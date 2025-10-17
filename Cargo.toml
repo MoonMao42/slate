@@ -1,0 +1,31 @@
+[package]
+name = "themectl"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "themectl"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+toml = "0.8"
+toml_edit = "0.22"
+serde = { version = "1.0", features = ["derive"] }
+regex = "1"
+tempfile = "3"
+atomic-write-file = "0.1"
+directories = "5"
+ansi_term = "0.12"
+thiserror = "1"
+anyhow = "1"
+color-eyre = "0.6"
+which = "5"
+dialoguer = "0.11"
+
+[dev-dependencies]
+rstest = "0.18"
+assert_cmd = "2"
