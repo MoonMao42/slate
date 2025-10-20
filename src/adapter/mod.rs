@@ -306,3 +306,6 @@ mod tests {
         assert!(result.is_success());
     }
 }
+
+pub mod ghostty;
+pub use ghostty::GhosttyAdapter;
