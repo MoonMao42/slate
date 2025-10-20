@@ -1,1 +1,2 @@
-// Library entry point - will be populated in later tasks
+pub mod error;
+pub use error::{ThemeError, ThemeResult};
