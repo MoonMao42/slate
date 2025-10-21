@@ -309,3 +309,7 @@ mod tests {
 
 pub mod ghostty;
 pub use ghostty::GhosttyAdapter;
+pub mod starship;
+pub use starship::StarshipAdapter;
+pub mod bat;
+pub use bat::BatAdapter;
