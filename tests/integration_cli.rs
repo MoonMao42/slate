@@ -1,0 +1,163 @@
+use assert_cmd::Command;
+use predicates::prelude::*;
+
+#[test]
+fn test_cli_help() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Apply a theme"));
+}
+
+#[test]
+fn test_cli_version() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0.1.0"));
+}
+
+#[test]
+fn test_cli_set_help() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.args(&["set", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("THEME"));
+}
+
+#[test]
+fn test_cli_set_valid_theme() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .arg("catppuccin-mocha")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Theme Applied:"))
+        .stdout(predicate::str::contains("tools updated"));
+}
+
+#[test]
+fn test_cli_set_invalid_theme() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .arg("nonexistent-theme")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Error:"))
+        .stderr(predicate::str::contains("not recognized"));
+}
+
+#[test]
+fn test_cli_set_verbose_mode() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .arg("catppuccin-mocha")
+        .arg("--verbose")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Scanning for tools"))
+        .stdout(predicate::str::contains("Checking"));
+}
+
+#[test]
+fn test_cli_set_dracula_theme() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .arg("dracula")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Theme Applied:"))
+        .stdout(predicate::str::contains("dracula"));
+}
+
+#[test]
+fn test_cli_set_tokyo_night_dark() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .arg("tokyo-night-dark")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Theme Applied:"))
+        .stdout(predicate::str::contains("tokyo-night-dark"));
+}
+
+#[test]
+fn test_cli_set_nord_theme() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .arg("nord")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Theme Applied:"))
+        .stdout(predicate::str::contains("nord"));
+}
+
+#[test]
+fn test_cli_set_case_insensitive() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .arg("Catppuccin-Mocha")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Theme Applied:"));
+}
+
+#[test]
+fn test_cli_exit_code_success() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .arg("catppuccin-mocha")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_cli_exit_code_failure() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .arg("invalid-theme")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_cli_output_format_has_emoji() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .arg("catppuccin-mocha")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("🎨"));
+}
+
+#[test]
+fn test_cli_output_format_has_checkmark() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .arg("catppuccin-mocha")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("✓"));
+}
+
+#[test]
+fn test_cli_no_arguments() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("missing positional argument")
+            .or(predicate::str::contains("COMMAND")));
+}
+
+#[test]
+fn test_cli_set_no_theme() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("set")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("missing")
+            .or(predicate::str::contains("required")));
+}
