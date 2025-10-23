@@ -1,7 +1,8 @@
+use std::io::ErrorKind;
 use std::io::Write;
 use std::path::Path;
-use atomic_write_file::AtomicWriteFile;
 use crate::ThemeResult;
+use tempfile::Builder;
 
 /// Auto-create minimal config file if tool is installed but config doesn't exist 
 /// 1. Check if config_path exists; if yes, return Ok()
@@ -10,16 +11,6 @@ use crate::ThemeResult;
 /// 4. Use atomic_write_file to write atomically
 /// 5. Return Ok() on success, Err on failure
 pub fn auto_create_config(tool: &str, config_path: &Path) -> ThemeResult<()> {
-    // If config already exists, skip creation
-    if config_path.exists() {
-        return Ok(());
-    }
-
-    // Create parent directory if needed
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
     // Generate minimal config template per tool
     let template = match tool {
         "ghostty" => "# themectl: Auto-created minimal config\ntheme = \"Catppuccin Mocha\"\n",
@@ -28,12 +19,23 @@ pub fn auto_create_config(tool: &str, config_path: &Path) -> ThemeResult<()> {
         _ => return Ok(()), // Unknown tool, skip
     };
 
-    // Write atomically
-    let mut file = AtomicWriteFile::open(config_path)?;
-    file.write_all(template.as_bytes())?;
-    file.commit()?;
+    // Create parent directory if needed
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
 
-    Ok(())
+    let temp_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp_file = Builder::new()
+        .prefix(".themectl.")
+        .tempfile_in(temp_dir)?;
+    temp_file.write_all(template.as_bytes())?;
+    temp_file.flush()?;
+
+    match temp_file.persist_noclobber(config_path) {
+        Ok(_) => Ok(()),
+        Err(err) if err.error.kind() == ErrorKind::AlreadyExists => Ok(()),
+        Err(err) => Err(err.error.into()),
+    }
 }
 
 #[cfg(test)]

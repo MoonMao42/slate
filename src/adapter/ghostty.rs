@@ -98,8 +98,9 @@ impl ToolAdapter for GhosttyAdapter {
             .to_string();
 
         // Use regex to replace or create the theme line
-        let theme_pattern = Regex::new(r#"(?m)^\s*theme\s*=\s*["\']?.*?["\']?\s*$"#)
-            .map_err(|e| ThemeError::Other(format!("Regex error: {}", e)))?;
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#)
+                .map_err(|e| ThemeError::Other(format!("Invalid built-in Ghostty theme regex: {}", e)))?;
 
         let new_content = if theme_pattern.is_match(&content) {
             // Replace existing theme line
@@ -148,11 +149,12 @@ impl ToolAdapter for GhosttyAdapter {
         let content = fs::read_to_string(&path)
             .map_err(|e| ThemeError::Io(e))?;
 
-        let theme_pattern = Regex::new(r#"^\s*theme\s*=\s*["\'](.+?)["\']"#)
-            .map_err(|e| ThemeError::Other(format!("Regex error: {}", e)))?;
+        let theme_pattern =
+            Regex::new(r#"^\s*theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#)
+                .map_err(|e| ThemeError::Other(format!("Invalid built-in Ghostty read regex: {}", e)))?;
 
         if let Some(caps) = theme_pattern.captures(&content) {
-            if let Some(theme_name) = caps.get(1) {
+            if let Some(theme_name) = caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
                 return Ok(Some(theme_name.as_str().to_string()));
             }
         }
@@ -232,7 +234,8 @@ mod tests {
     fn test_ghostty_replace_existing_theme() {
         let content = "font-family = monospace\ntheme = \"Dracula\"\nfont-size = 12\n";
         
-        let theme_pattern = Regex::new(r#"(?m)^\s*theme\s*=\s*["\']?.*?["\']?\s*$"#).unwrap();
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
         let new_content = theme_pattern
             .replace(content, r#"theme = "Catppuccin Mocha""#)
             .to_string();
@@ -245,10 +248,11 @@ mod tests {
     fn test_ghostty_theme_detection() {
         let content = r#"theme = "Tokyo Night""#;
         
-        let theme_pattern = Regex::new(r#"^\s*theme\s*=\s*["\'](.+?)["\']"#).unwrap();
+        let theme_pattern =
+            Regex::new(r#"^\s*theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#).unwrap();
         
         if let Some(caps) = theme_pattern.captures(content) {
-            if let Some(theme_name) = caps.get(1) {
+            if let Some(theme_name) = caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
                 assert_eq!(theme_name.as_str(), "Tokyo Night");
             }
         }
@@ -258,7 +262,8 @@ mod tests {
     fn test_ghostty_add_missing_theme() {
         let content = "font-family = monospace\nfont-size = 12\n";
         
-        let theme_pattern = Regex::new(r#"(?m)^\s*theme\s*=\s*["\']?.*?["\']?\s*$"#).unwrap();
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
         
         let new_content = if theme_pattern.is_match(content) {
             theme_pattern
@@ -275,5 +280,13 @@ mod tests {
         };
         
         assert!(new_content.contains(r#"theme = "Catppuccin Mocha""#));
+    }
+
+    #[test]
+    fn test_ghostty_pattern_rejects_mismatched_quotes() {
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
+        assert!(!theme_pattern.is_match(r#"theme = "Dracula"#));
+        assert!(!theme_pattern.is_match("theme = 'Dracula\""));
     }
 }

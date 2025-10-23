@@ -87,8 +87,9 @@ impl ToolAdapter for BatAdapter {
 
         // Use regex to replace or create the --theme flag
         // Use (?m) for multiline mode so ^ and $ match line boundaries
-        let theme_pattern = Regex::new(r#"(?m)^\s*--theme\s*=\s*["\']?.*?["\']?\s*$"#)
-            .map_err(|e| ThemeError::Other(format!("Regex error: {}", e)))?;
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*--theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#)
+                .map_err(|e| ThemeError::Other(format!("Invalid built-in bat theme regex: {}", e)))?;
 
         let new_content = if theme_pattern.is_match(&content) {
             // Replace existing --theme line
@@ -137,11 +138,12 @@ impl ToolAdapter for BatAdapter {
         let content = fs::read_to_string(&path)
             .map_err(|e| ThemeError::Io(e))?;
 
-        let theme_pattern = Regex::new(r#"^\s*--theme\s*=\s*["\'](.+?)["\']"#)
-            .map_err(|e| ThemeError::Other(format!("Regex error: {}", e)))?;
+        let theme_pattern =
+            Regex::new(r#"^\s*--theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#)
+                .map_err(|e| ThemeError::Other(format!("Invalid built-in bat read regex: {}", e)))?;
 
         if let Some(caps) = theme_pattern.captures(&content) {
-            if let Some(theme_name) = caps.get(1) {
+            if let Some(theme_name) = caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
                 return Ok(Some(theme_name.as_str().to_string()));
             }
         }
@@ -213,7 +215,8 @@ mod tests {
     fn test_bat_replace_existing_theme() {
         let content = "--paging=always\n--theme=\"Dracula\"\n--color=always\n";
         
-        let theme_pattern = Regex::new(r#"(?m)^\s*--theme\s*=\s*["\']?.*?["\']?\s*$"#).unwrap();
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*--theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
         let new_content = theme_pattern
             .replace(content, r#"--theme="Catppuccin Mocha""#)
             .to_string();
@@ -226,10 +229,11 @@ mod tests {
     fn test_bat_theme_detection() {
         let content = r#"--theme="Tokyo Night""#;
         
-        let theme_pattern = Regex::new(r#"^\s*--theme\s*=\s*["\'](.+?)["\']"#).unwrap();
+        let theme_pattern =
+            Regex::new(r#"^\s*--theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#).unwrap();
         
         if let Some(caps) = theme_pattern.captures(content) {
-            if let Some(theme_name) = caps.get(1) {
+            if let Some(theme_name) = caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
                 assert_eq!(theme_name.as_str(), "Tokyo Night");
             }
         }
@@ -239,7 +243,8 @@ mod tests {
     fn test_bat_add_missing_theme() {
         let content = "--paging=always\n--color=always\n";
         
-        let theme_pattern = Regex::new(r#"(?m)^\s*--theme\s*=\s*["\']?.*?["\']?\s*$"#).unwrap();
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*--theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
         
         let new_content = if theme_pattern.is_match(content) {
             theme_pattern
@@ -262,7 +267,8 @@ mod tests {
     fn test_bat_comment_handling() {
         let content = "# bat config file\n--paging=always\n--theme=\"Old\"\n# end config\n";
         
-        let theme_pattern = Regex::new(r#"(?m)^\s*--theme\s*=\s*["\']?.*?["\']?\s*$"#).unwrap();
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*--theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
         let new_content = theme_pattern
             .replace(content, r#"--theme="New""#)
             .to_string();
@@ -270,5 +276,13 @@ mod tests {
         assert!(new_content.contains("# bat config file"));
         assert!(new_content.contains("# end config"));
         assert!(new_content.contains(r#"--theme="New""#));
+    }
+
+    #[test]
+    fn test_bat_pattern_rejects_mismatched_quotes() {
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*--theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
+        assert!(!theme_pattern.is_match(r#"--theme="Dracula"#));
+        assert!(!theme_pattern.is_match("--theme='Dracula\""));
     }
 }
