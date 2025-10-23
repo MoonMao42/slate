@@ -1,6 +1,26 @@
-use crate::error::ThemeResult;
+use crate::error::{ThemeError, ThemeResult};
 use crate::theme::Theme;
 use std::path::PathBuf;
+
+/// Resolve XDG config home from env vars (pure function, testable)
+pub(crate) fn resolve_xdg_config_home(xdg: Option<&str>, home: Option<&str>) -> ThemeResult<PathBuf> {
+    if let Some(val) = xdg {
+        if !val.is_empty() {
+            return Ok(PathBuf::from(val));
+        }
+    }
+    let home = home
+        .ok_or_else(|| ThemeError::Other("Cannot determine HOME directory".to_string()))?;
+    Ok(PathBuf::from(home).join(".config"))
+}
+
+/// Resolve XDG config home from real environment
+pub(crate) fn xdg_config_home() -> ThemeResult<PathBuf> {
+    resolve_xdg_config_home(
+        std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
 
 /// Trait that all tool adapters must implement.
 /// Each adapter handles tool-specific config detection and modification.

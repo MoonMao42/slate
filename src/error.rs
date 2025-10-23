@@ -39,6 +39,10 @@ pub enum ThemeError {
     #[error("Partial failure: {0} tool(s) failed to apply theme")]
     PartialFailure(usize),
 
+    /// No supported tools were detected on the system
+    #[error("No supported tools detected. Install one of: ghostty, starship, bat")]
+    NoToolsDetected,
+
     /// Standard I/O errors with context
     #[error(transparent)]
     Io(#[from] io::Error),

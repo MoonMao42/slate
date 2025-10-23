@@ -3,7 +3,6 @@ use crate::config::backup::create_backup;
 use crate::error::{ThemeError, ThemeResult};
 use crate::theme::Theme;
 use atomic_write_file::AtomicWriteFile;
-use directories::ProjectDirs;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -12,13 +11,14 @@ use toml_edit::DocumentMut;
 pub struct StarshipAdapter;
 
 impl StarshipAdapter {
-    /// Get the Starship config directory path.
-    fn get_config_dir() -> ThemeResult<PathBuf> {
-        let proj_dirs = ProjectDirs::from("", "", "starship")
-            .ok_or_else(|| ThemeError::Other("Cannot determine config directory".to_string()))?;
-        
-        let config_dir = proj_dirs.config_dir().to_path_buf();
-        Ok(config_dir)
+    /// Pure path resolution: env override → XDG default (no global state)
+    fn resolve_path(starship_config: Option<&str>, config_home: &std::path::Path) -> PathBuf {
+        if let Some(val) = starship_config {
+            if !val.is_empty() {
+                return PathBuf::from(val);
+            }
+        }
+        config_home.join("starship.toml")
     }
 }
 
@@ -33,13 +33,16 @@ impl ToolAdapter for StarshipAdapter {
             Err(_) => false,
         };
         
-        // Tool is installed if both binary AND config exist (Starship requires config)
-        Ok(binary_exists && config_exists)
+        // Tool is installed if binary OR config exists (zero-config: binary alone = installed)
+        Ok(binary_exists || config_exists)
     }
 
     fn config_path(&self) -> ThemeResult<PathBuf> {
-        let config_dir = Self::get_config_dir()?;
-        Ok(config_dir.join("starship.toml"))
+        let config_home = crate::adapter::xdg_config_home()?;
+        Ok(Self::resolve_path(
+            std::env::var("STARSHIP_CONFIG").ok().as_deref(),
+            &config_home,
+        ))
     }
 
     fn config_exists(&self) -> ThemeResult<bool> {
@@ -147,11 +150,30 @@ mod tests {
     }
 
     #[test]
-    fn test_starship_config_path() {
-        let adapter = StarshipAdapter;
-        let path = adapter.config_path().unwrap();
-        assert!(path.to_string_lossy().contains("starship"));
-        assert!(path.to_string_lossy().contains("starship.toml"));
+    fn test_starship_resolve_path_env_override() {
+        let config_home = PathBuf::from("/home/user/.config");
+        assert_eq!(
+            StarshipAdapter::resolve_path(Some("/custom/starship.toml"), &config_home),
+            PathBuf::from("/custom/starship.toml")
+        );
+    }
+
+    #[test]
+    fn test_starship_resolve_path_empty_env_uses_default() {
+        let config_home = PathBuf::from("/home/user/.config");
+        assert_eq!(
+            StarshipAdapter::resolve_path(Some(""), &config_home),
+            PathBuf::from("/home/user/.config/starship.toml")
+        );
+    }
+
+    #[test]
+    fn test_starship_resolve_path_default_xdg() {
+        let config_home = PathBuf::from("/home/user/.config");
+        assert_eq!(
+            StarshipAdapter::resolve_path(None, &config_home),
+            PathBuf::from("/home/user/.config/starship.toml")
+        );
     }
 
     #[test]

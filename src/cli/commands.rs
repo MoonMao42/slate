@@ -50,10 +50,13 @@ pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<Apply
         for adapter in registry.adapters() {
             if let Ok(true) = adapter.is_installed() {
                 if let Ok(path) = adapter.config_path() {
-                    detected.push((
-                        adapter.tool_name().to_string(),
-                        Some(path.to_string_lossy().to_string()),
-                    ));
+                    // Distinguish existing config vs config that will be created
+                    let label = if path.exists() {
+                        format!("Found at {}", path.display())
+                    } else {
+                        format!("Installed (config will be created at {})", path.display())
+                    };
+                    detected.push((adapter.tool_name().to_string(), Some(label)));
                 }
             } else {
                 detected.push((adapter.tool_name().to_string(), None));
@@ -75,7 +78,12 @@ pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<Apply
     // Apply theme to all tools
     let result = registry.apply_theme_to_all(&theme)?;
 
-    // Print results
+    // 0 tools detected = error before printing any success output
+    if result.count_successful() == 0 && result.count_failed() == 0 {
+        return Err(ThemeError::NoToolsDetected);
+    }
+
+    // Print results only after confirming at least one tool was processed
     println!("{}", crate::cli::format_success_header(&final_theme_name));
     println!();
 
@@ -97,7 +105,6 @@ pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<Apply
         )
     );
 
-    // Return success if all tools succeeded, otherwise PartialFailure
     if result.is_success() {
         Ok(result)
     } else {

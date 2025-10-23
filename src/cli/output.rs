@@ -96,6 +96,11 @@ pub fn format_error(error: &ThemeError) -> String {
                 "Error: One or more tools failed to update\n\n    Problem: See per-tool status above\n\nGuidance: Check tool config syntax and permissions"
             )
         }
+        ThemeError::NoToolsDetected => {
+            format!(
+                "Error: No supported tools detected\n\n    Problem: None of the supported tools were found on this system\n\nGuidance: Install at least one supported tool:\n    $ brew install ghostty\n    $ brew install starship\n    $ brew install bat"
+            )
+        }
         _ => {
             format!("Error: {}", error)
         }
@@ -109,9 +114,9 @@ pub fn format_error(error: &ThemeError) -> String {
 pub fn format_verbose_detection(tools: &[(String, Option<String>)]) -> String {
     let mut output = String::from("[Scanning for tools...]\n");
 
-    for (tool, path_opt) in tools {
-        if let Some(path) = path_opt {
-            output.push_str(&format!("    Checking {}... Found at {}\n", tool, path));
+    for (tool, status_opt) in tools {
+        if let Some(status) = status_opt {
+            output.push_str(&format!("    Checking {}... {}\n", tool, status));
         } else {
             output.push_str(&format!("    Checking {}... Not found\n", tool));
         }
@@ -180,13 +185,14 @@ mod tests {
     #[test]
     fn test_verbose_detection_found() {
         let tools = vec![
-            ("Ghostty".to_string(), Some("~/.config/ghostty/config".to_string())),
-            ("Starship".to_string(), Some("~/.config/starship.toml".to_string())),
+            ("Ghostty".to_string(), Some("Found at ~/.config/ghostty/config".to_string())),
+            ("Starship".to_string(), Some("Installed (config will be created at ~/.config/starship.toml)".to_string())),
         ];
         let output = format_verbose_detection(&tools);
         assert!(output.contains("[Scanning for tools...]"));
         assert!(output.contains("Ghostty"));
         assert!(output.contains("Found at"));
+        assert!(output.contains("config will be created at"));
     }
 
     #[test]

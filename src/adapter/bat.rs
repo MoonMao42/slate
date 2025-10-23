@@ -3,7 +3,6 @@ use crate::config::backup::create_backup;
 use crate::error::{ThemeError, ThemeResult};
 use crate::theme::Theme;
 use atomic_write_file::AtomicWriteFile;
-use directories::ProjectDirs;
 use regex::Regex;
 use std::fs;
 use std::io::Write;
@@ -12,13 +11,23 @@ use std::path::PathBuf;
 pub struct BatAdapter;
 
 impl BatAdapter {
-    /// Get the bat config directory path.
-    fn get_config_dir() -> ThemeResult<PathBuf> {
-        let proj_dirs = ProjectDirs::from("", "", "bat")
-            .ok_or_else(|| ThemeError::Other("Cannot determine config directory".to_string()))?;
-        
-        let config_dir = proj_dirs.config_dir().to_path_buf();
-        Ok(config_dir)
+    /// Pure path resolution: BAT_CONFIG_PATH → BAT_CONFIG_DIR/config → XDG default (no global state)
+    fn resolve_path(
+        config_path: Option<&str>,
+        config_dir: Option<&str>,
+        config_home: &std::path::Path,
+    ) -> PathBuf {
+        if let Some(val) = config_path {
+            if !val.is_empty() {
+                return PathBuf::from(val);
+            }
+        }
+        if let Some(val) = config_dir {
+            if !val.is_empty() {
+                return PathBuf::from(val).join("config");
+            }
+        }
+        config_home.join("bat").join("config")
     }
 }
 
@@ -38,8 +47,12 @@ impl ToolAdapter for BatAdapter {
     }
 
     fn config_path(&self) -> ThemeResult<PathBuf> {
-        let config_dir = Self::get_config_dir()?;
-        Ok(config_dir.join("config"))
+        let config_home = crate::adapter::xdg_config_home()?;
+        Ok(Self::resolve_path(
+            std::env::var("BAT_CONFIG_PATH").ok().as_deref(),
+            std::env::var("BAT_CONFIG_DIR").ok().as_deref(),
+            &config_home,
+        ))
     }
 
     fn config_exists(&self) -> ThemeResult<bool> {
@@ -152,11 +165,48 @@ mod tests {
     }
 
     #[test]
-    fn test_bat_config_path() {
-        let adapter = BatAdapter;
-        let path = adapter.config_path().unwrap();
-        assert!(path.to_string_lossy().contains("bat"));
-        assert!(path.to_string_lossy().contains("config"));
+    fn test_bat_resolve_path_config_path_override() {
+        let config_home = PathBuf::from("/home/user/.config");
+        assert_eq!(
+            BatAdapter::resolve_path(Some("/custom/bat-config"), None, &config_home),
+            PathBuf::from("/custom/bat-config")
+        );
+    }
+
+    #[test]
+    fn test_bat_resolve_path_config_dir_override() {
+        let config_home = PathBuf::from("/home/user/.config");
+        assert_eq!(
+            BatAdapter::resolve_path(None, Some("/custom/bat-dir"), &config_home),
+            PathBuf::from("/custom/bat-dir/config")
+        );
+    }
+
+    #[test]
+    fn test_bat_resolve_path_config_path_takes_priority() {
+        let config_home = PathBuf::from("/home/user/.config");
+        assert_eq!(
+            BatAdapter::resolve_path(Some("/direct/config"), Some("/dir/bat"), &config_home),
+            PathBuf::from("/direct/config")
+        );
+    }
+
+    #[test]
+    fn test_bat_resolve_path_empty_env_uses_default() {
+        let config_home = PathBuf::from("/home/user/.config");
+        assert_eq!(
+            BatAdapter::resolve_path(Some(""), Some(""), &config_home),
+            PathBuf::from("/home/user/.config/bat/config")
+        );
+    }
+
+    #[test]
+    fn test_bat_resolve_path_default_xdg() {
+        let config_home = PathBuf::from("/home/user/.config");
+        assert_eq!(
+            BatAdapter::resolve_path(None, None, &config_home),
+            PathBuf::from("/home/user/.config/bat/config")
+        );
     }
 
     #[test]
