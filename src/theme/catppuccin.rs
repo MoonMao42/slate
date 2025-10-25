@@ -6,6 +6,8 @@ pub fn catppuccin_latte() -> Theme {
     overrides.insert("ghostty".to_string(), "Catppuccin Latte".to_string());
     overrides.insert("starship".to_string(), "catppuccin_latte".to_string());
     overrides.insert("bat".to_string(), "Catppuccin Latte".to_string());
+    overrides.insert("delta".to_string(), "Catppuccin Latte".to_string());
+    overrides.insert("lazygit".to_string(), "catppuccin-latte".to_string());
 
     Theme {
         name: "catppuccin-latte".to_string(),
@@ -31,6 +33,8 @@ pub fn catppuccin_frappe() -> Theme {
     overrides.insert("ghostty".to_string(), "Catppuccin Frappe".to_string());
     overrides.insert("starship".to_string(), "catppuccin_frappe".to_string());
     overrides.insert("bat".to_string(), "Catppuccin Frappe".to_string());
+    overrides.insert("delta".to_string(), "Catppuccin Frappe".to_string());
+    overrides.insert("lazygit".to_string(), "catppuccin-frappe".to_string());
 
     Theme {
         name: "catppuccin-frappe".to_string(),
@@ -56,6 +60,8 @@ pub fn catppuccin_macchiato() -> Theme {
     overrides.insert("ghostty".to_string(), "Catppuccin Macchiato".to_string());
     overrides.insert("starship".to_string(), "catppuccin_macchiato".to_string());
     overrides.insert("bat".to_string(), "Catppuccin Macchiato".to_string());
+    overrides.insert("delta".to_string(), "Catppuccin Macchiato".to_string());
+    overrides.insert("lazygit".to_string(), "catppuccin-macchiato".to_string());
 
     Theme {
         name: "catppuccin-macchiato".to_string(),
@@ -81,6 +87,8 @@ pub fn catppuccin_mocha() -> Theme {
     overrides.insert("ghostty".to_string(), "Catppuccin Mocha".to_string());
     overrides.insert("starship".to_string(), "catppuccin_mocha".to_string());
     overrides.insert("bat".to_string(), "Catppuccin Mocha".to_string());
+    overrides.insert("delta".to_string(), "Catppuccin Mocha".to_string());
+    overrides.insert("lazygit".to_string(), "catppuccin-mocha".to_string());
 
     Theme {
         name: "catppuccin-mocha".to_string(),

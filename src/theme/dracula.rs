@@ -6,6 +6,8 @@ pub fn dracula() -> Theme {
     overrides.insert("ghostty".to_string(), "Dracula".to_string());
     overrides.insert("starship".to_string(), "dracula".to_string());
     overrides.insert("bat".to_string(), "Dracula".to_string());
+    overrides.insert("delta".to_string(), "Dracula".to_string());
+    overrides.insert("lazygit".to_string(), "dracula".to_string());
 
     Theme {
         name: "dracula".to_string(),

@@ -6,6 +6,8 @@ pub fn tokyo_night_light() -> Theme {
     overrides.insert("ghostty".to_string(), "Tokyo Night Light".to_string());
     overrides.insert("starship".to_string(), "tokyo-night-light".to_string());
     overrides.insert("bat".to_string(), "Tokyo Night Light".to_string());
+    overrides.insert("delta".to_string(), "Tokyo Night".to_string());
+    overrides.insert("lazygit".to_string(), "tokyo-night-light".to_string());
 
     Theme {
         name: "tokyo-night-light".to_string(),
@@ -31,6 +33,8 @@ pub fn tokyo_night_dark() -> Theme {
     overrides.insert("ghostty".to_string(), "Tokyo Night".to_string());
     overrides.insert("starship".to_string(), "tokyo-night".to_string());
     overrides.insert("bat".to_string(), "Tokyo Night".to_string());
+    overrides.insert("delta".to_string(), "Tokyo Night".to_string());
+    overrides.insert("lazygit".to_string(), "tokyo-night-dark".to_string());
 
     Theme {
         name: "tokyo-night-dark".to_string(),

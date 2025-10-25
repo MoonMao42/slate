@@ -6,6 +6,8 @@ pub fn nord() -> Theme {
     overrides.insert("ghostty".to_string(), "Nord".to_string());
     overrides.insert("starship".to_string(), "nord".to_string());
     overrides.insert("bat".to_string(), "Nord".to_string());
+    overrides.insert("delta".to_string(), "Nord".to_string());
+    overrides.insert("lazygit".to_string(), "nord".to_string());
 
     Theme {
         name: "nord".to_string(),
