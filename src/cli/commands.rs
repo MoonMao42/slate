@@ -130,3 +130,55 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+/// Handle the `status` subcommand: show current theme state of installed tools
+pub fn handle_status_command(verbose: bool) -> ThemeResult<()> {
+    // Create registry and register all 5 adapters
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(GhosttyAdapter));
+    registry.register(Box::new(StarshipAdapter));
+    registry.register(Box::new(BatAdapter));
+    registry.register(Box::new(DeltaAdapter));
+    registry.register(Box::new(LazygitAdapter));
+
+    // Collect status for installed tools
+    let mut found_any = false;
+    let mut output_lines = Vec::new();
+
+    for adapter in registry.adapters() {
+        if let Ok(true) = adapter.is_installed() {
+            found_any = true;
+            let tool_name = adapter.tool_name();
+            
+            // Try to read current theme
+            let current_theme = match adapter.get_current_theme() {
+                Ok(Some(theme)) => theme,
+                Ok(None) => "unknown".to_string(),
+                Err(_) => {
+                    if verbose {
+                        eprintln!("[Warning] Could not read theme state for {}", tool_name);
+                    }
+                    "unknown".to_string()
+                }
+            };
+
+            output_lines.push((tool_name.to_string(), current_theme));
+        }
+    }
+
+    // If no tools found, print informational message
+    if !found_any {
+        println!("No supported tools detected");
+        return Ok(());
+    }
+
+    // Print status header
+    println!("{}", crate::cli::format_status_header());
+
+    // Print each tool's status
+    for (tool, theme) in output_lines {
+        println!("{}", crate::cli::format_status_line(&tool, &theme));
+    }
+
+    Ok(())
+}
