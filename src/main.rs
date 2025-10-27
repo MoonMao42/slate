@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use themectl::{cli::handle_set_command, ThemeResult};
+use themectl::{cli::handle_set_command, cli::handle_status_command, ThemeResult};
 
 /// A zero-configuration terminal theme switcher
 /// Apply your favorite theme to Ghostty, Starship, bat and other terminal tools
@@ -26,6 +26,13 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Show current theme state of installed tools
+    #[command(about = "Show current theme state")]
+    Status {
+        /// Show detection problems and warnings
+        #[arg(short, long)]
+        verbose: bool,
+    },
 }
 
 fn main() -> ThemeResult<()> {
@@ -43,6 +50,17 @@ fn main() -> ThemeResult<()> {
                 Err(themectl::ThemeError::PartialFailure(_)) => {
                     // Partial failure already printed
                     std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("{}", themectl::cli::format_error(&e));
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Status { verbose } => {
+            match handle_status_command(verbose) {
+                Ok(_) => {
+                    std::process::exit(0);
                 }
                 Err(e) => {
                     eprintln!("{}", themectl::cli::format_error(&e));
