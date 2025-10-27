@@ -2,7 +2,7 @@ use crate::{
     available_themes, get_theme, normalize_theme_name, parse_theme_input,
     ApplyThemeResult, ThemeError, ThemeResult, ToolRegistry,
 };
-use crate::adapter::{GhosttyAdapter, StarshipAdapter, BatAdapter, DeltaAdapter};
+use crate::adapter::{GhosttyAdapter, StarshipAdapter, BatAdapter, DeltaAdapter, LazygitAdapter};
 
 /// Handle the `set` subcommand: apply theme to all detected tools
 pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<ApplyThemeResult> {
@@ -44,6 +44,7 @@ pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<Apply
     registry.register(Box::new(StarshipAdapter));
     registry.register(Box::new(BatAdapter));
     registry.register(Box::new(DeltaAdapter));
+    registry.register(Box::new(LazygitAdapter));
 
     // Print verbose detection if requested
     if verbose {
