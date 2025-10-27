@@ -4,7 +4,7 @@ pub mod config;
 pub mod error;
 pub mod theme;
 
-pub use adapter::{ApplyThemeResult, BatAdapter, GhosttyAdapter, StarshipAdapter, ToolAdapter, ToolRegistry};
+pub use adapter::{ApplyThemeResult, BatAdapter, DeltaAdapter, GhosttyAdapter, StarshipAdapter, ToolAdapter, ToolRegistry};
 pub use cli::*;
 pub use error::{ThemeError, ThemeResult};
 pub use theme::{

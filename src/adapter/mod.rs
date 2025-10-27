@@ -333,3 +333,5 @@ pub mod starship;
 pub use starship::StarshipAdapter;
 pub mod bat;
 pub use bat::BatAdapter;
+pub mod delta;
+pub use delta::DeltaAdapter;
