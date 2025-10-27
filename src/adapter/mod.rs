@@ -335,3 +335,5 @@ pub mod bat;
 pub use bat::BatAdapter;
 pub mod delta;
 pub use delta::DeltaAdapter;
+pub mod lazygit;
+pub use lazygit::LazygitAdapter;
