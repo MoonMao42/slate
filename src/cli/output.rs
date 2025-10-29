@@ -224,3 +224,20 @@ mod tests {
         assert!(formatted.contains("invalid-theme"));
     }
 }
+
+/// Format the status header for status output
+/// Simple header showing tool status information
+pub fn format_status_header() -> String {
+    format!("{}{}",
+        ColorScheme::header().paint("Tool Status"),
+        ColorScheme::separator().paint(" ━━━━━━━━━━━━━━━━━━━━")
+    )
+}
+
+/// Format a status line showing tool name and current theme
+/// Format: " {tool_name:<12} {theme}"
+/// - tool_name left-aligned in 12-char column
+/// - theme on the right
+pub fn format_status_line(tool: &str, theme: &str) -> String {
+    format!("    {:<12} {}", tool, theme)
+}
