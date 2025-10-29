@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use themectl::{cli::handle_set_command, cli::handle_status_command, ThemeResult};
+use themectl::{cli::handle_set_command, cli::handle_status_command, cli::handle_list_command, ThemeResult};
 
 /// A zero-configuration terminal theme switcher
 /// Apply your favorite theme to Ghostty, Starship, bat and other terminal tools
@@ -15,6 +15,9 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// List available themes
+    #[command(about = "List available themes")]
+    List,
     /// Apply a theme to all detected tools
     #[command(about = "Apply a theme")]
     Set {
@@ -42,6 +45,17 @@ fn main() -> ThemeResult<()> {
     let args = Args::parse();
 
     match args.command {
+        Commands::List => {
+            match handle_list_command() {
+                Ok(_) => {
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    eprintln!("{}", themectl::cli::format_error(&e));
+                    std::process::exit(1);
+                }
+            }
+        }
         Commands::Set { theme, verbose } => {
             match handle_set_command(&theme, verbose) {
                 Ok(_) => {

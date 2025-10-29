@@ -109,3 +109,43 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+/// Get all available theme families
+pub fn available_theme_families() -> Vec<&'static str> {
+    vec!["catppuccin", "tokyo-night", "dracula", "nord"]
+}
+
+/// Get description for a theme
+pub fn get_theme_description(theme_name: &str) -> &'static str {
+    match theme_name {
+        "catppuccin-latte" => "Catppuccin Latte - Light theme with warm pastels",
+        "catppuccin-frappe" => "Catppuccin Frappé - Cool tones with smooth contrasts",
+        "catppuccin-macchiato" => "Catppuccin Macchiato - Balanced warm and cool tones",
+        "catppuccin-mocha" => "Catppuccin Mocha - Dark theme with rich colors",
+        "tokyo-night-light" => "Tokyo Night Light - Light theme inspired by Tokyo",
+        "tokyo-night-dark" => "Tokyo Night Dark - Dark theme inspired by Tokyo",
+        "dracula" => "Dracula - Popular dark theme with vibrant colors",
+        "nord" => "Nord - Arctic, north-bluish color palette",
+        _ => "Unknown theme",
+    }
+}
+
+/// Interactively select a theme family
+pub fn pick_theme_family() -> ThemeResult<String> {
+    let families = available_theme_families();
+    
+    if families.is_empty() {
+        return Err(ThemeError::Other("No theme families available".to_string()));
+    }
+
+    let selection = Select::new()
+        .with_prompt("Choose a theme family")
+        .items(&families)
+        .default(0)
+        .interact()
+        .map_err(|_| {
+            ThemeError::Other("Theme family selection cancelled".to_string())
+        })?;
+
+    Ok(families[selection].to_string())
+}

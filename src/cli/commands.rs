@@ -182,3 +182,89 @@ pub fn handle_status_command(verbose: bool) -> ThemeResult<()> {
 
     Ok(())
 }
+
+/// Handle the `list` subcommand: show available themes
+pub fn handle_list_command() -> ThemeResult<()> {
+    use atty::Stream;
+
+    // Check if stdout is a TTY
+    if !atty::is(Stream::Stdout) {
+        // Plain text mode: grouped by family with descriptions
+        print_plain_theme_list()?;
+    } else {
+        // Interactive mode: family -> variant -> confirm -> apply
+        run_interactive_list()?;
+    }
+
+    Ok(())
+}
+
+/// Print themes grouped by family in plain text format (for piping)
+fn print_plain_theme_list() -> ThemeResult<()> {
+    let themes = available_themes();
+    
+    // Group themes by family
+    let families = vec![
+        ("Catppuccin", vec![
+            "catppuccin-latte",
+            "catppuccin-frappe", 
+            "catppuccin-macchiato",
+            "catppuccin-mocha",
+        ]),
+        ("Tokyo Night", vec![
+            "tokyo-night-light",
+            "tokyo-night-dark",
+        ]),
+        ("Dracula", vec![
+            "dracula",
+        ]),
+        ("Nord", vec![
+            "nord",
+        ]),
+    ];
+
+    for (family_name, theme_names) in families {
+        println!("{}:", family_name);
+        for theme_name in theme_names {
+            if themes.contains(&theme_name.to_string()) {
+                let description = crate::cli::get_theme_description(theme_name);
+                println!("  {} - {}", theme_name, description);
+            }
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+/// Run interactive theme picker: family -> variant -> confirm -> apply
+fn run_interactive_list() -> ThemeResult<()> {
+    use dialoguer::Confirm;
+
+    // Pick family
+    let family = crate::cli::pick_theme_family()?;
+
+    // Pick variant
+    let theme = crate::cli::pick_theme_variant(&family)?;
+
+    // Confirm before applying
+    let description = crate::cli::get_theme_description(&theme);
+    let prompt = format!("Apply theme: {} ({})?\nConfirm", theme, description);
+    
+    let confirmed = Confirm::new()
+        .with_prompt(&prompt)
+        .default(true)
+        .interact()
+        .map_err(|_| {
+            ThemeError::Other("Theme confirmation cancelled".to_string())
+        })?;
+
+    if confirmed {
+        // Apply the theme using handle_set_command
+        handle_set_command(&theme, false)?;
+    } else {
+        println!("Theme application cancelled");
+    }
+
+    Ok(())
+}
