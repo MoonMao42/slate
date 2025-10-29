@@ -217,3 +217,77 @@ fn test_cli_status_output_has_tools_or_empty_message() {
     assert!(has_tools || has_empty_msg, 
         "Status output should show tools or empty message, got: {}", stdout);
 }
+
+// List command tests
+
+#[test]
+fn test_cli_list_help() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.args(&["list", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("List available themes"));
+}
+
+#[test]
+fn test_cli_list_plain_text_mode() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    // Simulate non-TTY by piping
+    cmd.arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Catppuccin"))
+        .stdout(predicate::str::contains("Tokyo Night"))
+        .stdout(predicate::str::contains("Dracula"))
+        .stdout(predicate::str::contains("Nord"));
+}
+
+#[test]
+fn test_cli_list_contains_catppuccin_variants() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("catppuccin-latte"))
+        .stdout(predicate::str::contains("catppuccin-frappe"))
+        .stdout(predicate::str::contains("catppuccin-macchiato"))
+        .stdout(predicate::str::contains("catppuccin-mocha"));
+}
+
+#[test]
+fn test_cli_list_contains_tokyo_night_variants() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tokyo-night-light"))
+        .stdout(predicate::str::contains("tokyo-night-dark"));
+}
+
+#[test]
+fn test_cli_list_contains_descriptions() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Dark theme"))
+        .stdout(predicate::str::contains("Light theme"));
+}
+
+#[test]
+fn test_cli_list_contains_dracula() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dracula"));
+}
+
+#[test]
+fn test_cli_list_contains_nord() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("nord"));
+}
