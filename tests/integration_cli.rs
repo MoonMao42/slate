@@ -161,3 +161,59 @@ fn test_cli_set_no_theme() {
         .stderr(predicate::str::contains("missing")
             .or(predicate::str::contains("required")));
 }
+
+#[test]
+fn test_cli_status_help() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.args(&["status", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Show current theme state"));
+}
+
+#[test]
+fn test_cli_status_basic() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("status")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_cli_status_verbose() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("status")
+        .arg("--verbose")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_cli_status_verbose_short() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("status")
+        .arg("-v")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_cli_status_output_has_tools_or_empty_message() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    let output = cmd.arg("status")
+        .output()
+        .unwrap();
+    
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should contain either tool names (if any installed) or the no-tools message
+    let has_tools = stdout.contains("Tool Status") 
+        || stdout.contains("Ghostty")
+        || stdout.contains("Starship")
+        || stdout.contains("bat")
+        || stdout.contains("Delta")
+        || stdout.contains("Lazygit");
+    let has_empty_msg = stdout.contains("No supported tools detected");
+    
+    assert!(has_tools || has_empty_msg, 
+        "Status output should show tools or empty message, got: {}", stdout);
+}
