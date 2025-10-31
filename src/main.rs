@@ -1,5 +1,8 @@
 use clap::{Parser, Subcommand};
-use themectl::{cli::handle_set_command, cli::handle_status_command, cli::handle_list_command, ThemeResult};
+use themectl::{
+    cli::handle_list_command, cli::handle_set_command, cli::handle_status_command,
+    cli::handle_restore_command, ThemeResult,
+};
 
 /// A zero-configuration terminal theme switcher
 /// Apply your favorite theme to Ghostty, Starship, bat and other terminal tools
@@ -36,6 +39,25 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Restore a previous theme state from backups
+    #[command(about = "Restore a previous theme state")]
+    Restore {
+        /// Restore point ID to restore (interactive selection in TTY if omitted)
+        #[arg(value_name = "RESTORE_POINT_ID")]
+        restore_point_id: Option<String>,
+
+        /// List all available restore points
+        #[arg(long)]
+        list: bool,
+
+        /// Delete a specific restore point
+        #[arg(long, value_name = "RESTORE_POINT_ID")]
+        cleanup: Option<String>,
+
+        /// Delete all restore points
+        #[arg(long)]
+        clear_all: bool,
+    },
 }
 
 fn main() -> ThemeResult<()> {
@@ -45,17 +67,15 @@ fn main() -> ThemeResult<()> {
     let args = Args::parse();
 
     match args.command {
-        Commands::List => {
-            match handle_list_command() {
-                Ok(_) => {
-                    std::process::exit(0);
-                }
-                Err(e) => {
-                    eprintln!("{}", themectl::cli::format_error(&e));
-                    std::process::exit(1);
-                }
+        Commands::List => match handle_list_command() {
+            Ok(_) => {
+                std::process::exit(0);
             }
-        }
+            Err(e) => {
+                eprintln!("{}", themectl::cli::format_error(&e));
+                std::process::exit(1);
+            }
+        },
         Commands::Set { theme, verbose } => {
             match handle_set_command(&theme, verbose) {
                 Ok(_) => {
@@ -71,16 +91,28 @@ fn main() -> ThemeResult<()> {
                 }
             }
         }
-        Commands::Status { verbose } => {
-            match handle_status_command(verbose) {
-                Ok(_) => {
-                    std::process::exit(0);
-                }
-                Err(e) => {
-                    eprintln!("{}", themectl::cli::format_error(&e));
-                    std::process::exit(1);
-                }
+        Commands::Status { verbose } => match handle_status_command(verbose) {
+            Ok(_) => {
+                std::process::exit(0);
             }
-        }
+            Err(e) => {
+                eprintln!("{}", themectl::cli::format_error(&e));
+                std::process::exit(1);
+            }
+        },
+        Commands::Restore {
+            restore_point_id,
+            list,
+            cleanup,
+            clear_all,
+        } => match handle_restore_command(restore_point_id, list, cleanup, clear_all) {
+            Ok(_) => {
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("{}", themectl::cli::format_error(&e));
+                std::process::exit(1);
+            }
+        },
     }
 }

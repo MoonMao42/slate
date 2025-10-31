@@ -51,10 +51,7 @@ pub struct Theme {
 
 /// Normalize a theme name to kebab-case, lowercase
 pub fn normalize_theme_name(input: &str) -> String {
-    input
-        .to_lowercase()
-        .replace(' ', "-")
-        .replace('_', "-")
+    input.to_lowercase().replace(' ', "-").replace('_', "-")
 }
 
 /// Parse theme input and return (family, optional variant)
@@ -110,7 +107,10 @@ mod tests {
     #[test]
     fn test_normalize_theme_name() {
         assert_eq!(normalize_theme_name("Catppuccin Mocha"), "catppuccin-mocha");
-        assert_eq!(normalize_theme_name("Tokyo Night Light"), "tokyo-night-light");
+        assert_eq!(
+            normalize_theme_name("Tokyo Night Light"),
+            "tokyo-night-light"
+        );
         assert_eq!(normalize_theme_name("DRACULA"), "dracula");
     }
 

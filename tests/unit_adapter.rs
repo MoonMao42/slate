@@ -56,7 +56,7 @@ fn test_adapter_tool_names() {
     let ghostty = GhosttyAdapter;
     let starship = StarshipAdapter;
     let bat = BatAdapter;
-    
+
     assert_eq!(ghostty.tool_name(), "ghostty");
     assert_eq!(starship.tool_name(), "starship");
     assert_eq!(bat.tool_name(), "bat");
@@ -66,10 +66,10 @@ fn test_adapter_tool_names() {
 fn test_ghostty_with_catppuccin_theme() {
     let adapter = GhosttyAdapter;
     let theme = get_theme("catppuccin-mocha").expect("Theme not found");
-    
+
     // Check that the adapter can identify the tool
     assert_eq!(adapter.tool_name(), "ghostty");
-    
+
     // Check that the theme has a ghostty override
     assert!(theme.colors.tool_overrides.contains_key("ghostty"));
 }
@@ -78,7 +78,7 @@ fn test_ghostty_with_catppuccin_theme() {
 fn test_starship_with_catppuccin_theme() {
     let adapter = StarshipAdapter;
     let theme = get_theme("catppuccin-mocha").expect("Theme not found");
-    
+
     assert_eq!(adapter.tool_name(), "starship");
     assert!(theme.colors.tool_overrides.contains_key("starship"));
 }
@@ -87,7 +87,7 @@ fn test_starship_with_catppuccin_theme() {
 fn test_bat_with_catppuccin_theme() {
     let adapter = BatAdapter;
     let theme = get_theme("catppuccin-mocha").expect("Theme not found");
-    
+
     assert_eq!(adapter.tool_name(), "bat");
     assert!(theme.colors.tool_overrides.contains_key("bat"));
 }
@@ -96,7 +96,7 @@ fn test_bat_with_catppuccin_theme() {
 fn test_all_theme_variants_have_all_adapters() {
     let themes = themectl::available_themes();
     let adapters = vec!["ghostty", "starship", "bat"];
-    
+
     for theme_name in themes {
         let theme = get_theme(&theme_name).expect(&format!("Theme {} not found", theme_name));
         for adapter_name in &adapters {

@@ -1,5 +1,5 @@
-use ansi_term::Colour;
 use crate::ThemeError;
+use ansi_term::Colour;
 
 /// Fixed color scheme for CLI output (not theme-dependent per)
 pub struct ColorScheme;
@@ -71,7 +71,10 @@ pub fn format_summary(successful: usize, total: usize, failed_count: usize) -> S
     if failed_count == 0 {
         format!("{}/{} tools updated", successful, total)
     } else {
-        format!("{}/{} tools updated ({} failed)", successful, total, failed_count)
+        format!(
+            "{}/{} tools updated ({} failed)",
+            successful, total, failed_count
+        )
     }
 }
 
@@ -98,7 +101,7 @@ pub fn format_error(error: &ThemeError) -> String {
         }
         ThemeError::NoToolsDetected => {
             format!(
-                "Error: No supported tools detected\n\n    Problem: None of the supported tools were found on this system\n\nGuidance: Install at least one supported tool:\n    $ brew install ghostty\n    $ brew install starship\n    $ brew install bat"
+                "Error: No supported tools detected\n\n    Problem: None of the supported tools were found on this system\n\nGuidance: Install at least one supported tool:\n    ghostty, starship, bat, delta, lazygit"
             )
         }
         _ => {
@@ -185,8 +188,14 @@ mod tests {
     #[test]
     fn test_verbose_detection_found() {
         let tools = vec![
-            ("Ghostty".to_string(), Some("Found at ~/.config/ghostty/config".to_string())),
-            ("Starship".to_string(), Some("Installed (config will be created at ~/.config/starship.toml)".to_string())),
+            (
+                "Ghostty".to_string(),
+                Some("Found at ~/.config/ghostty/config".to_string()),
+            ),
+            (
+                "Starship".to_string(),
+                Some("Installed (config will be created at ~/.config/starship.toml)".to_string()),
+            ),
         ];
         let output = format_verbose_detection(&tools);
         assert!(output.contains("[Scanning for tools...]"));
@@ -197,9 +206,7 @@ mod tests {
 
     #[test]
     fn test_verbose_detection_not_found() {
-        let tools = vec![
-            ("bat".to_string(), None),
-        ];
+        let tools = vec![("bat".to_string(), None)];
         let output = format_verbose_detection(&tools);
         assert!(output.contains("bat"));
         assert!(output.contains("Not found"));
@@ -217,7 +224,7 @@ mod tests {
     fn test_error_theme_not_found() {
         let error = ThemeError::ThemeNotFound(
             "invalid-theme".to_string(),
-            "catppuccin-mocha, tokyo-night-dark".to_string()
+            "catppuccin-mocha, tokyo-night-dark".to_string(),
         );
         let formatted = format_error(&error);
         assert!(formatted.contains("Error:"));
@@ -228,7 +235,8 @@ mod tests {
 /// Format the status header for status output
 /// Simple header showing tool status information
 pub fn format_status_header() -> String {
-    format!("{}{}",
+    format!(
+        "{}{}",
         ColorScheme::header().paint("Tool Status"),
         ColorScheme::separator().paint(" ━━━━━━━━━━━━━━━━━━━━")
     )

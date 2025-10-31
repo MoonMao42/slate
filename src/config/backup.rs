@@ -562,3 +562,127 @@ mod tests {
         let _ = result;
     }
 }
+
+/// Get a specific restore point by ID
+pub fn get_restore_point(restore_point_id: &str) -> ThemeResult<RestorePoint> {
+    let restore_points = list_restore_points()?;
+    
+    restore_points.into_iter()
+        .find(|rp| rp.id == restore_point_id)
+        .ok_or_else(|| ThemeError::BackupError {
+            reason: format!("Restore point not found: {}", restore_point_id),
+        })
+}
+
+/// Restore a specific restore point by writing backed-up files back to their original paths
+pub fn restore_restore_point(restore_point_id: &str) -> ThemeResult<crate::adapter::ApplyThemeResult> {
+    // Get the restore point
+    let restore_point = get_restore_point(restore_point_id)?;
+    
+    // Validate it before restoring
+    validate_restore_point(restore_point_id)?;
+    
+    let mut result = crate::adapter::ApplyThemeResult::default();
+    
+    // Read each backup file and write it back to original path
+    for backup_path in &restore_point.backup_files {
+        // Read backup content
+        let backup_content = fs::read_to_string(backup_path)
+            .map_err(|e| ThemeError::BackupError {
+                reason: format!("Failed to read backup file: {}", e),
+            })?;
+        
+        // Determine original path - we need to restore from metadata
+        // For now, we'll use a heuristic: the backup filename contains the tool name
+        // and we can infer the original path from the tool adapter
+        let filename = backup_path.file_name()
+            .ok_or_else(|| ThemeError::BackupError {
+                reason: "Invalid backup file path".to_string(),
+            })?
+            .to_string_lossy();
+        
+        // Parse tool name from filename: {tool}--{theme}--{timestamp}.backup
+        let tool_name = filename.split("--").next()
+            .ok_or_else(|| ThemeError::BackupError {
+                reason: "Cannot parse tool name from backup filename".to_string(),
+            })?;
+        
+        // Write back to original path using atomic write
+        // We need to get the tool's config path - delegate to adapter
+        match restore_backup_for_tool(tool_name, &backup_content) {
+            Ok(_) => {
+                result.successful.push(tool_name.to_string());
+            }
+            Err(e) => {
+                result.failed.push((tool_name.to_string(), e.to_string()));
+            }
+        }
+    }
+    
+    Ok(result)
+}
+
+/// Helper to restore a backup file for a specific tool
+fn restore_backup_for_tool(tool_name: &str, content: &str) -> ThemeResult<()> {
+    use crate::adapter::ToolAdapter;
+    
+    let adapter: Box<dyn ToolAdapter> = match tool_name {
+        "ghostty" => Box::new(crate::adapter::GhosttyAdapter),
+        "starship" => Box::new(crate::adapter::StarshipAdapter),
+        "bat" => Box::new(crate::adapter::BatAdapter),
+        "delta" => Box::new(crate::adapter::DeltaAdapter),
+        "delta-gitconfig" => Box::new(crate::adapter::DeltaAdapter),
+        "lazygit" => Box::new(crate::adapter::LazygitAdapter),
+        _ => {
+            return Err(ThemeError::BackupError {
+                reason: format!("Unknown tool: {}", tool_name),
+            });
+        }
+    };
+    
+    let config_path = adapter.config_path()?;
+    
+    // Write content atomically
+    let mut file = AtomicWriteFile::open(&config_path)
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to open config for writing: {}", e),
+        })?;
+    
+    file.write_all(content.as_bytes())
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to write restored content: {}", e),
+        })?;
+    
+    file.commit()
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to commit restored file: {}", e),
+        })
+}
+
+/// Delete a specific restore point by ID
+pub fn delete_restore_point(restore_point_id: &str) -> ThemeResult<usize> {
+    let restore_point = get_restore_point(restore_point_id)?;
+    let mut deleted_count = 0;
+    
+    for backup_path in &restore_point.backup_files {
+        fs::remove_file(backup_path)
+            .map_err(|e| ThemeError::BackupError {
+                reason: format!("Failed to delete backup file: {}", e),
+            })?;
+        deleted_count += 1;
+    }
+    
+    Ok(deleted_count)
+}
+
+/// Delete all restore points
+pub fn clear_all_restore_points() -> ThemeResult<usize> {
+    let restore_points = list_restore_points()?;
+    let mut total_deleted = 0;
+    
+    for restore_point in restore_points {
+        total_deleted += delete_restore_point(&restore_point.id)?;
+    }
+    
+    Ok(total_deleted)
+}

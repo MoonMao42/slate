@@ -40,7 +40,7 @@ pub enum ThemeError {
     PartialFailure(usize),
 
     /// No supported tools were detected on the system
-    #[error("No supported tools detected. Install one of: ghostty, starship, bat")]
+    #[error("No supported tools detected. Install one of: ghostty, starship, bat, delta, lazygit")]
     NoToolsDetected,
 
     /// Standard I/O errors with context

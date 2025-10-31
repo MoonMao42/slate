@@ -3,7 +3,8 @@ use crate::config::backup::create_backup;
 use crate::error::{ThemeError, ThemeResult};
 use crate::theme::Theme;
 use atomic_write_file::AtomicWriteFile;
-use serde_yaml::{Value, Mapping};
+use regex::Regex;
+use serde_yaml::{Mapping, Value};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -65,18 +66,22 @@ impl LazygitAdapter {
     fn apply_theme_to_yaml(
         config_path: &PathBuf,
         theme_id: &str,
+        bat_theme: &str,
+        delta_theme: &str,
     ) -> ThemeResult<()> {
         // Read existing config or start fresh
         let content = if config_path.exists() {
-            fs::read_to_string(&config_path)
-                .map_err(|e| ThemeError::Io(e))?
+            fs::read_to_string(&config_path).map_err(|e| ThemeError::Io(e))?
         } else {
             "gui:\n".to_string()
         };
 
+        let has_pager_integration = Self::has_pager_integration(&content);
+
         // Parse YAML
-        let mut doc: Value = serde_yaml::from_str(&content)
-            .map_err(|e| ThemeError::Other(format!("Failed to parse lazygit config YAML: {}", e)))?;
+        let mut doc: Value = serde_yaml::from_str(&content).map_err(|e| {
+            ThemeError::Other(format!("Failed to parse lazygit config YAML: {}", e))
+        })?;
 
         // Ensure 'gui' is a mapping at the root
         if !doc.is_mapping() {
@@ -86,7 +91,8 @@ impl LazygitAdapter {
         let gui_value = if let Some(gui) = doc.get_mut("gui") {
             gui
         } else {
-            let mapping = doc.as_mapping_mut()
+            let mapping = doc
+                .as_mapping_mut()
                 .ok_or_else(|| ThemeError::Other("Failed to access root mapping".to_string()))?;
             mapping.insert(
                 Value::String("gui".to_string()),
@@ -103,16 +109,19 @@ impl LazygitAdapter {
         // Update gui.theme
         gui_value["theme"] = Value::String(theme_id.to_string());
 
+        if has_pager_integration {
+            Self::sync_pager_commands(&mut doc, bat_theme, delta_theme, false)?;
+        }
+
         // Serialize back to YAML
         let new_content = serde_yaml::to_string(&doc)
             .map_err(|e| ThemeError::Other(format!("Failed to serialize lazygit config: {}", e)))?;
 
         // Atomic write
-        let mut file = AtomicWriteFile::open(&config_path)
-            .map_err(|e| ThemeError::WriteError {
-                path: config_path.display().to_string(),
-                reason: e.to_string(),
-            })?;
+        let mut file = AtomicWriteFile::open(&config_path).map_err(|e| ThemeError::WriteError {
+            path: config_path.display().to_string(),
+            reason: e.to_string(),
+        })?;
 
         file.write_all(new_content.as_bytes())
             .map_err(|e| ThemeError::WriteError {
@@ -131,6 +140,104 @@ impl LazygitAdapter {
     /// Check if existing config has a pager-related integration
     fn has_pager_integration(content: &str) -> bool {
         content.contains("pager") && (content.contains("bat") || content.contains("delta"))
+    }
+
+    fn sync_pager_command(
+        command: &str,
+        bat_theme: &str,
+        delta_theme: &str,
+    ) -> ThemeResult<String> {
+        let bat_pattern = Regex::new(r#"--theme(?:=|\s+)(?:"[^"\n]*"|'[^'\n]*'|[^"'#\s\n]+)"#)
+            .map_err(|e| ThemeError::Other(format!("Invalid built-in lazygit bat regex: {}", e)))?;
+        let delta_pattern = Regex::new(
+            r#"--syntax-theme(?:=|\s+)(?:"[^"\n]*"|'[^'\n]*'|[^"'#\s\n]+)"#,
+        )
+        .map_err(|e| ThemeError::Other(format!("Invalid built-in lazygit delta regex: {}", e)))?;
+
+        let mut updated = command.to_string();
+
+        if updated.contains("bat") {
+            if bat_pattern.is_match(&updated) {
+                updated = bat_pattern
+                    .replace(&updated, format!(r#"--theme="{}""#, bat_theme))
+                    .to_string();
+            } else {
+                updated.push_str(&format!(r#" --theme="{}""#, bat_theme));
+            }
+        }
+
+        if updated.contains("delta") {
+            if delta_pattern.is_match(&updated) {
+                updated = delta_pattern
+                    .replace(&updated, format!(r#"--syntax-theme="{}""#, delta_theme))
+                    .to_string();
+            } else {
+                updated.push_str(&format!(r#" --syntax-theme="{}""#, delta_theme));
+            }
+        }
+
+        Ok(updated)
+    }
+
+    fn sync_pager_commands(
+        value: &mut Value,
+        bat_theme: &str,
+        delta_theme: &str,
+        in_pager_context: bool,
+    ) -> ThemeResult<bool> {
+        match value {
+            Value::Mapping(map) => {
+                let mut changed = false;
+                for (key, child) in map.iter_mut() {
+                    let key_name = key.as_str().unwrap_or("");
+                    let child_in_pager = in_pager_context || matches!(key_name, "pager" | "paging");
+
+                    if matches!(key_name, "command" | "cmd" | "pager") {
+                        if let Value::String(command) = child {
+                            let updated =
+                                Self::sync_pager_command(command, bat_theme, delta_theme)?;
+                            if updated != *command {
+                                *command = updated;
+                                changed = true;
+                            }
+                            continue;
+                        }
+                    }
+
+                    changed |=
+                        Self::sync_pager_commands(child, bat_theme, delta_theme, child_in_pager)?;
+                }
+                Ok(changed)
+            }
+            Value::Sequence(seq) => {
+                let mut changed = false;
+                for child in seq.iter_mut() {
+                    changed |=
+                        Self::sync_pager_commands(child, bat_theme, delta_theme, in_pager_context)?;
+                }
+                Ok(changed)
+            }
+            Value::String(command) if in_pager_context => {
+                let updated = Self::sync_pager_command(command, bat_theme, delta_theme)?;
+                let changed = updated != *command;
+                if changed {
+                    *command = updated;
+                }
+                Ok(changed)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn get_tool_override(theme: &Theme, tool: &str) -> ThemeResult<String> {
+        theme
+            .colors
+            .tool_overrides
+            .get(tool)
+            .ok_or_else(|| {
+                ThemeError::Other(format!("No {} theme override for {}", tool, theme.name))
+            })
+            .map(|s| s.to_string())
     }
 }
 
@@ -164,21 +271,18 @@ impl ToolAdapter for LazygitAdapter {
             Self::create_default_config(&config_path)?;
         }
 
-        let canonical_path = fs::canonicalize(&config_path)
-            .map_err(|_e| ThemeError::SymlinkError {
+        let canonical_path =
+            fs::canonicalize(&config_path).map_err(|_e| ThemeError::SymlinkError {
                 path: config_path.display().to_string(),
             })?;
 
         let _backup_info = create_backup("lazygit", &theme.name, &canonical_path)?;
 
         let theme_id = Self::get_lazygit_theme_id(theme)?;
+        let bat_theme = Self::get_tool_override(theme, "bat")?;
+        let delta_theme = Self::get_tool_override(theme, "delta")?;
 
-        let current_content = fs::read_to_string(&canonical_path)
-            .map_err(|e| ThemeError::Io(e))?;
-
-        let _has_pager = Self::has_pager_integration(&current_content);
-
-        Self::apply_theme_to_yaml(&canonical_path, &theme_id)?;
+        Self::apply_theme_to_yaml(&canonical_path, &theme_id, &bat_theme, &delta_theme)?;
 
         Ok(())
     }
@@ -189,8 +293,7 @@ impl ToolAdapter for LazygitAdapter {
         }
 
         let path = self.config_path()?;
-        let content = fs::read_to_string(&path)
-            .map_err(|e| ThemeError::Io(e))?;
+        let content = fs::read_to_string(&path).map_err(|e| ThemeError::Io(e))?;
 
         let doc: Value = serde_yaml::from_str(&content)
             .map_err(|e| ThemeError::Other(format!("Failed to parse lazygit config: {}", e)))?;
@@ -246,7 +349,7 @@ mod tests {
 
         LazygitAdapter::create_default_config(&config_path).unwrap();
 
-        LazygitAdapter::apply_theme_to_yaml(&config_path, "dracula").unwrap();
+        LazygitAdapter::apply_theme_to_yaml(&config_path, "dracula", "Dracula", "Dracula").unwrap();
 
         let content = fs::read_to_string(&config_path).unwrap();
         let doc: Value = serde_yaml::from_str(&content).unwrap();
@@ -262,13 +365,25 @@ mod tests {
         let initial_yaml = "gui:\n  theme: \"light\"\n  nerdFontsVersion: \"3\"\n";
         fs::write(&config_path, initial_yaml).unwrap();
 
-        LazygitAdapter::apply_theme_to_yaml(&config_path, "catppuccin-mocha").unwrap();
+        LazygitAdapter::apply_theme_to_yaml(
+            &config_path,
+            "catppuccin-mocha",
+            "Catppuccin Mocha",
+            "Catppuccin Mocha",
+        )
+        .unwrap();
 
         let content = fs::read_to_string(&config_path).unwrap();
         let doc: Value = serde_yaml::from_str(&content).unwrap();
 
-        assert_eq!(doc["gui"]["theme"], Value::String("catppuccin-mocha".to_string()));
-        assert_eq!(doc["gui"]["nerdFontsVersion"], Value::String("3".to_string()));
+        assert_eq!(
+            doc["gui"]["theme"],
+            Value::String("catppuccin-mocha".to_string())
+        );
+        assert_eq!(
+            doc["gui"]["nerdFontsVersion"],
+            Value::String("3".to_string())
+        );
     }
 
     #[test]
@@ -306,16 +421,21 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let config_path = temp_dir.path().join("config.yml");
 
-        let initial_yaml = "gui:\n  theme: old-theme\n  nerdFontsVersion: \"3\"\n  window:\n    width: 200\n";
+        let initial_yaml =
+            "gui:\n  theme: old-theme\n  nerdFontsVersion: \"3\"\n  window:\n    width: 200\n";
         fs::write(&config_path, initial_yaml).unwrap();
 
-        LazygitAdapter::apply_theme_to_yaml(&config_path, "new-theme").unwrap();
+        LazygitAdapter::apply_theme_to_yaml(&config_path, "new-theme", "Dracula", "Dracula")
+            .unwrap();
 
         let content = fs::read_to_string(&config_path).unwrap();
         let doc: Value = serde_yaml::from_str(&content).unwrap();
 
         assert_eq!(doc["gui"]["theme"], Value::String("new-theme".to_string()));
-        assert_eq!(doc["gui"]["nerdFontsVersion"], Value::String("3".to_string()));
+        assert_eq!(
+            doc["gui"]["nerdFontsVersion"],
+            Value::String("3".to_string())
+        );
         assert_eq!(doc["gui"]["window"]["width"], Value::Number(200.into()));
     }
 
@@ -329,5 +449,55 @@ mod tests {
         let content = fs::read_to_string(&config_path).unwrap();
         let result: Result<Value, _> = serde_yaml::from_str(&content);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_lazygit_syncs_existing_delta_pager_theme() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("config.yml");
+
+        let initial_yaml = "gui:\n  theme: old-theme\ngit:\n  paging:\n    pager: delta --paging=never --syntax-theme=\"Dracula\"\n";
+        fs::write(&config_path, initial_yaml).unwrap();
+
+        LazygitAdapter::apply_theme_to_yaml(
+            &config_path,
+            "catppuccin-mocha",
+            "Catppuccin Mocha",
+            "Catppuccin Mocha",
+        )
+        .unwrap();
+
+        let content = fs::read_to_string(&config_path).unwrap();
+        let doc: Value = serde_yaml::from_str(&content).unwrap();
+
+        assert_eq!(
+            doc["gui"]["theme"],
+            Value::String("catppuccin-mocha".to_string())
+        );
+        assert_eq!(
+            doc["git"]["paging"]["pager"],
+            Value::String(r#"delta --paging=never --syntax-theme="Catppuccin Mocha""#.to_string())
+        );
+    }
+
+    #[test]
+    fn test_lazygit_syncs_existing_bat_pager_theme() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("config.yml");
+
+        let initial_yaml =
+            "gui:\n  theme: old-theme\ngit:\n  paging:\n    pager: bat --style=plain\n";
+        fs::write(&config_path, initial_yaml).unwrap();
+
+        LazygitAdapter::apply_theme_to_yaml(&config_path, "nord", "Nord", "Nord").unwrap();
+
+        let content = fs::read_to_string(&config_path).unwrap();
+        let doc: Value = serde_yaml::from_str(&content).unwrap();
+
+        assert_eq!(doc["gui"]["theme"], Value::String("nord".to_string()));
+        assert_eq!(
+            doc["git"]["paging"]["pager"],
+            Value::String(r#"bat --style=plain --theme="Nord""#.to_string())
+        );
     }
 }

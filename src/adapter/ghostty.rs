@@ -27,8 +27,8 @@ impl GhosttyAdapter {
         // Legacy macOS App Support location, if present on older setups.
         if cfg!(target_os = "macos") {
             if let Some(h) = home {
-                let appsupport = PathBuf::from(h)
-                    .join("Library/Application Support/com.mitchellh.ghostty");
+                let appsupport =
+                    PathBuf::from(h).join("Library/Application Support/com.mitchellh.ghostty");
                 paths.push(appsupport.join("config.ghostty"));
                 paths.push(appsupport.join("config"));
             }
@@ -75,8 +75,8 @@ impl ToolAdapter for GhosttyAdapter {
     fn apply_theme(&self, theme: &Theme) -> ThemeResult<()> {
         // Get canonical path (resolve symlinks)
         let config_path = self.config_path()?;
-        let canonical_path = fs::canonicalize(&config_path)
-            .map_err(|_e| ThemeError::SymlinkError {
+        let canonical_path =
+            fs::canonicalize(&config_path).map_err(|_e| ThemeError::SymlinkError {
                 path: config_path.display().to_string(),
             })?;
 
@@ -84,23 +84,23 @@ impl ToolAdapter for GhosttyAdapter {
         let _backup_info = create_backup("ghostty", &theme.name, &canonical_path)?;
 
         // Read current config
-        let content = fs::read_to_string(&canonical_path)
-            .map_err(|e| ThemeError::Io(e))?;
+        let content = fs::read_to_string(&canonical_path).map_err(|e| ThemeError::Io(e))?;
 
         // Get the Ghostty theme name from tool_overrides
         let ghostty_theme = theme
             .colors
             .tool_overrides
             .get("ghostty")
-            .ok_or_else(|| ThemeError::Other(
-                format!("No Ghostty theme override for {}", theme.name)
-            ))?
+            .ok_or_else(|| {
+                ThemeError::Other(format!("No Ghostty theme override for {}", theme.name))
+            })?
             .to_string();
 
         // Use regex to replace or create the theme line
-        let theme_pattern =
-            Regex::new(r#"(?m)^\s*theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#)
-                .map_err(|e| ThemeError::Other(format!("Invalid built-in Ghostty theme regex: {}", e)))?;
+        let theme_pattern = Regex::new(
+            r#"(?m)^\s*theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#,
+        )
+        .map_err(|e| ThemeError::Other(format!("Invalid built-in Ghostty theme regex: {}", e)))?;
 
         let new_content = if theme_pattern.is_match(&content) {
             // Replace existing theme line
@@ -119,23 +119,22 @@ impl ToolAdapter for GhosttyAdapter {
         };
 
         // Atomic write
-        let mut file = AtomicWriteFile::open(&canonical_path)
-            .map_err(|e| ThemeError::WriteError {
+        let mut file =
+            AtomicWriteFile::open(&canonical_path).map_err(|e| ThemeError::WriteError {
                 path: canonical_path.display().to_string(),
                 reason: e.to_string(),
             })?;
-        
+
         file.write_all(new_content.as_bytes())
             .map_err(|e| ThemeError::WriteError {
                 path: canonical_path.display().to_string(),
                 reason: e.to_string(),
             })?;
-        
-        file.commit()
-            .map_err(|e| ThemeError::WriteError {
-                path: canonical_path.display().to_string(),
-                reason: e.to_string(),
-            })?;
+
+        file.commit().map_err(|e| ThemeError::WriteError {
+            path: canonical_path.display().to_string(),
+            reason: e.to_string(),
+        })?;
 
         Ok(())
     }
@@ -146,12 +145,12 @@ impl ToolAdapter for GhosttyAdapter {
         }
 
         let path = self.config_path()?;
-        let content = fs::read_to_string(&path)
-            .map_err(|e| ThemeError::Io(e))?;
+        let content = fs::read_to_string(&path).map_err(|e| ThemeError::Io(e))?;
 
-        let theme_pattern =
-            Regex::new(r#"^\s*theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#)
-                .map_err(|e| ThemeError::Other(format!("Invalid built-in Ghostty read regex: {}", e)))?;
+        let theme_pattern = Regex::new(
+            r#"^\s*theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#,
+        )
+        .map_err(|e| ThemeError::Other(format!("Invalid built-in Ghostty read regex: {}", e)))?;
 
         if let Some(caps) = theme_pattern.captures(&content) {
             if let Some(theme_name) = caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
@@ -188,7 +187,8 @@ mod tests {
 
         // macOS legacy paths are included on macOS, but official default stays first.
         if cfg!(target_os = "macos") {
-            let appsupport = PathBuf::from("/home/user/Library/Application Support/com.mitchellh.ghostty");
+            let appsupport =
+                PathBuf::from("/home/user/Library/Application Support/com.mitchellh.ghostty");
             assert!(candidates.contains(&appsupport.join("config.ghostty")));
             assert!(candidates.contains(&appsupport.join("config")));
         }
@@ -222,9 +222,10 @@ mod tests {
         std::fs::write(&legacy_path, "theme = \"Wrong\"\n").unwrap();
         std::fs::write(&official_path, "theme = \"Right\"\n").unwrap();
 
-        let selected = GhosttyAdapter::first_existing_path(
-            &GhosttyAdapter::candidate_paths(&xdg_dir, Some(temp_dir.path().to_str().unwrap())),
-        )
+        let selected = GhosttyAdapter::first_existing_path(&GhosttyAdapter::candidate_paths(
+            &xdg_dir,
+            Some(temp_dir.path().to_str().unwrap()),
+        ))
         .unwrap();
 
         assert_eq!(selected, official_path);
@@ -233,13 +234,13 @@ mod tests {
     #[test]
     fn test_ghostty_replace_existing_theme() {
         let content = "font-family = monospace\ntheme = \"Dracula\"\nfont-size = 12\n";
-        
+
         let theme_pattern =
             Regex::new(r#"(?m)^\s*theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
         let new_content = theme_pattern
             .replace(content, r#"theme = "Catppuccin Mocha""#)
             .to_string();
-        
+
         assert!(new_content.contains(r#"theme = "Catppuccin Mocha""#));
         assert!(!new_content.contains("Dracula"));
     }
@@ -247,10 +248,10 @@ mod tests {
     #[test]
     fn test_ghostty_theme_detection() {
         let content = r#"theme = "Tokyo Night""#;
-        
+
         let theme_pattern =
             Regex::new(r#"^\s*theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#).unwrap();
-        
+
         if let Some(caps) = theme_pattern.captures(content) {
             if let Some(theme_name) = caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
                 assert_eq!(theme_name.as_str(), "Tokyo Night");
@@ -261,10 +262,10 @@ mod tests {
     #[test]
     fn test_ghostty_add_missing_theme() {
         let content = "font-family = monospace\nfont-size = 12\n";
-        
+
         let theme_pattern =
             Regex::new(r#"(?m)^\s*theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
-        
+
         let new_content = if theme_pattern.is_match(content) {
             theme_pattern
                 .replace(content, r#"theme = "Catppuccin Mocha""#)
@@ -278,7 +279,7 @@ mod tests {
             new.push('\n');
             new
         };
-        
+
         assert!(new_content.contains(r#"theme = "Catppuccin Mocha""#));
     }
 

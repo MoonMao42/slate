@@ -1,8 +1,8 @@
+use crate::adapter::{BatAdapter, DeltaAdapter, GhosttyAdapter, LazygitAdapter, StarshipAdapter};
 use crate::{
-    available_themes, get_theme, normalize_theme_name, parse_theme_input,
-    ApplyThemeResult, ThemeError, ThemeResult, ToolRegistry,
+    available_themes, get_theme, normalize_theme_name, parse_theme_input, ApplyThemeResult,
+    ThemeError, ThemeResult, ToolRegistry,
 };
-use crate::adapter::{GhosttyAdapter, StarshipAdapter, BatAdapter, DeltaAdapter, LazygitAdapter};
 
 /// Handle the `set` subcommand: apply theme to all detected tools
 pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<ApplyThemeResult> {
@@ -32,11 +32,10 @@ pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<Apply
     };
 
     // Verify the final theme exists
-    let theme = get_theme(&final_theme_name)
-        .ok_or_else(|| {
-            let available = available_themes().join(", ");
-            ThemeError::ThemeNotFound(final_theme_name.clone(), available)
-        })?;
+    let theme = get_theme(&final_theme_name).ok_or_else(|| {
+        let available = available_themes().join(", ");
+        ThemeError::ThemeNotFound(final_theme_name.clone(), available)
+    })?;
 
     // Create registry and register adapters
     let mut registry = ToolRegistry::new();
@@ -149,7 +148,7 @@ pub fn handle_status_command(verbose: bool) -> ThemeResult<()> {
         if let Ok(true) = adapter.is_installed() {
             found_any = true;
             let tool_name = adapter.tool_name();
-            
+
             // Try to read current theme
             let current_theme = match adapter.get_current_theme() {
                 Ok(Some(theme)) => theme,
@@ -202,25 +201,21 @@ pub fn handle_list_command() -> ThemeResult<()> {
 /// Print themes grouped by family in plain text format (for piping)
 fn print_plain_theme_list() -> ThemeResult<()> {
     let themes = available_themes();
-    
+
     // Group themes by family
     let families = vec![
-        ("Catppuccin", vec![
-            "catppuccin-latte",
-            "catppuccin-frappe", 
-            "catppuccin-macchiato",
-            "catppuccin-mocha",
-        ]),
-        ("Tokyo Night", vec![
-            "tokyo-night-light",
-            "tokyo-night-dark",
-        ]),
-        ("Dracula", vec![
-            "dracula",
-        ]),
-        ("Nord", vec![
-            "nord",
-        ]),
+        (
+            "Catppuccin",
+            vec![
+                "catppuccin-latte",
+                "catppuccin-frappe",
+                "catppuccin-macchiato",
+                "catppuccin-mocha",
+            ],
+        ),
+        ("Tokyo Night", vec!["tokyo-night-light", "tokyo-night-dark"]),
+        ("Dracula", vec!["dracula"]),
+        ("Nord", vec!["nord"]),
     ];
 
     for (family_name, theme_names) in families {
@@ -250,14 +245,12 @@ fn run_interactive_list() -> ThemeResult<()> {
     // Confirm before applying
     let description = crate::cli::get_theme_description(&theme);
     let prompt = format!("Apply theme: {} ({})?\nConfirm", theme, description);
-    
+
     let confirmed = Confirm::new()
         .with_prompt(&prompt)
         .default(true)
         .interact()
-        .map_err(|_| {
-            ThemeError::Other("Theme confirmation cancelled".to_string())
-        })?;
+        .map_err(|_| ThemeError::Other("Theme confirmation cancelled".to_string()))?;
 
     if confirmed {
         // Apply the theme using handle_set_command
@@ -266,5 +259,96 @@ fn run_interactive_list() -> ThemeResult<()> {
         println!("Theme application cancelled");
     }
 
+    Ok(())
+}
+
+/// Handle the `restore` subcommand: restore from backups or manage restore points
+/// Mode validation: exactly one mode must be selected
+/// - `restore_point_id` (positional): restore by ID
+/// - `--list`: list all restore points
+/// - `--cleanup <id>`: delete one restore point
+/// - `--clear-all`: delete all restore points
+/// - no args + TTY: interactive selection
+/// - no args + non-TTY: error with guidance
+pub fn handle_restore_command(
+    restore_point_id: Option<String>,
+    list: bool,
+    cleanup: Option<String>,
+    clear_all: bool,
+) -> ThemeResult<()> {
+    // Validate mode combinations - exactly one mode should be active
+    let active_modes = [
+        restore_point_id.is_some(),
+        list,
+        cleanup.is_some(),
+        clear_all,
+    ]
+    .iter()
+    .filter(|&&m| m)
+    .count();
+
+    if active_modes > 1 {
+        return Err(ThemeError::Other(
+            "Error: Conflicting modes\n\n    Problem: Cannot combine --list, --cleanup, --clear-all, or a restore point ID\n\nGuidance: Use one mode at a time:\n    themectl restore <id>          # Restore by ID\n    themectl restore --list        # List restore points\n    themectl restore --cleanup <id> # Delete a restore point\n    themectl restore --clear-all   # Delete all restore points".to_string()
+        ));
+    }
+
+    // Handle --list mode
+    if list {
+        let restore_points = crate::config::backup::list_restore_points()?;
+        
+        if restore_points.is_empty() {
+            println!("No restore points available");
+            return Ok(());
+        }
+
+        println!("{}", crate::cli::format_restore_point_list(&restore_points));
+        return Ok(());
+    }
+
+    // Handle --cleanup mode
+    if let Some(id) = cleanup {
+        crate::config::backup::validate_restore_point(&id)?;
+        let deleted_count = crate::config::backup::delete_restore_point(&id)?;
+        println!("Deleted {} backup file(s) from restore point: {}", deleted_count, id);
+        return Ok(());
+    }
+
+    // Handle --clear-all mode
+    if clear_all {
+        let deleted_count = crate::config::backup::clear_all_restore_points()?;
+        println!("Deleted all {} restore point(s)", deleted_count);
+        return Ok(());
+    }
+
+    // Handle direct restore by ID
+    if let Some(id) = restore_point_id {
+        crate::config::backup::validate_restore_point(&id)?;
+        let restore_point = crate::config::backup::get_restore_point(&id)?;
+        let result = crate::config::backup::restore_restore_point(&id)?;
+        println!("{}", crate::cli::format_restore_result(&restore_point.theme_name, &result));
+        return Ok(());
+    }
+
+    // No args - check if TTY
+    use atty::Stream;
+    if !atty::is(Stream::Stdout) {
+        return Err(ThemeError::Other(
+            "Error: No restore point specified in non-interactive mode\n\n    Problem: themectl restore requires either a restore point ID or TTY interactive selection\n\nGuidance: Use one of:\n    themectl restore --list              # List available restore points\n    themectl restore <restore_point_id>  # Restore by ID\n    Run in a terminal for interactive selection".to_string()
+        ));
+    }
+
+    // TTY mode - interactive selection
+    let restore_points = crate::config::backup::list_restore_points()?;
+    
+    if restore_points.is_empty() {
+        return Err(ThemeError::Other(
+            "No restore points available to restore from".to_string()
+        ));
+    }
+
+    let selected = crate::cli::pick_restore_point(&restore_points)?;
+    let result = crate::config::backup::restore_restore_point(&selected.id)?;
+    println!("{}", crate::cli::format_restore_result(&selected.theme_name, &result));
     Ok(())
 }

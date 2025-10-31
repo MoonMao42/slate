@@ -26,13 +26,13 @@ impl ToolAdapter for StarshipAdapter {
     fn is_installed(&self) -> ThemeResult<bool> {
         // Check if binary exists in PATH
         let binary_exists = which::which("starship").is_ok();
-        
+
         // Check if config file exists
         let config_exists = match self.config_path() {
             Ok(path) => path.exists(),
             Err(_) => false,
         };
-        
+
         // Tool is installed if binary OR config exists (zero-config: binary alone = installed)
         Ok(binary_exists || config_exists)
     }
@@ -53,8 +53,8 @@ impl ToolAdapter for StarshipAdapter {
     fn apply_theme(&self, theme: &Theme) -> ThemeResult<()> {
         // Get canonical path (resolve symlinks)
         let config_path = self.config_path()?;
-        let canonical_path = fs::canonicalize(&config_path)
-            .map_err(|_e| ThemeError::SymlinkError {
+        let canonical_path =
+            fs::canonicalize(&config_path).map_err(|_e| ThemeError::SymlinkError {
                 path: config_path.display().to_string(),
             })?;
 
@@ -62,24 +62,25 @@ impl ToolAdapter for StarshipAdapter {
         let _backup_info = create_backup("starship", &theme.name, &canonical_path)?;
 
         // Read config file as string
-        let content = fs::read_to_string(&canonical_path)
-            .map_err(|e| ThemeError::Io(e))?;
+        let content = fs::read_to_string(&canonical_path).map_err(|e| ThemeError::Io(e))?;
 
         // Parse using toml-edit (SAFE-02: preserves comments and formatting)
-        let mut doc: DocumentMut = content.parse()
-            .map_err(|e: toml_edit::TomlError| ThemeError::InvalidToml {
-                path: canonical_path.display().to_string(),
-                reason: e.to_string(),
-            })?;
+        let mut doc: DocumentMut =
+            content
+                .parse()
+                .map_err(|e: toml_edit::TomlError| ThemeError::InvalidToml {
+                    path: canonical_path.display().to_string(),
+                    reason: e.to_string(),
+                })?;
 
         // Get the Starship palette name from tool_overrides
         let palette_name = theme
             .colors
             .tool_overrides
             .get("starship")
-            .ok_or_else(|| ThemeError::Other(
-                format!("No Starship theme override for {}", theme.name)
-            ))?
+            .ok_or_else(|| {
+                ThemeError::Other(format!("No Starship theme override for {}", theme.name))
+            })?
             .to_string();
 
         // Modify the palette key in the document root using toml_edit::value
@@ -89,23 +90,22 @@ impl ToolAdapter for StarshipAdapter {
         let new_content = doc.to_string();
 
         // Atomic write
-        let mut file = AtomicWriteFile::open(&canonical_path)
-            .map_err(|e| ThemeError::WriteError {
+        let mut file =
+            AtomicWriteFile::open(&canonical_path).map_err(|e| ThemeError::WriteError {
                 path: canonical_path.display().to_string(),
                 reason: e.to_string(),
             })?;
-        
+
         file.write_all(new_content.as_bytes())
             .map_err(|e| ThemeError::WriteError {
                 path: canonical_path.display().to_string(),
                 reason: e.to_string(),
             })?;
-        
-        file.commit()
-            .map_err(|e| ThemeError::WriteError {
-                path: canonical_path.display().to_string(),
-                reason: e.to_string(),
-            })?;
+
+        file.commit().map_err(|e| ThemeError::WriteError {
+            path: canonical_path.display().to_string(),
+            reason: e.to_string(),
+        })?;
 
         Ok(())
     }
@@ -116,14 +116,15 @@ impl ToolAdapter for StarshipAdapter {
         }
 
         let path = self.config_path()?;
-        let content = fs::read_to_string(&path)
-            .map_err(|e| ThemeError::Io(e))?;
+        let content = fs::read_to_string(&path).map_err(|e| ThemeError::Io(e))?;
 
-        let doc: DocumentMut = content.parse()
-            .map_err(|e: toml_edit::TomlError| ThemeError::InvalidToml {
-                path: path.display().to_string(),
-                reason: e.to_string(),
-            })?;
+        let doc: DocumentMut =
+            content
+                .parse()
+                .map_err(|e: toml_edit::TomlError| ThemeError::InvalidToml {
+                    path: path.display().to_string(),
+                    reason: e.to_string(),
+                })?;
 
         if let Some(palette_item) = doc.get("palette") {
             if let Some(palette_str) = palette_item.as_str() {
@@ -185,7 +186,7 @@ format = "..."
 [palette]
 palette_name = "catppuccin-mocha"
 "#;
-        
+
         let doc: DocumentMut = content.parse().unwrap();
         assert!(doc.get("format").is_some());
         assert!(doc.get("palette").is_some());
@@ -197,10 +198,10 @@ palette_name = "catppuccin-mocha"
 format = "..."
 palette = "old-palette"
 "#;
-        
+
         let mut doc: DocumentMut = content.parse().unwrap();
         doc["palette"] = toml_edit::value("new-palette");
-        
+
         let result = doc.to_string();
         assert!(result.contains("new-palette"));
         assert!(!result.contains("old-palette"));
@@ -212,7 +213,7 @@ palette = "old-palette"
 format = "..."
 [invalid toml without closing bracket
 "#;
-        
+
         let result: Result<DocumentMut, _> = content.parse();
         assert!(result.is_err());
     }
@@ -224,10 +225,10 @@ format = "..."
 format = "..."  # inline comment
 palette = "old"  # palette comment
 "#;
-        
+
         let mut doc: DocumentMut = content.parse().unwrap();
         doc["palette"] = toml_edit::value("new");
-        
+
         let result = doc.to_string();
         // Comments should be preserved
         assert!(result.contains("# Top-level comment"));
@@ -243,10 +244,10 @@ $hostname\
 """
 palette = "old"
 "#;
-        
+
         let mut doc: DocumentMut = content.parse().unwrap();
         doc["palette"] = toml_edit::value("new");
-        
+
         let result = doc.to_string();
         assert!(result.contains("new"));
         // Multiline value should be preserved

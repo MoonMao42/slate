@@ -1,7 +1,7 @@
+use crate::ThemeResult;
 use std::io::ErrorKind;
 use std::io::Write;
 use std::path::Path;
-use crate::ThemeResult;
 use tempfile::Builder;
 
 /// Auto-create minimal config file if tool is installed but config doesn't exist 
@@ -25,9 +25,7 @@ pub fn auto_create_config(tool: &str, config_path: &Path) -> ThemeResult<()> {
     }
 
     let temp_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
-    let mut temp_file = Builder::new()
-        .prefix(".themectl.")
-        .tempfile_in(temp_dir)?;
+    let mut temp_file = Builder::new().prefix(".themectl.").tempfile_in(temp_dir)?;
     temp_file.write_all(template.as_bytes())?;
     temp_file.flush()?;
 

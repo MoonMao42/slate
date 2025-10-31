@@ -3,14 +3,17 @@ use crate::theme::Theme;
 use std::path::PathBuf;
 
 /// Resolve XDG config home from env vars (pure function, testable)
-pub(crate) fn resolve_xdg_config_home(xdg: Option<&str>, home: Option<&str>) -> ThemeResult<PathBuf> {
+pub(crate) fn resolve_xdg_config_home(
+    xdg: Option<&str>,
+    home: Option<&str>,
+) -> ThemeResult<PathBuf> {
     if let Some(val) = xdg {
         if !val.is_empty() {
             return Ok(PathBuf::from(val));
         }
     }
-    let home = home
-        .ok_or_else(|| ThemeError::Other("Cannot determine HOME directory".to_string()))?;
+    let home =
+        home.ok_or_else(|| ThemeError::Other("Cannot determine HOME directory".to_string()))?;
     Ok(PathBuf::from(home).join(".config"))
 }
 
@@ -174,16 +177,14 @@ fn apply_all_tools_with_fallback(
 
     for adapter in adapters {
         match adapter.is_installed() {
-            Ok(true) => {
-                match adapter.apply_theme(theme) {
-                    Ok(()) => {
-                        result.add_success(adapter.tool_name().to_string());
-                    }
-                    Err(e) => {
-                        result.add_failure(adapter.tool_name().to_string(), e.to_string());
-                    }
+            Ok(true) => match adapter.apply_theme(theme) {
+                Ok(()) => {
+                    result.add_success(adapter.tool_name().to_string());
                 }
-            }
+                Err(e) => {
+                    result.add_failure(adapter.tool_name().to_string(), e.to_string());
+                }
+            },
             Ok(false) => {
                 // Tool not installed, skip
             }
@@ -228,7 +229,10 @@ mod tests {
         }
 
         fn config_path(&self) -> ThemeResult<PathBuf> {
-            Ok(PathBuf::from(format!("/home/user/.config/{}/config", self.name)))
+            Ok(PathBuf::from(format!(
+                "/home/user/.config/{}/config",
+                self.name
+            )))
         }
 
         fn config_exists(&self) -> ThemeResult<bool> {

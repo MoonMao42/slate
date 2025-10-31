@@ -1,5 +1,5 @@
-use dialoguer::Select;
 use crate::{ThemeError, ThemeResult};
+use dialoguer::Select;
 
 /// Get available theme variants for a given family
 /// Returns vec of (theme_name, description) tuples for all themes
@@ -52,13 +52,14 @@ pub fn pick_theme_variant(family: &str) -> ThemeResult<String> {
         .collect();
 
     let selection = Select::new()
-        .with_prompt(&format!("Multiple variants of '{}' found. Which one?", family))
+        .with_prompt(&format!(
+            "Multiple variants of '{}' found. Which one?",
+            family
+        ))
         .items(&items)
         .default(0)
         .interact()
-        .map_err(|_| {
-            ThemeError::Other("Theme selection cancelled".to_string())
-        })?;
+        .map_err(|_| ThemeError::Other("Theme selection cancelled".to_string()))?;
 
     Ok(variants[selection].0.clone())
 }
@@ -133,7 +134,7 @@ pub fn get_theme_description(theme_name: &str) -> &'static str {
 /// Interactively select a theme family
 pub fn pick_theme_family() -> ThemeResult<String> {
     let families = available_theme_families();
-    
+
     if families.is_empty() {
         return Err(ThemeError::Other("No theme families available".to_string()));
     }
@@ -143,9 +144,7 @@ pub fn pick_theme_family() -> ThemeResult<String> {
         .items(&families)
         .default(0)
         .interact()
-        .map_err(|_| {
-            ThemeError::Other("Theme family selection cancelled".to_string())
-        })?;
+        .map_err(|_| ThemeError::Other("Theme family selection cancelled".to_string()))?;
 
     Ok(families[selection].to_string())
 }

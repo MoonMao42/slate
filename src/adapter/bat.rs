@@ -35,13 +35,13 @@ impl ToolAdapter for BatAdapter {
     fn is_installed(&self) -> ThemeResult<bool> {
         // Check if binary exists in PATH
         let binary_exists = which::which("bat").is_ok();
-        
+
         // Check if config file exists
         let config_exists = match self.config_path() {
             Ok(path) => path.exists(),
             Err(_) => false,
         };
-        
+
         // Tool is installed if either binary OR config exists
         Ok(binary_exists || config_exists)
     }
@@ -63,8 +63,8 @@ impl ToolAdapter for BatAdapter {
     fn apply_theme(&self, theme: &Theme) -> ThemeResult<()> {
         // Get canonical path (resolve symlinks)
         let config_path = self.config_path()?;
-        let canonical_path = fs::canonicalize(&config_path)
-            .map_err(|_e| ThemeError::SymlinkError {
+        let canonical_path =
+            fs::canonicalize(&config_path).map_err(|_e| ThemeError::SymlinkError {
                 path: config_path.display().to_string(),
             })?;
 
@@ -72,24 +72,22 @@ impl ToolAdapter for BatAdapter {
         let _backup_info = create_backup("bat", &theme.name, &canonical_path)?;
 
         // Read current config
-        let content = fs::read_to_string(&canonical_path)
-            .map_err(|e| ThemeError::Io(e))?;
+        let content = fs::read_to_string(&canonical_path).map_err(|e| ThemeError::Io(e))?;
 
         // Get the bat theme name from tool_overrides
         let bat_theme = theme
             .colors
             .tool_overrides
             .get("bat")
-            .ok_or_else(|| ThemeError::Other(
-                format!("No bat theme override for {}", theme.name)
-            ))?
+            .ok_or_else(|| ThemeError::Other(format!("No bat theme override for {}", theme.name)))?
             .to_string();
 
         // Use regex to replace or create the --theme flag
         // Use (?m) for multiline mode so ^ and $ match line boundaries
-        let theme_pattern =
-            Regex::new(r#"(?m)^\s*--theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#)
-                .map_err(|e| ThemeError::Other(format!("Invalid built-in bat theme regex: {}", e)))?;
+        let theme_pattern = Regex::new(
+            r#"(?m)^\s*--theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#,
+        )
+        .map_err(|e| ThemeError::Other(format!("Invalid built-in bat theme regex: {}", e)))?;
 
         let new_content = if theme_pattern.is_match(&content) {
             // Replace existing --theme line
@@ -108,23 +106,22 @@ impl ToolAdapter for BatAdapter {
         };
 
         // Atomic write
-        let mut file = AtomicWriteFile::open(&canonical_path)
-            .map_err(|e| ThemeError::WriteError {
+        let mut file =
+            AtomicWriteFile::open(&canonical_path).map_err(|e| ThemeError::WriteError {
                 path: canonical_path.display().to_string(),
                 reason: e.to_string(),
             })?;
-        
+
         file.write_all(new_content.as_bytes())
             .map_err(|e| ThemeError::WriteError {
                 path: canonical_path.display().to_string(),
                 reason: e.to_string(),
             })?;
-        
-        file.commit()
-            .map_err(|e| ThemeError::WriteError {
-                path: canonical_path.display().to_string(),
-                reason: e.to_string(),
-            })?;
+
+        file.commit().map_err(|e| ThemeError::WriteError {
+            path: canonical_path.display().to_string(),
+            reason: e.to_string(),
+        })?;
 
         Ok(())
     }
@@ -135,12 +132,12 @@ impl ToolAdapter for BatAdapter {
         }
 
         let path = self.config_path()?;
-        let content = fs::read_to_string(&path)
-            .map_err(|e| ThemeError::Io(e))?;
+        let content = fs::read_to_string(&path).map_err(|e| ThemeError::Io(e))?;
 
-        let theme_pattern =
-            Regex::new(r#"^\s*--theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#)
-                .map_err(|e| ThemeError::Other(format!("Invalid built-in bat read regex: {}", e)))?;
+        let theme_pattern = Regex::new(
+            r#"^\s*--theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#,
+        )
+        .map_err(|e| ThemeError::Other(format!("Invalid built-in bat read regex: {}", e)))?;
 
         if let Some(caps) = theme_pattern.captures(&content) {
             if let Some(theme_name) = caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
@@ -214,13 +211,13 @@ mod tests {
     #[test]
     fn test_bat_replace_existing_theme() {
         let content = "--paging=always\n--theme=\"Dracula\"\n--color=always\n";
-        
+
         let theme_pattern =
             Regex::new(r#"(?m)^\s*--theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
         let new_content = theme_pattern
             .replace(content, r#"--theme="Catppuccin Mocha""#)
             .to_string();
-        
+
         assert!(new_content.contains(r#"--theme="Catppuccin Mocha""#));
         assert!(!new_content.contains("Dracula"));
     }
@@ -228,10 +225,10 @@ mod tests {
     #[test]
     fn test_bat_theme_detection() {
         let content = r#"--theme="Tokyo Night""#;
-        
+
         let theme_pattern =
             Regex::new(r#"^\s*--theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#).unwrap();
-        
+
         if let Some(caps) = theme_pattern.captures(content) {
             if let Some(theme_name) = caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
                 assert_eq!(theme_name.as_str(), "Tokyo Night");
@@ -242,10 +239,10 @@ mod tests {
     #[test]
     fn test_bat_add_missing_theme() {
         let content = "--paging=always\n--color=always\n";
-        
+
         let theme_pattern =
             Regex::new(r#"(?m)^\s*--theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
-        
+
         let new_content = if theme_pattern.is_match(content) {
             theme_pattern
                 .replace(content, r#"--theme="Catppuccin Mocha""#)
@@ -259,20 +256,20 @@ mod tests {
             new.push('\n');
             new
         };
-        
+
         assert!(new_content.contains(r#"--theme="Catppuccin Mocha""#));
     }
 
     #[test]
     fn test_bat_comment_handling() {
         let content = "# bat config file\n--paging=always\n--theme=\"Old\"\n# end config\n";
-        
+
         let theme_pattern =
             Regex::new(r#"(?m)^\s*--theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#).unwrap();
         let new_content = theme_pattern
             .replace(content, r#"--theme="New""#)
             .to_string();
-        
+
         assert!(new_content.contains("# bat config file"));
         assert!(new_content.contains("# end config"));
         assert!(new_content.contains(r#"--theme="New""#));

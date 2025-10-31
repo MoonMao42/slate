@@ -6,11 +6,14 @@ use atomic_write_file::AtomicWriteFile;
 use regex::Regex;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct DeltaAdapter;
 
 impl DeltaAdapter {
+    const MANAGED_BLOCK_START: &'static str = "; -- START themectl managed block (do not edit) --";
+    const MANAGED_BLOCK_END: &'static str = "; -- END themectl managed block --";
+
     /// Delta config lives at ~/.config/delta/config.gitconfig (XDG default)
     fn config_path_delta() -> ThemeResult<PathBuf> {
         let config_home = crate::adapter::xdg_config_home()?;
@@ -19,23 +22,83 @@ impl DeltaAdapter {
 
     /// Managed include in ~/.gitconfig
     fn gitconfig_path() -> ThemeResult<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| ThemeError::Other("HOME not set".to_string()))?;
+        let home =
+            std::env::var("HOME").map_err(|_| ThemeError::Other("HOME not set".to_string()))?;
         Ok(PathBuf::from(home).join(".gitconfig"))
     }
 
-    /// Build the managed include block that points to the delta config
-    fn build_managed_block() -> String {
-        "; -- START themectl managed block (do not edit) --\n\
-         [include]\n\
-         \tpath = ~/.config/delta/config.gitconfig\n\
-         ; -- END themectl managed block --\n"
+    /// Format the include path for gitconfig.
+    fn format_gitconfig_include_path(config_path: &Path) -> String {
+        let escaped = config_path
+            .display()
             .to_string()
+            .replace('\\', r"\\")
+            .replace('"', "\\\"");
+        format!(r#""{}""#, escaped)
+    }
+
+    /// Build the managed include block that points to the delta config.
+    fn build_managed_block(config_path: &Path) -> String {
+        format!(
+            "{}\n[include]\n\tpath = {}\n{}\n",
+            Self::MANAGED_BLOCK_START,
+            Self::format_gitconfig_include_path(config_path),
+            Self::MANAGED_BLOCK_END
+        )
     }
 
     /// Check if gitconfig contains delta-related config
     fn gitconfig_has_delta(content: &str) -> bool {
-        content.contains("[delta]") || content.contains("path = ~/.config/delta/config.gitconfig")
+        content.contains("[delta]")
+            || content.contains(Self::MANAGED_BLOCK_START)
+            || content.contains("delta/config.gitconfig")
+    }
+
+    /// Remove all themectl-managed include blocks from gitconfig content.
+    fn strip_managed_blocks(content: &str) -> String {
+        let mut cleaned = String::with_capacity(content.len());
+        let mut remaining = content;
+
+        while let Some(start) = remaining.find(Self::MANAGED_BLOCK_START) {
+            cleaned.push_str(&remaining[..start]);
+
+            let block_tail = &remaining[start..];
+            let Some(end_rel) = block_tail.find(Self::MANAGED_BLOCK_END) else {
+                remaining = "";
+                break;
+            };
+
+            let after_end = start + end_rel + Self::MANAGED_BLOCK_END.len();
+            remaining = &remaining[after_end..];
+            if let Some(rest) = remaining.strip_prefix("\r\n") {
+                remaining = rest;
+            } else if let Some(rest) = remaining.strip_prefix('\n') {
+                remaining = rest;
+            }
+        }
+
+        cleaned.push_str(remaining);
+        cleaned
+    }
+
+    /// Ensure gitconfig contains exactly one fresh themectl-managed include block.
+    fn upsert_managed_block(content: &str, managed_block: &str) -> String {
+        let mut cleaned = Self::strip_managed_blocks(content);
+        if !cleaned.is_empty() && !cleaned.ends_with('\n') {
+            cleaned.push('\n');
+        }
+        cleaned.push_str(managed_block);
+        cleaned
+    }
+
+    fn resolve_existing_path(path: &Path) -> ThemeResult<PathBuf> {
+        if path.exists() {
+            fs::canonicalize(path).map_err(|_| ThemeError::SymlinkError {
+                path: path.display().to_string(),
+            })
+        } else {
+            Ok(path.to_path_buf())
+        }
     }
 
     /// Ensure delta config file parent directory exists
@@ -71,7 +134,11 @@ impl DeltaAdapter {
     }
 
     /// Update gitconfig with managed include block
-    fn update_gitconfig_with_include(gitconfig_path: &PathBuf) -> ThemeResult<()> {
+    fn update_gitconfig_with_include(
+        gitconfig_path: &PathBuf,
+        delta_config_path: &Path,
+        theme_name: &str,
+    ) -> ThemeResult<()> {
         // Ensure parent directory exists
         if let Some(parent) = gitconfig_path.parent() {
             if !parent.exists() {
@@ -79,53 +146,38 @@ impl DeltaAdapter {
             }
         }
 
+        let gitconfig_write_path = Self::resolve_existing_path(gitconfig_path)?;
+
+        if gitconfig_write_path.exists() {
+            let _backup_info = create_backup("delta-gitconfig", theme_name, &gitconfig_write_path)?;
+        }
+
         // Read current gitconfig if it exists
-        let content = if gitconfig_path.exists() {
-            fs::read_to_string(gitconfig_path).map_err(|e| ThemeError::Io(e))?
+        let content = if gitconfig_write_path.exists() {
+            fs::read_to_string(&gitconfig_write_path).map_err(|e| ThemeError::Io(e))?
         } else {
             String::new()
         };
 
         // Build the managed block
-        let managed_block = Self::build_managed_block();
-
-        // Pattern to find existing managed block (multiline)
-        let block_pattern = Regex::new(
-            r#"(?m); -- START themectl managed block.*?; -- END themectl managed block--\n?"#,
-        )
-        .map_err(|e| {
-            ThemeError::Other(format!("Invalid gitconfig block regex: {}", e))
-        })?;
-
-        // Replace or insert the managed block
-        let new_content = if block_pattern.is_match(&content) {
-            // Replace existing block
-            block_pattern.replace(&content, managed_block.as_str()).to_string()
-        } else {
-            // Append new block at the end
-            let mut result = content;
-            if !result.is_empty() && !result.ends_with('\n') {
-                result.push('\n');
-            }
-            result.push_str(&managed_block);
-            result
-        };
+        let managed_block = Self::build_managed_block(delta_config_path);
+        let new_content = Self::upsert_managed_block(&content, &managed_block);
 
         // Atomic write gitconfig
-        let mut file = AtomicWriteFile::open(gitconfig_path)
-            .map_err(|e| ThemeError::WriteError {
-                path: gitconfig_path.display().to_string(),
+        let mut file =
+            AtomicWriteFile::open(&gitconfig_write_path).map_err(|e| ThemeError::WriteError {
+                path: gitconfig_write_path.display().to_string(),
                 reason: e.to_string(),
             })?;
 
         file.write_all(new_content.as_bytes())
             .map_err(|e| ThemeError::WriteError {
-                path: gitconfig_path.display().to_string(),
+                path: gitconfig_write_path.display().to_string(),
                 reason: e.to_string(),
             })?;
 
         file.commit().map_err(|e| ThemeError::WriteError {
-            path: gitconfig_path.display().to_string(),
+            path: gitconfig_write_path.display().to_string(),
             reason: e.to_string(),
         })?;
 
@@ -173,8 +225,8 @@ impl ToolAdapter for DeltaAdapter {
         }
 
         // Get canonical path (resolve symlinks)
-        let canonical_path = fs::canonicalize(&delta_config_path)
-            .map_err(|_e| ThemeError::SymlinkError {
+        let canonical_path =
+            fs::canonicalize(&delta_config_path).map_err(|_e| ThemeError::SymlinkError {
                 path: delta_config_path.display().to_string(),
             })?;
 
@@ -182,8 +234,7 @@ impl ToolAdapter for DeltaAdapter {
         let _backup_info = create_backup("delta", &theme.name, &canonical_path)?;
 
         // Read current delta config
-        let content = fs::read_to_string(&canonical_path)
-            .map_err(|e| ThemeError::Io(e))?;
+        let content = fs::read_to_string(&canonical_path).map_err(|e| ThemeError::Io(e))?;
 
         // Get the delta theme name from tool_overrides
         let delta_theme = theme
@@ -197,10 +248,9 @@ impl ToolAdapter for DeltaAdapter {
 
         // Use regex to replace or create the syntax-theme line
         // Pattern: syntax-theme = "value" or syntax-theme = value (with optional spaces/quotes)
-        let theme_pattern = Regex::new(
-            r#"(?m)^\s*syntax-theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#,
-        )
-        .map_err(|e| ThemeError::Other(format!("Invalid delta theme regex: {}", e)))?;
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*syntax-theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#)
+                .map_err(|e| ThemeError::Other(format!("Invalid delta theme regex: {}", e)))?;
 
         let new_content = if theme_pattern.is_match(&content) {
             // Replace existing syntax-theme line
@@ -230,8 +280,8 @@ impl ToolAdapter for DeltaAdapter {
         };
 
         // Atomic write delta config
-        let mut file = AtomicWriteFile::open(&canonical_path)
-            .map_err(|e| ThemeError::WriteError {
+        let mut file =
+            AtomicWriteFile::open(&canonical_path).map_err(|e| ThemeError::WriteError {
                 path: canonical_path.display().to_string(),
                 reason: e.to_string(),
             })?;
@@ -249,7 +299,7 @@ impl ToolAdapter for DeltaAdapter {
 
         // Now update gitconfig with managed include block
         let gitconfig_path = Self::gitconfig_path()?;
-        Self::update_gitconfig_with_include(&gitconfig_path)?;
+        Self::update_gitconfig_with_include(&gitconfig_path, &delta_config_path, &theme.name)?;
 
         Ok(())
     }
@@ -267,11 +317,7 @@ impl ToolAdapter for DeltaAdapter {
                 .map_err(|e| ThemeError::Other(format!("Invalid delta read regex: {}", e)))?;
 
         if let Some(caps) = theme_pattern.captures(&content) {
-            if let Some(theme_name) = caps
-                .get(1)
-                .or_else(|| caps.get(2))
-                .or_else(|| caps.get(3))
-            {
+            if let Some(theme_name) = caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
                 return Ok(Some(theme_name.as_str().to_string()));
             }
         }
@@ -296,11 +342,12 @@ mod tests {
 
     #[test]
     fn test_delta_build_managed_block() {
-        let block = DeltaAdapter::build_managed_block();
+        let block =
+            DeltaAdapter::build_managed_block(Path::new("/tmp/custom-xdg/delta/config.gitconfig"));
         assert!(block.contains("START themectl managed block"));
         assert!(block.contains("END themectl managed block"));
         assert!(block.contains("[include]"));
-        assert!(block.contains("path = ~/.config/delta/config.gitconfig"));
+        assert!(block.contains(r#"path = "/tmp/custom-xdg/delta/config.gitconfig""#));
     }
 
     #[test]
@@ -311,7 +358,8 @@ mod tests {
 
     #[test]
     fn test_delta_gitconfig_has_delta_with_path() {
-        let content = "[user]\nname = Test\n[include]\npath = ~/.config/delta/config.gitconfig\n";
+        let content =
+            "[user]\nname = Test\n[include]\npath = \"/tmp/custom/delta/config.gitconfig\"\n";
         assert!(DeltaAdapter::gitconfig_has_delta(content));
     }
 
@@ -325,10 +373,9 @@ mod tests {
     fn test_delta_replace_existing_theme() {
         let content = "[delta]\nsyntax-theme = \"Dracula\"\n";
 
-        let theme_pattern = Regex::new(
-            r#"(?m)^\s*syntax-theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#,
-        )
-        .unwrap();
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*syntax-theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#)
+                .unwrap();
         let new_content = theme_pattern
             .replace(content, r#"syntax-theme = "Catppuccin Mocha""#)
             .to_string();
@@ -357,10 +404,9 @@ syntax-theme = "Tokyo Night""#;
     fn test_delta_add_missing_theme() {
         let content = "[delta]\ncolor = true\n";
 
-        let theme_pattern = Regex::new(
-            r#"(?m)^\s*syntax-theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#,
-        )
-        .unwrap();
+        let theme_pattern =
+            Regex::new(r#"(?m)^\s*syntax-theme\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^"'#\n]+)\s*$"#)
+                .unwrap();
 
         let new_content = if theme_pattern.is_match(content) {
             theme_pattern
@@ -381,45 +427,46 @@ syntax-theme = "Tokyo Night""#;
 
     #[test]
     fn test_gitconfig_managed_block_replacement() {
-        let old_gitconfig = "[user]\nname = Test\n; -- START themectl managed block (do not edit) --\n[include]\npath = ~/.config/delta/config.gitconfig\n; -- END themectl managed block --\n[core]\npager = delta\n";
-        let new_block = DeltaAdapter::build_managed_block();
-
-        let block_pattern = Regex::new(
-            r#"(?m); -- START themectl managed block.*?; -- END themectl managed block--\n?"#,
-        )
-        .unwrap();
-
-        let new_gitconfig = block_pattern.replace(&old_gitconfig, new_block.as_str()).to_string();
+        let old_gitconfig = "[user]\nname = Test\n; -- START themectl managed block (do not edit) --\n[include]\npath = \"/tmp/old/delta/config.gitconfig\"\n; -- END themectl managed block --\n[core]\npager = delta\n";
+        let new_block =
+            DeltaAdapter::build_managed_block(Path::new("/tmp/new/delta/config.gitconfig"));
+        let new_gitconfig = DeltaAdapter::upsert_managed_block(old_gitconfig, &new_block);
 
         assert!(new_gitconfig.contains("START themectl managed block"));
         assert!(new_gitconfig.contains("END themectl managed block"));
         assert!(new_gitconfig.contains("[user]"));
         assert!(new_gitconfig.contains("[core]"));
+        assert!(new_gitconfig.contains(r#"/tmp/new/delta/config.gitconfig"#));
+        assert_eq!(
+            new_gitconfig
+                .matches("START themectl managed block")
+                .count(),
+            1
+        );
     }
 
     #[test]
     fn test_gitconfig_managed_block_append() {
         let old_gitconfig = "[user]\nname = Test\n[core]\npager = delta\n";
-        let new_block = DeltaAdapter::build_managed_block();
-
-        let block_pattern = Regex::new(
-            r#"(?m); -- START themectl managed block.*?; -- END themectl managed block--\n?"#,
-        )
-        .unwrap();
-
-        let new_gitconfig = if block_pattern.is_match(&old_gitconfig) {
-            block_pattern.replace(&old_gitconfig, new_block.as_str()).to_string()
-        } else {
-            let mut result = old_gitconfig.to_string();
-            if !result.ends_with('\n') {
-                result.push('\n');
-            }
-            result.push_str(&new_block);
-            result
-        };
+        let new_block =
+            DeltaAdapter::build_managed_block(Path::new("/tmp/new/delta/config.gitconfig"));
+        let new_gitconfig = DeltaAdapter::upsert_managed_block(old_gitconfig, &new_block);
 
         assert!(new_gitconfig.contains("START themectl managed block"));
         assert!(new_gitconfig.contains("END themectl managed block"));
         assert!(new_gitconfig.contains("[user]"));
+    }
+
+    #[test]
+    fn test_gitconfig_managed_block_deduplicates_multiple_blocks() {
+        let gitconfig = "[user]\nname = Test\n; -- START themectl managed block (do not edit) --\n[include]\npath = \"/tmp/one/delta/config.gitconfig\"\n; -- END themectl managed block --\n\n; -- START themectl managed block (do not edit) --\n[include]\npath = \"/tmp/two/delta/config.gitconfig\"\n; -- END themectl managed block --\n";
+        let new_block =
+            DeltaAdapter::build_managed_block(Path::new("/tmp/clean/delta/config.gitconfig"));
+        let updated = DeltaAdapter::upsert_managed_block(gitconfig, &new_block);
+
+        assert_eq!(updated.matches("START themectl managed block").count(), 1);
+        assert!(updated.contains(r#"/tmp/clean/delta/config.gitconfig"#));
+        assert!(!updated.contains(r#"/tmp/one/delta/config.gitconfig"#));
+        assert!(!updated.contains(r#"/tmp/two/delta/config.gitconfig"#));
     }
 }
