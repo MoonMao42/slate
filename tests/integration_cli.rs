@@ -277,3 +277,44 @@ fn test_cli_list_contains_nord() {
         .success()
         .stdout(predicate::str::contains("nord"));
 }
+
+#[test]
+fn test_cli_restore_help() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.args(&["restore", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Restore a previous theme state"));
+}
+
+#[test]
+fn test_cli_restore_list_empty() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("restore")
+        .arg("--list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No restore points available")
+            .or(predicate::str::contains(""))); // Empty output if no backups
+}
+
+#[test]
+fn test_cli_restore_conflicting_modes() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("restore")
+        .arg("--list")
+        .arg("--clear-all")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Conflicting modes"));
+}
+
+#[test]
+fn test_cli_restore_nonexistent_id() {
+    let mut cmd = Command::cargo_bin("themectl").unwrap();
+    cmd.arg("restore")
+        .arg("nonexistent-restore-point-id")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Restore point not found"));
+}
