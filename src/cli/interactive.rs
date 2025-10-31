@@ -149,3 +149,34 @@ pub fn pick_theme_family() -> ThemeResult<String> {
 
     Ok(families[selection].to_string())
 }
+
+/// Interactively select a restore point
+/// Presents a menu with restore point timestamp, theme name, and tools
+/// Returns the selected RestorePoint or error if cancelled/no points available
+pub fn pick_restore_point(
+    restore_points: &[crate::config::backup::RestorePoint],
+) -> ThemeResult<crate::config::backup::RestorePoint> {
+    if restore_points.is_empty() {
+        return Err(ThemeError::Other("No restore points available".to_string()));
+    }
+
+    // Build display items
+    let items: Vec<String> = restore_points
+        .iter()
+        .map(|rp| {
+            let tools_str = rp.tools.join(", ");
+            format!("{}  {}  [{}]", rp.id, rp.theme_name, tools_str)
+        })
+        .collect();
+
+    let selection = Select::new()
+        .with_prompt("Select a restore point to restore")
+        .items(&items)
+        .default(0)
+        .interact()
+        .map_err(|_| {
+            ThemeError::Other("Restore cancelled".to_string())
+        })?;
+
+    Ok(restore_points[selection].clone())
+}

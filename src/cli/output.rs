@@ -241,3 +241,62 @@ pub fn format_status_header() -> String {
 pub fn format_status_line(tool: &str, theme: &str) -> String {
     format!("    {:<12} {}", tool, theme)
 }
+
+/// Format a list of restore points for plain-text output
+/// Output format per line: "{id} {theme_name} {tools_joined_by_comma}"
+/// No colors (suitable for piping/scripts)
+pub fn format_restore_point_list(restore_points: &[crate::config::backup::RestorePoint]) -> String {
+    if restore_points.is_empty() {
+        return String::new();
+    }
+
+    let lines: Vec<String> = restore_points
+        .iter()
+        .map(|rp| {
+            let tools_str = rp.tools.join(",");
+            format!("{}  {}  {}", rp.id, rp.theme_name, tools_str)
+        })
+        .collect();
+
+    lines.join("\n")
+}
+
+/// Format restore operation result
+/// Shows which tools were restored successfully/failed
+/// Matches output style: header + per-tool status + summary
+pub fn format_restore_result(
+    theme_name: &str,
+    result: &crate::adapter::ApplyThemeResult,
+) -> String {
+    let mut output = String::new();
+
+    // Header
+    output.push_str(&format!(
+        "{}{}",
+        ColorScheme::header().paint("Restored: "),
+        ColorScheme::header().paint(theme_name)
+    ));
+    output.push_str("\n\n");
+
+    // Per-tool status for successful tools
+    for tool in &result.successful {
+        output.push_str(&format_tool_status(tool, true, "Restored"));
+        output.push('\n');
+    }
+
+    // Per-tool status for failed tools
+    for (tool, error) in &result.failed {
+        output.push_str(&format_tool_status(tool, false, error));
+        output.push('\n');
+    }
+
+    // Summary
+    output.push('\n');
+    let successful = result.successful.len();
+    let total = successful + result.failed.len();
+    let failed = result.failed.len();
+    let summary = format_summary(successful, total, failed);
+    output.push_str(&summary);
+
+    output
+}
