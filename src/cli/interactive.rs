@@ -163,7 +163,11 @@ pub fn pick_restore_point(
     let items: Vec<String> = restore_points
         .iter()
         .map(|rp| {
-            let tools_str = rp.tools.join(", ");
+            let tools_str: String = rp.entries
+                .iter()
+                .map(|e| e.display_tool.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("{}  {}  [{}]", rp.id, rp.theme_name, tools_str)
         })
         .collect();

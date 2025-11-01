@@ -1,6 +1,5 @@
 use crate::error::{ThemeError, ThemeResult};
 use atomic_write_file::AtomicWriteFile;
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -16,15 +15,25 @@ pub struct BackupInfo {
     pub created_at: SystemTime,
 }
 
-/// Represents a grouped set of backups from a single theme application
-/// All files with the same timestamp (within 2-second window) are considered part of the same restore point
+/// Represents a single backup file with persisted metadata
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RestoreEntry {
+    pub tool_key: String,           // e.g., "ghostty", "starship", "bat", "delta", "delta-gitconfig", "lazygit"
+    pub display_tool: String,       // e.g., "Ghostty", "Starship", "bat", "Delta", "Delta (.gitconfig)", "lazygit"
+    pub original_path: PathBuf,     // e.g., ~/.config/ghostty/config
+    pub backup_path: PathBuf,       // e.g., ~/.cache/themectl/backups/restore_point_id/ghostty.backup
+}
+
+/// Represents a manifest-backed restore point with explicit directory structure
+/// Storage: ~/.cache/themectl/backups/<restore_point_id>/
+/// manifest.toml (metadata)
+/// ghostty.backup, starship.backup, bat.backup, delta.backup, delta-gitconfig.backup, lazygit.backup
 #[derive(Debug, Clone)]
 pub struct RestorePoint {
-    pub id: String,                 // Timestamp-based ID: "2026-04-09T10-00-00Z"
+    pub id: String,                 // e.g., "2026-04-09T10-00-00Z" (UUID-like, human-readable)
     pub theme_name: String,         // e.g., "Catppuccin Mocha"
-    pub timestamp: SystemTime,      // When the themectl set operation occurred
-    pub tools: Vec<String>,         // e.g., ["ghostty", "starship", "bat", "delta", "lazygit"]
-    pub backup_files: Vec<PathBuf>, // Absolute paths to all .backup files in this restore point
+    pub created_at: SystemTime,     // When the themectl set operation occurred
+    pub entries: Vec<RestoreEntry>, // All backed-up files for this restore point
 }
 
 /// Get the backup directory path (~/.cache/themectl/backups/)
@@ -48,6 +57,17 @@ pub fn backup_directory() -> ThemeResult<PathBuf> {
         })?;
 
     Ok(backup_dir)
+}
+
+/// Get a specific restore point directory path
+fn restore_point_directory(restore_point_id: &str) -> ThemeResult<PathBuf> {
+    let backup_dir = backup_directory()?;
+    Ok(backup_dir.join(restore_point_id))
+}
+
+/// Generate a unique restore point ID (timestamp-based, human-readable)
+fn generate_restore_point_id() -> String {
+    format_iso8601_timestamp(SystemTime::now())
 }
 
 /// Create a backup of a config file before modification
@@ -175,7 +195,6 @@ pub fn timestamp_from_string(ts_str: &str) -> ThemeResult<SystemTime> {
         })?;
 
     // Convert to Unix timestamp
-    // This is a simplified calculation; for production use, consider using chrono
     let days_since_epoch = days_from_unix_epoch(year, month, day)
         .ok_or_else(|| ThemeError::BackupError {
             reason: format!("Invalid date in timestamp: {}", ts_str),
@@ -223,8 +242,8 @@ fn days_from_unix_epoch(year: u64, month: u64, day: u64) -> Option<u64> {
 }
 
 /// List all restore points in the backup directory
-/// Groups backup files by timestamp with 2-second tolerance window
-/// Returns Vec<RestorePoint> sorted by timestamp descending (newest first)
+/// Scans ~/.cache/themectl/backups/ for restore_point_id directories with manifest.toml
+/// Returns Vec<RestorePoint> sorted by creation time descending (newest first)
 pub fn list_restore_points() -> ThemeResult<Vec<RestorePoint>> {
     let backup_dir = backup_directory()?;
 
@@ -232,81 +251,179 @@ pub fn list_restore_points() -> ThemeResult<Vec<RestorePoint>> {
         return Ok(Vec::new());
     }
 
-    // Read all backup files
     let entries = fs::read_dir(&backup_dir)
         .map_err(|e| ThemeError::BackupError {
             reason: format!("Failed to read backup directory: {}", e),
         })?;
 
-    // Map to group files by timestamp
-    let mut groups: BTreeMap<String, Vec<(String, String, PathBuf)>> = BTreeMap::new();
+    let mut restore_points = Vec::new();
 
     for entry in entries {
         let entry = entry
             .map_err(|e| ThemeError::BackupError {
-                reason: format!("Failed to read backup file: {}", e),
+                reason: format!("Failed to read backup directory entry: {}", e),
             })?;
 
         let path = entry.path();
-        let filename = entry.file_name();
-        let filename_str = filename.to_string_lossy();
 
-        // Only process .backup files
-        if !filename_str.ends_with(".backup") {
+        // Only process directories
+        if !path.is_dir() {
             continue;
         }
 
-        // Parse filename
-        match parse_backup_filename(&filename_str) {
-            Ok((tool, theme, timestamp)) => {
-                groups.entry(timestamp).or_insert_with(Vec::new)
-                    .push((tool, theme, path));
+        // Get the directory name as restore_point_id
+        let _restore_point_id = match path.file_name() {
+            Some(name) => name.to_string_lossy().to_string(),
+            None => continue,
+        };
+
+        // Check if manifest.toml exists
+        let manifest_path = path.join("manifest.toml");
+        if !manifest_path.exists() {
+            // Not a valid restore point directory (no manifest)
+            continue;
+        }
+
+        // Try to read and parse the manifest
+        match read_manifest(&manifest_path) {
+            Ok(restore_point) => {
+                // Validate that all entries' backup files exist
+                let all_exist = restore_point.entries.iter()
+                    .all(|entry| entry.backup_path.exists());
+
+                if all_exist && !restore_point.entries.is_empty() {
+                    restore_points.push(restore_point);
+                }
             }
             Err(_) => {
-                // Skip malformed filenames
+                // Skip invalid manifests
                 continue;
             }
         }
     }
 
-    // Convert groups to RestorePoints
-    let mut restore_points = Vec::new();
-
-    for (timestamp_str, files) in groups.iter().rev() {
-        // All files in this group should have the same theme (from same themectl set operation)
-        // Use the first file's theme as the group theme
-        if files.is_empty() {
-            continue;
-        }
-
-        let theme_name = files[0].1.clone();
-        let parsed_timestamp = timestamp_from_string(timestamp_str)?;
-
-        let tools: Vec<String> = files.iter()
-            .map(|(tool, _, _)| tool.clone())
-            .collect();
-
-        let backup_files: Vec<PathBuf> = files.iter()
-            .map(|(_, _, path)| path.clone())
-            .collect();
-
-        restore_points.push(RestorePoint {
-            id: timestamp_str.clone(),
-            theme_name,
-            timestamp: parsed_timestamp,
-            tools,
-            backup_files,
-        });
-    }
+    // Sort by created_at descending (newest first)
+    restore_points.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     Ok(restore_points)
 }
 
+/// Read and parse a manifest.toml file
+fn read_manifest(manifest_path: &Path) -> ThemeResult<RestorePoint> {
+    let content = fs::read_to_string(manifest_path)
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to read manifest.toml: {}", e),
+        })?;
+
+    let manifest: toml::Value = toml::from_str(&content)
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to parse manifest.toml: {}", e),
+        })?;
+
+    // Extract metadata section
+    let metadata = manifest.get("metadata")
+        .ok_or_else(|| ThemeError::BackupError {
+            reason: "manifest.toml missing [metadata] section".to_string(),
+        })?
+        .as_table()
+        .ok_or_else(|| ThemeError::BackupError {
+            reason: "[metadata] must be a table".to_string(),
+        })?;
+
+    let id = metadata.get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ThemeError::BackupError {
+            reason: "manifest.toml missing metadata.id".to_string(),
+        })?
+        .to_string();
+
+    let theme_name = metadata.get("theme_name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ThemeError::BackupError {
+            reason: "manifest.toml missing metadata.theme_name".to_string(),
+        })?
+        .to_string();
+
+    let created_at_str = metadata.get("created_at")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ThemeError::BackupError {
+            reason: "manifest.toml missing metadata.created_at".to_string(),
+        })?;
+
+    let created_at = timestamp_from_string(created_at_str)?;
+
+    // Extract entries array
+    let entries_array = manifest.get("entries")
+        .ok_or_else(|| ThemeError::BackupError {
+            reason: "manifest.toml missing [[entries]] array".to_string(),
+        })?
+        .as_array()
+        .ok_or_else(|| ThemeError::BackupError {
+            reason: "[[entries]] must be an array".to_string(),
+        })?;
+
+    let mut entries = Vec::new();
+
+    for entry_val in entries_array {
+        let entry_tbl = entry_val.as_table()
+            .ok_or_else(|| ThemeError::BackupError {
+                reason: "entries array element must be a table".to_string(),
+            })?;
+
+        let tool_key = entry_tbl.get("tool_key")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ThemeError::BackupError {
+                reason: "entry missing tool_key".to_string(),
+            })?
+            .to_string();
+
+        let display_tool = entry_tbl.get("display_tool")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ThemeError::BackupError {
+                reason: "entry missing display_tool".to_string(),
+            })?
+            .to_string();
+
+        let original_path_str = entry_tbl.get("original_path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ThemeError::BackupError {
+                reason: "entry missing original_path".to_string(),
+            })?;
+
+        let backup_path_str = entry_tbl.get("backup_path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ThemeError::BackupError {
+                reason: "entry missing backup_path".to_string(),
+            })?;
+
+        entries.push(RestoreEntry {
+            tool_key,
+            display_tool,
+            original_path: PathBuf::from(original_path_str),
+            backup_path: PathBuf::from(backup_path_str),
+        });
+    }
+
+    if entries.is_empty() {
+        return Err(ThemeError::BackupError {
+            reason: "manifest.toml has empty entries array".to_string(),
+        });
+    }
+
+    Ok(RestorePoint {
+        id,
+        theme_name,
+        created_at,
+        entries,
+    })
+}
+
 /// Validate a restore point before any restore operation
 /// Checks:
+/// - Restore point directory exists
+/// - manifest.toml exists and is valid
 /// - At least one backup file exists
-/// - All backup files are readable
-/// - All backup files are non-empty
+/// - All backup files are readable and non-empty
 /// - If delta file exists, delta-gitconfig must also exist 
 pub fn validate_restore_point(restore_point_id: &str) -> ThemeResult<()> {
     let restore_points = list_restore_points()?;
@@ -317,18 +434,20 @@ pub fn validate_restore_point(restore_point_id: &str) -> ThemeResult<()> {
             reason: format!("Restore point not found: {}", restore_point_id),
         })?;
 
-    // Check at least one backup file exists
-    if restore_point.backup_files.is_empty() {
+    // Check at least one entry exists
+    if restore_point.entries.is_empty() {
         return Err(ThemeError::BackupError {
-            reason: format!("No backup files found for restore point: {}", restore_point_id),
+            reason: format!("No entries in restore point: {}", restore_point_id),
         });
     }
 
     let mut has_delta = false;
     let mut has_delta_gitconfig = false;
 
-    // Check each backup file
-    for path in &restore_point.backup_files {
+    // Check each entry's backup file
+    for entry in &restore_point.entries {
+        let path = &entry.backup_path;
+
         // Check file exists and is readable
         if !path.exists() {
             return Err(ThemeError::BackupError {
@@ -350,13 +469,10 @@ pub fn validate_restore_point(restore_point_id: &str) -> ThemeResult<()> {
         }
 
         // Track delta files for validation
-        if let Some(filename) = path.file_name() {
-            let name = filename.to_string_lossy();
-            if name.starts_with("delta--") && !name.contains("delta-gitconfig") {
-                has_delta = true;
-            } else if name.starts_with("delta-gitconfig--") {
-                has_delta_gitconfig = true;
-            }
+        if entry.tool_key == "delta" {
+            has_delta = true;
+        } else if entry.tool_key == "delta-gitconfig" {
+            has_delta_gitconfig = true;
         }
     }
 
@@ -377,8 +493,6 @@ fn format_iso8601_timestamp(time: SystemTime) -> String {
     let duration = time.duration_since(UNIX_EPOCH)
         .unwrap_or_default();
 
-    // Simple implementation: use chrono-like formatting
-    // For ISO8601: YYYY-MM-DDTHH-MM-SSZ (colons replaced with dashes)
     let secs = duration.as_secs();
     let days_since_epoch = secs / 86400;
     let secs_today = secs % 86400;
@@ -397,7 +511,6 @@ fn format_iso8601_timestamp(time: SystemTime) -> String {
 }
 
 /// Calculate (year, month, day) from days since Unix epoch
-/// Unix epoch is 1970-01-01
 fn calculate_date(mut days: u64) -> (u64, u64, u64) {
     let mut year = 1970;
 
@@ -455,10 +568,8 @@ mod tests {
         let timestamp = format_iso8601_timestamp(SystemTime::UNIX_EPOCH);
         assert!(timestamp.starts_with("1970-"));
         assert!(timestamp.ends_with("Z"));
-        // Check no colons (replaced with dashes)
         assert!(!timestamp.contains(":"));
-        // Check expected format: YYYY-MM-DDTHH-MM-SSZ
-        assert_eq!(timestamp.len(), 20); // "1970-01-01T00-00-00Z"
+        assert_eq!(timestamp.len(), 20);
     }
 
     #[test]
@@ -471,7 +582,6 @@ mod tests {
 
     #[test]
     fn test_calculate_date_after_year() {
-        // 365 days after epoch is 1971-01-01
         let (year, month, day) = calculate_date(365);
         assert_eq!(year, 1971);
         assert_eq!(month, 1);
@@ -484,20 +594,6 @@ mod tests {
         assert!(is_leap_year(2004));
         assert!(!is_leap_year(1900));
         assert!(!is_leap_year(2001));
-    }
-
-    #[test]
-    fn test_backup_filename_format() {
-        // Just test the filename generation logic
-        let tool = "ghostty";
-        let theme = "Catppuccin Mocha";
-        let timestamp = "2026-04-08T12-34-56Z";
-
-        let safe_theme = theme.replace(' ', "-").replace(':', "-");
-        let filename = format!("{}--{}--{}.backup", tool, safe_theme, timestamp);
-
-        assert_eq!(filename, "ghostty--Catppuccin-Mocha--2026-04-08T12-34-56Z.backup");
-        assert!(!filename.contains(':'));
     }
 
     #[test]
@@ -548,8 +644,6 @@ mod tests {
 
     #[test]
     fn test_list_restore_points_empty_directory() {
-        // Create a temporary test (this would need a proper setup in real tests)
-        // For now, just verify the function exists and can be called
         let result = list_restore_points();
         assert!(result.is_ok());
     }
@@ -557,16 +651,39 @@ mod tests {
     #[test]
     fn test_validate_restore_point_nonexistent() {
         let result = validate_restore_point("2026-04-09T10-00-00Z");
-        // This might be ok if no backups exist, or might error
-        // The function should handle both cases gracefully
-        let _ = result;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_restore_entry_serialization() {
+        let entry = RestoreEntry {
+            tool_key: "ghostty".to_string(),
+            display_tool: "Ghostty".to_string(),
+            original_path: PathBuf::from("~/.config/ghostty/config"),
+            backup_path: PathBuf::from("~/.cache/themectl/backups/2026-04-09T10-00-00Z/ghostty.backup"),
+        };
+        let serialized = toml::to_string(&entry);
+        assert!(serialized.is_ok());
+    }
+
+    #[test]
+    fn test_restore_point_structure() {
+        let restore_point = RestorePoint {
+            id: "2026-04-09T10-00-00Z".to_string(),
+            theme_name: "Catppuccin Mocha".to_string(),
+            created_at: SystemTime::now(),
+            entries: vec![],
+        };
+        assert_eq!(restore_point.id, "2026-04-09T10-00-00Z");
+        assert_eq!(restore_point.theme_name, "Catppuccin Mocha");
+        assert!(restore_point.entries.is_empty());
     }
 }
 
 /// Get a specific restore point by ID
 pub fn get_restore_point(restore_point_id: &str) -> ThemeResult<RestorePoint> {
     let restore_points = list_restore_points()?;
-    
+
     restore_points.into_iter()
         .find(|rp| rp.id == restore_point_id)
         .ok_or_else(|| ThemeError::BackupError {
@@ -578,111 +695,91 @@ pub fn get_restore_point(restore_point_id: &str) -> ThemeResult<RestorePoint> {
 pub fn restore_restore_point(restore_point_id: &str) -> ThemeResult<crate::adapter::ApplyThemeResult> {
     // Get the restore point
     let restore_point = get_restore_point(restore_point_id)?;
-    
+
     // Validate it before restoring
     validate_restore_point(restore_point_id)?;
-    
+
     let mut result = crate::adapter::ApplyThemeResult::default();
-    
-    // Read each backup file and write it back to original path
-    for backup_path in &restore_point.backup_files {
+
+    // Restore each entry from its persisted original_path
+    for entry in &restore_point.entries {
         // Read backup content
-        let backup_content = fs::read_to_string(backup_path)
+        let backup_content = fs::read_to_string(&entry.backup_path)
             .map_err(|e| ThemeError::BackupError {
-                reason: format!("Failed to read backup file: {}", e),
+                reason: format!("Failed to read backup file {}: {}", entry.backup_path.display(), e),
             })?;
-        
-        // Determine original path - we need to restore from metadata
-        // For now, we'll use a heuristic: the backup filename contains the tool name
-        // and we can infer the original path from the tool adapter
-        let filename = backup_path.file_name()
-            .ok_or_else(|| ThemeError::BackupError {
-                reason: "Invalid backup file path".to_string(),
-            })?
-            .to_string_lossy();
-        
-        // Parse tool name from filename: {tool}--{theme}--{timestamp}.backup
-        let tool_name = filename.split("--").next()
-            .ok_or_else(|| ThemeError::BackupError {
-                reason: "Cannot parse tool name from backup filename".to_string(),
-            })?;
-        
-        // Write back to original path using atomic write
-        // We need to get the tool's config path - delegate to adapter
-        match restore_backup_for_tool(tool_name, &backup_content) {
+
+        // Write to persisted original_path using atomic write
+        match restore_entry(&entry.original_path, &backup_content) {
             Ok(_) => {
-                result.successful.push(tool_name.to_string());
+                result.successful.push(entry.display_tool.clone());
             }
             Err(e) => {
-                result.failed.push((tool_name.to_string(), e.to_string()));
+                result.failed.push((entry.display_tool.clone(), e.to_string()));
             }
         }
     }
-    
+
     Ok(result)
 }
 
-/// Helper to restore a backup file for a specific tool
-fn restore_backup_for_tool(tool_name: &str, content: &str) -> ThemeResult<()> {
-    use crate::adapter::ToolAdapter;
-    
-    let adapter: Box<dyn ToolAdapter> = match tool_name {
-        "ghostty" => Box::new(crate::adapter::GhosttyAdapter),
-        "starship" => Box::new(crate::adapter::StarshipAdapter),
-        "bat" => Box::new(crate::adapter::BatAdapter),
-        "delta" => Box::new(crate::adapter::DeltaAdapter),
-        "delta-gitconfig" => Box::new(crate::adapter::DeltaAdapter),
-        "lazygit" => Box::new(crate::adapter::LazygitAdapter),
-        _ => {
-            return Err(ThemeError::BackupError {
-                reason: format!("Unknown tool: {}", tool_name),
-            });
-        }
-    };
-    
-    let config_path = adapter.config_path()?;
-    
+/// Helper to restore a single entry to its persisted original_path
+fn restore_entry(original_path: &Path, content: &str) -> ThemeResult<()> {
     // Write content atomically
-    let mut file = AtomicWriteFile::open(&config_path)
+    let mut file = AtomicWriteFile::open(original_path)
         .map_err(|e| ThemeError::BackupError {
-            reason: format!("Failed to open config for writing: {}", e),
+            reason: format!("Failed to open config for writing {}: {}", original_path.display(), e),
         })?;
-    
+
     file.write_all(content.as_bytes())
         .map_err(|e| ThemeError::BackupError {
-            reason: format!("Failed to write restored content: {}", e),
+            reason: format!("Failed to write restored content to {}: {}", original_path.display(), e),
         })?;
-    
+
     file.commit()
         .map_err(|e| ThemeError::BackupError {
-            reason: format!("Failed to commit restored file: {}", e),
+            reason: format!("Failed to commit restored file {}: {}", original_path.display(), e),
         })
 }
 
-/// Delete a specific restore point by ID
+/// Delete a specific restore point by ID (removes entire restore_point_id directory)
 pub fn delete_restore_point(restore_point_id: &str) -> ThemeResult<usize> {
-    let restore_point = get_restore_point(restore_point_id)?;
-    let mut deleted_count = 0;
-    
-    for backup_path in &restore_point.backup_files {
-        fs::remove_file(backup_path)
-            .map_err(|e| ThemeError::BackupError {
-                reason: format!("Failed to delete backup file: {}", e),
-            })?;
-        deleted_count += 1;
+    let restore_point_dir = restore_point_directory(restore_point_id)?;
+
+    if !restore_point_dir.exists() {
+        return Err(ThemeError::BackupError {
+            reason: format!("Restore point directory not found: {}", restore_point_id),
+        });
     }
-    
-    Ok(deleted_count)
+
+    // Count files before deletion
+    let entries = fs::read_dir(&restore_point_dir)
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to read restore point directory: {}", e),
+        })?;
+
+    let file_count: usize = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .count();
+
+    // Remove entire directory
+    fs::remove_dir_all(&restore_point_dir)
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to delete restore point {}: {}", restore_point_id, e),
+        })?;
+
+    Ok(file_count)
 }
 
-/// Delete all restore points
+/// Delete all restore points (removes all restore_point_id directories)
 pub fn clear_all_restore_points() -> ThemeResult<usize> {
     let restore_points = list_restore_points()?;
     let mut total_deleted = 0;
-    
+
     for restore_point in restore_points {
         total_deleted += delete_restore_point(&restore_point.id)?;
     }
-    
+
     Ok(total_deleted)
 }
