@@ -1,5 +1,5 @@
 use crate::adapter::ToolAdapter;
-use crate::config::backup::create_backup;
+use crate::config::backup::{create_backup, create_backup_with_session, BackupSession};
 use crate::error::{ThemeError, ThemeResult};
 use crate::theme::Theme;
 use atomic_write_file::AtomicWriteFile;
@@ -72,7 +72,7 @@ impl ToolAdapter for GhosttyAdapter {
         Ok(path.exists() && path.is_file())
     }
 
-    fn apply_theme(&self, theme: &Theme, _session: Option<&crate::config::backup::BackupSession>) -> ThemeResult<()> {
+    fn apply_theme(&self, theme: &Theme, session: Option<&BackupSession>) -> ThemeResult<()> {
         // Get canonical path (resolve symlinks)
         let config_path = self.config_path()?;
         let canonical_path =
@@ -81,7 +81,13 @@ impl ToolAdapter for GhosttyAdapter {
             })?;
 
         // Create backup before modification (SAFE-04)
-        let _backup_info = create_backup("ghostty", &theme.name, &canonical_path)?;
+        if let Some(sess) = session {
+            // Manifest-backed backup with persisted metadata
+            let _restore_entry = create_backup_with_session("ghostty", "Ghostty", sess, &canonical_path)?;
+        } else {
+            // Legacy backup without session
+            let _backup_info = create_backup("ghostty", &theme.name, &canonical_path)?;
+        }
 
         // Read current config
         let content = fs::read_to_string(&canonical_path).map_err(|e| ThemeError::Io(e))?;

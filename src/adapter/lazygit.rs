@@ -1,5 +1,5 @@
 use crate::adapter::ToolAdapter;
-use crate::config::backup::create_backup;
+use crate::config::backup::{create_backup, create_backup_with_session, BackupSession};
 use crate::error::{ThemeError, ThemeResult};
 use crate::theme::Theme;
 use atomic_write_file::AtomicWriteFile;
@@ -262,7 +262,7 @@ impl ToolAdapter for LazygitAdapter {
         Ok(path.exists() && path.is_file())
     }
 
-    fn apply_theme(&self, theme: &Theme, _session: Option<&crate::config::backup::BackupSession>) -> ThemeResult<()> {
+    fn apply_theme(&self, theme: &Theme, session: Option<&BackupSession>) -> ThemeResult<()> {
         let config_path = self.config_path()?;
 
         Self::ensure_config_dir(&config_path)?;
@@ -276,7 +276,13 @@ impl ToolAdapter for LazygitAdapter {
                 path: config_path.display().to_string(),
             })?;
 
-        let _backup_info = create_backup("lazygit", &theme.name, &canonical_path)?;
+        if let Some(sess) = session {
+            // Manifest-backed backup with persisted metadata
+            let _restore_entry = create_backup_with_session("lazygit", "lazygit", sess, &canonical_path)?;
+        } else {
+            // Legacy backup without session
+            let _backup_info = create_backup("lazygit", &theme.name, &canonical_path)?;
+        }
 
         let theme_id = Self::get_lazygit_theme_id(theme)?;
         let bat_theme = Self::get_tool_override(theme, "bat")?;

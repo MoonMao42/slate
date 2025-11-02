@@ -102,6 +102,57 @@ pub fn begin_restore_point(theme_name: &str) -> ThemeResult<BackupSession> {
 }
 
 
+/// Create a backup of a config file within a restore session (manifest-backed).
+/// Returns RestoreEntry with persisted original_path and backup_path.
+/// This is the session-aware variant that should be used when a BackupSession exists.
+/// Parameters:
+/// - tool_key: Internal identifier for the backup (e.g., "ghostty", "delta", "delta-gitconfig")
+/// - display_tool: User-facing tool name (e.g., "Ghostty", "Delta", "Delta (.gitconfig)")
+/// - session: The BackupSession that groups this backup with others
+/// - config_path: Path to the config file being backed up
+pub fn create_backup_with_session(
+    tool_key: &str,
+    display_tool: &str,
+    session: &BackupSession,
+    config_path: &Path,
+) -> ThemeResult<RestoreEntry> {
+    // Read original config file
+    let content = fs::read_to_string(config_path)
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to read config: {}", e),
+        })?;
+    
+    // Generate backup filename in the restore point directory
+    // Format: {tool_key}.backup (simple, no timestamp needed)
+    let backup_filename = format!("{}.backup", tool_key);
+    let backup_path = session.restore_point_dir.join(&backup_filename);
+    
+    // Write backup file atomically
+    let mut file = AtomicWriteFile::open(&backup_path)
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to create backup file: {}", e),
+        })?;
+    
+    file.write_all(content.as_bytes())
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to write backup: {}", e),
+        })?;
+    
+    file.commit()
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to commit backup: {}", e),
+        })?;
+    
+    Ok(RestoreEntry {
+        tool_key: tool_key.to_string(),
+        display_tool: display_tool.to_string(),
+        original_path: config_path.to_path_buf(),
+        backup_path,
+    })
+}
+
+
+
 /// Create a backup of a config file before modification
 /// Returns BackupInfo with both paths and timestamp
 pub fn create_backup(

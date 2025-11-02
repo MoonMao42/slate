@@ -1,5 +1,5 @@
 use crate::adapter::ToolAdapter;
-use crate::config::backup::create_backup;
+use crate::config::backup::{create_backup, create_backup_with_session, BackupSession};
 use crate::error::{ThemeError, ThemeResult};
 use crate::theme::Theme;
 use atomic_write_file::AtomicWriteFile;
@@ -138,6 +138,7 @@ impl DeltaAdapter {
         gitconfig_path: &PathBuf,
         delta_config_path: &Path,
         theme_name: &str,
+        session: Option<&BackupSession>,
     ) -> ThemeResult<()> {
         // Ensure parent directory exists
         if let Some(parent) = gitconfig_path.parent() {
@@ -149,7 +150,13 @@ impl DeltaAdapter {
         let gitconfig_write_path = Self::resolve_existing_path(gitconfig_path)?;
 
         if gitconfig_write_path.exists() {
-            let _backup_info = create_backup("delta-gitconfig", theme_name, &gitconfig_write_path)?;
+            if let Some(sess) = session {
+                // Manifest-backed backup with persisted metadata
+                let _restore_entry = create_backup_with_session("delta-gitconfig", "Delta (.gitconfig)", sess, &gitconfig_write_path)?;
+            } else {
+                // Legacy backup without session
+                let _backup_info = create_backup("delta-gitconfig", theme_name, &gitconfig_write_path)?;
+            }
         }
 
         // Read current gitconfig if it exists
@@ -213,7 +220,7 @@ impl ToolAdapter for DeltaAdapter {
         Ok(path.exists() && path.is_file())
     }
 
-    fn apply_theme(&self, theme: &Theme, _session: Option<&crate::config::backup::BackupSession>) -> ThemeResult<()> {
+    fn apply_theme(&self, theme: &Theme, session: Option<&BackupSession>) -> ThemeResult<()> {
         let delta_config_path = self.config_path()?;
 
         // Ensure the delta config directory exists
@@ -231,7 +238,13 @@ impl ToolAdapter for DeltaAdapter {
             })?;
 
         // Create backup before modification (SAFE-04)
-        let _backup_info = create_backup("delta", &theme.name, &canonical_path)?;
+        if let Some(sess) = session {
+            // Manifest-backed backup with persisted metadata
+            let _restore_entry = create_backup_with_session("delta", "Delta", sess, &canonical_path)?;
+        } else {
+            // Legacy backup without session
+            let _backup_info = create_backup("delta", &theme.name, &canonical_path)?;
+        }
 
         // Read current delta config
         let content = fs::read_to_string(&canonical_path).map_err(|e| ThemeError::Io(e))?;
@@ -299,7 +312,7 @@ impl ToolAdapter for DeltaAdapter {
 
         // Now update gitconfig with managed include block
         let gitconfig_path = Self::gitconfig_path()?;
-        Self::update_gitconfig_with_include(&gitconfig_path, &delta_config_path, &theme.name)?;
+        Self::update_gitconfig_with_include(&gitconfig_path, &delta_config_path, &theme.name, session)?;
 
         Ok(())
     }
