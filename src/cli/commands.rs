@@ -1,4 +1,5 @@
 use crate::adapter::{BatAdapter, DeltaAdapter, GhosttyAdapter, LazygitAdapter, StarshipAdapter};
+use crate::config::backup;
 use crate::{
     available_themes, get_theme, normalize_theme_name, parse_theme_input, ApplyThemeResult,
     ThemeError, ThemeResult, ToolRegistry,
@@ -76,12 +77,23 @@ pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<Apply
         }
     }
 
-    // Apply theme to all tools
-    let result = registry.apply_theme_to_all(&theme, None)?;
-
-    // 0 tools detected = error before printing any success output
-    if result.count_successful() == 0 && result.count_failed() == 0 {
+    // Check if any tools are installed before creating restore point
+    let detected_tools = registry.detect_installed()?;
+    if detected_tools.is_empty() {
         return Err(ThemeError::NoToolsDetected);
+    }
+
+    // Begin restore point session (creates directory structure)
+    let session = backup::begin_restore_point(&final_theme_name)?;
+
+    // Apply theme to all tools with the backup session
+    let result = registry.apply_theme_to_all(&theme, Some(&session))?;
+
+    // If all adapters failed to create backups, remove the empty restore point
+    if result.count_successful() == 0 && result.count_failed() > 0 {
+        // All tools failed - clean up the empty restore point
+        let _ = std::fs::remove_dir_all(&session.restore_point_dir);
+        return Err(ThemeError::PartialFailure(result.count_failed()));
     }
 
     // Print results only after confirming at least one tool was processed
@@ -97,14 +109,14 @@ pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<Apply
     }
 
     println!();
-    println!(
-        "{}",
-        crate::cli::format_summary(
-            result.count_successful(),
-            result.count_successful() + result.count_failed(),
-            result.count_failed()
-        )
-    );
+    
+    // Show restore point info
+    println!("Created restore point: {}", session.restore_point_id);
+    println!("{}", crate::cli::format_summary(
+        result.count_successful(),
+        result.count_successful() + result.count_failed(),
+        result.count_failed()
+    ));
 
     if result.is_success() {
         Ok(result)
