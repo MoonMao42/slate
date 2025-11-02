@@ -262,7 +262,7 @@ impl ToolAdapter for LazygitAdapter {
         Ok(path.exists() && path.is_file())
     }
 
-    fn apply_theme(&self, theme: &Theme) -> ThemeResult<()> {
+    fn apply_theme(&self, theme: &Theme, _session: Option<&crate::config::backup::BackupSession>) -> ThemeResult<()> {
         let config_path = self.config_path()?;
 
         Self::ensure_config_dir(&config_path)?;

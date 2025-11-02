@@ -77,7 +77,7 @@ pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<Apply
     }
 
     // Apply theme to all tools
-    let result = registry.apply_theme_to_all(&theme)?;
+    let result = registry.apply_theme_to_all(&theme, None)?;
 
     // 0 tools detected = error before printing any success output
     if result.count_successful() == 0 && result.count_failed() == 0 {

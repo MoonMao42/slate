@@ -72,7 +72,7 @@ impl ToolAdapter for GhosttyAdapter {
         Ok(path.exists() && path.is_file())
     }
 
-    fn apply_theme(&self, theme: &Theme) -> ThemeResult<()> {
+    fn apply_theme(&self, theme: &Theme, _session: Option<&crate::config::backup::BackupSession>) -> ThemeResult<()> {
         // Get canonical path (resolve symlinks)
         let config_path = self.config_path()?;
         let canonical_path =

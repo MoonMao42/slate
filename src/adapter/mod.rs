@@ -1,5 +1,6 @@
 use crate::error::{ThemeError, ThemeResult};
 use crate::theme::Theme;
+use crate::config::backup::BackupSession;
 use std::path::PathBuf;
 
 /// Resolve XDG config home from env vars (pure function, testable)
@@ -42,7 +43,10 @@ pub trait ToolAdapter: Send + Sync {
 
     /// Apply a theme to the tool's configuration.
     /// Must create a backup before modification and use atomic writes.
-    fn apply_theme(&self, theme: &Theme) -> ThemeResult<()>;
+    /// session: Optional backup session for persisting metadata.
+    /// If provided, the adapter must use session-aware create_backup() to persist original_path.
+    /// If None, the adapter can create backups without session grouping (legacy behavior).
+    fn apply_theme(&self, theme: &Theme, session: Option<&BackupSession>) -> ThemeResult<()>;
 
     /// Get the current theme name from the tool's config (optional, for phase 2 status command).
     /// Returns None if theme cannot be determined.
@@ -155,8 +159,9 @@ impl ToolRegistry {
     /// Returns per-tool status (successful + failed).
     /// Implements SAFE-07: graceful partial failure.
     /// If one tool fails, others still apply.
-    pub fn apply_theme_to_all(&self, theme: &Theme) -> ThemeResult<ApplyThemeResult> {
-        apply_all_tools_with_fallback(&self.adapters, theme)
+    /// session: Optional backup session to pass to adapters for metadata persistence.
+    pub fn apply_theme_to_all(&self, theme: &Theme, session: Option<&BackupSession>) -> ThemeResult<ApplyThemeResult> {
+        apply_all_tools_with_fallback(&self.adapters, theme, session)
     }
 }
 
@@ -172,12 +177,13 @@ impl Default for ToolRegistry {
 fn apply_all_tools_with_fallback(
     adapters: &[Box<dyn ToolAdapter>],
     theme: &Theme,
+    session: Option<&BackupSession>,
 ) -> ThemeResult<ApplyThemeResult> {
     let mut result = ApplyThemeResult::new();
 
     for adapter in adapters {
         match adapter.is_installed() {
-            Ok(true) => match adapter.apply_theme(theme) {
+            Ok(true) => match adapter.apply_theme(theme, session) {
                 Ok(()) => {
                     result.add_success(adapter.tool_name().to_string());
                 }
@@ -239,7 +245,7 @@ mod tests {
             Ok(self.installed)
         }
 
-        fn apply_theme(&self, _theme: &Theme) -> ThemeResult<()> {
+        fn apply_theme(&self, _theme: &Theme, _session: Option<&BackupSession>) -> ThemeResult<()> {
             if self.should_fail {
                 Err(ThemeError::WriteError {
                     path: "test".to_string(),
@@ -288,7 +294,7 @@ mod tests {
         registry.register(MockAdapter::new("bat", true, false));
 
         let theme = get_theme("catppuccin-mocha").unwrap();
-        let result = registry.apply_theme_to_all(&theme).unwrap();
+        let result = registry.apply_theme_to_all(&theme, None).unwrap();
 
         // Should have 2 successes (ghostty, bat) and 1 failure (starship)
         assert_eq!(result.count_successful(), 2);
@@ -323,7 +329,7 @@ mod tests {
     fn test_empty_registry() {
         let registry = ToolRegistry::new();
         let theme = get_theme("dracula").unwrap();
-        let result = registry.apply_theme_to_all(&theme).unwrap();
+        let result = registry.apply_theme_to_all(&theme, None).unwrap();
 
         assert_eq!(result.count_successful(), 0);
         assert_eq!(result.count_failed(), 0);

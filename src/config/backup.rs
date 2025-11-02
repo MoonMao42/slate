@@ -36,6 +36,16 @@ pub struct RestorePoint {
     pub entries: Vec<RestoreEntry>, // All backed-up files for this restore point
 }
 
+/// Explicit backup session created at the start of a set operation.
+/// Groups all backups from a single set command under one restore_point_id.
+/// Threaded through adapter trait to ensure consistent metadata persistence.
+#[derive(Debug, Clone)]
+pub struct BackupSession {
+    pub restore_point_id: String,   // e.g., "2026-04-09T10-00-00Z" (unique restore point ID)
+    pub theme_name: String,         // e.g., "Catppuccin Mocha" (theme being applied)
+    pub restore_point_dir: PathBuf, // Directory where this restore point's backups live
+}
+
 /// Get the backup directory path (~/.cache/themectl/backups/)
 pub fn backup_directory() -> ThemeResult<PathBuf> {
     let cache_dir = if let Ok(cache) = std::env::var("XDG_CACHE_HOME") {
@@ -69,6 +79,28 @@ fn restore_point_directory(restore_point_id: &str) -> ThemeResult<PathBuf> {
 fn generate_restore_point_id() -> String {
     format_iso8601_timestamp(SystemTime::now())
 }
+
+
+/// Begin a new restore point session for a set operation.
+/// Creates the restore_point_id directory and returns a BackupSession
+/// that groups all backups from this set operation.
+pub fn begin_restore_point(theme_name: &str) -> ThemeResult<BackupSession> {
+    let restore_point_id = generate_restore_point_id();
+    let restore_point_dir = restore_point_directory(&restore_point_id)?;
+    
+    // Create the restore point directory
+    fs::create_dir_all(&restore_point_dir)
+        .map_err(|e| ThemeError::BackupError {
+            reason: format!("Failed to create restore point directory: {}", e),
+        })?;
+    
+    Ok(BackupSession {
+        restore_point_id,
+        theme_name: theme_name.to_string(),
+        restore_point_dir,
+    })
+}
+
 
 /// Create a backup of a config file before modification
 /// Returns BackupInfo with both paths and timestamp

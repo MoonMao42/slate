@@ -213,7 +213,7 @@ impl ToolAdapter for DeltaAdapter {
         Ok(path.exists() && path.is_file())
     }
 
-    fn apply_theme(&self, theme: &Theme) -> ThemeResult<()> {
+    fn apply_theme(&self, theme: &Theme, _session: Option<&crate::config::backup::BackupSession>) -> ThemeResult<()> {
         let delta_config_path = self.config_path()?;
 
         // Ensure the delta config directory exists
