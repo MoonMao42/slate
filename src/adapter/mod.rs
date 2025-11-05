@@ -1,6 +1,6 @@
+use crate::config::backup::BackupSession;
 use crate::error::{ThemeError, ThemeResult};
 use crate::theme::Theme;
-use crate::config::backup::BackupSession;
 use std::path::PathBuf;
 
 /// Resolve XDG config home from env vars (pure function, testable)
@@ -160,7 +160,11 @@ impl ToolRegistry {
     /// Implements SAFE-07: graceful partial failure.
     /// If one tool fails, others still apply.
     /// session: Optional backup session to pass to adapters for metadata persistence.
-    pub fn apply_theme_to_all(&self, theme: &Theme, session: Option<&BackupSession>) -> ThemeResult<ApplyThemeResult> {
+    pub fn apply_theme_to_all(
+        &self,
+        theme: &Theme,
+        session: Option<&BackupSession>,
+    ) -> ThemeResult<ApplyThemeResult> {
         apply_all_tools_with_fallback(&self.adapters, theme, session)
     }
 }

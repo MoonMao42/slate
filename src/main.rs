@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use themectl::{
-    cli::handle_list_command, cli::handle_set_command, cli::handle_status_command,
-    cli::handle_restore_command, ThemeResult,
+    cli::handle_list_command, cli::handle_restore_command, cli::handle_set_command,
+    cli::handle_status_command, ThemeResult,
 };
 
 /// A zero-configuration terminal theme switcher
@@ -21,12 +21,13 @@ enum Commands {
     /// List available themes
     #[command(about = "List available themes")]
     List,
-    /// Apply a theme to all detected tools
+    /// Apply a theme to all detected tools (interactive picker if no theme given)
     #[command(about = "Apply a theme")]
     Set {
-        /// Name of the theme to apply (e.g., catppuccin-mocha, tokyo-night-dark)
+        /// Name of the theme to apply (e.g., catppuccin-mocha, tokyo-night-dark).
+        /// Omit for interactive selection.
         #[arg(value_name = "THEME")]
-        theme: String,
+        theme: Option<String>,
 
         /// Show detection and modification details
         #[arg(short, long)]
@@ -77,7 +78,7 @@ fn main() -> ThemeResult<()> {
             }
         },
         Commands::Set { theme, verbose } => {
-            match handle_set_command(&theme, verbose) {
+            match handle_set_command(theme.as_deref().unwrap_or(""), verbose) {
                 Ok(_) => {
                     std::process::exit(0);
                 }

@@ -152,10 +152,16 @@ impl DeltaAdapter {
         if gitconfig_write_path.exists() {
             if let Some(sess) = session {
                 // Manifest-backed backup with persisted metadata
-                let _restore_entry = create_backup_with_session("delta-gitconfig", "Delta (.gitconfig)", sess, &gitconfig_write_path)?;
+                let _restore_entry = create_backup_with_session(
+                    "delta-gitconfig",
+                    "Delta",
+                    sess,
+                    &gitconfig_write_path,
+                )?;
             } else {
                 // Legacy backup without session
-                let _backup_info = create_backup("delta-gitconfig", theme_name, &gitconfig_write_path)?;
+                let _backup_info =
+                    create_backup("delta-gitconfig", theme_name, &gitconfig_write_path)?;
             }
         }
 
@@ -240,7 +246,8 @@ impl ToolAdapter for DeltaAdapter {
         // Create backup before modification (SAFE-04)
         if let Some(sess) = session {
             // Manifest-backed backup with persisted metadata
-            let _restore_entry = create_backup_with_session("delta", "Delta", sess, &canonical_path)?;
+            let _restore_entry =
+                create_backup_with_session("delta", "Delta", sess, &canonical_path)?;
         } else {
             // Legacy backup without session
             let _backup_info = create_backup("delta", &theme.name, &canonical_path)?;
@@ -312,7 +319,12 @@ impl ToolAdapter for DeltaAdapter {
 
         // Now update gitconfig with managed include block
         let gitconfig_path = Self::gitconfig_path()?;
-        Self::update_gitconfig_with_include(&gitconfig_path, &delta_config_path, &theme.name, session)?;
+        Self::update_gitconfig_with_include(
+            &gitconfig_path,
+            &delta_config_path,
+            &theme.name,
+            session,
+        )?;
 
         Ok(())
     }

@@ -261,7 +261,7 @@ pub fn format_restore_point_list(restore_points: &[crate::config::backup::Restor
     let lines: Vec<String> = restore_points
         .iter()
         .map(|rp| {
-            let tools_str = rp.entries.iter().map(|e| e.display_tool.clone()).collect::<Vec<_>>().join(",");
+            let tools_str = crate::config::backup::display_tools(&rp.entries).join(", ");
             format!("{}  {}  {}", rp.id, rp.theme_name, tools_str)
         })
         .collect();

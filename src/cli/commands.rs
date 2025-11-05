@@ -6,29 +6,35 @@ use crate::{
 };
 
 /// Handle the `set` subcommand: apply theme to all detected tools
+/// If theme_input is empty, launch interactive family → variant picker.
 pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<ApplyThemeResult> {
-    // Normalize input to kebab-case
-    let normalized = normalize_theme_name(theme_input);
-
-    // Try to get the theme directly
-    let final_theme_name = if let Some(_theme) = get_theme(&normalized) {
-        normalized
+    // No argument → interactive picker (family → variant)
+    let final_theme_name = if theme_input.is_empty() {
+        let family = crate::cli::pick_theme_family()?;
+        crate::cli::pick_theme_variant(&family)?
     } else {
-        // Try parsing to see if it's a family name
-        if let Some((family, variant_opt)) = parse_theme_input(&normalized) {
-            if variant_opt.is_none() {
-                // Incomplete family name - show interactive selection
-                let selected = crate::cli::pick_theme_variant(&family.to_string())?;
-                selected
+        // Normalize input to kebab-case
+        let normalized = normalize_theme_name(theme_input);
+
+        // Try to get the theme directly
+        if let Some(_theme) = get_theme(&normalized) {
+            normalized
+        } else {
+            // Try parsing to see if it's a family name
+            if let Some((family, variant_opt)) = parse_theme_input(&normalized) {
+                if variant_opt.is_none() {
+                    // Incomplete family name - show interactive selection
+                    crate::cli::pick_theme_variant(&family.to_string())?
+                } else {
+                    // Has variant but theme not found - error
+                    let available = available_themes().join(", ");
+                    return Err(ThemeError::ThemeNotFound(normalized, available));
+                }
             } else {
-                // Has variant but theme not found - error
+                // Not a valid family - error
                 let available = available_themes().join(", ");
                 return Err(ThemeError::ThemeNotFound(normalized, available));
             }
-        } else {
-            // Not a valid family - error
-            let available = available_themes().join(", ");
-            return Err(ThemeError::ThemeNotFound(normalized, available));
         }
     };
 
@@ -83,8 +89,16 @@ pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<Apply
         return Err(ThemeError::NoToolsDetected);
     }
 
+    // Detect current theme (what we're backing up), not the new theme being set
+    let backup_theme_name = registry
+        .adapters()
+        .iter()
+        .filter_map(|a| a.get_current_theme().ok().flatten())
+        .next()
+        .unwrap_or_else(|| "unknown".to_string());
+
     // Begin restore point session (creates directory structure)
-    let session = backup::begin_restore_point(&final_theme_name)?;
+    let session = backup::begin_restore_point(&backup_theme_name)?;
 
     // Apply theme to all tools with the backup session
     let result = registry.apply_theme_to_all(&theme, Some(&session))?;
@@ -109,14 +123,17 @@ pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<Apply
     }
 
     println!();
-    
+
     // Show restore point info
     println!("Created restore point: {}", session.restore_point_id);
-    println!("{}", crate::cli::format_summary(
-        result.count_successful(),
-        result.count_successful() + result.count_failed(),
-        result.count_failed()
-    ));
+    println!(
+        "{}",
+        crate::cli::format_summary(
+            result.count_successful(),
+            result.count_successful() + result.count_failed(),
+            result.count_failed()
+        )
+    );
 
     if result.is_success() {
         Ok(result)
@@ -194,20 +211,9 @@ pub fn handle_status_command(verbose: bool) -> ThemeResult<()> {
     Ok(())
 }
 
-/// Handle the `list` subcommand: show available themes
+/// Handle the `list` subcommand: show available themes (read-only)
 pub fn handle_list_command() -> ThemeResult<()> {
-    use atty::Stream;
-
-    // Check if stdout is a TTY
-    if !atty::is(Stream::Stdout) {
-        // Plain text mode: grouped by family with descriptions
-        print_plain_theme_list()?;
-    } else {
-        // Interactive mode: family -> variant -> confirm -> apply
-        run_interactive_list()?;
-    }
-
-    Ok(())
+    print_plain_theme_list()
 }
 
 /// Print themes grouped by family in plain text format (for piping)
@@ -239,36 +245,6 @@ fn print_plain_theme_list() -> ThemeResult<()> {
             }
         }
         println!();
-    }
-
-    Ok(())
-}
-
-/// Run interactive theme picker: family -> variant -> confirm -> apply
-fn run_interactive_list() -> ThemeResult<()> {
-    use dialoguer::Confirm;
-
-    // Pick family
-    let family = crate::cli::pick_theme_family()?;
-
-    // Pick variant
-    let theme = crate::cli::pick_theme_variant(&family)?;
-
-    // Confirm before applying
-    let description = crate::cli::get_theme_description(&theme);
-    let prompt = format!("Apply theme: {} ({})?\nConfirm", theme, description);
-
-    let confirmed = Confirm::new()
-        .with_prompt(&prompt)
-        .default(true)
-        .interact()
-        .map_err(|_| ThemeError::Other("Theme confirmation cancelled".to_string()))?;
-
-    if confirmed {
-        // Apply the theme using handle_set_command
-        handle_set_command(&theme, false)?;
-    } else {
-        println!("Theme application cancelled");
     }
 
     Ok(())
@@ -308,7 +284,7 @@ pub fn handle_restore_command(
     // Handle --list mode
     if list {
         let restore_points = crate::config::backup::list_restore_points()?;
-        
+
         if restore_points.is_empty() {
             println!("No restore points available");
             return Ok(());
@@ -322,14 +298,17 @@ pub fn handle_restore_command(
     if let Some(id) = cleanup {
         crate::config::backup::validate_restore_point(&id)?;
         let deleted_count = crate::config::backup::delete_restore_point(&id)?;
-        println!("Deleted {} backup file(s) from restore point: {}", deleted_count, id);
+        println!(
+            "Deleted {} backup file(s) from restore point: {}",
+            deleted_count, id
+        );
         return Ok(());
     }
 
     // Handle --clear-all mode
     if clear_all {
         let deleted_count = crate::config::backup::clear_all_restore_points()?;
-        println!("Deleted all {} restore point(s)", deleted_count);
+        println!("Deleted {} backup item(s)", deleted_count);
         return Ok(());
     }
 
@@ -338,7 +317,10 @@ pub fn handle_restore_command(
         crate::config::backup::validate_restore_point(&id)?;
         let restore_point = crate::config::backup::get_restore_point(&id)?;
         let result = crate::config::backup::restore_restore_point(&id)?;
-        println!("{}", crate::cli::format_restore_result(&restore_point.theme_name, &result));
+        println!(
+            "{}",
+            crate::cli::format_restore_result(&restore_point.theme_name, &result)
+        );
         return Ok(());
     }
 
@@ -352,15 +334,18 @@ pub fn handle_restore_command(
 
     // TTY mode - interactive selection
     let restore_points = crate::config::backup::list_restore_points()?;
-    
+
     if restore_points.is_empty() {
         return Err(ThemeError::Other(
-            "No restore points available to restore from".to_string()
+            "No restore points available to restore from".to_string(),
         ));
     }
 
     let selected = crate::cli::pick_restore_point(&restore_points)?;
     let result = crate::config::backup::restore_restore_point(&selected.id)?;
-    println!("{}", crate::cli::format_restore_result(&selected.theme_name, &result));
+    println!(
+        "{}",
+        crate::cli::format_restore_result(&selected.theme_name, &result)
+    );
     Ok(())
 }

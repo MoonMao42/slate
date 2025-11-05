@@ -163,11 +163,7 @@ pub fn pick_restore_point(
     let items: Vec<String> = restore_points
         .iter()
         .map(|rp| {
-            let tools_str: String = rp.entries
-                .iter()
-                .map(|e| e.display_tool.clone())
-                .collect::<Vec<_>>()
-                .join(", ");
+            let tools_str = crate::config::backup::display_tools(&rp.entries).join(", ");
             format!("{}  {}  [{}]", rp.id, rp.theme_name, tools_str)
         })
         .collect();
@@ -177,9 +173,7 @@ pub fn pick_restore_point(
         .items(&items)
         .default(0)
         .interact()
-        .map_err(|_| {
-            ThemeError::Other("Restore cancelled".to_string())
-        })?;
+        .map_err(|_| ThemeError::Other("Restore cancelled".to_string()))?;
 
     Ok(restore_points[selection].clone())
 }

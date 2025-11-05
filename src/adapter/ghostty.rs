@@ -17,14 +17,17 @@ impl GhosttyAdapter {
     }
 
     /// Build candidate config paths in priority order.
-    /// Prefer the current upstream default first, then known legacy paths.
+    /// Ghostty resolves: XDG config.ghostty > XDG config > App Support (macOS legacy).
     fn candidate_paths(xdg_dir: &Path, home: Option<&str>) -> Vec<PathBuf> {
         let mut paths = Vec::new();
 
-        // Upstream-documented default path.
+        // Upstream-documented default path (Ghostty 1.1+).
         paths.push(Self::default_config_path(xdg_dir));
 
-        // Legacy macOS App Support location, if present on older setups.
+        // XDG config (without .ghostty extension) — common user setup.
+        paths.push(xdg_dir.join("config"));
+
+        // Legacy macOS App Support location, lowest priority.
         if cfg!(target_os = "macos") {
             if let Some(h) = home {
                 let appsupport =
@@ -34,8 +37,6 @@ impl GhosttyAdapter {
             }
         }
 
-        // Legacy XDG location used by earlier revisions of this project.
-        paths.push(xdg_dir.join("config"));
         paths
     }
 
@@ -83,7 +84,8 @@ impl ToolAdapter for GhosttyAdapter {
         // Create backup before modification (SAFE-04)
         if let Some(sess) = session {
             // Manifest-backed backup with persisted metadata
-            let _restore_entry = create_backup_with_session("ghostty", "Ghostty", sess, &canonical_path)?;
+            let _restore_entry =
+                create_backup_with_session("ghostty", "Ghostty", sess, &canonical_path)?;
         } else {
             // Legacy backup without session
             let _backup_info = create_backup("ghostty", &theme.name, &canonical_path)?;
@@ -154,7 +156,7 @@ impl ToolAdapter for GhosttyAdapter {
         let content = fs::read_to_string(&path).map_err(|e| ThemeError::Io(e))?;
 
         let theme_pattern = Regex::new(
-            r#"^\s*theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#,
+            r#"(?m)^\s*theme\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^"'#\s\n]+))"#,
         )
         .map_err(|e| ThemeError::Other(format!("Invalid built-in Ghostty read regex: {}", e)))?;
 
@@ -187,11 +189,10 @@ mod tests {
         let xdg_dir = PathBuf::from("/home/user/.config/ghostty");
         let candidates = GhosttyAdapter::candidate_paths(&xdg_dir, Some("/home/user"));
 
-        assert!(candidates.contains(&xdg_dir.join("config.ghostty")));
-        assert!(candidates.contains(&xdg_dir.join("config")));
         assert_eq!(candidates[0], xdg_dir.join("config.ghostty"));
+        assert_eq!(candidates[1], xdg_dir.join("config"));
 
-        // macOS legacy paths are included on macOS, but official default stays first.
+        // macOS legacy paths come after XDG paths.
         if cfg!(target_os = "macos") {
             let appsupport =
                 PathBuf::from("/home/user/Library/Application Support/com.mitchellh.ghostty");
