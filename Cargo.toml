@@ -1,5 +1,5 @@
 [package]
-name = "themectl"
+name = "slate-cli"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,7 +7,7 @@ edition = "2021"
 path = "src/lib.rs"
 
 [[bin]]
-name = "themectl"
+name = "slate"
 path = "src/main.rs"
 
 [dependencies]
