@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use crate::error::Result;
-use crate::theme::Theme;
+use crate::theme::ThemeVariant;
 
 pub mod registry;
 
@@ -61,7 +61,7 @@ pub trait ToolAdapter: Send + Sync {
     /// 2. Ensure integration file includes/references managed path (per apply_strategy)
     /// 3. Never modify user/ directory 
     /// 4. Be idempotent (running twice produces same result)
-    fn apply_theme(&self, theme: &Theme) -> Result<()>;
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<()>;
 
     /// Hot-reload mechanism for this tool.
     /// Allows theme changes to take effect without closing terminal.

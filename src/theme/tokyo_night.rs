@@ -1,56 +1,118 @@
-use super::{Theme, ThemeColors, ThemeFamily};
-use std::collections::HashMap;
+use crate::error::Result;
+use super::{ThemeVariant, ToolRefs, Palette};
 
-pub fn tokyo_night_light() -> Theme {
-    let mut overrides = HashMap::new();
-    overrides.insert("ghostty".to_string(), "Tokyo Night Light".to_string());
-    overrides.insert("starship".to_string(), "tokyo-night-light".to_string());
-    overrides.insert("bat".to_string(), "Tokyo Night Light".to_string());
-    overrides.insert("delta".to_string(), "Tokyo Night".to_string());
-    overrides.insert("lazygit".to_string(), "tokyo-night-light".to_string());
-
-    Theme {
-        name: "tokyo-night-light".to_string(),
-        family: ThemeFamily::TokyoNight,
-        colors: ThemeColors {
-            foreground: "#3760bf".to_string(),
-            background: "#f5f5f5".to_string(),
-            cursor: "#0184bc".to_string(),
-            red: "#d20f39".to_string(),
-            green: "#2c8340".to_string(),
-            yellow: "#9a6e00".to_string(),
-            blue: "#0184bc".to_string(),
-            magenta: "#7847bd".to_string(),
-            cyan: "#00788c".to_string(),
-            white: "#c4cccd".to_string(),
-            tool_overrides: overrides,
+/// Tokyo Night Light — light, modern palette
+pub fn tokyo_night_light() -> Result<ThemeVariant> {
+    Ok(ThemeVariant {
+        id: "tokyo-night-light".to_string(),
+        name: "Tokyo Night Light".to_string(),
+        family: "Tokyo Night".to_string(),
+        tool_refs: ToolRefs {
+            ghostty: "Tokyo Night Light".to_string(),
+            alacritty: "tokyo_night_light".to_string(),
+            bat: "Tokyo Night Light".to_string(),
+            delta: "tokyo_night_light".to_string(),
+            starship: "tokyo_night_light".to_string(),
+            eza: "tokyo_night_light".to_string(),
+            lazygit: "tokyo_night_light".to_string(),
+            fastfetch: "tokyo_night_light".to_string(),
+            tmux: "tokyo_night_light".to_string(),
+            zsh_syntax_highlighting: "tokyo_night_light".to_string(),
         },
-    }
+        palette: Palette {
+            foreground: "#3760f6".to_string(),
+            background: "#ffffff".to_string(),
+            cursor: Some("#0184bc".to_string()),
+            selection_bg: Some("#e0e0e0".to_string()),
+            selection_fg: Some("#3760f6".to_string()),
+            black: "#757575".to_string(),
+            red: "#f52a65".to_string(),
+            green: "#587539".to_string(),
+            yellow: "#8f8f00".to_string(),
+            blue: "#2e7de9".to_string(),
+            magenta: "#b15ea4".to_string(),
+            cyan: "#007197".to_string(),
+            white: "#ffffff".to_string(),
+            bright_black: "#9e9e9e".to_string(),
+            bright_red: "#f52a65".to_string(),
+            bright_green: "#587539".to_string(),
+            bright_yellow: "#8f8f00".to_string(),
+            bright_blue: "#2e7de9".to_string(),
+            bright_magenta: "#b15ea4".to_string(),
+            bright_cyan: "#007197".to_string(),
+            bright_white: "#ffffff".to_string(),
+            rosewater: None,
+            flamingo: None,
+            pink: None,
+            mauve: None,
+            lavender: None,
+            text: None,
+            subtext1: None,
+            subtext0: None,
+            overlay2: None,
+            overlay1: None,
+            overlay0: None,
+            surface2: None,
+            surface1: None,
+            surface0: None,
+        },
+    })
 }
 
-pub fn tokyo_night_dark() -> Theme {
-    let mut overrides = HashMap::new();
-    overrides.insert("ghostty".to_string(), "Tokyo Night".to_string());
-    overrides.insert("starship".to_string(), "tokyo-night".to_string());
-    overrides.insert("bat".to_string(), "Tokyo Night".to_string());
-    overrides.insert("delta".to_string(), "Tokyo Night".to_string());
-    overrides.insert("lazygit".to_string(), "tokyo-night-dark".to_string());
-
-    Theme {
-        name: "tokyo-night-dark".to_string(),
-        family: ThemeFamily::TokyoNight,
-        colors: ThemeColors {
+/// Tokyo Night Dark — dark, vibrant palette
+pub fn tokyo_night_dark() -> Result<ThemeVariant> {
+    Ok(ThemeVariant {
+        id: "tokyo-night-dark".to_string(),
+        name: "Tokyo Night Dark".to_string(),
+        family: "Tokyo Night".to_string(),
+        tool_refs: ToolRefs {
+            ghostty: "Tokyo Night".to_string(),  // Ghostty uses "Tokyo Night" not "Tokyo Night Dark"
+            alacritty: "tokyo_night_dark".to_string(),
+            bat: "Tokyo Night".to_string(),
+            delta: "tokyo_night_dark".to_string(),
+            starship: "tokyo_night_dark".to_string(),
+            eza: "tokyo_night_dark".to_string(),
+            lazygit: "tokyo_night_dark".to_string(),
+            fastfetch: "tokyo_night_dark".to_string(),
+            tmux: "tokyo_night_dark".to_string(),
+            zsh_syntax_highlighting: "tokyo_night_dark".to_string(),
+        },
+        palette: Palette {
             foreground: "#c0caf5".to_string(),
             background: "#1a1b26".to_string(),
-            cursor: "#7aa2f7".to_string(),
+            cursor: Some("#7aa2f7".to_string()),
+            selection_bg: Some("#364a82".to_string()),
+            selection_fg: Some("#c0caf5".to_string()),
+            black: "#565f89".to_string(),
             red: "#f7768e".to_string(),
             green: "#9ece6a".to_string(),
             yellow: "#e0af68".to_string(),
             blue: "#7aa2f7".to_string(),
             magenta: "#bb9af7".to_string(),
             cyan: "#7dcfff".to_string(),
-            white: "#a9b1d6".to_string(),
-            tool_overrides: overrides,
+            white: "#ffffff".to_string(),
+            bright_black: "#7aa1f0".to_string(),
+            bright_red: "#f7768e".to_string(),
+            bright_green: "#9ece6a".to_string(),
+            bright_yellow: "#e0af68".to_string(),
+            bright_blue: "#7aa2f7".to_string(),
+            bright_magenta: "#bb9af7".to_string(),
+            bright_cyan: "#7dcfff".to_string(),
+            bright_white: "#ffffff".to_string(),
+            rosewater: None,
+            flamingo: None,
+            pink: None,
+            mauve: None,
+            lavender: None,
+            text: None,
+            subtext1: None,
+            subtext0: None,
+            overlay2: None,
+            overlay1: None,
+            overlay0: None,
+            surface2: None,
+            surface1: None,
+            surface0: None,
         },
-    }
+    })
 }

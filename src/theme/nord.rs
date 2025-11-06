@@ -1,29 +1,60 @@
-use super::{Theme, ThemeColors, ThemeFamily};
-use std::collections::HashMap;
+use crate::error::Result;
+use super::{ThemeVariant, ToolRefs, Palette};
 
-pub fn nord() -> Theme {
-    let mut overrides = HashMap::new();
-    overrides.insert("ghostty".to_string(), "Nord".to_string());
-    overrides.insert("starship".to_string(), "nord".to_string());
-    overrides.insert("bat".to_string(), "Nord".to_string());
-    overrides.insert("delta".to_string(), "Nord".to_string());
-    overrides.insert("lazygit".to_string(), "nord".to_string());
-
-    Theme {
-        name: "nord".to_string(),
-        family: ThemeFamily::Nord,
-        colors: ThemeColors {
+/// Nord — arctic, north-bluish color palette
+pub fn nord() -> Result<ThemeVariant> {
+    Ok(ThemeVariant {
+        id: "nord".to_string(),
+        name: "Nord".to_string(),
+        family: "Nord".to_string(),
+        tool_refs: ToolRefs {
+            ghostty: "Nord".to_string(),
+            alacritty: "nord".to_string(),
+            bat: "Nord".to_string(),
+            delta: "nord".to_string(),
+            starship: "nord".to_string(),
+            eza: "nord".to_string(),
+            lazygit: "nord".to_string(),
+            fastfetch: "nord".to_string(),
+            tmux: "nord".to_string(),
+            zsh_syntax_highlighting: "nord".to_string(),
+        },
+        palette: Palette {
             foreground: "#d8dee9".to_string(),
             background: "#2e3440".to_string(),
-            cursor: "#88c0d0".to_string(),
+            cursor: Some("#d8dee9".to_string()),
+            selection_bg: Some("#434c5e".to_string()),
+            selection_fg: Some("#d8dee9".to_string()),
+            black: "#434c5e".to_string(),
             red: "#bf616a".to_string(),
             green: "#a3be8c".to_string(),
             yellow: "#ebcb8b".to_string(),
-            blue: "#5e81ac".to_string(),
+            blue: "#81a1c1".to_string(),
             magenta: "#b48ead".to_string(),
             cyan: "#88c0d0".to_string(),
             white: "#eceff4".to_string(),
-            tool_overrides: overrides,
+            bright_black: "#4c566a".to_string(),
+            bright_red: "#bf616a".to_string(),
+            bright_green: "#a3be8c".to_string(),
+            bright_yellow: "#ebcb8b".to_string(),
+            bright_blue: "#81a1c1".to_string(),
+            bright_magenta: "#b48ead".to_string(),
+            bright_cyan: "#88c0d0".to_string(),
+            bright_white: "#eceff4".to_string(),
+            rosewater: None,
+            flamingo: None,
+            pink: None,
+            mauve: None,
+            lavender: None,
+            text: None,
+            subtext1: None,
+            subtext0: None,
+            overlay2: None,
+            overlay1: None,
+            overlay0: None,
+            surface2: None,
+            surface1: None,
+            surface0: None,
         },
-    }
+    })
 }

@@ -1,29 +1,60 @@
-use super::{Theme, ThemeColors, ThemeFamily};
-use std::collections::HashMap;
+use crate::error::Result;
+use super::{ThemeVariant, ToolRefs, Palette};
 
-pub fn dracula() -> Theme {
-    let mut overrides = HashMap::new();
-    overrides.insert("ghostty".to_string(), "Dracula".to_string());
-    overrides.insert("starship".to_string(), "dracula".to_string());
-    overrides.insert("bat".to_string(), "Dracula".to_string());
-    overrides.insert("delta".to_string(), "Dracula".to_string());
-    overrides.insert("lazygit".to_string(), "dracula".to_string());
-
-    Theme {
-        name: "dracula".to_string(),
-        family: ThemeFamily::Dracula,
-        colors: ThemeColors {
+/// Dracula — dark, modern palette
+pub fn dracula() -> Result<ThemeVariant> {
+    Ok(ThemeVariant {
+        id: "dracula".to_string(),
+        name: "Dracula".to_string(),
+        family: "Dracula".to_string(),
+        tool_refs: ToolRefs {
+            ghostty: "Dracula".to_string(),
+            alacritty: "dracula".to_string(),
+            bat: "Dracula".to_string(),
+            delta: "dracula".to_string(),
+            starship: "dracula".to_string(),
+            eza: "dracula".to_string(),
+            lazygit: "dracula".to_string(),
+            fastfetch: "dracula".to_string(),
+            tmux: "dracula".to_string(),
+            zsh_syntax_highlighting: "dracula".to_string(),
+        },
+        palette: Palette {
             foreground: "#f8f8f2".to_string(),
             background: "#282a36".to_string(),
-            cursor: "#f8f8f2".to_string(),
+            cursor: Some("#f8f8f2".to_string()),
+            selection_bg: Some("#44475a".to_string()),
+            selection_fg: Some("#f8f8f2".to_string()),
+            black: "#44475a".to_string(),
             red: "#ff5555".to_string(),
             green: "#50fa7b".to_string(),
             yellow: "#f1fa8c".to_string(),
-            blue: "#6272a4".to_string(),
+            blue: "#6495ed".to_string(),
             magenta: "#ff79c6".to_string(),
             cyan: "#8be9fd".to_string(),
             white: "#f8f8f2".to_string(),
-            tool_overrides: overrides,
+            bright_black: "#6272a4".to_string(),
+            bright_red: "#ff6e6e".to_string(),
+            bright_green: "#69ff94".to_string(),
+            bright_yellow: "#ffffa5".to_string(),
+            bright_blue: "#d6acff".to_string(),
+            bright_magenta: "#ff92df".to_string(),
+            bright_cyan: "#a4ffff".to_string(),
+            bright_white: "#ffffff".to_string(),
+            rosewater: None,
+            flamingo: None,
+            pink: None,
+            mauve: None,
+            lavender: None,
+            text: None,
+            subtext1: None,
+            subtext0: None,
+            overlay2: None,
+            overlay1: None,
+            overlay0: None,
+            surface2: None,
+            surface1: None,
+            surface0: None,
         },
-    }
+    })
 }

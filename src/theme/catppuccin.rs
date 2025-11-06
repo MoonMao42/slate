@@ -1,110 +1,234 @@
-use super::{Theme, ThemeColors, ThemeFamily};
-use std::collections::HashMap;
+use crate::error::Result;
+use super::{ThemeVariant, ToolRefs, Palette};
 
-pub fn catppuccin_latte() -> Theme {
-    let mut overrides = HashMap::new();
-    overrides.insert("ghostty".to_string(), "Catppuccin Latte".to_string());
-    overrides.insert("starship".to_string(), "catppuccin_latte".to_string());
-    overrides.insert("bat".to_string(), "Catppuccin Latte".to_string());
-    overrides.insert("delta".to_string(), "Catppuccin Latte".to_string());
-    overrides.insert("lazygit".to_string(), "catppuccin-latte".to_string());
-
-    Theme {
-        name: "catppuccin-latte".to_string(),
-        family: ThemeFamily::Catppuccin,
-        colors: ThemeColors {
+/// Catppuccin Latte — light, colorful palette
+pub fn catppuccin_latte() -> Result<ThemeVariant> {
+    Ok(ThemeVariant {
+        id: "catppuccin-latte".to_string(),
+        name: "Catppuccin Latte".to_string(),
+        family: "Catppuccin".to_string(),
+        tool_refs: ToolRefs {
+            ghostty: "Catppuccin Latte".to_string(),
+            alacritty: "catppuccin_latte".to_string(),
+            bat: "Catppuccin Latte".to_string(),
+            delta: "catppuccin_latte".to_string(),
+            starship: "catppuccin_latte".to_string(),
+            eza: "catppuccin_latte".to_string(),
+            lazygit: "catppuccin_latte".to_string(),
+            fastfetch: "catppuccin_latte".to_string(),
+            tmux: "catppuccin_latte".to_string(),
+            zsh_syntax_highlighting: "catppuccin_latte".to_string(),
+        },
+        palette: Palette {
             foreground: "#4c4f69".to_string(),
             background: "#eff1f5".to_string(),
-            cursor: "#dc8a78".to_string(),
+            cursor: Some("#dc8a78".to_string()),
+            selection_bg: Some("#bcc0cc".to_string()),
+            selection_fg: Some("#4c4f69".to_string()),
+            black: "#5c5f77".to_string(),
             red: "#d20f39".to_string(),
             green: "#40a02b".to_string(),
             yellow: "#df8e1d".to_string(),
             blue: "#1e66f5".to_string(),
             magenta: "#ea76cb".to_string(),
             cyan: "#04a5e5".to_string(),
-            white: "#acb0be".to_string(),
-            tool_overrides: overrides,
+            white: "#dce0e8".to_string(),
+            bright_black: "#6c6f85".to_string(),
+            bright_red: "#d20f39".to_string(),
+            bright_green: "#40a02b".to_string(),
+            bright_yellow: "#df8e1d".to_string(),
+            bright_blue: "#1e66f5".to_string(),
+            bright_magenta: "#ea76cb".to_string(),
+            bright_cyan: "#04a5e5".to_string(),
+            bright_white: "#dce0e8".to_string(),
+            rosewater: Some("#f2d5cf".to_string()),
+            flamingo: Some("#eebebe".to_string()),
+            pink: Some("#f4b8e4".to_string()),
+            mauve: Some("#ca9ee6".to_string()),
+            lavender: Some("#babbf1".to_string()),
+            text: Some("#4c4f69".to_string()),
+            subtext1: Some("#5c5f77".to_string()),
+            subtext0: Some("#6c6f85".to_string()),
+            overlay2: Some("#7c7f93".to_string()),
+            overlay1: Some("#8c8fa1".to_string()),
+            overlay0: Some("#9ca0b0".to_string()),
+            surface2: Some("#acb0be".to_string()),
+            surface1: Some("#bcc0cc".to_string()),
+            surface0: Some("#ccd0da".to_string()),
         },
-    }
+    })
 }
 
-pub fn catppuccin_frappe() -> Theme {
-    let mut overrides = HashMap::new();
-    overrides.insert("ghostty".to_string(), "Catppuccin Frappe".to_string());
-    overrides.insert("starship".to_string(), "catppuccin_frappe".to_string());
-    overrides.insert("bat".to_string(), "Catppuccin Frappe".to_string());
-    overrides.insert("delta".to_string(), "Catppuccin Frappe".to_string());
-    overrides.insert("lazygit".to_string(), "catppuccin-frappe".to_string());
-
-    Theme {
-        name: "catppuccin-frappe".to_string(),
-        family: ThemeFamily::Catppuccin,
-        colors: ThemeColors {
+/// Catppuccin Frappé — warm, darker palette
+pub fn catppuccin_frappe() -> Result<ThemeVariant> {
+    Ok(ThemeVariant {
+        id: "catppuccin-frappe".to_string(),
+        name: "Catppuccin Frappé".to_string(),
+        family: "Catppuccin".to_string(),
+        tool_refs: ToolRefs {
+            ghostty: "Catppuccin Frappé".to_string(),
+            alacritty: "catppuccin_frappe".to_string(),
+            bat: "Catppuccin Frappé".to_string(),
+            delta: "catppuccin_frappe".to_string(),
+            starship: "catppuccin_frappe".to_string(),
+            eza: "catppuccin_frappe".to_string(),
+            lazygit: "catppuccin_frappe".to_string(),
+            fastfetch: "catppuccin_frappe".to_string(),
+            tmux: "catppuccin_frappe".to_string(),
+            zsh_syntax_highlighting: "catppuccin_frappe".to_string(),
+        },
+        palette: Palette {
             foreground: "#c6d0f5".to_string(),
             background: "#302d41".to_string(),
-            cursor: "#f5a97f".to_string(),
+            cursor: Some("#f8b88b".to_string()),
+            selection_bg: Some("#51576d".to_string()),
+            selection_fg: Some("#c6d0f5".to_string()),
+            black: "#51576d".to_string(),
             red: "#e64553".to_string(),
-            green: "#a6d189".to_string(),
-            yellow: "#e5c890".to_string(),
-            blue: "#8caaee".to_string(),
-            magenta: "#f4b8e4".to_string(),
-            cyan: "#81c8be".to_string(),
-            white: "#b5bfe2".to_string(),
-            tool_overrides: overrides,
+            green: "#51be8b".to_string(),
+            yellow: "#f4d160".to_string(),
+            blue: "#89b4fa".to_string(),
+            magenta: "#f5a3dc".to_string(),
+            cyan: "#99d1db".to_string(),
+            white: "#f5f5f5".to_string(),
+            bright_black: "#626880".to_string(),
+            bright_red: "#e64553".to_string(),
+            bright_green: "#51be8b".to_string(),
+            bright_yellow: "#f4d160".to_string(),
+            bright_blue: "#89b4fa".to_string(),
+            bright_magenta: "#f5a3dc".to_string(),
+            bright_cyan: "#99d1db".to_string(),
+            bright_white: "#f5f5f5".to_string(),
+            rosewater: Some("#f2d5cf".to_string()),
+            flamingo: Some("#eebebe".to_string()),
+            pink: Some("#f4b8e4".to_string()),
+            mauve: Some("#ca9ee6".to_string()),
+            lavender: Some("#babbf1".to_string()),
+            text: Some("#c6d0f5".to_string()),
+            subtext1: Some("#bac2de".to_string()),
+            subtext0: Some("#a5adce".to_string()),
+            overlay2: Some("#949cbb".to_string()),
+            overlay1: Some("#838ba7".to_string()),
+            overlay0: Some("#737994".to_string()),
+            surface2: Some("#626880".to_string()),
+            surface1: Some("#51576d".to_string()),
+            surface0: Some("#414559".to_string()),
         },
-    }
+    })
 }
 
-pub fn catppuccin_macchiato() -> Theme {
-    let mut overrides = HashMap::new();
-    overrides.insert("ghostty".to_string(), "Catppuccin Macchiato".to_string());
-    overrides.insert("starship".to_string(), "catppuccin_macchiato".to_string());
-    overrides.insert("bat".to_string(), "Catppuccin Macchiato".to_string());
-    overrides.insert("delta".to_string(), "Catppuccin Macchiato".to_string());
-    overrides.insert("lazygit".to_string(), "catppuccin-macchiato".to_string());
-
-    Theme {
-        name: "catppuccin-macchiato".to_string(),
-        family: ThemeFamily::Catppuccin,
-        colors: ThemeColors {
-            foreground: "#cad1f5".to_string(),
+/// Catppuccin Macchiato — cool, balanced palette
+pub fn catppuccin_macchiato() -> Result<ThemeVariant> {
+    Ok(ThemeVariant {
+        id: "catppuccin-macchiato".to_string(),
+        name: "Catppuccin Macchiato".to_string(),
+        family: "Catppuccin".to_string(),
+        tool_refs: ToolRefs {
+            ghostty: "Catppuccin Macchiato".to_string(),
+            alacritty: "catppuccin_macchiato".to_string(),
+            bat: "Catppuccin Macchiato".to_string(),
+            delta: "catppuccin_macchiato".to_string(),
+            starship: "catppuccin_macchiato".to_string(),
+            eza: "catppuccin_macchiato".to_string(),
+            lazygit: "catppuccin_macchiato".to_string(),
+            fastfetch: "catppuccin_macchiato".to_string(),
+            tmux: "catppuccin_macchiato".to_string(),
+            zsh_syntax_highlighting: "catppuccin_macchiato".to_string(),
+        },
+        palette: Palette {
+            foreground: "#cad3f5".to_string(),
             background: "#24273a".to_string(),
-            cursor: "#f5a97f".to_string(),
+            cursor: Some("#f5a97f".to_string()),
+            selection_bg: Some("#494d64".to_string()),
+            selection_fg: Some("#cad3f5".to_string()),
+            black: "#5b6078".to_string(),
             red: "#ed8796".to_string(),
             green: "#a6da95".to_string(),
             yellow: "#eed49f".to_string(),
             blue: "#8aadf4".to_string(),
             magenta: "#f5bde6".to_string(),
-            cyan: "#8bd5ca".to_string(),
-            white: "#b8c0e0".to_string(),
-            tool_overrides: overrides,
+            cyan: "#91d7e3".to_string(),
+            white: "#f5f5f5".to_string(),
+            bright_black: "#6e738d".to_string(),
+            bright_red: "#ed8796".to_string(),
+            bright_green: "#a6da95".to_string(),
+            bright_yellow: "#eed49f".to_string(),
+            bright_blue: "#8aadf4".to_string(),
+            bright_magenta: "#f5bde6".to_string(),
+            bright_cyan: "#91d7e3".to_string(),
+            bright_white: "#f5f5f5".to_string(),
+            rosewater: Some("#f2d5cf".to_string()),
+            flamingo: Some("#eebebe".to_string()),
+            pink: Some("#f4b8e4".to_string()),
+            mauve: Some("#ca9ee6".to_string()),
+            lavender: Some("#babbf1".to_string()),
+            text: Some("#cad3f5".to_string()),
+            subtext1: Some("#b8c5e4".to_string()),
+            subtext0: Some("#a5b4d4".to_string()),
+            overlay2: Some("#939fc3".to_string()),
+            overlay1: Some("#8087b2".to_string()),
+            overlay0: Some("#6e738d".to_string()),
+            surface2: Some("#5b6078".to_string()),
+            surface1: Some("#494d64".to_string()),
+            surface0: Some("#363a4f".to_string()),
         },
-    }
+    })
 }
 
-pub fn catppuccin_mocha() -> Theme {
-    let mut overrides = HashMap::new();
-    overrides.insert("ghostty".to_string(), "Catppuccin Mocha".to_string());
-    overrides.insert("starship".to_string(), "catppuccin_mocha".to_string());
-    overrides.insert("bat".to_string(), "Catppuccin Mocha".to_string());
-    overrides.insert("delta".to_string(), "Catppuccin Mocha".to_string());
-    overrides.insert("lazygit".to_string(), "catppuccin-mocha".to_string());
-
-    Theme {
-        name: "catppuccin-mocha".to_string(),
-        family: ThemeFamily::Catppuccin,
-        colors: ThemeColors {
+/// Catppuccin Mocha — dark, vibrant palette
+pub fn catppuccin_mocha() -> Result<ThemeVariant> {
+    Ok(ThemeVariant {
+        id: "catppuccin-mocha".to_string(),
+        name: "Catppuccin Mocha".to_string(),
+        family: "Catppuccin".to_string(),
+        tool_refs: ToolRefs {
+            ghostty: "Catppuccin Mocha".to_string(),
+            alacritty: "catppuccin_mocha".to_string(),
+            bat: "Catppuccin Mocha".to_string(),
+            delta: "catppuccin_mocha".to_string(),
+            starship: "catppuccin_mocha".to_string(),
+            eza: "catppuccin_mocha".to_string(),
+            lazygit: "catppuccin_mocha".to_string(),
+            fastfetch: "catppuccin_mocha".to_string(),
+            tmux: "catppuccin_mocha".to_string(),
+            zsh_syntax_highlighting: "catppuccin_mocha".to_string(),
+        },
+        palette: Palette {
             foreground: "#cdd6f4".to_string(),
             background: "#1e1e2e".to_string(),
-            cursor: "#f5a97f".to_string(),
+            cursor: Some("#f5e0dc".to_string()),
+            selection_bg: Some("#45475a".to_string()),
+            selection_fg: Some("#cdd6f4".to_string()),
+            black: "#45475a".to_string(),
             red: "#f38ba8".to_string(),
             green: "#a6e3a1".to_string(),
             yellow: "#f9e2af".to_string(),
             blue: "#89b4fa".to_string(),
-            magenta: "#f5c2de".to_string(),
+            magenta: "#f5c2e7".to_string(),
             cyan: "#94e2d5".to_string(),
-            white: "#bac2de".to_string(),
-            tool_overrides: overrides,
+            white: "#f5f5f5".to_string(),
+            bright_black: "#585b70".to_string(),
+            bright_red: "#f38ba8".to_string(),
+            bright_green: "#a6e3a1".to_string(),
+            bright_yellow: "#f9e2af".to_string(),
+            bright_blue: "#89b4fa".to_string(),
+            bright_magenta: "#f5c2e7".to_string(),
+            bright_cyan: "#94e2d5".to_string(),
+            bright_white: "#f5f5f5".to_string(),
+            rosewater: Some("#f2d5cf".to_string()),
+            flamingo: Some("#eebebe".to_string()),
+            pink: Some("#f4b8e4".to_string()),
+            mauve: Some("#ca9ee6".to_string()),
+            lavender: Some("#babbf1".to_string()),
+            text: Some("#cdd6f4".to_string()),
+            subtext1: Some("#bac2de".to_string()),
+            subtext0: Some("#a6adc8".to_string()),
+            overlay2: Some("#9399b2".to_string()),
+            overlay1: Some("#7f849c".to_string()),
+            overlay0: Some("#6c7086".to_string()),
+            surface2: Some("#585b70".to_string()),
+            surface1: Some("#45475a".to_string()),
+            surface0: Some("#313244".to_string()),
         },
-    }
+    })
 }
