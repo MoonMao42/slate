@@ -1,9 +1,11 @@
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
+use slate_cli::cli;
 
 #[derive(Parser)]
 #[command(name = "slate")]
-#[command(about = "macOS terminal beautification kit", long_about = None)]
+#[command(about = "✦ slate — macOS terminal beautification kit")]
+#[command(long_about = "Transform your terminal in 30 seconds")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -13,6 +15,7 @@ struct Cli {
 enum Commands {
     /// Interactive setup wizard
     Setup {
+        /// Skip questions, use all defaults
         #[arg(long)]
         quick: bool,
     },
@@ -44,28 +47,28 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Setup { quick } => {
-            // Placeholder for 
-            println!("Setup wizard (quick={}) — implemented in ", quick);
+            // Dispatch to setup handler
+            let args: Vec<&str> = if quick { vec!["--quick"] } else { vec![] };
+            cli::setup::handle(&args)?;
         }
         Commands::Set { theme } => {
-            // Placeholder for 
-            println!("Set theme: {:?} — implemented in ", theme);
+            // Dispatch to set handler
+            let args: Vec<&str> = theme.as_ref().map(|t| vec![t.as_str()]).unwrap_or_default();
+            cli::set::handle(&args)?;
         }
         Commands::Status => {
-            // Placeholder for 
-            println!("Status — implemented in ");
+            cli::status::handle(&[])?;
         }
         Commands::List => {
-            // Placeholder for 
-            println!("List themes — implemented in ");
+            cli::list::handle(&[])?;
         }
         Commands::Restore { backup_id } => {
-            // Placeholder for 
-            println!("Restore: {:?} — implemented in ", backup_id);
+            let args: Vec<&str> = backup_id.as_ref().map(|id| vec![id.as_str()]).unwrap_or_default();
+            cli::restore::handle(&args)?;
         }
         Commands::Init { shell } => {
-            // Placeholder for 
-            println!("Init shell: {:?} — implemented in ", shell);
+            let args: Vec<&str> = shell.as_ref().map(|s| vec![s.as_str()]).unwrap_or_default();
+            cli::init::handle(&args)?;
         }
     }
 
