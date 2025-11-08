@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use slate_cli::brand::language::Language;
 
 #[test]
 fn test_cli_help_shows_commands() {
@@ -83,8 +84,7 @@ fn test_setup_quick_flag() {
     let output = cmd.args(&["setup", "--quick"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    // Placeholder shows phase reference
-    assert!(stdout.contains("") || stdout.contains("implemented"));
+    assert!(stdout.contains(Language::SETUP_QUICK_PENDING));
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn test_status_command_runs() {
     let output = cmd.arg("status").output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    assert!(stdout.contains("") || stdout.contains("implemented"));
+    assert!(stdout.contains(Language::STATUS_PENDING));
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn test_list_command_runs() {
     let output = cmd.arg("list").output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    assert!(stdout.contains("") || stdout.contains("implemented"));
+    assert!(stdout.contains(Language::LIST_PENDING));
 }
 
 #[test]
@@ -135,5 +135,6 @@ fn test_init_with_shell_arg() {
     let output = cmd.args(&["init", "zsh"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    assert!(stdout.contains("zsh"));
+    assert!(stdout.contains("slate shell init for zsh"));
+    assert!(stdout.contains("SLATE_HOME"));
 }

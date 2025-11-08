@@ -66,7 +66,7 @@ pub type Result<T> = std::result::Result<T, SlateError>;
 /// Install the color-eyre error handler.
 /// Call this once at the start of main().
 /// color_eyre::install() must be called.
-pub fn install_error_handler() -> std::result::Result<(), Box<dyn std::error::Error>> {
+pub fn install_error_handler() -> color_eyre::Result<()> {
     color_eyre::install()?;
     Ok(())
 }

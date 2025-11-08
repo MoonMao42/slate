@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
-use slate_cli::cli;
+use slate_cli::{cli, error};
 
 #[derive(Parser)]
 #[command(name = "slate")]
@@ -41,7 +41,7 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
-    color_eyre::install()?;
+    error::install_error_handler()?;
 
     let cli = Cli::parse();
 

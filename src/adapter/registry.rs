@@ -29,10 +29,11 @@ impl ToolRegistry {
     }
 
     /// Find adapter by tool name
-    pub fn get_adapter(&self, tool_name: &str) -> Option<&Box<dyn ToolAdapter>> {
+    pub fn get_adapter(&self, tool_name: &str) -> Option<&dyn ToolAdapter> {
         self.adapters
             .iter()
             .find(|a| a.tool_name() == tool_name)
+            .map(|a| a.as_ref())
     }
 
     /// Detect which registered tools are installed

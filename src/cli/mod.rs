@@ -4,6 +4,7 @@ pub mod status;
 pub mod list;
 pub mod restore;
 pub mod init;
+pub mod wizard_core;
 
 use crate::error::Result;
 

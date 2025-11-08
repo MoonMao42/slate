@@ -31,16 +31,10 @@ impl Colors {
         format!("{}{}{}", Self::ACCENT, text, Self::RESET)
     }
 
-    /// Helper: format label with gray, colon with accent
-    /// Example: "current:" where "current" is gray and ":" is accent
+    /// Helper: format label and separator in gray
+    /// Example: "current:" where both "current" and ":" are gray
     pub fn label(name: &str, separator: &str) -> String {
-        format!("{}{}{}{}{}",
-            Self::gray(name),
-            Self::RESET,
-            Self::GRAY,
-            separator,
-            Self::RESET
-        )
+        format!("{}{}{}{}", Self::GRAY, name, separator, Self::RESET)
     }
 }
 
@@ -67,6 +61,7 @@ mod tests {
         assert!(label_text.contains("current"));
         assert!(label_text.contains(":"));
         assert!(label_text.contains("\x1b["));
+        assert_eq!(label_text.matches(Colors::RESET).count(), 1);
     }
 
     #[test]

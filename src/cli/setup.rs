@@ -9,10 +9,10 @@ pub fn handle(args: &[&str]) -> Result<()> {
 
     if args.contains(&"--quick") {
         println!("{} {}", Symbols::BRAND, Language::SETUP_WELCOME);
-        println!("Quick setup mode — implemented in ");
+        println!("{}", Language::SETUP_QUICK_PENDING);
     } else {
         println!("{} {}", Symbols::BRAND, Language::SETUP_WELCOME);
-        println!("Interactive setup wizard — implemented in ");
+        println!("{}", Language::SETUP_INTERACTIVE_PENDING);
     }
 
     Ok(())

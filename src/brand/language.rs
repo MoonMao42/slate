@@ -12,6 +12,8 @@ impl Language {
     pub const SETUP_REVIEW: &str = "Review and confirm:";
     pub const SETUP_APPLYING: &str = "Applying configuration...";
     pub const SETUP_COMPLETE: &str = "✦ Your terminal is now beautiful!";
+    pub const SETUP_QUICK_PENDING: &str = "Quick setup mode lands in .";
+    pub const SETUP_INTERACTIVE_PENDING: &str = "Interactive setup wizard lands in .";
 
     // Tool selling points (one-liner visual value per)
     pub const PITCH_GHOSTTY: &str = "Makes your terminal glow";
@@ -32,6 +34,10 @@ impl Language {
     pub const STATUS_LABEL_FONT: &str = "font:";
     pub const LIST_HEADER: &str = "Available themes";
     pub const RESTORE_SUCCESS: &str = "✓ Configuration restored";
+    pub const SET_PICKER_PENDING: &str = "Interactive theme picker lands in .";
+    pub const STATUS_PENDING: &str = "Status display lands in .";
+    pub const LIST_PENDING: &str = "Theme listing lands in .";
+    pub const RESTORE_PICKER_PENDING: &str = "Restore point selection lands in .";
 
     // Status indicators (per)
     pub const INSTALLED: &str = "✓ installed";
@@ -80,6 +86,14 @@ impl Language {
             reason
         )
     }
+
+    pub fn set_pending_theme(theme: &str) -> String {
+        format!("{} lands in .", theme)
+    }
+
+    pub fn restore_pending_backup(backup_id: &str) -> String {
+        format!("Restoring backup: {} lands in .", backup_id)
+    }
 }
 
 #[cfg(test)]
@@ -104,5 +118,11 @@ mod tests {
         assert_eq!(Language::INSTALLED, "✓ installed");
         assert_eq!(Language::NOT_INSTALLED, "○ not installed");
         assert_eq!(Language::FAILED, "✗ failed");
+    }
+
+    #[test]
+    fn test_placeholder_formatters() {
+        assert!(Language::set_pending_theme("catppuccin-mocha").contains("catppuccin-mocha"));
+        assert!(Language::restore_pending_backup("backup-1").contains("backup-1"));
     }
 }

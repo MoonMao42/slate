@@ -5,6 +5,6 @@ use crate::brand::language::Language;
 pub fn handle(_args: &[&str]) -> Result<()> {
     // will implement full theme listing
     println!("{}", Language::LIST_HEADER);
-    println!("Theme listing — implemented in ");
+    println!("{}", Language::LIST_PENDING);
     Ok(())
 }

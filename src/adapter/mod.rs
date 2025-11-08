@@ -16,11 +16,11 @@ pub enum ApplyStrategy {
     /// Tools: Ghostty (edit color blocks directly), Starship (edit palette field)
     EditInPlace,
 
-    /// Set environment variable in shell integration file (~/.config/slate/env.sh)
+    /// Set environment variables emitted by `slate init`
     /// Tools: bat (BAT_THEME env var), eza (EZA_CONFIG_DIR)
     EnvironmentVariable,
 
-    /// Source a generated script from shell integration file
+    /// Source a generated script emitted by `slate init`
     /// Tools: zsh-syntax-highlighting (source ~/.config/slate/zsh-highlight.zsh)
     SourceScript,
 }
