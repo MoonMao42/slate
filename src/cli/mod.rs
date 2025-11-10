@@ -6,6 +6,7 @@ pub mod restore;
 pub mod init;
 pub mod wizard_core;
 pub mod font_detection;
+pub mod tool_selection;
 
 use crate::error::Result;
 
