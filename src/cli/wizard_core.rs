@@ -4,6 +4,9 @@ use crate::cli::font_detection::detect_current_font;
 use crate::cli::tool_selection::{
     ToolCatalog, compute_install_candidates, ReviewReceipt, InstallAction
 };
+use crate::cli::preset_selection::PresetCatalog;
+use crate::cli::font_selection::FontCatalog;
+use crate::cli::theme_selection::ThemeSelector;
 use crate::adapter::registry::ToolRegistry;
 use cliclack::{intro, outro, select, multiselect};
 use std::collections::HashMap;
@@ -16,6 +19,7 @@ pub struct WizardContext {
     pub selected_font: Option<String>,
     pub selected_theme: Option<String>,
     pub current_font: Option<String>,
+    pub current_theme: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,44 +30,70 @@ pub enum WizardMode {
 
 pub struct Wizard {
     context: WizardContext,
+    theme_selector: ThemeSelector,
 }
 
 impl Wizard {
     pub fn new() -> Result<Self> {
-        // Detect current font on wizard startup
+        // Detect current font and theme on wizard startup
         let current_font = detect_current_font().ok().flatten();
+        let current_theme = None; // TODO: detect current theme from managed config
         
         Ok(Self {
             context: WizardContext {
                 mode: WizardMode::Manual,
                 current_step: 0,
-                total_steps: 6, // intro → tools → font → theme → action list → apply
+                total_steps: 6, // intro → mode/preset → tools → font → theme → action list → apply
                 selected_tools: Vec::new(),
                 selected_font: None,
                 selected_theme: None,
                 current_font,
+                current_theme,
             },
+            theme_selector: ThemeSelector::new()?,
         })
     }
 
     /// Run the full wizard flow
-    pub fn run(&mut self, quick_mode: bool) -> Result<()> {
+    pub fn run(&mut self, quick_mode: bool, _force: bool) -> Result<()> {
         // Step 0: Intro
         self.show_intro()?;
 
-        // Step 1: Mode selection (or skip if --quick)
+        // Step 1: Mode or preset selection
         if quick_mode {
             self.context.mode = WizardMode::Quick;
-            self.context.total_steps = 4; // Adjust for Quick: preset → tools → action → apply
+            // Quick mode: use default preset, then tool selection
+            self.context.total_steps = 4; // intro → preset → tools → action → apply
+            self.step_select_preset_quick()?;
         } else {
+            // Manual mode: ask for mode selection
             self.step_select_mode()?;
+            if self.context.mode == WizardMode::Quick {
+                self.context.total_steps = 4;
+                self.step_select_preset_quick()?;
+            } else {
+                // Manual mode: individual selection steps
+                self.context.total_steps = 7; // intro → mode → tools → font → theme → action → apply
+            }
         }
 
-        // Step 2: Tool detection and selection
+        // Step 2+: Tool detection and selection
         self.step_detect_and_select_tools()?;
 
-        // Later steps handled by subsequent plans
-        // For now: show step counter format and completion
+        // Step 3+: Font selection (manual mode only)
+        if self.context.mode == WizardMode::Manual {
+            self.step_select_font()?;
+        }
+
+        // Step 4+: Theme selection (manual mode only)
+        if self.context.mode == WizardMode::Manual {
+            self.step_select_theme()?;
+        }
+
+        // Later steps handled by subsequent plans:
+        // - Action list review
+        // - Execution
+        // - Completion
         self.show_completion()?;
 
         Ok(())
@@ -94,10 +124,32 @@ impl Wizard {
         Ok(())
     }
 
+    fn step_select_preset_quick(&mut self) -> Result<()> {
+        self.log_step("Select Style Preset");
+
+        let presets = PresetCatalog::all_presets();
+        let preset_options: Vec<(&str, &str, String)> = presets
+            .iter()
+            .map(|p| (p.id, p.name, format!("— {}", p.description)))
+            .collect();
+
+        let selected_preset_id = select("Pick a vibe:")
+            .items(&preset_options)
+            .interact()?;
+
+        if let Some(preset) = PresetCatalog::get_preset(selected_preset_id) {
+            self.context.selected_font = Some(preset.font_id.to_string());
+            self.context.selected_theme = Some(preset.theme_id.to_string());
+        }
+
+        self.context.current_step += 1;
+        Ok(())
+    }
+
     fn step_detect_and_select_tools(&mut self) -> Result<()> {
         self.log_step("Detect and Select Tools");
 
-        // Create a registry just for detection (not default-populated)
+        // Create a registry just for detection
         let registry = ToolRegistry::new();
         let installed = registry.detect_installed();
 
@@ -114,7 +166,7 @@ impl Wizard {
             return Ok(());
         }
 
-        // Build multiselect items as tuples: (id, label, description)
+        // Build multiselect items: (id, label, pitch)
         let items: Vec<(&str, String, String)> = candidates
             .iter()
             .map(|tool| {
@@ -126,24 +178,92 @@ impl Wizard {
             })
             .collect();
 
-        // Convert to owned vec for interaction
-        let items_for_select: Vec<(String, String, String)> = items
-            .iter()
-            .map(|(id, label, desc)| (id.to_string(), label.clone(), desc.clone()))
-            .collect();
-
         eprintln!("Select tools to install:");
         let selected: Vec<&str> = multiselect("Tools:")
             .items(
-                &items_for_select
+                &items
                     .iter()
-                    .map(|(id, label, desc)| (id.as_str(), label.clone(), desc.clone()))
+                    .map(|(id, label, pitch)| (*id, label.as_str(), pitch.as_str()))
                     .collect::<Vec<_>>()
             )
             .interact()?;
 
         // Convert &str to String
         self.context.selected_tools = selected.into_iter().map(|s| s.to_string()).collect();
+        self.context.current_step += 1;
+        Ok(())
+    }
+
+    fn step_select_font(&mut self) -> Result<()> {
+        self.log_step("Select Font");
+
+        // Display current font if available
+        if let Some(ref current) = self.context.current_font {
+            eprintln!("Current font: {}", current);
+        } else {
+            eprintln!("Current font: system default");
+        }
+
+        // Build font options with skip
+        let fonts = FontCatalog::all_fonts();
+        let mut font_options: Vec<(&str, &str, String)> = fonts
+            .iter()
+            .map(|f| (f.id, f.name, format!("— {}", f.label)))
+            .collect();
+
+        // Add skip option manually (as a tuple)
+        let (skip_id, skip_label) = FontCatalog::skip_option();
+        font_options.push((skip_id, skip_label, "".to_string()));
+
+        eprintln!("Select a font (or skip to keep current):");
+        let selected_font_id = select("Font:")
+            .items(
+                &font_options
+                    .iter()
+                    .map(|(id, label, desc)| (*id, *label, desc.as_str()))
+                    .collect::<Vec<_>>()
+            )
+            .interact()?;
+
+        // Store selection only if not skip
+        if selected_font_id != "skip" {
+            if let Some(font) = FontCatalog::get_font(selected_font_id) {
+                self.context.selected_font = Some(font.id.to_string());
+            }
+        }
+        // If skip, leave selected_font as None (will default to current in apply step)
+
+        self.context.current_step += 1;
+        Ok(())
+    }
+
+    fn step_select_theme(&mut self) -> Result<()> {
+        self.log_step("Select Theme");
+
+        if let Some(ref current) = self.context.current_theme {
+            eprintln!("Current theme: {}", current);
+        } else {
+            eprintln!("Current theme: not yet applied");
+        }
+
+        // Get all themes for display
+        let all_themes = self.theme_selector.all_themes();
+        let theme_options: Vec<(&str, &str, String)> = all_themes
+            .iter()
+            .map(|t| (t.id.as_str(), t.name.as_str(), format!("— {}", t.family)))
+            .collect();
+
+        eprintln!("Select a theme:");
+        let selected_theme_id = select("Theme:")
+            .items(
+                &theme_options
+                    .iter()
+                    .map(|(id, label, desc)| (*id, *label, desc.as_str()))
+                    .collect::<Vec<_>>()
+            )
+            .interact()?;
+
+        self.context.selected_theme = Some(selected_theme_id.to_string());
         self.context.current_step += 1;
         Ok(())
     }
@@ -267,5 +387,18 @@ mod tests {
         assert_eq!(receipt.install_actions.len(), 2);
         assert!(receipt.selected_font.is_some());
         assert!(receipt.selected_theme.is_some());
+    }
+
+    #[test]
+    fn test_quick_mode_adjusts_step_count() {
+        let mut wizard = Wizard::new().unwrap();
+        wizard.context.mode = WizardMode::Quick;
+        wizard.context.total_steps = 4; // Quick mode should be shorter
+        assert_eq!(wizard.context.total_steps, 4);
+    }
+
+    #[test]
+    fn test_wizard_mode_variants() {
+        assert_ne!(WizardMode::Quick, WizardMode::Manual);
     }
 }

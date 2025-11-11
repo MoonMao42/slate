@@ -6,7 +6,7 @@ pub fn handle(args: &[&str]) -> Result<()> {
     let quick_mode = args.contains(&"--quick");
     
     let mut wizard = Wizard::new()?;
-    wizard.run(quick_mode)?;
+    wizard.run(quick_mode, false)?;
     
     Ok(())
 }
