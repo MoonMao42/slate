@@ -172,4 +172,55 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_all_fonts_in_presets_exist() {
+        // Verify all font IDs referenced in presets actually exist
+        use super::super::font_selection::FontCatalog;
+        let presets = PresetCatalog::all_presets();
+        for preset in presets {
+            let font = FontCatalog::get_font(preset.font_id);
+            assert!(font.is_some(), "Preset {} references nonexistent font {}", preset.id, preset.font_id);
+        }
+    }
+
+    #[test]
+    fn test_all_themes_in_presets_exist() {
+        // Verify all theme IDs referenced in presets actually exist
+        use super::super::theme_selection::ThemeSelector;
+        let selector = ThemeSelector::new().unwrap();
+        let presets = PresetCatalog::all_presets();
+        for preset in presets {
+            let theme = selector.get_theme(preset.theme_id);
+            assert!(theme.is_some(), "Preset {} references nonexistent theme {}", preset.id, preset.theme_id);
+        }
+    }
+
+    #[test]
+    fn test_locked_presets_exact_mapping() {
+        // Verify the four locked presets match exactly
+        let presets = PresetCatalog::all_presets();
+        assert_eq!(presets.len(), 4, "Must have exactly 4 locked presets");
+
+        // Modern Dark → Catppuccin Mocha + JetBrains Mono
+        let modern = presets.iter().find(|p| p.id == "modern-dark").unwrap();
+        assert_eq!(modern.theme_id, "catppuccin-mocha");
+        assert_eq!(modern.font_id, "jetbrains-mono");
+
+        // Minimal Frost → Nord + Hack
+        let minimal = presets.iter().find(|p| p.id == "minimal-frost").unwrap();
+        assert_eq!(minimal.theme_id, "nord");
+        assert_eq!(minimal.font_id, "hack");
+
+        // Retro Warm → Gruvbox Dark + Iosevka Term
+        let retro = presets.iter().find(|p| p.id == "retro-warm").unwrap();
+        assert_eq!(retro.theme_id, "gruvbox-dark");
+        assert_eq!(retro.font_id, "iosevka-term");
+
+        // Clean Light → Catppuccin Latte + Fira Code
+        let clean = presets.iter().find(|p| p.id == "clean-light").unwrap();
+        assert_eq!(clean.theme_id, "catppuccin-latte");
+        assert_eq!(clean.font_id, "fira-code");
+    }
+
 }

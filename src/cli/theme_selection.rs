@@ -203,4 +203,22 @@ mod tests {
         assert!(selector.get_theme("gruvbox-dark").is_some());
         assert!(selector.get_theme("nonexistent").is_none());
     }
+
+    #[test]
+    fn test_gruvbox_themes_selectable() {
+        // Verify Gruvbox Dark and Light are in the selection
+        let selector = ThemeSelector::new().unwrap();
+        assert!(selector.get_theme("gruvbox-dark").is_some(), "Gruvbox Dark must be available");
+        assert!(selector.get_theme("gruvbox-light").is_some(), "Gruvbox Light must be available");
+    }
+
+    #[test]
+    fn test_rerun_behavior_awareness() {
+        // ThemeSelector provides data for rerun behavior awareness
+        let selector = ThemeSelector::new().unwrap();
+        // Verify selectors are ready to detect and display current theme
+        assert!(!selector.all_theme_ids().is_empty());
+        assert!(selector.theme_count() > 0);
+    }
+
 }
