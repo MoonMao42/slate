@@ -7,6 +7,9 @@ pub mod init;
 pub mod wizard_core;
 pub mod font_detection;
 pub mod tool_selection;
+pub mod preset_selection;
+pub mod font_selection;
+pub mod theme_selection;
 
 use crate::error::Result;
 

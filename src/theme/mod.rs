@@ -7,6 +7,7 @@ pub mod catppuccin;
 pub mod tokyo_night;
 pub mod dracula;
 pub mod nord;
+pub mod gruvbox;
 
 /// Color palette for a theme.
 /// Per revised: Hybrid design with semantic UI colors (5) + ANSI normal/bright (16) as named fields,
@@ -158,9 +159,13 @@ impl ThemeRegistry {
         // Nord
         let nd = nord::nord()?;
 
+        // Gruvbox variants
+        let gruvbox_dark = gruvbox::gruvbox_dark()?;
+        let gruvbox_light = gruvbox::gruvbox_light()?;
+
         // Register all variants
         for variant in &[&cat_latte, &cat_frappe, &cat_macchiato, &cat_mocha,
-                        &tn_light, &tn_dark, &drac, &nd] {
+                        &tn_light, &tn_dark, &drac, &nd, &gruvbox_dark, &gruvbox_light] {
             variants.insert(variant.id.clone(), (*variant).clone());
         }
 
