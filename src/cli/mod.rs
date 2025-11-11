@@ -12,6 +12,7 @@ pub mod font_selection;
 pub mod theme_selection;
 pub mod preflight;
 pub mod failure_handler;
+pub mod setup_executor;
 
 use crate::error::Result;
 

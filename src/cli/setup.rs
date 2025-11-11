@@ -1,6 +1,7 @@
 use crate::error::Result;
 use crate::cli::wizard_core::Wizard;
 use crate::cli::preflight;
+use crate::cli::setup_executor;
 use crate::cli::tool_selection::ToolCatalog;
 
 /// Handle `slate setup` command with optional flags
@@ -28,9 +29,17 @@ pub fn handle(quick: bool, force: bool, only: Option<String>) -> Result<()> {
     let mut wizard = Wizard::new()?;
     wizard.run(quick, force)?;
 
-    // For now, show a placeholder completion message
-    // Full execution and summary will come in next task
-    eprintln!("\nSetup wizard flow completed. Full execution coming next.\n");
+    // Build selections from wizard context
+    let context = wizard.get_context();
+    let selected_tools = context.selected_tools.clone();
+    let selected_font = context.selected_font.as_deref();
+    let selected_theme = context.selected_theme.as_deref();
+
+    // Execute the setup (install tools, apply configurations)
+    let summary = setup_executor::execute_setup(&selected_tools, selected_font, selected_theme)?;
+
+    // Display completion message with visibility guidance
+    eprintln!("\n{}", summary.format_completion_message());
 
     Ok(())
 }
@@ -56,12 +65,15 @@ fn handle_retry_only(tool_id: &str) -> Result<()> {
             ));
         }
 
-        // In a real implementation, we would:
-        // 1. Check if tool is already installed (skip if yes)
-        // 2. Run `brew install` with appropriate args
-        // 3. Report results
+        // Execute single tool installation
+        let summary = setup_executor::execute_setup(&[tool_id.to_string()], None, None)?;
 
-        eprintln!("Retry for tool '{}' started (execution coming next)\n", tool_id);
+        // Show completion
+        if summary.success_count() > 0 {
+            eprintln!("\n✓ Tool '{}' installed successfully.\n", tool.label);
+        } else {
+            eprintln!("\n✗ Tool '{}' installation failed. Check logs above.\n", tool.label);
+        }
 
         Ok(())
     } else {
