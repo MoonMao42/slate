@@ -18,6 +18,12 @@ enum Commands {
         /// Skip questions, use all defaults
         #[arg(long)]
         quick: bool,
+        /// Ignore current state and run as fresh install
+        #[arg(long)]
+        force: bool,
+        /// Retry only a specific tool (skip wizard, install just this tool)
+        #[arg(long, value_name = "TOOL")]
+        only: Option<String>,
     },
     /// Switch to a theme
     Set {
@@ -46,10 +52,9 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Setup { quick } => {
+        Commands::Setup { quick, force, only } => {
             // Dispatch to setup handler
-            let args: Vec<&str> = if quick { vec!["--quick"] } else { vec![] };
-            cli::setup::handle(&args)?;
+            cli::setup::handle(quick, force, only)?;
         }
         Commands::Set { theme } => {
             // Dispatch to set handler

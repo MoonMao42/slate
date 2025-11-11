@@ -10,13 +10,15 @@ pub mod tool_selection;
 pub mod preset_selection;
 pub mod font_selection;
 pub mod theme_selection;
+pub mod preflight;
+pub mod failure_handler;
 
 use crate::error::Result;
 
 /// Dispatch CLI commands based on parsed arguments
+/// Note: setup handler is now called directly from main.rs with structured arguments
 pub fn dispatch(command: &str, args: &[&str]) -> Result<()> {
     match command {
-        "setup" => setup::handle(args),
         "set" => set::handle(args),
         "status" => status::handle(args),
         "list" => list::handle(args),
