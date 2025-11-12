@@ -15,6 +15,19 @@ impl Language {
     pub const SETUP_QUICK_PENDING: &str = "Quick setup mode lands in .";
     pub const SETUP_INTERACTIVE_PENDING: &str = "Interactive setup wizard lands in .";
 
+    // Receipt and completion polish (for 02-05 polish pass)
+    pub const RECEIPT_HEADER: &str = "Review your setup:";
+    pub const RECEIPT_INSTALL_SECTION: &str = "Install";
+    pub const RECEIPT_FONT_SECTION: &str = "Font";
+    pub const RECEIPT_THEME_SECTION: &str = "Theme";
+    pub const RECEIPT_TERMINAL_SECTION: &str = "Terminal";
+    pub const RECEIPT_FOOTER: &str = "Ready to apply? This will create backups first.";
+
+    pub const COMPLETION_TIME_TAKEN: &str = "Time to dopamine:";
+    pub const COMPLETION_NEXT_STEPS: &str = "What's next:";
+    pub const COMPLETION_ACTIVATION_NOTE: &str = "Note: Changes may require a new terminal window to take full effect.";
+    pub const COMPLETION_CALL_TO_ACTION: &str = "Open a fresh terminal to see your new setup shine!";
+
     // Tool selling points (one-liner visual value per)
     pub const PITCH_GHOSTTY: &str = "Makes your terminal glow";
     pub const PITCH_STARSHIP: &str = "Transforms your prompt";
@@ -94,6 +107,28 @@ impl Language {
     pub fn restore_pending_backup(backup_id: &str) -> String {
         format!("Restoring backup: {} lands in .", backup_id)
     }
+
+    // Polish-pass formatting helpers
+    pub fn receipt_line(label: &str, value: &str) -> String {
+        format!("  → {}: {}", label, value)
+    }
+
+    pub fn completion_with_timing(message: &str, duration_ms: u64) -> String {
+        format!("{} ({}ms)", message, duration_ms)
+    }
+
+    pub fn activation_guidance(tool: &str, activation_type: &str) -> String {
+        format!("  {} {} — {}", 
+            match activation_type {
+                "immediate" => "✓",
+                "new_window" => "➔",
+                "restart" => "⟳",
+                _ => "•",
+            },
+            tool,
+            activation_type
+        )
+    }
 }
 
 #[cfg(test)]
@@ -104,6 +139,19 @@ mod tests {
     fn test_setup_messages_exist() {
         assert!(!Language::SETUP_WELCOME.is_empty());
         assert!(!Language::SETUP_COMPLETE.is_empty());
+    }
+
+    #[test]
+    fn test_receipt_messages_exist() {
+        assert!(!Language::RECEIPT_HEADER.is_empty());
+        assert!(!Language::RECEIPT_INSTALL_SECTION.is_empty());
+        assert!(!Language::RECEIPT_FOOTER.is_empty());
+    }
+
+    #[test]
+    fn test_completion_messages_exist() {
+        assert!(!Language::COMPLETION_TIME_TAKEN.is_empty());
+        assert!(!Language::COMPLETION_NEXT_STEPS.is_empty());
     }
 
     #[test]
@@ -124,5 +172,34 @@ mod tests {
     fn test_placeholder_formatters() {
         assert!(Language::set_pending_theme("catppuccin-mocha").contains("catppuccin-mocha"));
         assert!(Language::restore_pending_backup("backup-1").contains("backup-1"));
+    }
+
+    #[test]
+    fn test_receipt_line_format() {
+        let line = Language::receipt_line("Font", "JetBrains Mono");
+        assert!(line.contains("Font"));
+        assert!(line.contains("JetBrains Mono"));
+        assert!(line.contains("→"));
+    }
+
+    #[test]
+    fn test_completion_with_timing() {
+        let msg = Language::completion_with_timing("Setup complete", 850);
+        assert!(msg.contains("850ms"));
+        assert!(msg.contains("Setup complete"));
+    }
+
+    #[test]
+    fn test_activation_guidance_immediate() {
+        let guidance = Language::activation_guidance("Starship", "immediate");
+        assert!(guidance.contains("Starship"));
+        assert!(guidance.contains("immediate"));
+    }
+
+    #[test]
+    fn test_activation_guidance_new_window() {
+        let guidance = Language::activation_guidance("Ghostty colors", "new_window");
+        assert!(guidance.contains("Ghostty colors"));
+        assert!(guidance.contains("new_window"));
     }
 }

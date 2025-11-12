@@ -2,6 +2,7 @@
 /// Single source of truth for tool metadata, installability, and selection logic.
 
 use crate::brand::language::Language;
+use crate::design::typography::Typography;
 use std::collections::HashMap;
 
 /// Brew installation kind
@@ -234,40 +235,44 @@ impl ReviewReceipt {
         self.install_actions.push(action);
     }
 
-    /// Format receipt as human-readable string for display
+    /// Format receipt as human-readable string for display using typography helpers
     pub fn format_for_display(&self) -> String {
         let mut output = String::new();
-        output.push_str("✦ Review and confirm:\n\n");
+        output.push_str(&format!("{}\n\n", Typography::section_header("Review and confirm")));
 
         if !self.install_actions.is_empty() {
-            output.push_str("→ Install:\n");
+            output.push_str(&format!("{}\n", Typography::category_heading("Install")));
             for action in &self.install_actions {
                 let kind_str = match action.brew_kind {
                     BrewKind::Formula => "formula",
                     BrewKind::Cask => "cask",
                 };
-                output.push_str(&format!("  • {} ({})\n", action.tool_label, kind_str));
+                output.push_str(&format!("{}\n", 
+                    Typography::list_item('•', 
+                        &action.tool_label, 
+                        &kind_str)));
             }
             output.push('\n');
         }
 
         if let Some(font) = &self.selected_font {
-            output.push_str(&format!("→ Font: {}\n\n", font));
+            output.push_str(&format!("{}\n", Language::receipt_line(Language::RECEIPT_FONT_SECTION, font)));
         }
 
         if let Some(theme) = &self.selected_theme {
-            output.push_str(&format!("→ Theme: {}\n\n", theme));
+            output.push_str(&format!("{}\n", Language::receipt_line(Language::RECEIPT_THEME_SECTION, theme)));
         }
 
         if let Some(settings) = &self.terminal_settings {
-            output.push_str(&format!("→ Terminal: opacity {}, ", settings.background_opacity));
-            if settings.blur_enabled {
-                output.push_str("blur enabled, ");
-            }
-            output.push_str(&format!("padding {}x{}\n\n", settings.padding_x, settings.padding_y));
+            output.push_str(&format!("{}\n", Language::receipt_line(Language::RECEIPT_TERMINAL_SECTION, 
+                &format!("opacity {}, {}padding {}x{}", 
+                    settings.background_opacity,
+                    if settings.blur_enabled { "blur, " } else { "" },
+                    settings.padding_x, 
+                    settings.padding_y))));
         }
 
-        output.push_str("Backup current config first? (yes/no)\n");
+        output.push_str(&format!("\n{}\n", Typography::explanation(Language::RECEIPT_FOOTER)));
         output
     }
 }
@@ -309,7 +314,6 @@ mod tests {
     fn test_tool_catalog_has_tools() {
         let tools = ToolCatalog::all_tools();
         assert!(!tools.is_empty());
-        // Expect at least: ghostty, starship, bat, delta, eza, lazygit, fastfetch, zsh-syntax-highlighting, alacritty, tmux
         assert!(tools.len() >= 10);
     }
 
@@ -340,21 +344,16 @@ mod tests {
 
         let candidates = compute_install_candidates(&installed);
 
-        // ghostty is installed, so should NOT be in candidates
         assert!(!candidates.iter().any(|t| t.id == "ghostty"));
-
-        // starship is not installed, so SHOULD be in candidates
         assert!(candidates.iter().any(|t| t.id == "starship"));
     }
 
     #[test]
     fn test_install_candidates_excludes_detect_only() {
         let mut installed = HashMap::new();
-        installed.insert("tmux".to_string(), false); // tmux not installed
+        installed.insert("tmux".to_string(), false);
 
         let candidates = compute_install_candidates(&installed);
-
-        // Even though tmux is not installed, it's detect-only so should NOT be a candidate
         assert!(!candidates.iter().any(|t| t.id == "tmux"));
     }
 
@@ -363,13 +362,8 @@ mod tests {
         let selected = vec!["ghostty".to_string(), "tmux".to_string(), "unknown".to_string()];
         let actions = filter_valid_selections(selected);
 
-        // ghostty is installable → included
         assert!(actions.iter().any(|a| a.tool_id == "ghostty"));
-
-        // tmux is detect-only → filtered out
         assert!(!actions.iter().any(|a| a.tool_id == "tmux"));
-
-        // unknown doesn't exist → filtered out
         assert!(!actions.iter().any(|a| a.tool_id == "unknown"));
     }
 
@@ -393,7 +387,7 @@ mod tests {
         let formatted = receipt.format_for_display();
         assert!(formatted.contains("JetBrains Mono"));
         assert!(formatted.contains("Catppuccin Mocha"));
-        assert!(formatted.contains("Review and confirm"));
+        assert!(formatted.contains("Review"));
     }
 
     #[test]

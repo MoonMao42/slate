@@ -1,5 +1,7 @@
 use crate::error::Result;
 use crate::brand::language::Language;
+use crate::design::typography::Typography;
+use crate::design::colors::Colors;
 use crate::cli::font_detection::detect_current_font;
 use crate::cli::tool_selection::{
     ToolCatalog, compute_install_candidates, ReviewReceipt, InstallAction
@@ -10,6 +12,7 @@ use crate::cli::theme_selection::ThemeSelector;
 use crate::adapter::registry::ToolRegistry;
 use cliclack::{intro, outro, select, multiselect};
 use std::collections::HashMap;
+use std::time::Instant;
 
 pub struct WizardContext {
     pub mode: WizardMode,
@@ -21,6 +24,7 @@ pub struct WizardContext {
     pub current_font: Option<String>,
     pub current_theme: Option<String>,
     pub force: bool,
+    pub start_time: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,6 +55,7 @@ impl Wizard {
                 current_font,
                 current_theme,
                 force: false,
+                start_time: None,
             },
             theme_selector: ThemeSelector::new()?,
         })
@@ -60,6 +65,7 @@ impl Wizard {
     /// force=true ignores current state and runs as fresh install
     pub fn run(&mut self, quick_mode: bool, force: bool) -> Result<()> {
         self.context.force = force;
+        self.context.start_time = Some(Instant::now());
 
         // If force flag is set, clear current state
         if force {
@@ -165,7 +171,7 @@ impl Wizard {
         let registry = ToolRegistry::new();
         let installed = registry.detect_installed();
 
-        // Display full inventory with status
+        // Display full inventory with status using typography helpers
         self.display_tool_inventory(&installed)?;
 
         // Get install candidates (missing + installable)
@@ -209,12 +215,13 @@ impl Wizard {
     fn step_select_font(&mut self) -> Result<()> {
         self.log_step("Select Font");
 
-        // Display current font if available
+        // Display current font if available with better formatting
         if let Some(ref current) = self.context.current_font {
-            eprintln!("Current font: {}", current);
+            eprintln!("{}", Typography::secondary_label("current font", current));
         } else {
-            eprintln!("Current font: system default");
+            eprintln!("{}", Typography::secondary_label("current font", "system default"));
         }
+        eprintln!();
 
         // Build font options with skip
         let fonts = FontCatalog::all_fonts();
@@ -253,10 +260,11 @@ impl Wizard {
         self.log_step("Select Theme");
 
         if let Some(ref current) = self.context.current_theme {
-            eprintln!("Current theme: {}", current);
+            eprintln!("{}", Typography::secondary_label("current theme", current));
         } else {
-            eprintln!("Current theme: not yet applied");
+            eprintln!("{}", Typography::secondary_label("current theme", "not yet applied"));
         }
+        eprintln!();
 
         // Get all themes for display
         let all_themes = self.theme_selector.all_themes();
@@ -281,7 +289,7 @@ impl Wizard {
     }
 
     fn display_tool_inventory(&self, installed: &HashMap<String, bool>) -> Result<()> {
-        eprintln!("\n✦ Tool Inventory:\n");
+        eprintln!("\n{}\n", Typography::section_header("Tool Inventory"));
         
         for tool in ToolCatalog::all_tools() {
             let status_mark = if installed.get(tool.id).copied().unwrap_or(false) {
@@ -301,8 +309,10 @@ impl Wizard {
             };
 
             eprintln!(
-                "  {} {} — {}{}",
-                status_mark, tool.label, tool.pitch, install_note
+                "{}",
+                Typography::list_item(status_mark.chars().next().unwrap_or('•'), 
+                    tool.label, 
+                    &format!("{}{}", tool.pitch, install_note))
             );
         }
         eprintln!();
@@ -311,7 +321,32 @@ impl Wizard {
 
     fn show_completion(&mut self) -> Result<()> {
         self.log_step("Complete");
-        outro(Language::SETUP_COMPLETE).ok();
+        
+        // Calculate elapsed time
+        let elapsed_ms = self.context.start_time
+            .map(|t| t.elapsed().as_millis() as u64)
+            .unwrap_or(0);
+
+        // Main completion message with time-to-dopamine
+        eprintln!("\n{}\n", Typography::strong_emphasis(Language::SETUP_COMPLETE));
+        
+        // Show timing only if it's meaningful
+        if elapsed_ms > 0 && elapsed_ms < 60000 { // Show time if < 60 seconds
+            eprintln!("{} {}", 
+                Language::COMPLETION_TIME_TAKEN,
+                format!("{}ms", elapsed_ms));
+        }
+        
+        // Provide next steps guidance
+        eprintln!("\n{}", Language::COMPLETION_NEXT_STEPS);
+        eprintln!("{}", Typography::explanation("• Open a new terminal to see your setup in action"));
+        eprintln!("{}", Typography::explanation("• Fonts and colors apply immediately"));
+        eprintln!("{}", Typography::explanation("• Some features may need a full app restart"));
+        
+        eprintln!("\n{}", Colors::accent("✦ Your new terminal awaits!"));
+        eprintln!();
+
+        outro("Happy customizing").ok();
         Ok(())
     }
 
@@ -347,6 +382,31 @@ impl Wizard {
 
         receipt
     }
+
+    /// Format and display polished receipt
+    pub fn display_receipt(&self, receipt: &ReviewReceipt) -> String {
+        let mut output = String::new();
+        output.push_str(&format!("{}\n\n", Typography::section_header(Language::RECEIPT_HEADER)));
+
+        if !receipt.install_actions.is_empty() {
+            output.push_str(&format!("{}\n", Typography::category_heading(Language::RECEIPT_INSTALL_SECTION)));
+            for action in &receipt.install_actions {
+                output.push_str(&format!("{}\n", Language::receipt_line(&action.tool_label, "")));
+            }
+            output.push('\n');
+        }
+
+        if let Some(font) = &receipt.selected_font {
+            output.push_str(&format!("{}\n", Language::receipt_line(Language::RECEIPT_FONT_SECTION, font)));
+        }
+
+        if let Some(theme) = &receipt.selected_theme {
+            output.push_str(&format!("{}\n", Language::receipt_line(Language::RECEIPT_THEME_SECTION, theme)));
+        }
+
+        output.push_str(&format!("\n{}\n", Typography::explanation(Language::RECEIPT_FOOTER)));
+        output
+    }
 }
 
 #[cfg(test)]
@@ -377,8 +437,6 @@ mod tests {
         wizard.context.current_font = Some("JetBrains Mono".to_string());
         wizard.context.current_theme = Some("Catppuccin Mocha".to_string());
 
-        // After run with force, current state should be cleared
-        // (we're just testing the flag behavior here)
         wizard.context.force = true;
         wizard.context.current_font = None;
         wizard.context.current_theme = None;
@@ -389,11 +447,9 @@ mod tests {
 
     #[test]
     fn test_wizard_detects_font() {
-        // Font detection should complete without error
         let wizard = Wizard::new().unwrap();
         let _context = wizard.get_context();
         // current_font may be None or Some depending on environment
-        // The important thing is that detection succeeded
         assert!(true); // Wizard created successfully with font detection
     }
 
@@ -421,12 +477,34 @@ mod tests {
     fn test_quick_mode_adjusts_step_count() {
         let mut wizard = Wizard::new().unwrap();
         wizard.context.mode = WizardMode::Quick;
-        wizard.context.total_steps = 4; // Quick mode should be shorter
+        wizard.context.total_steps = 4;
         assert_eq!(wizard.context.total_steps, 4);
     }
 
     #[test]
     fn test_wizard_mode_variants() {
         assert_ne!(WizardMode::Quick, WizardMode::Manual);
+    }
+
+    #[test]
+    fn test_display_receipt_includes_sections() {
+        let mut wizard = Wizard::new().unwrap();
+        wizard.context.selected_tools = vec!["ghostty".to_string()];
+        wizard.context.selected_font = Some("JetBrains Mono".to_string());
+        wizard.context.selected_theme = Some("Catppuccin Mocha".to_string());
+
+        let receipt = wizard.build_review_receipt();
+        let display = wizard.display_receipt(&receipt);
+
+        assert!(display.contains("Review"));
+        assert!(display.contains("JetBrains Mono"));
+        assert!(display.contains("Catppuccin Mocha"));
+    }
+
+    #[test]
+    fn test_wizard_tracks_start_time() {
+        let mut wizard = Wizard::new().unwrap();
+        wizard.context.start_time = Some(Instant::now());
+        assert!(wizard.context.start_time.is_some());
     }
 }
