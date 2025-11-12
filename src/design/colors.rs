@@ -26,6 +26,11 @@ impl Colors {
         format!("{}{}{}", Self::GRAY, text, Self::RESET)
     }
 
+    /// Helper: format a string with dimmed gray color
+    pub fn gray_dim(text: &str) -> String {
+        format!("{}{}{}", Self::GRAY_DIM, text, Self::RESET)
+    }
+
     /// Helper: format a string with accent color
     pub fn accent(text: &str) -> String {
         format!("{}{}{}", Self::ACCENT, text, Self::RESET)
@@ -47,6 +52,13 @@ mod tests {
         let gray_text = Colors::gray("test");
         assert!(gray_text.contains("\x1b[38;5;244m"));
         assert!(gray_text.contains("\x1b[0m"));
+    }
+
+    #[test]
+    fn test_gray_dim_format() {
+        let gray_dim_text = Colors::gray_dim("test");
+        assert!(gray_dim_text.contains("\x1b[38;5;240m"));
+        assert!(gray_dim_text.contains("\x1b[0m"));
     }
 
     #[test]
