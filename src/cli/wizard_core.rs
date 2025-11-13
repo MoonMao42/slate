@@ -12,6 +12,7 @@ use crate::cli::theme_selection::ThemeSelector;
 use crate::adapter::registry::ToolRegistry;
 use cliclack::{intro, outro, select, multiselect};
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::time::Instant;
 
 pub struct WizardContext {
@@ -127,6 +128,12 @@ impl Wizard {
     fn step_select_mode(&mut self) -> Result<()> {
         self.log_step("Select Setup Mode");
 
+        if !std::io::stdin().is_terminal() {
+            self.context.mode = WizardMode::Quick;
+            self.context.current_step += 1;
+            return Ok(());
+        }
+
         let mode_choice = select("Setup mode:")
             .item("quick", "Quick (pick a vibe)", "")
             .item("manual", "Manual (customize each)", "")
@@ -146,6 +153,17 @@ impl Wizard {
         self.log_step("Select Style Preset");
 
         let presets = PresetCatalog::all_presets();
+
+        if !std::io::stdin().is_terminal() {
+            // Non-interactive: use first preset as default
+            if let Some(preset) = presets.first() {
+                self.context.selected_font = Some(preset.font_id.to_string());
+                self.context.selected_theme = Some(preset.theme_id.to_string());
+            }
+            self.context.current_step += 1;
+            return Ok(());
+        }
+
         let preset_options: Vec<(&str, &str, String)> = presets
             .iter()
             .map(|p| (p.id, p.name, format!("— {}", p.description)))
@@ -180,6 +198,13 @@ impl Wizard {
         // If no candidates, skip selection
         if candidates.is_empty() {
             eprintln!("All tools are already installed.");
+            self.context.current_step += 1;
+            return Ok(());
+        }
+
+        // Non-interactive: select all candidates by default
+        if !std::io::stdin().is_terminal() {
+            self.context.selected_tools = candidates.iter().map(|c| c.id.to_string()).collect();
             self.context.current_step += 1;
             return Ok(());
         }
@@ -234,6 +259,12 @@ impl Wizard {
         let (skip_id, skip_label) = FontCatalog::skip_option();
         font_options.push((skip_id, skip_label, "".to_string()));
 
+        if !std::io::stdin().is_terminal() {
+            // Non-interactive: skip font selection (keep current)
+            self.context.current_step += 1;
+            return Ok(());
+        }
+
         eprintln!("Select a font (or skip to keep current):");
         let selected_font_id = select("Font:")
             .items(
@@ -272,6 +303,15 @@ impl Wizard {
             .iter()
             .map(|t| (t.id.as_str(), t.name.as_str(), format!("— {}", t.family)))
             .collect();
+
+        if !std::io::stdin().is_terminal() {
+            // Non-interactive: use first theme as default
+            if let Some(first) = all_themes.first() {
+                self.context.selected_theme = Some(first.id.clone());
+            }
+            self.context.current_step += 1;
+            return Ok(());
+        }
 
         eprintln!("Select a theme:");
         let selected_theme_id = select("Theme:")
