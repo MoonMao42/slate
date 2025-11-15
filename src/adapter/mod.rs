@@ -6,6 +6,7 @@ pub mod registry;
 pub mod marker_block;
 pub mod bat;
 pub mod ghostty;
+pub mod eza;
 
 /// How a tool includes external configuration files.
 /// Variants match real-world tool behavior.
