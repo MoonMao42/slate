@@ -4,6 +4,7 @@ use crate::theme::ThemeVariant;
 
 pub mod registry;
 pub mod marker_block;
+pub mod bat;
 
 /// How a tool includes external configuration files.
 /// Variants match real-world tool behavior.
