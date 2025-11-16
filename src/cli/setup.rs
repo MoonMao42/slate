@@ -1,8 +1,11 @@
+use crate::brand::language::Language;
 use crate::error::Result;
 use crate::cli::wizard_core::Wizard;
 use crate::cli::preflight;
 use crate::cli::setup_executor;
 use crate::cli::tool_selection::ToolCatalog;
+use std::io::IsTerminal;
+use std::time::Instant;
 
 /// Handle `slate setup` command with optional flags
 /// Supports: --quick, --force, --only <tool>
@@ -10,6 +13,12 @@ pub fn handle(quick: bool, force: bool, only: Option<String>) -> Result<()> {
     // If --only flag is set, handle retry flow
     if let Some(tool_id) = only {
         return handle_retry_only(&tool_id);
+    }
+
+    if !std::io::stdin().is_terminal() && !quick {
+        return Err(crate::error::SlateError::Internal(
+            "Non-interactive setup requires --quick for explicit consent.".to_string(),
+        ));
     }
 
     // Run pre-flight checks
@@ -31,6 +40,10 @@ pub fn handle(quick: bool, force: bool, only: Option<String>) -> Result<()> {
 
     // Build selections from wizard context
     let context = wizard.get_context();
+    if !context.confirmed {
+        return Ok(());
+    }
+    let start_time = context.start_time;
     let selected_tools = context.selected_tools.clone();
     let selected_font = context.selected_font.as_deref();
     let selected_theme = context.selected_theme.as_deref();
@@ -40,52 +53,71 @@ pub fn handle(quick: bool, force: bool, only: Option<String>) -> Result<()> {
 
     // Display completion message with visibility guidance
     eprintln!("\n{}", summary.format_completion_message());
+    if let Some(timing_line) = format_completion_timing(start_time) {
+        eprintln!("{}", timing_line);
+    }
 
     Ok(())
 }
 
 /// Handle --only flag: retry a single tool installation
 fn handle_retry_only(tool_id: &str) -> Result<()> {
-    // Validate that the tool exists and is installable
-    if let Some(tool) = ToolCatalog::get_tool(tool_id) {
-        if !tool.installable {
-            return Err(crate::error::SlateError::Internal(format!(
-                "Tool '{}' is not installable via setup",
-                tool_id
-            )));
-        }
+    let tool = validate_retry_tool(tool_id)?;
 
-        eprintln!("\n✦ Retrying tool installation: {}\n", tool.label);
+    eprintln!("\n✦ Retrying tool installation: {}\n", tool.label);
 
-        // Run pre-flight checks
-        let preflight_result = preflight::run_checks()?;
-        if !preflight_result.is_ready() {
-            return Err(crate::error::SlateError::Internal(
-                "Pre-flight checks failed.".to_string(),
-            ));
-        }
-
-        // Execute single tool installation
-        let summary = setup_executor::execute_setup(&[tool_id.to_string()], None, None)?;
-
-        // Show completion
-        if summary.success_count() > 0 {
-            eprintln!("\n✓ Tool '{}' installed successfully.\n", tool.label);
-        } else {
-            eprintln!("\n✗ Tool '{}' installation failed. Check logs above.\n", tool.label);
-        }
-
-        Ok(())
-    } else {
-        Err(crate::error::SlateError::Internal(
-            format!("Unknown tool: '{}'. Run 'slate setup' to see available tools.", tool_id),
-        ))
+    // Run pre-flight checks
+    let preflight_result = preflight::run_checks()?;
+    if !preflight_result.is_ready() {
+        return Err(crate::error::SlateError::Internal(
+            "Pre-flight checks failed.".to_string(),
+        ));
     }
+
+    // Execute single tool installation
+    let summary = setup_executor::execute_setup(&[tool_id.to_string()], None, None)?;
+
+    // Show completion
+    if summary.success_count() > 0 {
+        eprintln!("\n✓ Tool '{}' installed successfully.\n", tool.label);
+    } else {
+        eprintln!("\n✗ Tool '{}' installation failed. Check logs above.\n", tool.label);
+    }
+
+    Ok(())
+}
+
+fn validate_retry_tool(tool_id: &str) -> Result<crate::cli::tool_selection::ToolMetadata> {
+    let Some(tool) = ToolCatalog::get_tool(tool_id) else {
+        return Err(crate::error::SlateError::Internal(
+            format!("Unknown tool: '{}'. Run 'slate setup' to see available tools.", tool_id),
+        ));
+    };
+
+    if !tool.installable {
+        return Err(crate::error::SlateError::Internal(format!(
+            "Tool '{}' is not installable via setup",
+            tool_id
+        )));
+    }
+
+    Ok(tool)
+}
+
+fn format_completion_timing(start_time: Option<Instant>) -> Option<String> {
+    start_time.map(|start| {
+        format!(
+            "{} {}ms",
+            Language::COMPLETION_TIME_TAKEN,
+            start.elapsed().as_millis()
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn test_setup_force_flag_recognized() {
@@ -103,11 +135,9 @@ mod tests {
 
     #[test]
     fn test_setup_only_valid_tool() {
-        // Verify valid tools are recognized
-        let result = handle_retry_only("ghostty");
-        // Should not error on validation (execution details may differ)
-        // We're just checking the tool exists
-        let _ = result;
+        // Verify valid tools are recognized without performing the install in test.
+        let result = validate_retry_tool("ghostty");
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -116,5 +146,19 @@ mod tests {
         let result = handle_retry_only("tmux");
         // tmux is detect-only, should fail
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_format_completion_timing_uses_label() {
+        let start = Instant::now() - Duration::from_millis(10);
+        let line = format_completion_timing(Some(start)).expect("timing should be present");
+
+        assert!(line.contains(Language::COMPLETION_TIME_TAKEN));
+        assert!(line.contains("ms"));
+    }
+
+    #[test]
+    fn test_format_completion_timing_none() {
+        assert!(format_completion_timing(None).is_none());
     }
 }

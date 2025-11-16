@@ -4,6 +4,7 @@
 use crate::error::Result;
 use crate::cli::failure_handler::{ExecutionSummary, ToolInstallResult, InstallStatus};
 use crate::cli::tool_selection::{ToolCatalog, BrewKind};
+use crate::cli::font_selection::FontCatalog;
 use std::process::Command;
 
 /// Execute the setup based on wizard selections
@@ -71,10 +72,8 @@ pub fn execute_setup(
 
     // Apply theme (placeholder - actual application in adapters)
     if let Some(theme_name) = theme {
-        eprintln!("Applying theme: {}...", theme_name);
-        // In +, adapters will write the actual config files
-        summary.theme_applied = true;
-        eprintln!("  ✓ Theme applied\n");
+        eprintln!("Theme selected: {}...", theme_name);
+        eprintln!("  ○ Theme adapter apply is not wired yet in this phase\n");
     }
 
     // Overall success: at least one tool succeeded, or no tools were selected
@@ -114,15 +113,21 @@ fn install_tool(package: &str, kind: BrewKind) -> Result<()> {
 }
 
 /// Install a Nerd Font via Homebrew
-fn install_font(font_name: &str) -> Result<()> {
-    // Map font display names to cask names
-    let cask_name = match font_name {
-        "JetBrains Mono" => "font-jetbrains-mono-nerd-font",
-        "Fira Code" => "font-fira-code-nerd-font",
-        "Iosevka Term" => "font-iosevka-term-nerd-font",
-        "Hack" => "font-hack-nerd-font",
-        _ => return Err(crate::error::SlateError::Internal(format!("Unknown font: {}", font_name))),
-    };
+fn install_font(font_name_or_id: &str) -> Result<()> {
+    let cask_name = FontCatalog::get_font(font_name_or_id)
+        .map(|font| font.brew_cask)
+        .or_else(|| {
+            FontCatalog::all_fonts()
+                .into_iter()
+                .find(|font| {
+                    font.name == font_name_or_id
+                        || font.name.replace(" Nerd Font", "") == font_name_or_id
+                })
+                .map(|font| font.brew_cask)
+        })
+        .ok_or_else(|| {
+            crate::error::SlateError::Internal(format!("Unknown font: {}", font_name_or_id))
+        })?;
 
     let mut cmd = Command::new("brew");
     cmd.arg("install").arg("--cask").arg(cask_name);
@@ -166,5 +171,11 @@ mod tests {
             // Just verify these are recognized
             let _ = font;
         }
+    }
+
+    #[test]
+    fn test_theme_selection_stays_pending_without_adapter_apply() {
+        let summary = execute_setup(&[], None, Some("catppuccin-mocha")).unwrap();
+        assert!(!summary.theme_applied);
     }
 }

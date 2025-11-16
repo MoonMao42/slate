@@ -1,4 +1,4 @@
-use crate::adapter::{BatAdapter, DeltaAdapter, GhosttyAdapter, LazygitAdapter, StarshipAdapter};
+use crate::adapter::{BatAdapter, DeltaAdapter, GhosttyAdapter, LazygitAdapter, StarshipAdapter, AlacrittyAdapter, TmuxAdapter};
 use crate::config::backup;
 use crate::{
     available_themes, get_theme, normalize_theme_name, parse_theme_input, ApplyThemeResult,
@@ -51,6 +51,10 @@ pub fn handle_set_command(theme_input: &str, verbose: bool) -> ThemeResult<Apply
     registry.register(Box::new(BatAdapter));
     registry.register(Box::new(DeltaAdapter));
     registry.register(Box::new(LazygitAdapter));
+    registry.register(Box::new(AlacrittyAdapter));
+    registry.register(Box::new(EzaAdapter));
+    registry.register(Box::new(AlacrittyAdapter));
+    registry.register(Box::new(TmuxAdapter));
 
     // Print verbose detection if requested
     if verbose {
@@ -168,6 +172,10 @@ pub fn handle_status_command(verbose: bool) -> ThemeResult<()> {
     registry.register(Box::new(BatAdapter));
     registry.register(Box::new(DeltaAdapter));
     registry.register(Box::new(LazygitAdapter));
+    registry.register(Box::new(AlacrittyAdapter));
+    registry.register(Box::new(EzaAdapter));
+    registry.register(Box::new(AlacrittyAdapter));
+    registry.register(Box::new(TmuxAdapter));
 
     // Collect status for installed tools
     let mut found_any = false;

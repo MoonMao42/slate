@@ -254,10 +254,10 @@ mod tool_selection_tests {
     fn test_formula_vs_cask_distinction() {
         // Verify that formula and cask installs are correctly distinguished
         let ghostty = ToolCatalog::get_tool("ghostty").unwrap();
-        assert_eq!(ghostty.brew_kind, BrewKind::Formula);
+        assert_eq!(ghostty.brew_kind, BrewKind::Cask);
         
-        let alacritty = ToolCatalog::get_tool("alacritty").unwrap();
-        assert_eq!(alacritty.brew_kind, BrewKind::Cask);
+        let starship = ToolCatalog::get_tool("starship").unwrap();
+        assert_eq!(starship.brew_kind, BrewKind::Formula);
     }
 
     #[test]
@@ -309,9 +309,9 @@ mod tool_selection_tests {
             );
         }
         
-        if let Some(alacritty) = ToolCatalog::get_tool("alacritty") {
+        if let Some(starship) = ToolCatalog::get_tool("starship") {
             receipt.add_install_action(
-                slate_cli::cli::tool_selection::InstallAction::from_metadata(&alacritty)
+                slate_cli::cli::tool_selection::InstallAction::from_metadata(&starship)
             );
         }
 
@@ -482,7 +482,7 @@ mod rerun_behavior {
     fn test_wizard_detects_current_state_on_new() {
         // Wizard detects current font on startup
         let wizard = Wizard::new().unwrap();
-        let context = wizard.get_context();
+        let _context = wizard.get_context();
         // current_font may be Some or None depending on environment
         // The important thing is detection doesn't crash
         assert!(true);
@@ -530,6 +530,8 @@ mod rerun_behavior {
 #[cfg(test)]
 mod optional_automations {
     use slate_cli::cli::preset_selection::PresetCatalog;
+    use slate_cli::cli::tool_selection::TerminalSettings;
+    use slate_cli::cli::wizard_core::Wizard;
 
     #[test]
     fn test_preset_visuals_are_defined() {
@@ -554,6 +556,23 @@ mod optional_automations {
             assert!(preset.visuals.background_opacity > 0.0 && preset.visuals.background_opacity <= 1.0);
             assert!(matches!(preset.visuals.cursor_style, "block" | "underline" | "bar"));
         }
+    }
+
+    #[test]
+    fn test_receipt_can_show_terminal_visuals() {
+        let mut wizard = Wizard::new().unwrap();
+        wizard.get_context_mut().selected_terminal_settings = Some(TerminalSettings {
+            background_opacity: 0.95,
+            blur_enabled: true,
+            padding_x: 12,
+            padding_y: 12,
+        });
+
+        let receipt = wizard.build_review_receipt();
+        let formatted = wizard.display_receipt(&receipt);
+        assert!(formatted.contains("Terminal"));
+        assert!(formatted.contains("opacity 0.95"));
+        assert!(formatted.contains("padding 12x12"));
     }
 }
 

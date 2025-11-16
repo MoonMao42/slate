@@ -7,6 +7,9 @@ pub mod marker_block;
 pub mod bat;
 pub mod ghostty;
 pub mod eza;
+pub mod alacritty;
+pub mod delta;
+pub mod tmux;
 
 /// How a tool includes external configuration files.
 /// Variants match real-world tool behavior.

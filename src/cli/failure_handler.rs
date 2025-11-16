@@ -93,20 +93,23 @@ impl ExecutionSummary {
         // Visibility guidance
         output.push_str("📍 Visibility & Activation:\n\n");
 
-        output.push_str("→ Live Now (visible immediately):\n");
-        output.push_str("  • Color themes (bat, lazygit, delta)\n");
-        output.push_str("  • Prompt (Starship)\n");
-        output.push_str("  • Command output formatting (eza, bat)\n\n");
+        output.push_str("→ Available Now:\n");
+        output.push_str("  • Homebrew finished installing the selected tools/apps\n");
+        output.push_str("  • Newly installed CLIs can be available right away\n\n");
 
-        output.push_str("→ Fresh Terminal Required:\n");
-        output.push_str("  • Shell config changes (zsh-syntax-highlighting)\n");
-        output.push_str("  • Environment variables\n");
-        output.push_str("  • New window/tab in terminal emulator\n\n");
+        output.push_str("→ Fresh Shell or Tab:\n");
+        output.push_str("  • Starship prompt initialization\n");
+        output.push_str("  • zsh-syntax-highlighting and shell init changes\n");
+        output.push_str("  • PATH or environment updates that land on shell startup\n\n");
 
-        output.push_str("→ Full App Restart Required:\n");
-        output.push_str("  • Terminal emulator settings (Ghostty, Alacritty)\n");
-        output.push_str("  • Window padding, opacity, cursor style\n");
-        output.push_str("  • Font changes\n\n");
+        output.push_str("→ New Terminal Window or Surface:\n");
+        output.push_str("  • Ghostty/Alacritty padding and similar window-level visuals\n");
+        output.push_str("  • New tabs/windows often pick up terminal chrome changes first\n\n");
+
+        output.push_str("→ Full App Restart May Still Be Required:\n");
+        output.push_str("  • Font changes\n");
+        output.push_str("  • Ghostty background opacity on macOS\n");
+        output.push_str("  • Some terminal appearance settings depending on the app\n\n");
 
         // Retry guidance if there were failures
         if failed > 0 {
@@ -120,8 +123,8 @@ impl ExecutionSummary {
             output.push('\n');
         }
 
-        output.push_str("🎨 You can open a fresh terminal now to see live changes,\n");
-        output.push_str("   or restart your terminal app for full effect.\n");
+        output.push_str("🎨 Open a fresh shell first, then restart the terminal app only if\n");
+        output.push_str("   fonts or window visuals still look unchanged.\n");
 
         output
     }
@@ -215,11 +218,10 @@ mod tests {
             error_message: None,
         });
         summary.font_applied = true;
-        summary.theme_applied = true;
-
         let message = summary.format_completion_message();
         assert!(message.contains("Setup Complete"));
-        assert!(message.contains("Fresh Terminal Required"));
+        assert!(message.contains("Fresh Shell or Tab"));
+        assert!(message.contains("Full App Restart May Still Be Required"));
         assert!(message.contains("Visibility & Activation"));
     }
 

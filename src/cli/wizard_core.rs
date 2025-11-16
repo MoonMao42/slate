@@ -1,18 +1,19 @@
 use crate::error::Result;
 use crate::brand::language::Language;
 use crate::design::typography::Typography;
-use crate::design::colors::Colors;
 use crate::cli::font_detection::detect_current_font;
 use crate::cli::tool_selection::{
-    ToolCatalog, compute_install_candidates, ReviewReceipt, InstallAction
+    ToolCatalog, compute_install_candidates, detect_installed_tools, ReviewReceipt, InstallAction,
+    TerminalSettings,
 };
 use crate::cli::preset_selection::PresetCatalog;
 use crate::cli::font_selection::FontCatalog;
 use crate::cli::theme_selection::ThemeSelector;
-use crate::adapter::registry::ToolRegistry;
-use cliclack::{intro, outro, select, multiselect};
+use cliclack::{confirm, intro, multiselect, outro_cancel, select};
 use std::collections::HashMap;
+use std::fs;
 use std::io::IsTerminal;
+use std::path::PathBuf;
 use std::time::Instant;
 
 pub struct WizardContext {
@@ -22,8 +23,10 @@ pub struct WizardContext {
     pub selected_tools: Vec<String>,
     pub selected_font: Option<String>,
     pub selected_theme: Option<String>,
+    pub selected_terminal_settings: Option<TerminalSettings>,
     pub current_font: Option<String>,
     pub current_theme: Option<String>,
+    pub confirmed: bool,
     pub force: bool,
     pub start_time: Option<Instant>,
 }
@@ -43,7 +46,7 @@ impl Wizard {
     pub fn new() -> Result<Self> {
         // Detect current font and theme on wizard startup
         let current_font = detect_current_font().ok().flatten();
-        let current_theme = None; // TODO: detect current theme from managed config
+        let current_theme = detect_current_theme_id();
         
         Ok(Self {
             context: WizardContext {
@@ -53,8 +56,10 @@ impl Wizard {
                 selected_tools: Vec::new(),
                 selected_font: None,
                 selected_theme: None,
+                selected_terminal_settings: None,
                 current_font,
                 current_theme,
+                confirmed: false,
                 force: false,
                 start_time: None,
             },
@@ -75,24 +80,24 @@ impl Wizard {
             eprintln!("⚙ Force mode: ignoring current state\n");
         }
 
+        self.context.total_steps = if quick_mode { 4 } else { 5 };
+
         // Step 0: Intro
         self.show_intro()?;
 
         // Step 1: Mode or preset selection
         if quick_mode {
             self.context.mode = WizardMode::Quick;
-            // Quick mode: use default preset, then tool selection
-            self.context.total_steps = 4; // intro → preset → tools → action → apply
+            self.sync_total_steps(false);
             self.step_select_preset_quick()?;
         } else {
             // Manual mode: ask for mode selection
             self.step_select_mode()?;
             if self.context.mode == WizardMode::Quick {
-                self.context.total_steps = 4;
+                self.sync_total_steps(true);
                 self.step_select_preset_quick()?;
             } else {
-                // Manual mode: individual selection steps
-                self.context.total_steps = 7; // intro → mode → tools → font → theme → action → apply
+                self.sync_total_steps(true);
             }
         }
 
@@ -109,11 +114,7 @@ impl Wizard {
             self.step_select_theme()?;
         }
 
-        // Later steps handled by subsequent plans:
-        // - Action list review
-        // - Execution
-        // - Completion
-        self.show_completion()?;
+        self.step_review_and_confirm()?;
 
         Ok(())
     }
@@ -145,6 +146,7 @@ impl Wizard {
             _ => WizardMode::Manual,
         };
 
+        self.sync_total_steps(true);
         self.context.current_step += 1;
         Ok(())
     }
@@ -152,18 +154,17 @@ impl Wizard {
     fn step_select_preset_quick(&mut self) -> Result<()> {
         self.log_step("Select Style Preset");
 
-        let presets = PresetCatalog::all_presets();
-
         if !std::io::stdin().is_terminal() {
-            // Non-interactive: use first preset as default
-            if let Some(preset) = presets.first() {
-                self.context.selected_font = Some(preset.font_id.to_string());
-                self.context.selected_theme = Some(preset.theme_id.to_string());
-            }
+            // Non-interactive: use the locked default preset.
+            let preset = PresetCatalog::default_preset();
+            self.context.selected_font = Some(preset.font_id.to_string());
+            self.context.selected_theme = Some(preset.theme_id.to_string());
+            self.context.selected_terminal_settings = Some(self.terminal_settings_from_preset(&preset));
             self.context.current_step += 1;
             return Ok(());
         }
 
+        let presets = PresetCatalog::all_presets();
         let preset_options: Vec<(&str, &str, String)> = presets
             .iter()
             .map(|p| (p.id, p.name, format!("— {}", p.description)))
@@ -176,6 +177,7 @@ impl Wizard {
         if let Some(preset) = PresetCatalog::get_preset(selected_preset_id) {
             self.context.selected_font = Some(preset.font_id.to_string());
             self.context.selected_theme = Some(preset.theme_id.to_string());
+            self.context.selected_terminal_settings = Some(self.terminal_settings_from_preset(&preset));
         }
 
         self.context.current_step += 1;
@@ -185,9 +187,7 @@ impl Wizard {
     fn step_detect_and_select_tools(&mut self) -> Result<()> {
         self.log_step("Detect and Select Tools");
 
-        // Create a registry just for detection
-        let registry = ToolRegistry::new();
-        let installed = registry.detect_installed();
+        let installed = detect_installed_tools();
 
         // Display full inventory with status using typography helpers
         self.display_tool_inventory(&installed)?;
@@ -202,7 +202,7 @@ impl Wizard {
             return Ok(());
         }
 
-        // Non-interactive: select all candidates by default
+        // Non-interactive quick mode: select all candidates by default
         if !std::io::stdin().is_terminal() {
             self.context.selected_tools = candidates.iter().map(|c| c.id.to_string()).collect();
             self.context.current_step += 1;
@@ -260,7 +260,7 @@ impl Wizard {
         font_options.push((skip_id, skip_label, "".to_string()));
 
         if !std::io::stdin().is_terminal() {
-            // Non-interactive: skip font selection (keep current)
+            // Non-interactive: keep current font if present, otherwise preserve preset/default.
             self.context.current_step += 1;
             return Ok(());
         }
@@ -290,8 +290,9 @@ impl Wizard {
     fn step_select_theme(&mut self) -> Result<()> {
         self.log_step("Select Theme");
 
-        if let Some(ref current) = self.context.current_theme {
-            eprintln!("{}", Typography::secondary_label("current theme", current));
+        if let Some(ref current_theme_id) = self.context.current_theme {
+            let current_label = self.resolve_theme_label(current_theme_id);
+            eprintln!("{}", Typography::secondary_label("current theme", &current_label));
         } else {
             eprintln!("{}", Typography::secondary_label("current theme", "not yet applied"));
         }
@@ -299,15 +300,30 @@ impl Wizard {
 
         // Get all themes for display
         let all_themes = self.theme_selector.all_themes();
-        let theme_options: Vec<(&str, &str, String)> = all_themes
-            .iter()
-            .map(|t| (t.id.as_str(), t.name.as_str(), format!("— {}", t.family)))
-            .collect();
+        let mut theme_options: Vec<(String, String, String)> = Vec::new();
+
+        if let Some(current_theme_id) = &self.context.current_theme {
+            theme_options.push((
+                "keep-current".to_string(),
+                "Keep current theme".to_string(),
+                format!("— {}", self.resolve_theme_label(current_theme_id)),
+            ));
+        }
+
+        theme_options.extend(all_themes.iter().map(|t| {
+            (
+                t.id.clone(),
+                t.name.clone(),
+                format!("— {}", t.family),
+            )
+        }));
 
         if !std::io::stdin().is_terminal() {
-            // Non-interactive: use first theme as default
-            if let Some(first) = all_themes.first() {
-                self.context.selected_theme = Some(first.id.clone());
+            // Non-interactive: keep current theme if present, otherwise preserve preset/default.
+            if self.context.current_theme.is_none() && self.context.selected_theme.is_none() {
+                if let Some(first) = all_themes.first() {
+                    self.context.selected_theme = Some(first.id.clone());
+                }
             }
             self.context.current_step += 1;
             return Ok(());
@@ -318,12 +334,16 @@ impl Wizard {
             .items(
                 &theme_options
                     .iter()
-                    .map(|(id, label, desc)| (*id, *label, desc.as_str()))
+                    .map(|(id, label, desc)| (id.as_str(), label.as_str(), desc.as_str()))
                     .collect::<Vec<_>>()
             )
             .interact()?;
 
-        self.context.selected_theme = Some(selected_theme_id.to_string());
+        if selected_theme_id != "keep-current" {
+            self.context.selected_theme = Some(selected_theme_id.to_string());
+        } else {
+            self.context.selected_theme = None;
+        }
         self.context.current_step += 1;
         Ok(())
     }
@@ -359,37 +379,6 @@ impl Wizard {
         Ok(())
     }
 
-    fn show_completion(&mut self) -> Result<()> {
-        self.log_step("Complete");
-        
-        // Calculate elapsed time
-        let elapsed_ms = self.context.start_time
-            .map(|t| t.elapsed().as_millis() as u64)
-            .unwrap_or(0);
-
-        // Main completion message with time-to-dopamine
-        eprintln!("\n{}\n", Typography::strong_emphasis(Language::SETUP_COMPLETE));
-        
-        // Show timing only if it's meaningful
-        if elapsed_ms > 0 && elapsed_ms < 60000 { // Show time if < 60 seconds
-            eprintln!("{} {}", 
-                Language::COMPLETION_TIME_TAKEN,
-                format!("{}ms", elapsed_ms));
-        }
-        
-        // Provide next steps guidance
-        eprintln!("\n{}", Language::COMPLETION_NEXT_STEPS);
-        eprintln!("{}", Typography::explanation("• Open a new terminal to see your setup in action"));
-        eprintln!("{}", Typography::explanation("• Fonts and colors apply immediately"));
-        eprintln!("{}", Typography::explanation("• Some features may need a full app restart"));
-        
-        eprintln!("\n{}", Colors::accent("✦ Your new terminal awaits!"));
-        eprintln!();
-
-        outro("Happy customizing").ok();
-        Ok(())
-    }
-
     fn log_step(&self, step_name: &str) {
         eprintln!(
             "Step {} of {} — {}",
@@ -405,6 +394,31 @@ impl Wizard {
         &mut self.context
     }
 
+    fn step_review_and_confirm(&mut self) -> Result<()> {
+        self.log_step("Review and Confirm");
+        let receipt = self.build_review_receipt();
+        eprintln!("\n{}", self.display_receipt(&receipt));
+
+        if !std::io::stdin().is_terminal() {
+            self.context.confirmed = true;
+            self.context.current_step += 1;
+            return Ok(());
+        }
+
+        let confirmed = confirm(Language::SETUP_REVIEW)
+            .initial_value(true)
+            .interact()?;
+
+        self.context.confirmed = confirmed;
+        self.context.current_step += 1;
+
+        if !confirmed {
+            outro_cancel("Setup canceled").ok();
+        }
+
+        Ok(())
+    }
+
     /// Build a review receipt from current wizard state
     pub fn build_review_receipt(&self) -> ReviewReceipt {
         let mut receipt = ReviewReceipt::new();
@@ -417,36 +431,85 @@ impl Wizard {
             }
         }
 
-        receipt.selected_font = self.context.selected_font.clone();
-        receipt.selected_theme = self.context.selected_theme.clone();
+        receipt.selected_font = self
+            .context
+            .selected_font
+            .as_deref()
+            .map(|font_id| self.resolve_font_label(font_id))
+            .or_else(|| {
+                self.context
+                    .current_font
+                    .as_ref()
+                    .map(|font| format!("Keep current ({font})"))
+            });
+        receipt.selected_theme = self
+            .context
+            .selected_theme
+            .as_deref()
+            .map(|theme_id| self.resolve_theme_label(theme_id))
+            .or_else(|| {
+                self.context
+                    .current_theme
+                    .as_deref()
+                    .map(|theme_id| format!("Keep current ({})", self.resolve_theme_label(theme_id)))
+            });
+        receipt.terminal_settings = self.context.selected_terminal_settings.clone();
 
         receipt
     }
 
     /// Format and display polished receipt
     pub fn display_receipt(&self, receipt: &ReviewReceipt) -> String {
-        let mut output = String::new();
-        output.push_str(&format!("{}\n\n", Typography::section_header(Language::RECEIPT_HEADER)));
-
-        if !receipt.install_actions.is_empty() {
-            output.push_str(&format!("{}\n", Typography::category_heading(Language::RECEIPT_INSTALL_SECTION)));
-            for action in &receipt.install_actions {
-                output.push_str(&format!("{}\n", Language::receipt_line(&action.tool_label, "")));
-            }
-            output.push('\n');
-        }
-
-        if let Some(font) = &receipt.selected_font {
-            output.push_str(&format!("{}\n", Language::receipt_line(Language::RECEIPT_FONT_SECTION, font)));
-        }
-
-        if let Some(theme) = &receipt.selected_theme {
-            output.push_str(&format!("{}\n", Language::receipt_line(Language::RECEIPT_THEME_SECTION, theme)));
-        }
-
-        output.push_str(&format!("\n{}\n", Typography::explanation(Language::RECEIPT_FOOTER)));
-        output
+        receipt.format_for_display()
     }
+
+    fn sync_total_steps(&mut self, include_mode_step: bool) {
+        self.context.total_steps = match (self.context.mode, include_mode_step) {
+            (WizardMode::Quick, true) => 5,
+            (WizardMode::Quick, false) => 4,
+            (WizardMode::Manual, true) => 6,
+            (WizardMode::Manual, false) => 5,
+        };
+    }
+
+    fn resolve_font_label(&self, font_id_or_name: &str) -> String {
+        FontCatalog::get_font(font_id_or_name)
+            .map(|font| font.name.to_string())
+            .unwrap_or_else(|| font_id_or_name.to_string())
+    }
+
+    fn resolve_theme_label(&self, theme_id_or_name: &str) -> String {
+        self.theme_selector
+            .get_theme(theme_id_or_name)
+            .map(|theme| theme.name.clone())
+            .unwrap_or_else(|| theme_id_or_name.to_string())
+    }
+
+    fn terminal_settings_from_preset(
+        &self,
+        preset: &crate::cli::preset_selection::StylePreset,
+    ) -> TerminalSettings {
+        TerminalSettings {
+            background_opacity: preset.visuals.background_opacity,
+            blur_enabled: preset.visuals.blur_radius > 0,
+            padding_x: preset.visuals.padding_x,
+            padding_y: preset.visuals.padding_y,
+        }
+    }
+}
+
+fn detect_current_theme_id() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let path = PathBuf::from(home).join(".config/slate/current");
+
+    if !path.exists() {
+        return None;
+    }
+
+    fs::read_to_string(path)
+        .ok()
+        .map(|content| content.trim().to_string())
+        .filter(|content| !content.is_empty())
 }
 
 #[cfg(test)]
@@ -504,13 +567,43 @@ mod tests {
     fn test_build_review_receipt_with_selections() {
         let mut wizard = Wizard::new().unwrap();
         wizard.context.selected_tools = vec!["ghostty".to_string(), "starship".to_string()];
-        wizard.context.selected_font = Some("JetBrains Mono".to_string());
-        wizard.context.selected_theme = Some("Catppuccin Mocha".to_string());
+        wizard.context.selected_font = Some("jetbrains-mono".to_string());
+        wizard.context.selected_theme = Some("catppuccin-mocha".to_string());
 
         let receipt = wizard.build_review_receipt();
         assert_eq!(receipt.install_actions.len(), 2);
-        assert!(receipt.selected_font.is_some());
-        assert!(receipt.selected_theme.is_some());
+        assert_eq!(receipt.selected_font.as_deref(), Some("JetBrains Mono Nerd Font"));
+        assert_eq!(receipt.selected_theme.as_deref(), Some("Catppuccin Mocha"));
+    }
+
+    #[test]
+    fn test_build_review_receipt_uses_current_state_when_skipped() {
+        let mut wizard = Wizard::new().unwrap();
+        wizard.context.current_font = Some("SF Mono".to_string());
+        wizard.context.current_theme = Some("catppuccin-mocha".to_string());
+
+        let receipt = wizard.build_review_receipt();
+        assert_eq!(receipt.selected_font.as_deref(), Some("Keep current (SF Mono)"));
+        assert_eq!(
+            receipt.selected_theme.as_deref(),
+            Some("Keep current (Catppuccin Mocha)")
+        );
+    }
+
+    #[test]
+    fn test_build_review_receipt_includes_terminal_settings() {
+        let mut wizard = Wizard::new().unwrap();
+        wizard.context.selected_terminal_settings = Some(TerminalSettings {
+            background_opacity: 0.95,
+            blur_enabled: true,
+            padding_x: 12,
+            padding_y: 12,
+        });
+
+        let receipt = wizard.build_review_receipt();
+        let settings = receipt.terminal_settings.expect("terminal settings should exist");
+        assert_eq!(settings.padding_x, 12);
+        assert!(settings.blur_enabled);
     }
 
     #[test]
@@ -530,14 +623,14 @@ mod tests {
     fn test_display_receipt_includes_sections() {
         let mut wizard = Wizard::new().unwrap();
         wizard.context.selected_tools = vec!["ghostty".to_string()];
-        wizard.context.selected_font = Some("JetBrains Mono".to_string());
-        wizard.context.selected_theme = Some("Catppuccin Mocha".to_string());
+        wizard.context.selected_font = Some("jetbrains-mono".to_string());
+        wizard.context.selected_theme = Some("catppuccin-mocha".to_string());
 
         let receipt = wizard.build_review_receipt();
         let display = wizard.display_receipt(&receipt);
 
         assert!(display.contains("Review"));
-        assert!(display.contains("JetBrains Mono"));
+        assert!(display.contains("JetBrains Mono Nerd Font"));
         assert!(display.contains("Catppuccin Mocha"));
     }
 

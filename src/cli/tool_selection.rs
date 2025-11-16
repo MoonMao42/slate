@@ -4,6 +4,7 @@
 use crate::brand::language::Language;
 use crate::design::typography::Typography;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Brew installation kind
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,8 +92,8 @@ impl ToolCatalog {
     /// Get all tools managed by setup wizard
     pub fn all_tools() -> Vec<ToolMetadata> {
         vec![
-            // Installable formula-based tools
-            ToolMetadata::formula(
+            // Installable tools
+            ToolMetadata::cask(
                 "ghostty",
                 "Ghostty",
                 Language::PITCH_GHOSTTY,
@@ -176,6 +177,14 @@ impl ToolCatalog {
             .filter(|t| t.detect_only)
             .collect()
     }
+}
+
+/// Detect installation state for all wizard-managed tools without relying on adapter registration.
+pub fn detect_installed_tools() -> HashMap<String, bool> {
+    ToolCatalog::all_tools()
+        .into_iter()
+        .map(|tool| (tool.id.to_string(), detect_tool_installed(&tool)))
+        .collect()
 }
 
 /// Install action: what to install and how
@@ -306,6 +315,22 @@ pub fn filter_valid_selections(selected_ids: Vec<String>) -> Vec<InstallAction> 
         .collect()
 }
 
+fn detect_tool_installed(tool: &ToolMetadata) -> bool {
+    match tool.id {
+        "zsh-syntax-highlighting" => detect_zsh_syntax_highlighting(),
+        _ => which::which(tool.id).is_ok() || which::which(tool.brew_package).is_ok(),
+    }
+}
+
+fn detect_zsh_syntax_highlighting() -> bool {
+    [
+        "/opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh",
+        "/usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh",
+    ]
+    .iter()
+    .any(|path| Path::new(path).exists())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,13 +394,19 @@ mod tests {
 
     #[test]
     fn test_install_action_from_metadata() {
-        let metadata = ToolMetadata::formula("ghostty", "Ghostty", "pitch", "ghostty");
+        let metadata = ToolMetadata::formula("starship", "Starship", "pitch", "starship");
         let action = InstallAction::from_metadata(&metadata);
 
-        assert_eq!(action.tool_id, "ghostty");
-        assert_eq!(action.tool_label, "Ghostty");
-        assert_eq!(action.brew_package, "ghostty");
+        assert_eq!(action.tool_id, "starship");
+        assert_eq!(action.tool_label, "Starship");
+        assert_eq!(action.brew_package, "starship");
         assert_eq!(action.brew_kind, BrewKind::Formula);
+    }
+
+    #[test]
+    fn test_ghostty_uses_cask_install() {
+        let ghostty = ToolCatalog::get_tool("ghostty").expect("ghostty should exist");
+        assert_eq!(ghostty.brew_kind, BrewKind::Cask);
     }
 
     #[test]
