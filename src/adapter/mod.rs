@@ -11,6 +11,14 @@ pub mod alacritty;
 pub mod delta;
 pub mod tmux;
 
+// Re-export adapter structs for use in commands and tests
+pub use alacritty::AlacrittyAdapter;
+pub use delta::DeltaAdapter;
+pub use tmux::TmuxAdapter;
+pub use bat::BatAdapter;
+pub use ghostty::GhosttyAdapter;
+pub use eza::EzaAdapter;
+
 /// How a tool includes external configuration files.
 /// Variants match real-world tool behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

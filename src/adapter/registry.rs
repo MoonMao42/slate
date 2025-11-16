@@ -147,3 +147,23 @@ mod tests {
         assert_eq!(registry.adapters().len(), 0);
     }
 }
+
+#[cfg(test)]
+mod registry_extended_tests {
+    use super::*;
+    use crate::adapter::{AlacrittyAdapter, DeltaAdapter, TmuxAdapter};
+
+    #[test]
+    fn test_registry_with_new_adapters() {
+        let mut registry = ToolRegistry::new();
+        
+        registry.register(Box::new(AlacrittyAdapter));
+        registry.register(Box::new(DeltaAdapter));
+        registry.register(Box::new(TmuxAdapter));
+
+        assert_eq!(registry.adapters().len(), 3);
+        assert!(registry.get_adapter("alacritty").is_some());
+        assert!(registry.get_adapter("delta").is_some());
+        assert!(registry.get_adapter("tmux").is_some());
+    }
+}
