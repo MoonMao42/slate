@@ -10,6 +10,10 @@ pub mod eza;
 pub mod alacritty;
 pub mod delta;
 pub mod tmux;
+pub mod palette_renderer;
+pub mod starship;
+pub mod lazygit;
+pub mod fastfetch;
 
 // Re-export adapter structs for use in commands and tests
 pub use alacritty::AlacrittyAdapter;
