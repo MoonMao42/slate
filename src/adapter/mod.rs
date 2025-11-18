@@ -14,6 +14,8 @@ pub mod palette_renderer;
 pub mod starship;
 pub mod lazygit;
 pub mod fastfetch;
+pub mod zsh_highlight;
+pub mod font;
 
 // Re-export adapter structs for use in commands and tests
 pub use alacritty::AlacrittyAdapter;
@@ -42,6 +44,10 @@ pub enum ApplyStrategy {
     /// Source a generated script emitted by `slate init`
     /// Tools: zsh-syntax-highlighting (source ~/.config/slate/zsh-highlight.zsh)
     SourceScript,
+
+    /// Detect and install tool (no config file modification)
+    /// Tools: Nerd Font (detection + brew install mapping only)
+    DetectAndInstall,
 }
 
 /// Trait all tool adapters must implement.
@@ -104,17 +110,19 @@ mod tests {
 
     #[test]
     fn test_apply_strategy_variants() {
-        // Verify all 4 variants exist and are distinct
+        // Verify all variants exist and are distinct
         let write_include = ApplyStrategy::WriteAndInclude;
         let edit_in_place = ApplyStrategy::EditInPlace;
         let env_var = ApplyStrategy::EnvironmentVariable;
         let source_script = ApplyStrategy::SourceScript;
+        let detect_install = ApplyStrategy::DetectAndInstall;
 
         // All variants should be distinguishable
         assert_ne!(write_include, edit_in_place);
         assert_ne!(env_var, source_script);
         assert_ne!(write_include, env_var);
         assert_ne!(edit_in_place, source_script);
+        assert_ne!(detect_install, write_include);
     }
 
     #[test]
