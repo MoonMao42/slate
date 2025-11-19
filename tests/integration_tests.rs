@@ -135,7 +135,12 @@ fn test_init_with_shell_arg() {
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(stdout.contains("slate shell init for zsh"));
-    assert!(stdout.contains("SLATE_HOME"));
+    // Check for environment variable exports per 
+    assert!(stdout.contains("export BAT_THEME="));
+    assert!(stdout.contains("export EZA_CONFIG_DIR="));
+    assert!(stdout.contains("export LG_CONFIG_FILE="));
+    // Check for fastfetch wrapper
+    assert!(stdout.contains("fastfetch()"));
 }
 
 // Setup wizard tests 
