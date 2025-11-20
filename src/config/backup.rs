@@ -23,18 +23,18 @@ pub struct RestoreEntry {
     pub tool_key: String, // e.g., "ghostty", "starship", "bat", "delta", "delta-gitconfig", "lazygit"
     pub display_tool: String, // e.g., "Ghostty", "Starship", "bat", "Delta", "Delta (.gitconfig)", "lazygit"
     pub original_path: PathBuf, // e.g., ~/.config/ghostty/config
-    pub backup_path: PathBuf, // e.g., ~/.cache/themectl/backups/restore_point_id/ghostty.backup
+    pub backup_path: PathBuf, // e.g., ~/.cache/slate/backups/restore_point_id/ghostty.backup
 }
 
 /// Represents a manifest-backed restore point with explicit directory structure
-/// Storage: ~/.cache/themectl/backups/<restore_point_id>/
+/// Storage: ~/.cache/slate/backups/<restore_point_id>/
 /// manifest.toml (metadata)
 /// ghostty.backup, starship.backup, bat.backup, delta.backup, delta-gitconfig.backup, lazygit.backup
 #[derive(Debug, Clone)]
 pub struct RestorePoint {
     pub id: String,             // e.g., "2026-04-09T10-00-00Z" (UUID-like, human-readable)
     pub theme_name: String,     // e.g., "Catppuccin Mocha"
-    pub created_at: SystemTime, // When the themectl set operation occurred
+    pub created_at: SystemTime, // When the slate set operation occurred
     pub entries: Vec<RestoreEntry>, // All backed-up files for this restore point
 }
 
@@ -63,7 +63,7 @@ struct RestoreManifest {
 
 static RESTORE_POINT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Get the backup directory path (~/.cache/themectl/backups/)
+/// Get the backup directory path (~/.cache/slate/backups/)
 pub fn backup_directory() -> ThemeResult<PathBuf> {
     let cache_dir = if let Ok(cache) = std::env::var("XDG_CACHE_HOME") {
         PathBuf::from(cache)
@@ -75,7 +75,7 @@ pub fn backup_directory() -> ThemeResult<PathBuf> {
         ));
     };
 
-    let backup_dir = cache_dir.join("themectl").join("backups");
+    let backup_dir = cache_dir.join("slate").join("backups");
 
     // Create directory if missing
     fs::create_dir_all(&backup_dir).map_err(|e| ThemeError::BackupError {
@@ -497,7 +497,7 @@ fn days_from_unix_epoch(year: u64, month: u64, day: u64) -> Option<u64> {
 }
 
 /// List all restore points in the backup directory
-/// Scans ~/.cache/themectl/backups/ for restore_point_id directories with manifest.toml
+/// Scans ~/.cache/slate/backups/ for restore_point_id directories with manifest.toml
 /// Returns Vec<RestorePoint> sorted by creation time descending (newest first)
 pub fn list_restore_points() -> ThemeResult<Vec<RestorePoint>> {
     let backup_dir = backup_directory()?;
@@ -652,7 +652,7 @@ mod tests {
         assert!(result.is_ok());
         let path = result.unwrap();
         assert!(path.exists());
-        assert!(path.to_string_lossy().contains("themectl"));
+        assert!(path.to_string_lossy().contains("slate"));
         assert!(path.to_string_lossy().contains("backups"));
     }
 
@@ -754,7 +754,7 @@ mod tests {
             display_tool: "Ghostty".to_string(),
             original_path: PathBuf::from("~/.config/ghostty/config"),
             backup_path: PathBuf::from(
-                "~/.cache/themectl/backups/2026-04-09T10-00-00Z/ghostty.backup",
+                "~/.cache/slate/backups/2026-04-09T10-00-00Z/ghostty.backup",
             ),
         };
         let serialized = toml::to_string(&entry);

@@ -13,9 +13,9 @@ use tempfile::Builder;
 pub fn auto_create_config(tool: &str, config_path: &Path) -> ThemeResult<()> {
     // Generate minimal config template per tool
     let template = match tool {
-        "ghostty" => "# themectl: Auto-created minimal config\ntheme = \"Catppuccin Mocha\"\n",
-        "starship" => "# themectl: Auto-created minimal config\npalette = \"catppuccin-mocha\"\n",
-        "bat" => "# themectl: Auto-created minimal config\n--theme=\"Catppuccin Mocha\"\n",
+        "ghostty" => "# slate: Auto-created minimal config\ntheme = \"Catppuccin Mocha\"\n",
+        "starship" => "# slate: Auto-created minimal config\npalette = \"catppuccin-mocha\"\n",
+        "bat" => "# slate: Auto-created minimal config\n--theme=\"Catppuccin Mocha\"\n",
         _ => return Ok(()), // Unknown tool, skip
     };
 
@@ -25,7 +25,7 @@ pub fn auto_create_config(tool: &str, config_path: &Path) -> ThemeResult<()> {
     }
 
     let temp_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
-    let mut temp_file = Builder::new().prefix(".themectl.").tempfile_in(temp_dir)?;
+    let mut temp_file = Builder::new().prefix(".slate.").tempfile_in(temp_dir)?;
     temp_file.write_all(template.as_bytes())?;
     temp_file.flush()?;
 

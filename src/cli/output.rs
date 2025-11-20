@@ -90,7 +90,7 @@ pub fn format_error(error: &ThemeError) -> String {
     match error {
         ThemeError::ThemeNotFound(name, available) => {
             format!(
-                "Error: Theme not recognized\n\n    Problem: '{}' does not match any known theme\n\nGuidance: Use 'themectl set <name>' with one of:\n    Available: {}",
+                "Error: Theme not recognized\n\n    Problem: '{}' does not match any known theme\n\nGuidance: Use 'slate set <name>' with one of:\n    Available: {}",
                 name, available
             )
         }
