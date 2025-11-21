@@ -17,6 +17,8 @@ pub fn execute_setup(
 
     eprintln!("\n✦ Applying your setup...\n");
 
+    let mut spinner = cliclack::spinner();
+
     // Install selected tools
     for tool_id in tools_to_install {
         if let Some(tool) = ToolCatalog::get_tool(tool_id) {
@@ -30,7 +32,7 @@ pub fn execute_setup(
                 continue;
             }
 
-            eprintln!("Installing {}...", tool.label);
+            spinner.start(format!("Installing {}...", tool.label));
 
             match install_tool(&tool.brew_package, tool.brew_kind) {
                 Ok(_) => {
@@ -40,7 +42,7 @@ pub fn execute_setup(
                         status: InstallStatus::Success,
                         error_message: None,
                     });
-                    eprintln!("  ✓ {} installed\n", tool.label);
+                    spinner.stop(format!("✓ {} installed", tool.label));
                 }
                 Err(e) => {
                     summary.add_tool_result(ToolInstallResult {
@@ -49,7 +51,7 @@ pub fn execute_setup(
                         status: InstallStatus::Failed,
                         error_message: Some(e.to_string()),
                     });
-                    eprintln!("  ✗ {} failed: {}\n", tool.label, e);
+                    spinner.error(format!("✗ {} failed: {}", tool.label, e));
                     // Continue with next tool (partial failure handling)
                 }
             }
@@ -58,22 +60,22 @@ pub fn execute_setup(
 
     // Apply font (placeholder - actual application in adapters)
     if let Some(font_name) = font {
-        eprintln!("Installing font: {}...", font_name);
+        spinner.start(format!("Installing font: {}...", font_name));
         match install_font(font_name) {
             Ok(_) => {
                 summary.font_applied = true;
-                eprintln!("  ✓ Font installed\n");
+                spinner.stop("✓ Font installed");
             }
             Err(e) => {
-                eprintln!("  ✗ Font installation failed: {}\n", e);
+                spinner.error(format!("✗ Font installation failed: {}", e));
             }
         }
     }
 
     // Apply theme (placeholder - actual application in adapters)
     if let Some(theme_name) = theme {
-        eprintln!("Theme selected: {}...", theme_name);
-        eprintln!("  ○ Theme adapter apply is not wired yet in this phase\n");
+        spinner.start(format!("Theme selected: {}...", theme_name));
+        spinner.stop("○ Theme adapter apply is not wired yet in this phase");
     }
 
     // Overall success: at least one tool succeeded, or no tools were selected
@@ -95,19 +97,15 @@ fn install_tool(package: &str, kind: BrewKind) -> Result<()> {
         }
     }
 
-    cmd.stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit());
+    let output = cmd.output()
+        .map_err(|e| crate::error::SlateError::Internal(format!("Failed to execute brew: {}", e)))?;
 
-    let status = cmd.spawn()
-        .map_err(|e| crate::error::SlateError::Internal(format!("Failed to spawn brew: {}", e)))?
-        .wait()
-        .map_err(|e| crate::error::SlateError::Internal(format!("Failed to wait for brew: {}", e)))?;
-
-    if status.success() {
+    if output.status.success() {
         Ok(())
     } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         Err(crate::error::SlateError::Internal(
-            format!("brew install {} failed with code {:?}", package, status.code())
+            format!("brew install {} failed:\n{}", package, stderr.trim())
         ))
     }
 }
@@ -132,19 +130,15 @@ fn install_font(font_name_or_id: &str) -> Result<()> {
     let mut cmd = Command::new("brew");
     cmd.arg("install").arg("--cask").arg(cask_name);
 
-    cmd.stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit());
+    let output = cmd.output()
+        .map_err(|e| crate::error::SlateError::Internal(format!("Failed to execute brew: {}", e)))?;
 
-    let status = cmd.spawn()
-        .map_err(|e| crate::error::SlateError::Internal(format!("Failed to spawn brew: {}", e)))?
-        .wait()
-        .map_err(|e| crate::error::SlateError::Internal(format!("Failed to wait for brew: {}", e)))?;
-
-    if status.success() {
+    if output.status.success() {
         Ok(())
     } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         Err(crate::error::SlateError::Internal(
-            format!("Font installation failed with code {:?}", status.code())
+            format!("Font installation failed:\n{}", stderr.trim())
         ))
     }
 }
