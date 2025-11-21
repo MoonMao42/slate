@@ -62,7 +62,7 @@ impl AlacrittyAdapter {
     }
 
     /// Ensure integration file includes managed path in import array (idempotent).
-    /// Parse and modify TOML import array for managed config path.
+    /// Uses toml_edit AST to safely modify the import array.
     fn ensure_integration_includes_managed(
         integration_path: &Path,
         managed_path: &Path,
@@ -70,43 +70,47 @@ impl AlacrittyAdapter {
         let managed_str = managed_path.display().to_string();
 
         // Read or create integration file
-        let mut content = if integration_path.exists() {
+        let content = if integration_path.exists() {
             fs::read_to_string(integration_path)?
         } else {
             String::new()
         };
 
-        // Try to parse as TOML to validate structure
-        let _ : toml_edit::DocumentMut = content.parse()
+        // Parse as TOML AST (preserves comments and formatting)
+        let mut doc: toml_edit::DocumentMut = content.parse()
             .map_err(|e| SlateError::InvalidConfig(
                 format!("Failed to parse Alacritty TOML: {}", e)
             ))?;
 
-        // Check if managed path is already present (idempotent)
-        if content.contains(&format!("\"{}\"", managed_str)) {
+        // Get or create the import array
+        if doc.get("import").is_none() {
+            doc["import"] = toml_edit::Item::Value(toml_edit::Value::Array(toml_edit::Array::new()));
+        }
+
+        let import_array = doc["import"]
+            .as_array_mut()
+            .ok_or_else(|| SlateError::InvalidConfig(
+                "Alacritty 'import' field is not an array".to_string()
+            ))?;
+
+        // Idempotent: check if managed path already present
+        let already_present = import_array.iter().any(|v| {
+            v.as_str().map_or(false, |s| s == managed_str)
+        });
+
+        if already_present {
             return Ok(());
         }
 
-        // Simple approach: add import array line if not present
-        if !content.contains("import") {
-            // Create import array from scratch
-            content = format!("import = [\"{}\"]\n{}", managed_str, content);
-        } else if let Some(import_line) = content.find("import") {
-            // Find the import line and its closing bracket
-            let after_import = &content[import_line..];
-            if let Some(closing_bracket) = after_import.find(']') {
-                let insert_pos = import_line + closing_bracket;
-                // Insert path before closing bracket
-                content.insert_str(insert_pos, &format!(", \"{}\"", managed_str));
-            } else {
-                return Err(SlateError::InvalidConfig(
-                    "Malformed import array in Alacritty config".to_string()
-                ));
-            }
-        }
+        // Append managed path to import array
+        import_array.push(managed_str);
 
-        // Write back to file
-        fs::write(integration_path, content)?;
+        // Atomic write back to file (per)
+        use atomic_write_file::AtomicWriteFile;
+        use std::io::Write;
+        let mut file = AtomicWriteFile::open(integration_path)?;
+        file.write_all(doc.to_string().as_bytes())?;
+        file.commit()?;
 
         Ok(())
     }

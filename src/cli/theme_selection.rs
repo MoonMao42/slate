@@ -2,7 +2,7 @@
 /// Per and from 02-.
 /// Provides access to 10 theme variants grouped by family.
 
-use crate::theme::ThemeRegistry;
+use crate::theme::{ThemeRegistry, DEFAULT_THEME_ID};
 use crate::error::Result;
 use std::collections::HashMap;
 
@@ -38,7 +38,7 @@ impl ThemeSelector {
 
     /// Get default theme for quick mode ("catppuccin-mocha")
     pub fn default_theme_id() -> &'static str {
-        "catppuccin-mocha"
+        DEFAULT_THEME_ID
     }
 
     /// Get brief description for a theme family (for UX)

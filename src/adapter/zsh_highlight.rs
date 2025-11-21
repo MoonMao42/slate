@@ -5,7 +5,6 @@
 use std::path::PathBuf;
 use std::fs;
 use std::io::Write;
-use std::collections::HashMap;
 use crate::adapter::{ToolAdapter, ApplyStrategy};
 use crate::adapter::marker_block;
 use crate::adapter::palette_renderer::PaletteRenderer;
@@ -25,33 +24,25 @@ impl ZshHighlightAdapter {
 
     /// Build semantic map for ZSH_HIGHLIGHT_STYLES
     /// Maps palette colors to zsh-syntax-highlighting token types
-    fn build_semantic_map() -> HashMap<&'static str, &'static str> {
-        let mut map = HashMap::new();
+    fn build_semantic_map() -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("mauve", "keyword"),
+            ("blue", "builtin"),
+            ("green", "function"),
+            ("overlay1", "comment"),
+            ("red", "error"),
+            ("red", "arg0"),
+            ("yellow", "arg1"),
+            ("green", "string"),
+            ("yellow", "number"),
+            ("cyan", "reserved"),
+            ("magenta", "variable"),
+            ("white", "default"),
+        ]
+    }
 
-        // Syntax highlighting token types (zsh-syntax-highlighting)
-        // keyword, builtin, function -> accent colors
-        map.insert("mauve", "keyword");           // primary accent
-        map.insert("blue", "builtin");            // secondary accent
-        map.insert("green", "function");          // function names
-
-        // Comments -> muted colors
-        map.insert("overlay1", "comment");        // overlay1 is muted
-
-        // Error states
-        map.insert("red", "error");               // errors in red
-        map.insert("red", "arg0");                // command names
-        map.insert("yellow", "arg1");             // arguments
-
-        // Strings
-        map.insert("green", "string");            // strings in green
-        map.insert("yellow", "number");           // numbers in yellow
-
-        // Additional token types for completeness
-        map.insert("cyan", "reserved");           // reserved words
-        map.insert("magenta", "variable");        // variables
-        map.insert("white", "default");           // default text
-
-        map
+    fn render_highlight_styles(theme: &ThemeVariant) -> Result<String> {
+        PaletteRenderer::to_shell_vars_from_pairs(&theme.palette, &Self::build_semantic_map())
     }
 }
 
@@ -102,10 +93,7 @@ impl ToolAdapter for ZshHighlightAdapter {
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
         // Step 1: Build semantic map for ZSH_HIGHLIGHT_STYLES
-        let semantic_map = Self::build_semantic_map();
-
-        // Step 2: Generate ZSH_HIGHLIGHT_STYLES export using PaletteRenderer
-        let highlight_styles = PaletteRenderer::to_shell_vars(&theme.palette, &semantic_map)?;
+        let highlight_styles = Self::render_highlight_styles(theme)?;
 
         // Step 3: Write to managed config directory
         let managed_dir = self.managed_config_path();
@@ -131,16 +119,20 @@ impl ToolAdapter for ZshHighlightAdapter {
         // Step 6: Create marker block content
         let source_line = "source ~/.config/slate/managed/zsh/highlight-styles.sh";
         let marker_block = format!(
-            "# slate:start — managed by slate, do not edit\n{}\n# slate:end\n",
-            source_line
+            "{}\n{}\n{}\n",
+            marker_block::START,
+            source_line,
+            marker_block::END
         );
 
         // Step 7: Upsert marker block
         let updated_content = marker_block::upsert_managed_block(&zshrc_content, &marker_block);
 
-        // Step 8: Atomic write to .zshrc
-        let mut file = fs::File::create(&zshrc_path)?;
+        // Step 8: Atomic write to .zshrc (per)
+        use atomic_write_file::AtomicWriteFile;
+        let mut file = AtomicWriteFile::open(&zshrc_path)?;
         file.write_all(updated_content.as_bytes())?;
+        file.commit()?;
 
         Ok(())
     }
@@ -202,8 +194,29 @@ mod tests {
         let map = ZshHighlightAdapter::build_semantic_map();
         assert!(!map.is_empty());
         // Verify at least keyword token type is present
-        let has_keyword = map.values().any(|&v| v == "keyword");
+        let has_keyword = map.iter().any(|(_, token)| *token == "keyword");
         assert!(has_keyword);
+    }
+
+    #[test]
+    fn test_semantic_map_preserves_duplicate_palette_keys() {
+        let map = ZshHighlightAdapter::build_semantic_map();
+        let red_count = map.iter().filter(|(palette_key, _)| *palette_key == "red").count();
+        let green_count = map.iter().filter(|(palette_key, _)| *palette_key == "green").count();
+
+        assert_eq!(red_count, 2);
+        assert_eq!(green_count, 2);
+    }
+
+    #[test]
+    fn test_render_highlight_styles_preserves_duplicate_shell_tokens() {
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        let styles = ZshHighlightAdapter::render_highlight_styles(&theme).unwrap();
+
+        assert!(styles.contains("error=38;2;"));
+        assert!(styles.contains("arg0=38;2;"));
+        assert!(styles.contains("function=38;2;"));
+        assert!(styles.contains("string=38;2;"));
     }
 
     #[test]

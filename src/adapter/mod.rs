@@ -19,11 +19,16 @@ pub mod font;
 
 // Re-export adapter structs for use in commands and tests
 pub use alacritty::AlacrittyAdapter;
-pub use delta::DeltaAdapter;
-pub use tmux::TmuxAdapter;
 pub use bat::BatAdapter;
-pub use ghostty::GhosttyAdapter;
+pub use delta::DeltaAdapter;
 pub use eza::EzaAdapter;
+pub use fastfetch::FastfetchAdapter;
+pub use font::FontAdapter;
+pub use ghostty::GhosttyAdapter;
+pub use lazygit::LazygitAdapter;
+pub use starship::StarshipAdapter;
+pub use tmux::TmuxAdapter;
+pub use zsh_highlight::ZshHighlightAdapter;
 
 /// How a tool includes external configuration files.
 /// Variants match real-world tool behavior.

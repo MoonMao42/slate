@@ -130,7 +130,20 @@ impl PaletteRenderer {
         palette: &Palette,
         semantic_map: &HashMap<&str, &str>,
     ) -> Result<String> {
-        if semantic_map.is_empty() {
+        let semantic_pairs: Vec<_> = semantic_map
+            .iter()
+            .map(|(palette_key, shell_var)| (*palette_key, *shell_var))
+            .collect();
+
+        Self::to_shell_vars_from_pairs(palette, &semantic_pairs)
+    }
+
+    /// Render Palette to shell environment variables format while preserving duplicate mappings.
+    pub fn to_shell_vars_from_pairs(
+        palette: &Palette,
+        semantic_pairs: &[(&str, &str)],
+    ) -> Result<String> {
+        if semantic_pairs.is_empty() {
             return Err(SlateError::InvalidThemeData(
                 "semantic_map cannot be empty".to_string(),
             ));
@@ -139,8 +152,8 @@ impl PaletteRenderer {
         let colors = Self::extract_palette_colors(palette);
         let mut segments = Vec::new();
 
-        for (palette_key, shell_var) in semantic_map.iter() {
-            if let Some(color) = colors.get(palette_key as &str) {
+        for (palette_key, shell_var) in semantic_pairs.iter() {
+            if let Some(color) = colors.get(*palette_key) {
                 let (r, g, b) = Self::hex_to_rgb(color)?;
                 let ansi_24bit = Self::rgb_to_ansi_24bit(r, g, b);
                 segments.push(format!("{}={}", shell_var, ansi_24bit));
@@ -188,7 +201,11 @@ impl PaletteRenderer {
             }
         }
 
-        for (style_name, pairs) in styles.iter() {
+        let mut sorted_styles: Vec<_> = styles.into_iter().collect();
+        sorted_styles.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (style_name, mut pairs) in sorted_styles {
+            pairs.sort_by(|a, b| a.0.cmp(&b.0));
             let style_value = pairs
                 .iter()
                 .map(|(k, v)| format!("{}={}", k, v))
@@ -238,13 +255,17 @@ impl PaletteRenderer {
             }
         }
 
+        let mut sorted_prefixes: Vec<_> = prefixes.into_iter().collect();
+        sorted_prefixes.sort_by(|a, b| a.0.cmp(&b.0));
+
         let mut first_prefix = true;
-        for (prefix, fields) in prefixes.iter() {
+        for (prefix, mut fields) in sorted_prefixes {
             if !first_prefix {
                 output.push(',');
             }
             output.push_str(&format!("  \"{}\": {{\n", prefix));
 
+            fields.sort_by(|a, b| a.0.cmp(&b.0));
             for (i, (field, color)) in fields.iter().enumerate() {
                 output.push_str(&format!(
                     "    \"{}\": \"{}\"{}  // ANSI 24-bit RGB\n",
@@ -450,6 +471,16 @@ mod tests {
         let result = PaletteRenderer::to_shell_vars(&palette, &semantic_map).unwrap();
         assert!(result.contains("ZSH_HIGHLIGHT_STYLES"));
         assert!(result.contains("error=38;2;"));
+    }
+
+    #[test]
+    fn test_to_shell_vars_from_pairs_preserves_duplicate_palette_keys() {
+        let palette = create_test_palette();
+        let semantic_pairs = vec![("red", "error"), ("red", "arg0")];
+
+        let result = PaletteRenderer::to_shell_vars_from_pairs(&palette, &semantic_pairs).unwrap();
+        assert!(result.contains("error=38;2;"));
+        assert!(result.contains("arg0=38;2;"));
     }
 
     #[test]

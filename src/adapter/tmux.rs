@@ -111,8 +111,12 @@ impl ToolAdapter for TmuxAdapter {
         // Upsert managed block
         let updated_content = marker_block::upsert_managed_block(&tmux_content, &new_block);
 
-        // Write back to .tmux.conf
-        fs::write(&tmux_conf_path, updated_content)?;
+        // Write back to .tmux.conf (atomic per)
+        use atomic_write_file::AtomicWriteFile;
+        use std::io::Write;
+        let mut file = AtomicWriteFile::open(&tmux_conf_path)?;
+        file.write_all(updated_content.as_bytes())?;
+        file.commit()?;
 
         Ok(())
     }

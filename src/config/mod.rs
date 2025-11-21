@@ -54,6 +54,25 @@ impl ConfigManager {
         self.base_path.join("current")
     }
 
+    /// Path to the user's config root.
+    /// Normally this is ~/.config when base_path is ~/.config/slate.
+    /// Tests may inject a temp base_path directly, in which case that directory acts as config root.
+    fn config_root(&self) -> PathBuf {
+        let is_standard_slate_dir = self.base_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some("slate");
+
+        if is_standard_slate_dir {
+            self.base_path
+                .parent()
+                .unwrap_or(self.base_path.as_path())
+                .to_path_buf()
+        } else {
+            self.base_path.clone()
+        }
+    }
+
     /// Write managed config for a tool.
     /// Slate owns this tier — regenerate freely without losing user data.
     /// Use atomic_write_file to prevent partial writes.
@@ -86,51 +105,62 @@ impl ConfigManager {
     /// Implements : environment variable exports for EnvironmentVariable strategy adapters
     /// (bat, eza, lazygit) and tool wrappers (fastfetch).
     pub fn render_shell_init(&self, shell: &str) -> Result<String> {
-        use crate::theme::ThemeRegistry;
-        
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        
-        // Get current theme if available
+        use crate::theme::{ThemeRegistry, DEFAULT_THEME_ID};
+
         let current_theme_id = self.get_current_theme()?;
         let theme_registry = ThemeRegistry::new()?;
-        
-        // Prepare environment variables
+
+        let default_theme = theme_registry
+            .get(DEFAULT_THEME_ID)
+            .ok_or_else(|| SlateError::InvalidThemeData(format!(
+                "Default theme '{}' is missing from registry",
+                DEFAULT_THEME_ID
+            )))?;
+
+        let (theme, warning_comment) = match current_theme_id.as_deref() {
+            Some(theme_id) => match theme_registry.get(theme_id) {
+                Some(theme) => (theme, None),
+                None => (
+                    default_theme,
+                    Some(format!(
+                        "# WARNING: Current theme '{}' not found. Using default values.\n",
+                        theme_id
+                    )),
+                ),
+            },
+            None => (
+                default_theme,
+                Some("# WARNING: No current theme set. Using default values.\n".to_string()),
+            ),
+        };
+
+        let managed_root = self.base_path.join("managed");
+        let config_root = self.config_root();
+        let eza_config_dir = managed_root.join("eza");
+        let lazygit_managed = managed_root.join("lazygit").join("config.yml");
+        let lazygit_user = config_root.join("lazygit").join("config.yml");
+        let fastfetch_config = managed_root.join("fastfetch").join("config.jsonc");
+
         let mut env_exports = String::new();
-        
-        if let Some(theme_id) = &current_theme_id {
-            if let Some(_theme) = theme_registry.get(theme_id) {
-                // BAT_THEME: use theme ID in kebab-case (already normalized)
-                env_exports.push_str(&format!("export BAT_THEME=\"{}\"\n", theme_id));
-                
-                // EZA_CONFIG_DIR: point to managed eza directory
-                env_exports.push_str(&format!(
-                    "export EZA_CONFIG_DIR=\"{}/.config/slate/managed/eza\"\n",
-                    home
-                ));
-                
-                // LG_CONFIG_FILE: point to managed lazygit config (managed first, then user's)
-                env_exports.push_str(&format!(
-                    "export LG_CONFIG_FILE=\"{}/.config/slate/managed/lazygit/config.yml:{}/.config/lazygit/config.yml\"\n",
-                    home, home
-                ));
-            }
-        } else {
-            // Fallback: no current theme set
-            env_exports.push_str("# WARNING: No current theme set. Using default values.\n");
-            env_exports.push_str("export BAT_THEME=\"catppuccin-mocha\"\n");
-            env_exports.push_str(&format!(
-                "export EZA_CONFIG_DIR=\"{}/.config/slate/managed/eza\"\n",
-                home
-            ));
-            env_exports.push_str(&format!(
-                "export LG_CONFIG_FILE=\"{}/.config/slate/managed/lazygit/config.yml:{}/.config/lazygit/config.yml\"\n",
-                home, home
-            ));
+        if let Some(warning_comment) = warning_comment {
+            env_exports.push_str(&warning_comment);
         }
-        
-        // Tool wrapper for fastfetch
-        let fastfetch_wrapper = "fastfetch() {\n  command fastfetch -c \"$HOME/.config/slate/managed/fastfetch/config.jsonc\" \"$@\"\n}\n";
-        
+        env_exports.push_str(&format!("export BAT_THEME=\"{}\"\n", theme.tool_refs.bat));
+        env_exports.push_str(&format!(
+            "export EZA_CONFIG_DIR=\"{}\"\n",
+            eza_config_dir.display()
+        ));
+        env_exports.push_str(&format!(
+            "export LG_CONFIG_FILE=\"{},{}\"\n",
+            lazygit_managed.display(),
+            lazygit_user.display()
+        ));
+
+        let fastfetch_wrapper = format!(
+            "fastfetch() {{\n  command fastfetch -c \"{}\" \"$@\"\n}}\n",
+            fastfetch_config.display()
+        );
+
         match shell {
             "zsh" | "bash" => {
                 let output = format!(
@@ -164,7 +194,7 @@ impl ConfigManager {
                                 var_name, var_value
                             ));
                         }
-                    } else if !line.is_empty() && !line.starts_with("#") {
+                    } else if !line.is_empty() {
                         // Keep comments as-is
                         fish_init.push_str(line);
                         fish_init.push('\n');
@@ -172,7 +202,10 @@ impl ConfigManager {
                 }
                 
                 // Fish function wrapper
-                fish_init.push_str("function fastfetch --wraps fastfetch\n  command fastfetch -c \"$HOME/.config/slate/managed/fastfetch/config.jsonc\" $argv\nend\n");
+                fish_init.push_str(&format!(
+                    "function fastfetch --wraps fastfetch\n  command fastfetch -c \"{}\" $argv\nend\n",
+                    fastfetch_config.display()
+                ));
                 
                 Ok(fish_init)
             }
@@ -432,15 +465,59 @@ mod tests {
         assert!(shell_init.contains("slate shell init for zsh"));
         
         // Check for environment variable exports
-        assert!(shell_init.contains("export BAT_THEME="));
-        assert!(shell_init.contains("export EZA_CONFIG_DIR="));
-        assert!(shell_init.contains("export LG_CONFIG_FILE="));
+        assert!(shell_init.contains("export BAT_THEME=\"Catppuccin Mocha\""));
+        assert!(shell_init.contains(&format!(
+            "export EZA_CONFIG_DIR=\"{}\"",
+            temp.path().join("managed/eza").display()
+        )));
+        assert!(shell_init.contains(&format!(
+            "export LG_CONFIG_FILE=\"{},{}\"",
+            temp.path().join("managed/lazygit/config.yml").display(),
+            temp.path().join("lazygit/config.yml").display()
+        )));
         
         // Check for fastfetch wrapper
         assert!(shell_init.contains("fastfetch()"));
+        assert!(shell_init.contains(&temp.path().join("managed/fastfetch/config.jsonc").display().to_string()));
         
         // Verify theme is used
-        assert!(shell_init.contains("catppuccin-mocha"));
+        assert!(shell_init.contains("Catppuccin Mocha"));
+    }
+
+    #[test]
+    fn test_render_shell_init_without_current_theme_uses_default_exports() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+
+        let shell_init = config_manager.render_shell_init("zsh").unwrap();
+
+        assert!(shell_init.contains("# WARNING: No current theme set. Using default values."));
+        assert!(shell_init.contains("export BAT_THEME=\"Catppuccin Mocha\""));
+        assert!(shell_init.contains(&format!(
+            "export LG_CONFIG_FILE=\"{},{}\"",
+            temp.path().join("managed/lazygit/config.yml").display(),
+            temp.path().join("lazygit/config.yml").display()
+        )));
+    }
+
+    #[test]
+    fn test_render_shell_init_with_invalid_current_theme_uses_default_exports() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+
+        config_manager.set_current_theme("bogus-theme").unwrap();
+        let shell_init = config_manager.render_shell_init("zsh").unwrap();
+
+        assert!(shell_init.contains("# WARNING: Current theme 'bogus-theme' not found. Using default values."));
+        assert!(shell_init.contains("export BAT_THEME=\"Catppuccin Mocha\""));
+        assert!(shell_init.contains(&format!(
+            "export EZA_CONFIG_DIR=\"{}\"",
+            temp.path().join("managed/eza").display()
+        )));
     }
 
     #[test]

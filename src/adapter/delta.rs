@@ -14,13 +14,6 @@ use std::path::PathBuf;
 pub struct DeltaAdapter;
 
 impl DeltaAdapter {
-    /// Get config home directory (XDG default)
-    fn config_home() -> Result<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| SlateError::MissingHomeDir)?;
-        Ok(PathBuf::from(home).join(".config"))
-    }
-
     /// Path to ~/.gitconfig (integration file)
     fn gitconfig_path() -> Result<PathBuf> {
         let home = std::env::var("HOME")
@@ -50,12 +43,17 @@ impl DeltaAdapter {
     }
 
     /// Render delta color theme settings (for managed config file)
-    fn render_delta_colors(_theme: &ThemeVariant) -> String {
+    fn render_delta_colors(theme: &ThemeVariant) -> String {
+        let syntax_theme = theme
+            .tool_refs
+            .get("delta")
+            .unwrap_or("catppuccin-mocha");
         format!(
             "[delta]\n\
-             syntax-theme = catppuccin-mocha\n\
+             syntax-theme = {}\n\
              dark = true\n\
-             line-numbers = true\n"
+             line-numbers = true\n",
+            syntax_theme
         )
     }
 }
@@ -117,8 +115,12 @@ impl ToolAdapter for DeltaAdapter {
         // Upsert managed block
         let updated_content = marker_block::upsert_managed_block(&gitconfig_content, &new_block);
 
-        // Write back to gitconfig
-        fs::write(&gitconfig_path, updated_content)?;
+        // Write back to gitconfig (atomic per)
+        use atomic_write_file::AtomicWriteFile;
+        use std::io::Write;
+        let mut file = AtomicWriteFile::open(&gitconfig_path)?;
+        file.write_all(updated_content.as_bytes())?;
+        file.commit()?;
 
         Ok(())
     }
@@ -225,7 +227,7 @@ mod tests {
         let output = DeltaAdapter::render_delta_colors(&theme);
 
         assert!(output.contains("[delta]"));
-        assert!(output.contains("syntax-theme"));
+        assert!(output.contains("syntax-theme = test"));
         assert!(output.contains("dark = true"));
     }
 

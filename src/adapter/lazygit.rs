@@ -14,17 +14,37 @@ use which::which;
 pub struct LazygitAdapter;
 
 impl LazygitAdapter {
+    fn parse_config_paths(path_str: &str) -> Option<PathBuf> {
+        for separator in [',', ':'] {
+            if !path_str.contains(separator) {
+                continue;
+            }
+
+            if let Some(first_path) = path_str
+                .split(separator)
+                .map(str::trim)
+                .find(|path| !path.is_empty())
+            {
+                return Some(PathBuf::from(first_path));
+            }
+        }
+
+        let trimmed = path_str.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(trimmed))
+        }
+    }
+
     /// Resolve lazygit config path per , /// 1. LG_CONFIG_FILE env var (if set)
     /// 2. XDG_CONFIG_HOME/lazygit/config.yml
     /// 3. ~/Library/Application Support/lazygit/ (macOS)
     fn resolve_config_path() -> Result<PathBuf> {
         // Step 1: Check LG_CONFIG_FILE env var first
         if let Ok(path_str) = std::env::var("LG_CONFIG_FILE") {
-            if !path_str.is_empty() {
-                // LG_CONFIG_FILE can be comma-separated paths; take first one
-                if let Some(first_path) = path_str.split(',').next() {
-                    return Ok(PathBuf::from(first_path));
-                }
+            if let Some(first_path) = Self::parse_config_paths(&path_str) {
+                return Ok(first_path);
             }
         }
 
@@ -76,16 +96,14 @@ impl ToolAdapter for LazygitAdapter {
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
         // Step 1: Extract theme name from tool_refs
-        let _lazygit_theme = theme
-            .tool_refs
+        theme.tool_refs
             .get("lazygit")
             .ok_or_else(|| {
                 SlateError::InvalidThemeData(format!(
                     "Theme '{}' missing lazygit tool reference",
                     theme.id
                 ))
-            })?
-            .to_string();
+            })?;
 
         // Step 2: Generate managed YAML using PaletteRenderer
         let managed_content = self.generate_yaml_config(theme)?;
@@ -107,9 +125,13 @@ impl ToolAdapter for LazygitAdapter {
 
 impl LazygitAdapter {
     fn generate_yaml_config(&self, theme: &ThemeVariant) -> Result<String> {
-        // Generate lazygit YAML config with themed GUI colors
-        // Using semantic mapping for lazygit UI elements
+        let lazygit_ref = theme.tool_refs
+            .get("lazygit")
+            .ok_or_else(|| SlateError::InvalidThemeData(format!(
+                "Theme '{}' missing lazygit tool reference", theme.id
+            )))?;
 
+        // Generate lazygit YAML config with themed GUI colors
         let mut semantic_map = std::collections::HashMap::new();
         semantic_map.insert("text", "gui.theme.inactiveBorderColor");
         semantic_map.insert("foreground", "gui.theme.activeBorderColor");
@@ -124,7 +146,7 @@ impl LazygitAdapter {
                 .map(|line| format!("  {}", line))
                 .collect::<Vec<_>>()
                 .join("\n"),
-            theme.tool_refs.get("lazygit").unwrap_or(&"default".to_string())
+            lazygit_ref
         );
 
         Ok(config)
@@ -160,5 +182,22 @@ mod tests {
         let result = adapter.get_current_theme();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_parse_config_paths_prefers_first_comma_separated_path() {
+        let path = LazygitAdapter::parse_config_paths("/tmp/managed.yml,/tmp/user.yml");
+        assert_eq!(path, Some(PathBuf::from("/tmp/managed.yml")));
+    }
+
+    #[test]
+    fn test_parse_config_paths_accepts_legacy_colon_separator() {
+        let path = LazygitAdapter::parse_config_paths("/tmp/managed.yml:/tmp/user.yml");
+        assert_eq!(path, Some(PathBuf::from("/tmp/managed.yml")));
+    }
+
+    #[test]
+    fn test_parse_config_paths_rejects_empty_input() {
+        assert_eq!(LazygitAdapter::parse_config_paths("   "), None);
     }
 }

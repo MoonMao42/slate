@@ -9,6 +9,9 @@ pub mod dracula;
 pub mod nord;
 pub mod gruvbox;
 
+/// Shared default theme ID used when Slate needs a fallback theme.
+pub const DEFAULT_THEME_ID: &str = "catppuccin-mocha";
+
 /// Color palette for a theme.
 /// Per revised: Hybrid design with semantic UI colors (5) + ANSI normal/bright (16) as named fields,
 /// plus extras for theme-specific colors. Zero-allocation.
