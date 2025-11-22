@@ -100,6 +100,41 @@ impl ConfigManager {
     }
 
 
+
+    /// Write shell integration file (env.zsh) with theme-aware content.
+    /// Write shell integration file (env.zsh) with theme-aware content.
+    /// Per , generates exports + fastfetch wrapper + zsh-highlight source.
+    /// Called both during setup (to initialize) and on `slate set` (to update).
+    pub fn write_shell_integration_file(&self, theme: &crate::theme::ThemeVariant) -> Result<()> {
+        let mut content = String::new();
+        
+        // Export BAT_THEME
+        content.push_str(&format!("export BAT_THEME=\"{}\"
+", theme.tool_refs.bat));
+        
+        // Export EZA_CONFIG_DIR
+        content.push_str("export EZA_CONFIG_DIR=\"$HOME/.config/slate/managed/eza\"
+");
+        
+        // Export LG_CONFIG_FILE
+        content.push_str("export LG_CONFIG_FILE=\"$HOME/.config/slate/managed/lazygit/config.yml:$HOME/.config/lazygit/config.yml\"
+");
+        
+        // Add fastfetch wrapper function
+        content.push_str("fastfetch() { command fastfetch -c ~/.config/slate/managed/fastfetch/config.jsonc \"$@\"; }
+");
+        
+        // Add zsh-syntax-highlighting source line
+        content.push_str("source ~/.config/slate/managed/zsh/highlight-styles.sh
+");
+        
+        // Write atomically to ~/.config/slate/managed/shell/env.zsh
+        self.write_managed_file("shell", "env.zsh", &content)?;
+        
+        Ok(())
+    }
+
+
     /// Render shell integration for `slate init <shell>`.
     /// slate prints shell exports/source commands directly.
     /// Implements : environment variable exports for EnvironmentVariable strategy adapters
