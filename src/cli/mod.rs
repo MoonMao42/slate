@@ -3,7 +3,6 @@ pub mod set;
 pub mod status;
 pub mod list;
 pub mod restore;
-pub mod init;
 pub mod wizard_core;
 pub mod font_detection;
 pub mod tool_selection;
@@ -24,7 +23,6 @@ pub fn dispatch(command: &str, args: &[&str]) -> Result<()> {
         "status" => status::handle(args),
         "list" => list::handle(args),
         "restore" => restore::handle(args),
-        "init" => init::handle(args),
         _ => Err(crate::error::SlateError::Internal(
             format!("Unknown command: {}", command)
         )),

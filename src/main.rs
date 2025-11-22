@@ -34,15 +34,10 @@ enum Commands {
     Status,
     /// List available themes
     List,
-    /// Restore previous configuration
-    Restore {
+    /// Reset to previous configuration
+    Reset {
         /// Backup point ID (optional; if omitted, shows list)
         backup_id: Option<String>,
-    },
-    /// Initialize shell integration
-    Init {
-        /// Shell type (zsh, bash, fish)
-        shell: Option<String>,
     },
 }
 
@@ -67,13 +62,9 @@ fn main() -> Result<()> {
         Commands::List => {
             cli::list::handle(&[])?;
         }
-        Commands::Restore { backup_id } => {
+        Commands::Reset { backup_id } => {
             let args: Vec<&str> = backup_id.as_ref().map(|id| vec![id.as_str()]).unwrap_or_default();
             cli::restore::handle(&args)?;
-        }
-        Commands::Init { shell } => {
-            let args: Vec<&str> = shell.as_ref().map(|s| vec![s.as_str()]).unwrap_or_default();
-            cli::init::handle(&args)?;
         }
     }
 
