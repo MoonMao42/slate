@@ -6,6 +6,10 @@ use crate::cli::failure_handler::{ExecutionSummary, ToolInstallResult, InstallSt
 use crate::cli::tool_selection::{ToolCatalog, BrewKind};
 use crate::cli::font_selection::FontCatalog;
 use std::process::Command;
+use std::fs;
+use std::path::PathBuf;
+use atomic_write_file::AtomicWriteFile;
+use std::io::Write;
 
 /// Execute the setup based on wizard selections
 pub fn execute_setup(
@@ -17,7 +21,7 @@ pub fn execute_setup(
 
     eprintln!("\n✦ Applying your setup...\n");
 
-    let mut spinner = cliclack::spinner();
+    let spinner = cliclack::spinner();
 
     // Install selected tools
     for tool_id in tools_to_install {
@@ -78,10 +82,80 @@ pub fn execute_setup(
         spinner.stop("○ Theme adapter apply is not wired yet in this phase");
     }
 
+    // Setup shell integration: write marker block to .zshrc and env.zsh
+    spinner.start("Setting up shell integration...");
+    match setup_shell_integration(theme) {
+        Ok(_) => {
+            spinner.stop("✓ Shell integration configured");
+        }
+        Err(e) => {
+            spinner.error(format!("✗ Shell integration setup failed: {}", e));
+        }
+    }
+
     // Overall success: at least one tool succeeded, or no tools were selected
     summary.overall_success = summary.failure_count() == 0 || summary.success_count() > 0;
 
     Ok(summary)
+}
+
+/// Setup shell integration: write marker block to .zshrc and env.zsh
+fn setup_shell_integration(theme: Option<&str>) -> Result<()> {
+    use crate::adapter::marker_block;
+    use crate::config::ConfigManager;
+    use crate::theme::ThemeRegistry;
+    
+    let home = std::env::var("HOME")
+        .map_err(|_| crate::error::SlateError::MissingHomeDir)?;
+    let zshrc_path = PathBuf::from(home).join(".zshrc");
+    
+    // Load or create ~/.zshrc content
+    let zshrc_content = if zshrc_path.exists() {
+        fs::read_to_string(&zshrc_path)?
+    } else {
+        String::new()
+    };
+    
+    // Validate marker block state (0/0 or 1/1 pairs)
+    marker_block::validate_block_state(&zshrc_content)?;
+    
+    // Create marker block with source line
+    let marker_content = format!(
+        "{}\nsource ~/.config/slate/managed/shell/env.zsh\n{}\n",
+        marker_block::START,
+        marker_block::END
+    );
+    
+    // Upsert the block (idempotent)
+    let updated = marker_block::upsert_managed_block(&zshrc_content, &marker_content);
+    
+    // Atomic write back to .zshrc
+    let mut file = AtomicWriteFile::open(&zshrc_path)?;
+    file.write_all(updated.as_bytes())?;
+    file.commit()?;
+    
+    // Resolve theme with precedence: explicit argument → current_theme file → default theme
+    let config_mgr = ConfigManager::new()?;
+    let theme_id = if let Some(theme_name) = theme {
+        theme_name.to_string()
+    } else if let Some(current_theme) = config_mgr.get_current_theme()? {
+        current_theme
+    } else {
+        "catppuccin-mocha".to_string()
+    };
+    
+    // Validate theme exists in registry
+    let registry = ThemeRegistry::new()?;
+    let selected_theme = registry.get(&theme_id)
+        .ok_or_else(|| crate::error::SlateError::InvalidThemeData(
+            format!("Theme '{}' not found", theme_id)
+        ))?;
+    
+    // Persist current theme and write env.zsh
+    config_mgr.set_current_theme(&selected_theme.id)?;
+    config_mgr.write_shell_integration_file(selected_theme)?;
+    
+    Ok(())
 }
 
 /// Install a tool via Homebrew
