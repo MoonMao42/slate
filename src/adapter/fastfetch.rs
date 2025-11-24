@@ -84,7 +84,7 @@ impl ToolAdapter for FastfetchAdapter {
 }
 
 impl FastfetchAdapter {
-    fn generate_jsonc_config(&self, theme: &ThemeVariant) -> Result<String> {
+    pub fn generate_jsonc_config(&self, theme: &ThemeVariant) -> Result<String> {
         use serde_json::json;
         use crate::adapter::palette_renderer::PaletteRenderer;
 
