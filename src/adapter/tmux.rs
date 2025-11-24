@@ -23,7 +23,14 @@ impl TmuxAdapter {
     }
 
     /// Render tmux status bar color configuration
-    /// Maps palette to tmux status-style, window-status, and pane-border colors
+    /// Maps palette to 7 tmux color elements:
+    /// 1. status-style (bg/fg)
+    /// 2. window-status-current-style (bg/fg)
+    /// 3. pane-border-style (fg)
+    /// 4. pane-active-border-style (fg)
+    /// 5. message-style (bg/fg)
+    /// 6. mode-style (bg/fg)
+    /// 7. message-command-style (bg/fg)
     fn render_tmux_colors(theme: &ThemeVariant) -> String {
         let palette = &theme.palette;
 
@@ -32,13 +39,22 @@ impl TmuxAdapter {
              set -g status-style \"bg={} fg={}\"\n\
              set -g window-status-current-style \"bg={} fg={} bold\"\n\
              set -g pane-border-style \"fg={}\"\n\
-             set -g pane-active-border-style \"fg={}\"\n",
-            palette.background,
-            palette.foreground,
-            palette.blue,      // accent for active window
-            palette.foreground,
-            palette.black,      // muted for inactive panes
-            palette.blue,       // accent for active pane
+             set -g pane-active-border-style \"fg={}\"\n\
+             set -g message-style \"bg={} fg={}\"\n\
+             set -g mode-style \"bg={} fg={}\"\n\
+             set -g message-command-style \"bg={} fg={}\"\n",
+            palette.background,       // status bg
+            palette.foreground,       // status fg
+            palette.blue,             // active window bg (accent)
+            palette.foreground,       // active window fg
+            palette.black,            // inactive pane fg (muted)
+            palette.blue,             // active pane fg (accent)
+            palette.background,       // message bg
+            palette.foreground,       // message fg
+            palette.black,            // mode selection bg (muted)
+            palette.blue,             // mode selection fg (accent)
+            palette.background,       // message-command bg
+            palette.foreground        // message-command fg
         )
     }
 
@@ -224,11 +240,22 @@ mod tests {
         let theme = create_test_theme();
         let output = TmuxAdapter::render_tmux_colors(&theme);
 
+        // Verify all 7 elements are present
         assert!(output.contains("status-style"));
         assert!(output.contains("window-status-current-style"));
         assert!(output.contains("pane-border-style"));
+        assert!(output.contains("pane-active-border-style"));
+        assert!(output.contains("message-style"));
+        assert!(output.contains("mode-style"));
+        assert!(output.contains("message-command-style"));
+        
+        // Verify color values
         assert!(output.contains("#000000")); // background
         assert!(output.contains("#ffffff")); // foreground
+        
+        // Verify 7 set -g directives (count)
+        let count = output.matches("set -g").count();
+        assert_eq!(count, 7, "Expected 7 set -g directives, found {}", count);
     }
 
     #[test]
