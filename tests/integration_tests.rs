@@ -116,7 +116,9 @@ fn test_list_command_runs() {
     let output = cmd.arg("list").output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    assert!(stdout.contains(Language::LIST_PENDING));
+    // slate list now shows themes with TrueColor palette blocks
+    assert!(stdout.contains(Language::LIST_HEADER));
+    assert!(stdout.contains("Catppuccin")); // At least one theme should be listed
 }
 
 #[test]

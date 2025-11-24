@@ -31,7 +31,7 @@ impl TmuxAdapter {
     /// 5. message-style (bg/fg)
     /// 6. mode-style (bg/fg)
     /// 7. message-command-style (bg/fg)
-    fn render_tmux_colors(theme: &ThemeVariant) -> String {
+    pub fn render_tmux_colors(theme: &ThemeVariant) -> String {
         let palette = &theme.palette;
 
         format!(
