@@ -85,34 +85,61 @@ impl ToolAdapter for FastfetchAdapter {
 
 impl FastfetchAdapter {
     fn generate_jsonc_config(&self, theme: &ThemeVariant) -> Result<String> {
-        // For now, generate a minimal JSONC template with themed colors
+        use serde_json::json;
+        use crate::adapter::palette_renderer::PaletteRenderer;
+
         let palette = &theme.palette;
 
-        // Generate basic JSONC config with color settings
-        let config = format!(
-            r#"{{
-  "display": {{
-    "separator": " ",
-    "key-width": 12,
-    "type": "kitty",
-    "logo": {{
-      "type": "builtin",
-      "name": "apple",
-      "width": 20,
-      "height": 10,
-      "preserve": true
-    }}
-  }},
-  "color": {{
-    "text": "{}",
-    "background": "{}"
-  }}
-}}
-"#,
-            palette.foreground, palette.background
-        );
+        // Convert hex colors to ANSI 24-bit RGB format
+        let (r_fg, g_fg, b_fg) = PaletteRenderer::hex_to_rgb(&palette.foreground)?;
+        let (r_blue, g_blue, b_blue) = PaletteRenderer::hex_to_rgb(&palette.blue)?;
 
-        Ok(config)
+        let color_keys = format!("38;2;{};{};{}", r_fg, g_fg, b_fg);
+        let color_accent = format!("38;2;{};{};{}", r_blue, g_blue, b_blue);
+
+        let config = json!({
+            "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+            "display": {
+                "separator": "─",
+                "key-width": 12,
+                "logo": {
+                    "type": "builtin",
+                    "name": "apple",
+                    "width": 20,
+                    "height": 10,
+                    "preserve": true
+                }
+            },
+            "color": {
+                "keys": color_keys,
+                "separator": color_keys,
+                "output": color_keys
+            },
+            "modules": [
+                { "type": "title" },
+                { "type": "separator" },
+                { "type": "os" },
+                { "type": "kernel" },
+                { "type": "cpu" },
+                {
+                    "type": "memory",
+                    "options": {
+                        "barLength": 20,
+                        "barsColors": [color_accent]
+                    }
+                },
+                {
+                    "type": "disk",
+                    "key": "Disk (/)",
+                    "options": {
+                        "barsColors": [color_accent]
+                    }
+                },
+                { "type": "shell" }
+            ]
+        });
+
+        Ok(serde_json::to_string_pretty(&config)?)
     }
 }
 

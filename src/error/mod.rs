@@ -50,6 +50,9 @@ pub enum SlateError {
     #[error("TOML parse error: {0}")]
     TomlParseError(#[from] toml_edit::TomlError),
 
+    #[error("JSON serialization error: {0}")]
+    JsonError(#[from] serde_json::Error),
+
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 
