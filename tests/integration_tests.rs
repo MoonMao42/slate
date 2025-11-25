@@ -1,7 +1,5 @@
 use assert_cmd::Command;
 use slate_cli::brand::language::Language;
-use std::fs;
-use tempfile::TempDir;
 
 #[test]
 fn test_cli_help_shows_commands() {
@@ -14,8 +12,7 @@ fn test_cli_help_shows_commands() {
     assert!(stdout.contains("set"));
     assert!(stdout.contains("status"));
     assert!(stdout.contains("list"));
-    assert!(stdout.contains("restore"));
-    assert!(stdout.contains("init"));
+    assert!(stdout.contains("reset"));
 }
 
 #[test]
@@ -60,24 +57,15 @@ fn test_list_subcommand_help() {
 }
 
 #[test]
-fn test_restore_subcommand_help() {
+fn test_reset_subcommand_help() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(&["restore", "--help"]).output().unwrap();
+    let output = cmd.args(&["reset", "--help"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    assert!(stdout.contains("restore"));
+    assert!(stdout.contains("reset"));
 }
 
-#[test]
-fn test_init_subcommand_help() {
-    let mut cmd = Command::cargo_bin("slate").unwrap();
-
-    let output = cmd.args(&["init", "--help"]).output().unwrap();
-    let stdout = String::from_utf8(output.stdout).unwrap();
-
-    assert!(stdout.contains("init"));
-}
 
 #[test]
 fn test_setup_quick_flag() {
@@ -95,8 +83,8 @@ fn test_set_with_theme_argument() {
     let output = cmd.args(&["set", "catppuccin-mocha"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    // Placeholder shows theme name
-    assert!(stdout.contains("catppuccin-mocha"));
+    // set command now switches theme and confirms
+    assert!(stdout.contains("Catppuccin Mocha"));
 }
 
 #[test]
@@ -122,53 +110,15 @@ fn test_list_command_runs() {
 }
 
 #[test]
-fn test_restore_with_backup_id() {
+fn test_reset_with_backup_id() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(&["restore", "backup123"]).output().unwrap();
+    let output = cmd.args(&["reset", "backup123"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(stdout.contains("backup123"));
 }
 
-#[test]
-fn test_init_with_shell_arg() {
-    let mut cmd = Command::cargo_bin("slate").unwrap();
-
-    let output = cmd.args(&["init", "zsh"]).output().unwrap();
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let lazygit_line = stdout
-        .lines()
-        .find(|line| line.starts_with("export LG_CONFIG_FILE="))
-        .unwrap();
-
-    assert!(stdout.contains("slate shell init for zsh"));
-    // Check for environment variable exports per 
-    assert!(stdout.contains("export BAT_THEME=\""));
-    assert!(stdout.contains("export EZA_CONFIG_DIR="));
-    assert!(stdout.contains("export LG_CONFIG_FILE="));
-    assert!(lazygit_line.contains(','));
-    // Check for fastfetch wrapper
-    assert!(stdout.contains("fastfetch()"));
-}
-
-#[test]
-fn test_init_with_invalid_current_theme_falls_back_to_default_exports() {
-    let temp = TempDir::new().unwrap();
-    let slate_dir = temp.path().join(".config/slate");
-    fs::create_dir_all(&slate_dir).unwrap();
-    fs::write(slate_dir.join("current"), "bogus-theme\n").unwrap();
-
-    let mut cmd = Command::cargo_bin("slate").unwrap();
-    cmd.env("HOME", temp.path());
-
-    let output = cmd.args(["init", "zsh"]).output().unwrap();
-    let stdout = String::from_utf8(output.stdout).unwrap();
-
-    assert!(stdout.contains("Current theme 'bogus-theme' not found"));
-    assert!(stdout.contains("export BAT_THEME=\"Catppuccin Mocha\""));
-    assert!(stdout.contains("export LG_CONFIG_FILE=\""));
-}
 
 // Setup wizard tests 
 
