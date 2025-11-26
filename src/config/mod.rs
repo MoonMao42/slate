@@ -1,25 +1,24 @@
+use crate::error::{Result, SlateError};
+use atomic_write_file::AtomicWriteFile;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use atomic_write_file::AtomicWriteFile;
 use toml_edit::DocumentMut;
-use crate::error::{Result, SlateError};
 
 /// Three-tier configuration manager.
 /// Manages three tiers per /// 1. Managed tier: ~/.config/slate/managed/{tool}/ — Slate writes here (regenerates freely)
 /// 2. Integration tier: ~/.config/{tool}/config — User's entry file (slate ensures it includes managed, never modifies content)
 /// 3. User tier: ~/.config/slate/user/{tool}/ — User's custom overrides (slate never touches)
 pub struct ConfigManager {
-    base_path: PathBuf,  // ~/.config/slate
+    base_path: PathBuf, // ~/.config/slate
 }
 
 impl ConfigManager {
     /// Create ConfigManager with default base path.
     /// hardcode ~/.config/slate/ (macOS-only, no ProjectDirs)
     pub fn new() -> Result<Self> {
-        let home = std::env::var("HOME")
-            .map_err(|_| crate::error::SlateError::MissingHomeDir)?;
+        let home = std::env::var("HOME").map_err(|_| crate::error::SlateError::MissingHomeDir)?;
 
         let base_path = PathBuf::from(home).join(".config/slate");
 
@@ -54,25 +53,6 @@ impl ConfigManager {
         self.base_path.join("current")
     }
 
-    /// Path to the user's config root.
-    /// Normally this is ~/.config when base_path is ~/.config/slate.
-    /// Tests may inject a temp base_path directly, in which case that directory acts as config root.
-    fn config_root(&self) -> PathBuf {
-        let is_standard_slate_dir = self.base_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            == Some("slate");
-
-        if is_standard_slate_dir {
-            self.base_path
-                .parent()
-                .unwrap_or(self.base_path.as_path())
-                .to_path_buf()
-        } else {
-            self.base_path.clone()
-        }
-    }
-
     /// Write managed config for a tool.
     /// Slate owns this tier — regenerate freely without losing user data.
     /// Use atomic_write_file to prevent partial writes.
@@ -98,47 +78,47 @@ impl ConfigManager {
 
         Ok(())
     }
-
-
-
-    /// Write shell integration file (env.zsh) with theme-aware content.
     /// Write shell integration file (env.zsh) with theme-aware content.
     /// Per , generates exports + fastfetch wrapper + zsh-highlight source.
     /// Called both during setup (to initialize) and on `slate set` (to update).
     pub fn write_shell_integration_file(&self, theme: &crate::theme::ThemeVariant) -> Result<()> {
         let mut content = String::new();
-        
+
         // Export BAT_THEME
-        content.push_str(&format!("export BAT_THEME=\"{}\"
-", theme.tool_refs.bat));
-        
+        content.push_str(&format!(
+            "export BAT_THEME=\"{}\"
+",
+            theme.tool_refs.bat
+        ));
+
         // Export EZA_CONFIG_DIR
-        content.push_str("export EZA_CONFIG_DIR=\"$HOME/.config/slate/managed/eza\"
-");
-        
+        content.push_str(
+            "export EZA_CONFIG_DIR=\"$HOME/.config/slate/managed/eza\"
+",
+        );
+
         // Export LG_CONFIG_FILE
         content.push_str("export LG_CONFIG_FILE=\"$HOME/.config/slate/managed/lazygit/config.yml:$HOME/.config/lazygit/config.yml\"
 ");
-        
+
         // Add fastfetch wrapper function
         content.push_str("fastfetch() { command fastfetch -c ~/.config/slate/managed/fastfetch/config.jsonc \"$@\"; }
 ");
-        
-        // Add zsh-syntax-highlighting source line
-        content.push_str("source ~/.config/slate/managed/zsh/highlight-styles.sh
-");
-        
+
+        // Guard optional zsh-syntax-highlighting styles so fresh shells do not
+        // fail when the plugin has not been installed yet.
+        content.push_str(
+            "if [ -f \"$HOME/.config/slate/managed/zsh/highlight-styles.sh\" ]; then
+  source \"$HOME/.config/slate/managed/zsh/highlight-styles.sh\"
+fi
+",
+        );
+
         // Write atomically to ~/.config/slate/managed/shell/env.zsh
         self.write_managed_file("shell", "env.zsh", &content)?;
-        
+
         Ok(())
     }
-
-
-    /// Render shell integration for `slate init <shell>`.
-    /// slate prints shell exports/source commands directly.
-    /// Implements : environment variable exports for EnvironmentVariable strategy adapters
-    /// (bat, eza, lazygit) and tool wrappers (fastfetch).
     /// Update current theme tracking file.
     /// plain text file with theme ID.
     pub fn set_current_theme(&self, theme_id: &str) -> Result<()> {
@@ -201,15 +181,10 @@ impl ConfigManager {
     /// "catppuccin-mocha"
     /// )?;
     /// ```
-    pub fn edit_config_field(
-        &self,
-        config_path: &Path,
-        keys: &[&str],
-        value: &str,
-    ) -> Result<()> {
+    pub fn edit_config_field(&self, config_path: &Path, keys: &[&str], value: &str) -> Result<()> {
         if !config_path.exists() {
             return Err(crate::error::SlateError::ConfigNotFound(
-                config_path.to_string_lossy().to_string()
+                config_path.to_string_lossy().to_string(),
             ));
         }
 
@@ -227,7 +202,8 @@ impl ConfigManager {
             // For multi-level keys, we'd need recursive navigation which is complex with DocumentMut
             // Adapters should implement custom logic instead
             return Err(crate::error::SlateError::Internal(
-                "Multi-level TOML editing not yet supported; use adapter-specific logic".to_string()
+                "Multi-level TOML editing not yet supported; use adapter-specific logic"
+                    .to_string(),
             ));
         }
 
@@ -330,7 +306,7 @@ mod tests {
         let result = config_manager.write_managed_file(
             "ghostty",
             "colors.conf",
-            "# Managed config\ncolor0 = #000000"
+            "# Managed config\ncolor0 = #000000",
         );
 
         assert!(result.is_ok());
@@ -367,7 +343,9 @@ mod tests {
         assert_eq!(current, None);
 
         // Set theme
-        config_manager.set_current_theme("catppuccin-mocha").unwrap();
+        config_manager
+            .set_current_theme("catppuccin-mocha")
+            .unwrap();
 
         // Verify it was set
         let current = config_manager.get_current_theme().unwrap();
@@ -375,10 +353,27 @@ mod tests {
     }
 
     #[test]
+    fn test_shell_integration_file_guards_optional_zsh_source() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+
+        config_manager.write_shell_integration_file(&theme).unwrap();
+
+        let shell_file = config_manager.managed_dir("shell").join("env.zsh");
+        let content = fs::read_to_string(shell_file).unwrap();
+        assert!(content
+            .contains("if [ -f \"$HOME/.config/slate/managed/zsh/highlight-styles.sh\" ]; then"));
+        assert!(content.contains("source \"$HOME/.config/slate/managed/zsh/highlight-styles.sh\""));
+    }
+
+    #[test]
     fn test_edit_config_field_single_level() {
         let temp = TempDir::new().unwrap();
         let config_path = temp.path().join("config.toml");
-        
+
         // Create a test config file
         let initial = r#"
 palette = "old"
@@ -391,11 +386,7 @@ format = "..."
         };
 
         // Edit the palette key
-        let result = config_manager.edit_config_field(
-            &config_path,
-            &["palette"],
-            "new-palette"
-        );
+        let result = config_manager.edit_config_field(&config_path, &["palette"], "new-palette");
 
         assert!(result.is_ok());
 

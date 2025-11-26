@@ -3,7 +3,7 @@
 //! This adapter uses the MarkerBlock module for safe, validated editing.
 //! Detects tmux installation but doesn't require it (optional tool).
 
-use crate::adapter::{ToolAdapter, ApplyStrategy, marker_block};
+use crate::adapter::{marker_block, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -17,8 +17,7 @@ pub struct TmuxAdapter;
 impl TmuxAdapter {
     /// Path to ~/.tmux.conf (integration file)
     fn tmux_conf_path() -> Result<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| SlateError::MissingHomeDir)?;
+        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home).join(".tmux.conf"))
     }
 
@@ -43,18 +42,18 @@ impl TmuxAdapter {
              set -g message-style \"bg={} fg={}\"\n\
              set -g mode-style \"bg={} fg={}\"\n\
              set -g message-command-style \"bg={} fg={}\"\n",
-            palette.background,       // status bg
-            palette.foreground,       // status fg
-            palette.blue,             // active window bg (accent)
-            palette.foreground,       // active window fg
-            palette.black,            // inactive pane fg (muted)
-            palette.blue,             // active pane fg (accent)
-            palette.background,       // message bg
-            palette.foreground,       // message fg
-            palette.black,            // mode selection bg (muted)
-            palette.blue,             // mode selection fg (accent)
-            palette.background,       // message-command bg
-            palette.foreground        // message-command fg
+            palette.background, // status bg
+            palette.foreground, // status fg
+            palette.blue,       // active window bg (accent)
+            palette.foreground, // active window fg
+            palette.black,      // inactive pane fg (muted)
+            palette.blue,       // active pane fg (accent)
+            palette.background, // message bg
+            palette.foreground, // message fg
+            palette.black,      // mode selection bg (muted)
+            palette.blue,       // mode selection fg (accent)
+            palette.background, // message-command bg
+            palette.foreground  // message-command fg
         )
     }
 
@@ -139,8 +138,10 @@ impl ToolAdapter for TmuxAdapter {
 
     fn reload(&self) -> Result<()> {
         // Attempt to reload tmux server if running
+        let tmux_conf_path = Self::tmux_conf_path()?;
         let result = Command::new("tmux")
-            .args(&["source-file", "~/.tmux.conf"])
+            .arg("source-file")
+            .arg(&tmux_conf_path)
             .output();
 
         match result {
@@ -248,11 +249,11 @@ mod tests {
         assert!(output.contains("message-style"));
         assert!(output.contains("mode-style"));
         assert!(output.contains("message-command-style"));
-        
+
         // Verify color values
         assert!(output.contains("#000000")); // background
         assert!(output.contains("#ffffff")); // foreground
-        
+
         // Verify 7 set -g directives (count)
         let count = output.matches("set -g").count();
         assert_eq!(count, 7, "Expected 7 set -g directives, found {}", count);

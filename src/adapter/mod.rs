@@ -1,21 +1,21 @@
-use std::path::PathBuf;
 use crate::error::Result;
 use crate::theme::ThemeVariant;
+use std::path::PathBuf;
 
-pub mod registry;
-pub mod marker_block;
-pub mod bat;
-pub mod ghostty;
-pub mod eza;
 pub mod alacritty;
+pub mod bat;
 pub mod delta;
-pub mod tmux;
-pub mod palette_renderer;
-pub mod starship;
-pub mod lazygit;
+pub mod eza;
 pub mod fastfetch;
-pub mod zsh_highlight;
 pub mod font;
+pub mod ghostty;
+pub mod lazygit;
+pub mod marker_block;
+pub mod palette_renderer;
+pub mod registry;
+pub mod starship;
+pub mod tmux;
+pub mod zsh_highlight;
 
 // Re-export adapter structs for use in commands and tests
 pub use alacritty::AlacrittyAdapter;
@@ -47,7 +47,7 @@ pub enum ApplyStrategy {
     EnvironmentVariable,
 
     /// Source a generated script emitted by `slate init`
-    /// Tools: zsh-syntax-highlighting (source ~/.config/slate/zsh-highlight.zsh)
+    /// Tools: zsh-syntax-highlighting (source ~/.config/slate/managed/zsh/highlight-styles.sh)
     SourceScript,
 
     /// Detect and install tool (no config file modification)

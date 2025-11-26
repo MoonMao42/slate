@@ -164,11 +164,18 @@ impl PaletteRenderer {
             return Ok(String::new());
         }
 
-        let style_string = segments.join(":");
-        Ok(format!(
-            "export ZSH_HIGHLIGHT_STYLES=\"{}\"\n",
-            style_string
-        ))
+        // ZSH_HIGHLIGHT_STYLES is a zsh associative array — must be set per-key,
+        // not exported as a flat string.
+        let mut output = String::new();
+        for segment in &segments {
+            if let Some((token, color)) = segment.split_once('=') {
+                output.push_str(&format!(
+                    "ZSH_HIGHLIGHT_STYLES[{}]='fg={}'\n",
+                    token, color
+                ));
+            }
+        }
+        Ok(output)
     }
 
     /// Render Palette to tmux format.
@@ -469,8 +476,7 @@ mod tests {
         semantic_map.insert("red", "error");
 
         let result = PaletteRenderer::to_shell_vars(&palette, &semantic_map).unwrap();
-        assert!(result.contains("ZSH_HIGHLIGHT_STYLES"));
-        assert!(result.contains("error=38;2;"));
+        assert!(result.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=38;2;"));
     }
 
     #[test]
@@ -479,8 +485,8 @@ mod tests {
         let semantic_pairs = vec![("red", "error"), ("red", "arg0")];
 
         let result = PaletteRenderer::to_shell_vars_from_pairs(&palette, &semantic_pairs).unwrap();
-        assert!(result.contains("error=38;2;"));
-        assert!(result.contains("arg0=38;2;"));
+        assert!(result.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=38;2;"));
+        assert!(result.contains("ZSH_HIGHLIGHT_STYLES[arg0]='fg=38;2;"));
     }
 
     #[test]

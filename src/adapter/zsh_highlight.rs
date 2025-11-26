@@ -1,15 +1,15 @@
 //! zsh-syntax-highlighting adapter for shell syntax coloring.
-//! Per and zsh-syntax-highlighting uses a managed config file
-//! sourced from .zshrc via marker blocks for safe insertion and removal.
+//! Per and slate generates a managed shell snippet and lets the
+//! central shell integration file source it. This avoids competing marker
+//! blocks inside `.zshrc`.
 
-use std::path::PathBuf;
-use std::fs;
-use std::io::Write;
-use crate::adapter::{ToolAdapter, ApplyStrategy};
-use crate::adapter::marker_block;
 use crate::adapter::palette_renderer::PaletteRenderer;
+use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
 
 /// zsh-syntax-highlighting adapter implementing v2 ToolAdapter trait.
 pub struct ZshHighlightAdapter;
@@ -17,8 +17,7 @@ pub struct ZshHighlightAdapter;
 impl ZshHighlightAdapter {
     /// Get home directory
     fn home() -> Result<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| SlateError::MissingHomeDir)?;
+        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home))
     }
 
@@ -88,7 +87,7 @@ impl ToolAdapter for ZshHighlightAdapter {
     }
 
     fn apply_strategy(&self) -> ApplyStrategy {
-        ApplyStrategy::WriteAndInclude
+        ApplyStrategy::SourceScript
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
@@ -100,38 +99,9 @@ impl ToolAdapter for ZshHighlightAdapter {
         fs::create_dir_all(&managed_dir)?;
 
         let highlight_file = managed_dir.join("highlight-styles.sh");
-        let mut file = fs::File::create(&highlight_file)?;
-        file.write_all(highlight_styles.as_bytes())?;
-
-        // Step 4: Read .zshrc and validate marker block state
-        let zshrc_path = self.integration_config_path()?;
-
-        // Create .zshrc if it doesn't exist
-        let zshrc_content = if zshrc_path.exists() {
-            fs::read_to_string(&zshrc_path)?
-        } else {
-            String::new()
-        };
-
-        // Step 5: Validate marker block state
-        marker_block::validate_block_state(&zshrc_content)?;
-
-        // Step 6: Create marker block content
-        let source_line = "source ~/.config/slate/managed/zsh/highlight-styles.sh";
-        let marker_block = format!(
-            "{}\n{}\n{}\n",
-            marker_block::START,
-            source_line,
-            marker_block::END
-        );
-
-        // Step 7: Upsert marker block
-        let updated_content = marker_block::upsert_managed_block(&zshrc_content, &marker_block);
-
-        // Step 8: Atomic write to .zshrc (per)
         use atomic_write_file::AtomicWriteFile;
-        let mut file = AtomicWriteFile::open(&zshrc_path)?;
-        file.write_all(updated_content.as_bytes())?;
+        let mut file = AtomicWriteFile::open(&highlight_file)?;
+        file.write_all(highlight_styles.as_bytes())?;
         file.commit()?;
 
         Ok(())
@@ -160,9 +130,9 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_strategy_returns_write_and_include() {
+    fn test_apply_strategy_returns_source_script() {
         let adapter = ZshHighlightAdapter;
-        assert_eq!(adapter.apply_strategy(), ApplyStrategy::WriteAndInclude);
+        assert_eq!(adapter.apply_strategy(), ApplyStrategy::SourceScript);
     }
 
     #[test]
@@ -201,8 +171,14 @@ mod tests {
     #[test]
     fn test_semantic_map_preserves_duplicate_palette_keys() {
         let map = ZshHighlightAdapter::build_semantic_map();
-        let red_count = map.iter().filter(|(palette_key, _)| *palette_key == "red").count();
-        let green_count = map.iter().filter(|(palette_key, _)| *palette_key == "green").count();
+        let red_count = map
+            .iter()
+            .filter(|(palette_key, _)| *palette_key == "red")
+            .count();
+        let green_count = map
+            .iter()
+            .filter(|(palette_key, _)| *palette_key == "green")
+            .count();
 
         assert_eq!(red_count, 2);
         assert_eq!(green_count, 2);
@@ -213,10 +189,10 @@ mod tests {
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
         let styles = ZshHighlightAdapter::render_highlight_styles(&theme).unwrap();
 
-        assert!(styles.contains("error=38;2;"));
-        assert!(styles.contains("arg0=38;2;"));
-        assert!(styles.contains("function=38;2;"));
-        assert!(styles.contains("string=38;2;"));
+        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=38;2;"));
+        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[arg0]='fg=38;2;"));
+        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[function]='fg=38;2;"));
+        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[string]='fg=38;2;"));
     }
 
     #[test]

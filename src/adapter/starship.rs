@@ -119,6 +119,8 @@ impl ToolAdapter for StarshipAdapter {
             semantic_map.insert("surface0", "surface0");
             semantic_map.insert("foreground", "foreground");
             semantic_map.insert("background", "background");
+            semantic_map.insert("black", "crust");
+            semantic_map.insert("white", "white");
 
             let palette_colors = crate::adapter::palette_renderer::PaletteRenderer::to_toml(&theme.palette, &semantic_map)?;
 
