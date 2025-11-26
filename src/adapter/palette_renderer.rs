@@ -355,6 +355,15 @@ impl PaletteRenderer {
         if let Some(v) = &palette.surface0 {
             colors.insert("surface0".to_string(), v.clone());
         }
+        if let Some(v) = &palette.base {
+            colors.insert("base".to_string(), v.clone());
+        }
+        if let Some(v) = &palette.mantle {
+            colors.insert("mantle".to_string(), v.clone());
+        }
+        if let Some(v) = &palette.crust {
+            colors.insert("crust".to_string(), v.clone());
+        }
 
         colors
     }
@@ -401,6 +410,9 @@ mod tests {
             surface2: Some("#585b70".to_string()),
             surface1: Some("#45475a".to_string()),
             surface0: Some("#313244".to_string()),
+            base: Some("#313244".to_string()),
+            mantle: Some("#292c3c".to_string()),
+            crust: Some("#11111b".to_string()),
         }
     }
 

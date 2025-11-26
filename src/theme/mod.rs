@@ -44,6 +44,7 @@ pub struct Palette {
     pub bright_white: String,
 
     // Catppuccin-specific colors (optional)
+    // All themes must populate base, mantle, crust fields for Starship powerline compatibility.
     pub rosewater: Option<String>,
     pub flamingo: Option<String>,
     pub pink: Option<String>,
@@ -58,6 +59,9 @@ pub struct Palette {
     pub surface2: Option<String>,
     pub surface1: Option<String>,
     pub surface0: Option<String>,
+    pub base: Option<String>,         // Catppuccin base (darker background variant)
+    pub mantle: Option<String>,       // Catppuccin mantle (slightly lighter background)
+    pub crust: Option<String>,        // Catppuccin crust (darkest, almost black)
 }
 
 impl Palette {
@@ -251,6 +255,9 @@ mod tests {
             surface2: None,
             surface1: None,
             surface0: None,
+            base: None,
+            mantle: None,
+            crust: None,
         };
 
         assert!(palette.validate().is_ok());

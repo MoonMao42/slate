@@ -227,6 +227,9 @@ mod tests {
             surface2: None,
             surface1: None,
             surface0: None,
+            base: None,
+            mantle: None,
+            crust: None,
         }
     }
 

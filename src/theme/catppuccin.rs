@@ -55,6 +55,9 @@ pub fn catppuccin_latte() -> Result<ThemeVariant> {
             surface2: Some("#acb0be".to_string()),
             surface1: Some("#bcc0cc".to_string()),
             surface0: Some("#ccd0da".to_string()),
+            base: Some("#f2f4f8".to_string()),
+            mantle: Some("#e6e9f0".to_string()),
+            crust: Some("#eff1f5".to_string()),
         },
     })
 }
@@ -113,6 +116,9 @@ pub fn catppuccin_frappe() -> Result<ThemeVariant> {
             surface2: Some("#626880".to_string()),
             surface1: Some("#51576d".to_string()),
             surface0: Some("#414559".to_string()),
+            base: Some("#2c2839".to_string()),
+            mantle: Some("#34323e".to_string()),
+            crust: Some("#1e1d2b".to_string()),
         },
     })
 }
@@ -171,6 +177,9 @@ pub fn catppuccin_macchiato() -> Result<ThemeVariant> {
             surface2: Some("#5b6078".to_string()),
             surface1: Some("#494d64".to_string()),
             surface0: Some("#363a4f".to_string()),
+            base: Some("#1e1e2e".to_string()),
+            mantle: Some("#181825".to_string()),
+            crust: Some("#0f0f12".to_string()),
         },
     })
 }
@@ -229,6 +238,9 @@ pub fn catppuccin_mocha() -> Result<ThemeVariant> {
             surface2: Some("#585b70".to_string()),
             surface1: Some("#45475a".to_string()),
             surface0: Some("#313244".to_string()),
+            base: Some("#1a1a2e".to_string()),
+            mantle: Some("#16161e".to_string()),
+            crust: Some("#0f0f14".to_string()),
         },
     })
 }
