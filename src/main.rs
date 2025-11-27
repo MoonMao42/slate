@@ -49,7 +49,14 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Setup { quick, force, only } => {
             // Dispatch to setup handler
-            cli::setup::handle(quick, force, only)?;
+            match cli::setup::handle(quick, force, only) {
+                Err(error::SlateError::UserCancelled) => {
+                    // Graceful cancellation message
+                    cliclack::outro_cancel("✦ Setup cancelled.");
+                    std::process::exit(130);  // Standard Unix exit code for SIGINT
+                }
+                other => other?,
+            }
         }
         Commands::Set { theme } => {
             // Dispatch to set handler

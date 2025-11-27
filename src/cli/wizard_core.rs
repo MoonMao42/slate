@@ -16,6 +16,18 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use std::io;
+
+/// Handle cliclack IO errors (Ctrl+C returns Interrupted kind)
+/// Map Interrupted to UserCancelled for graceful handling
+fn handle_cliclack_error(e: io::Error) -> crate::error::SlateError {
+    if e.kind() == io::ErrorKind::Interrupted {
+        crate::error::SlateError::UserCancelled
+    } else {
+        crate::error::SlateError::IOError(e)
+    }
+}
+
 pub struct WizardContext {
     pub mode: WizardMode,
     pub current_step: usize,
@@ -138,7 +150,7 @@ impl Wizard {
         let mode_choice = select("Setup mode:")
             .item("quick", "Quick (pick a vibe)", "")
             .item("manual", "Manual (customize each)", "")
-            .interact()?;
+            .interact().map_err(handle_cliclack_error)?;
 
         self.context.mode = match mode_choice {
             "quick" => WizardMode::Quick,
@@ -172,7 +184,7 @@ impl Wizard {
 
         let selected_preset_id = select("Pick a vibe:")
             .items(&preset_options)
-            .interact()?;
+            .interact().map_err(handle_cliclack_error)?;
 
         if let Some(preset) = PresetCatalog::get_preset(selected_preset_id) {
             self.context.selected_font = Some(preset.font_id.to_string());
@@ -229,7 +241,7 @@ impl Wizard {
                     .map(|(id, label, pitch)| (*id, label.as_str(), pitch.as_str()))
                     .collect::<Vec<_>>()
             )
-            .interact()?;
+            .interact().map_err(handle_cliclack_error)?;
 
         // Convert &str to String
         self.context.selected_tools = selected.into_iter().map(|s| s.to_string()).collect();
@@ -273,7 +285,7 @@ impl Wizard {
                     .map(|(id, label, desc)| (*id, *label, desc.as_str()))
                     .collect::<Vec<_>>()
             )
-            .interact()?;
+            .interact().map_err(handle_cliclack_error)?;
 
         // Store selection only if not skip
         if selected_font_id != "skip" {
@@ -337,7 +349,7 @@ impl Wizard {
                     .map(|(id, label, desc)| (id.as_str(), label.as_str(), desc.as_str()))
                     .collect::<Vec<_>>()
             )
-            .interact()?;
+            .interact().map_err(handle_cliclack_error)?;
 
         if selected_theme_id != "keep-current" {
             self.context.selected_theme = Some(selected_theme_id.to_string());
@@ -407,7 +419,7 @@ impl Wizard {
 
         let confirmed = confirm(Language::SETUP_REVIEW)
             .initial_value(true)
-            .interact()?;
+            .interact().map_err(handle_cliclack_error)?;
 
         self.context.confirmed = confirmed;
         self.context.current_step += 1;
