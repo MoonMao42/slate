@@ -189,10 +189,10 @@ mod tests {
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
         let styles = ZshHighlightAdapter::render_highlight_styles(&theme).unwrap();
 
-        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=38;2;"));
-        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[arg0]='fg=38;2;"));
-        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[function]='fg=38;2;"));
-        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[string]='fg=38;2;"));
+        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=#"));
+        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[arg0]='fg=#"));
+        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[function]='fg=#"));
+        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[string]='fg=#"));
     }
 
     #[test]

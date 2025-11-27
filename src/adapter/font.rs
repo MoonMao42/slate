@@ -28,7 +28,7 @@ impl FontAdapter {
         if let Ok(user_fonts) = fs::read_dir(Self::home()?.join("Library/Fonts")) {
             for entry in user_fonts.flatten() {
                 if let Ok(name) = entry.file_name().into_string() {
-                    if name.contains("Nerd Font") {
+                    if name.contains("NerdFont") || name.contains("Nerd Font") {
                         // Extract font name without extension
                         let font_name = name.split('.').next().unwrap_or(&name).to_string();
                         if !fonts.contains(&font_name) {
@@ -43,7 +43,7 @@ impl FontAdapter {
         if let Ok(sys_fonts) = fs::read_dir("/Library/Fonts") {
             for entry in sys_fonts.flatten() {
                 if let Ok(name) = entry.file_name().into_string() {
-                    if name.contains("Nerd Font") {
+                    if name.contains("NerdFont") || name.contains("Nerd Font") {
                         let font_name = name.split('.').next().unwrap_or(&name).to_string();
                         if !fonts.contains(&font_name) {
                             fonts.push(font_name);

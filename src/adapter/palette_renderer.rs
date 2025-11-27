@@ -49,6 +49,13 @@ impl PaletteRenderer {
         format!("38;2;{};{};{}", r, g, b)
     }
 
+    /// Convert RGB to hex format for zsh: #RRGGBB
+    /// Used by to_shell_vars_from_pairs() for ZSH_HIGHLIGHT_STYLES
+    /// zsh requires hex format, not ANSI 24-bit escapes
+    pub fn rgb_to_hex(r: u8, g: u8, b: u8) -> String {
+        format!("#{:02x}{:02x}{:02x}", r, g, b)
+    }
+
     /// Render Palette to TOML format for Starship.
     pub fn to_toml(
         palette: &Palette,
@@ -155,8 +162,8 @@ impl PaletteRenderer {
         for (palette_key, shell_var) in semantic_pairs.iter() {
             if let Some(color) = colors.get(*palette_key) {
                 let (r, g, b) = Self::hex_to_rgb(color)?;
-                let ansi_24bit = Self::rgb_to_ansi_24bit(r, g, b);
-                segments.push(format!("{}={}", shell_var, ansi_24bit));
+                let hex_color = Self::rgb_to_hex(r, g, b);
+                segments.push(format!("{}={}", shell_var, hex_color));
             }
         }
 
@@ -488,7 +495,7 @@ mod tests {
         semantic_map.insert("red", "error");
 
         let result = PaletteRenderer::to_shell_vars(&palette, &semantic_map).unwrap();
-        assert!(result.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=38;2;"));
+        assert!(result.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=#"));
     }
 
     #[test]
@@ -497,8 +504,8 @@ mod tests {
         let semantic_pairs = vec![("red", "error"), ("red", "arg0")];
 
         let result = PaletteRenderer::to_shell_vars_from_pairs(&palette, &semantic_pairs).unwrap();
-        assert!(result.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=38;2;"));
-        assert!(result.contains("ZSH_HIGHLIGHT_STYLES[arg0]='fg=38;2;"));
+        assert!(result.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=#"));
+        assert!(result.contains("ZSH_HIGHLIGHT_STYLES[arg0]='fg=#"));
     }
 
     #[test]

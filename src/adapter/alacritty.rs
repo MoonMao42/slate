@@ -31,6 +31,19 @@ impl AlacrittyAdapter {
 
     /// Render Palette into Alacritty TOML color scheme structure.
     /// Maps palette colors to Alacritty's colors.primary, colors.normal, colors.bright sections.
+        /// Format font name to display format
+    /// Example: "JetBrainsMonoNerdFont" → "JetBrains Mono Nerd Font"
+    fn format_font_family(font_name: &str) -> String {
+        let mut result = String::new();
+        for (i, c) in font_name.chars().enumerate() {
+            if i > 0 && c.is_uppercase() {
+                result.push(' ');
+            }
+            result.push(c);
+        }
+        result
+    }
+
     fn render_alacritty_colors(theme: &ThemeVariant) -> String {
         let palette = &theme.palette;
 
@@ -161,9 +174,22 @@ impl ToolAdapter for AlacrittyAdapter {
         // Render theme as TOML color scheme
         let colors_content = Self::render_alacritty_colors(theme);
 
+        // Step 2b: Add font-family to colors TOML if Nerd Font detected 
+        // Step 2b: Add font-family to colors TOML if Nerd Font detected 
+        let mut final_colors_content = colors_content;
+        if let Ok(fonts) = crate::adapter::font::FontAdapter::detect_installed_fonts() {
+            if !fonts.is_empty() {
+                let font_family = Self::format_font_family(&fonts[0]);
+                let font_section = format!("[font.normal]\nfamily = \"{}\"\n\n", font_family);
+                final_colors_content = font_section + &final_colors_content;
+            }
+        }
+
+
+
         // Write managed colors file
         let config_mgr = ConfigManager::new()?;
-        config_mgr.write_managed_file("alacritty", "colors.toml", &colors_content)?;
+        config_mgr.write_managed_file("alacritty", "colors.toml", &final_colors_content)?;
 
         // Ensure integration file includes managed colors path
         let integration_path = self.integration_config_path()?;

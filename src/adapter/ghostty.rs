@@ -45,6 +45,20 @@ impl GhosttyAdapter {
         paths
     }
 
+
+    /// Format font name to display format
+    /// Example: "JetBrainsMonoNerdFont" → "JetBrains Mono Nerd Font"
+    fn format_font_family(font_name: &str) -> String {
+        let mut result = String::new();
+        for (i, c) in font_name.chars().enumerate() {
+            if i > 0 && c.is_uppercase() {
+                result.push(' ');
+            }
+            result.push(c);
+        }
+        result
+    }
+
     fn first_existing_path(candidates: &[PathBuf]) -> Option<PathBuf> {
         candidates.iter().find(|path| path.exists()).cloned()
     }
@@ -160,8 +174,17 @@ impl ToolAdapter for GhosttyAdapter {
             .to_string();
 
         // Step 2: Render managed config as simple theme = "Name" line
-        let managed_content = format!("theme = \"{}\"\n", ghostty_theme);
+        let mut managed_content = format!("theme = \"{}\"\n", ghostty_theme);
 
+
+        // Step 3: Add font-family if Nerd Font is detected 
+        if let Ok(fonts) = crate::adapter::font::FontAdapter::detect_installed_fonts() {
+            if !fonts.is_empty() {
+                let font_family = Self::format_font_family(&fonts[0]);
+                managed_content.push_str(&format!("font-family = \"{}\"
+", font_family));
+            }
+        }
         // Step 3: Write to managed config directory via ConfigManager
         let config_manager = ConfigManager::new()?;
         config_manager.write_managed_file("ghostty", "theme.conf", &managed_content)?;
