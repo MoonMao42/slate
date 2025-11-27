@@ -26,6 +26,7 @@ pub use fastfetch::FastfetchAdapter;
 pub use font::FontAdapter;
 pub use ghostty::GhosttyAdapter;
 pub use lazygit::LazygitAdapter;
+pub use registry::ToolRegistry;
 pub use starship::StarshipAdapter;
 pub use tmux::TmuxAdapter;
 pub use zsh_highlight::ZshHighlightAdapter;

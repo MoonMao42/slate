@@ -1,9 +1,6 @@
 /// Setup execution: actually runs the brew installations and applies configurations
 /// Handles partial failures and tracks results
-use crate::adapter::{
-    AlacrittyAdapter, BatAdapter, DeltaAdapter, EzaAdapter, FastfetchAdapter, GhosttyAdapter,
-    LazygitAdapter, StarshipAdapter, TmuxAdapter, ToolAdapter, ZshHighlightAdapter,
-};
+use crate::adapter::ToolRegistry;
 use crate::cli::failure_handler::{ExecutionSummary, InstallStatus, ToolInstallResult};
 use crate::cli::font_selection::FontCatalog;
 use crate::cli::tool_selection::{BrewKind, ToolCatalog};
@@ -110,26 +107,47 @@ pub fn execute_setup(
 
 /// Resolve the selected theme, persist it, regenerate shell integration, and
 /// apply adapter outputs that live outside env.zsh.
+/// Per , Use registry loop instead of hardcoded adapter calls
 pub(crate) fn apply_theme_selection(theme: &ThemeVariant) -> Result<()> {
     theme.validate()?;
 
     let config_mgr = ConfigManager::new()?;
+    // ConfigManager calls BEFORE registry loop
     config_mgr.set_current_theme(&theme.id)?;
     config_mgr.write_shell_integration_file(theme)?;
 
-    // Apply all adapters
-    GhosttyAdapter.apply_theme(theme)?;
-    AlacrittyAdapter.apply_theme(theme)?;
-    StarshipAdapter.apply_theme(theme)?;
-    BatAdapter.apply_theme(theme)?;
-    DeltaAdapter.apply_theme(theme)?;
-    EzaAdapter.apply_theme(theme)?;
-    LazygitAdapter.apply_theme(theme)?;
-    FastfetchAdapter.apply_theme(theme)?;
-    ZshHighlightAdapter.apply_theme(theme)?;
+    // Use registry loop instead of hardcoded calls
+    let registry = ToolRegistry::default();
+    let results = registry.apply_theme_to_all(theme);
 
-    if TmuxAdapter.is_installed()? {
-        TmuxAdapter.apply_theme(theme)?;
+    // Visual error report per adapter
+    let mut success_count = 0;
+    let mut failure_count = 0;
+
+    for (tool_name, result) in results {
+        match result {
+            Ok(()) => {
+                eprintln!("✓ {}", tool_name);
+                success_count += 1;
+            }
+            Err(e) => {
+                eprintln!("❌ {}: {}", tool_name, e);
+                failure_count += 1;
+            }
+        }
+    }
+
+    // Ghostty restart hint (after all adapters complete)
+    if registry.get_adapter("ghostty").is_some() {
+        eprintln!("Ghostty requires restart to apply theme.");
+    }
+
+    // Partial success = Ok(0); all failures = Err
+    if failure_count > 0 && success_count == 0 {
+        return Err(crate::error::SlateError::ApplyThemeFailed(
+            "all".to_string(),
+            "No adapters were successfully configured".to_string()
+        ));
     }
 
     Ok(())

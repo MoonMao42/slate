@@ -81,7 +81,20 @@ impl ToolRegistry {
 
 impl Default for ToolRegistry {
     fn default() -> Self {
-        Self::new()
+        let mut registry = Self::new();
+        // Register all 11 adapters in default instance
+        registry.register(Box::new(crate::adapter::GhosttyAdapter));
+        registry.register(Box::new(crate::adapter::AlacrittyAdapter));
+        registry.register(Box::new(crate::adapter::StarshipAdapter));
+        registry.register(Box::new(crate::adapter::BatAdapter));
+        registry.register(Box::new(crate::adapter::DeltaAdapter));
+        registry.register(Box::new(crate::adapter::EzaAdapter));
+        registry.register(Box::new(crate::adapter::LazygitAdapter));
+        registry.register(Box::new(crate::adapter::FastfetchAdapter));
+        registry.register(Box::new(crate::adapter::ZshHighlightAdapter));
+        registry.register(Box::new(crate::adapter::TmuxAdapter));
+        registry.register(Box::new(crate::adapter::FontAdapter));
+        registry
     }
 }
 
@@ -144,7 +157,7 @@ mod tests {
     #[test]
     fn test_registry_default() {
         let registry = ToolRegistry::default();
-        assert_eq!(registry.adapters().len(), 0);
+        assert_eq!(registry.adapters().len(), 11);
     }
 }
 
