@@ -146,9 +146,14 @@ pub(crate) fn apply_theme_selection(theme: &ThemeVariant) -> Result<()> {
         }
     }
 
-    // Ghostty restart hint (after all adapters complete)
+    // Hot-reload Ghostty via SIGUSR2 (no restart needed)
     if ghostty_applied {
-        eprintln!("Ghostty requires restart to apply theme.");
+        if let Some(adapter) = registry.get_adapter("ghostty") {
+            match adapter.reload() {
+                Ok(()) => eprintln!("✓ Ghostty reloaded"),
+                Err(_) => eprintln!("Ghostty: restart to apply theme"),
+            }
+        }
     }
 
     // Partial success = Ok(0); all failures = Err

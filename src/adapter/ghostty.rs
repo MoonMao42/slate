@@ -240,12 +240,23 @@ impl ToolAdapter for GhosttyAdapter {
     }
 
     fn reload(&self) -> Result<()> {
-        // Ghostty supports SIGUSR2 for hot-reload, but implementation is optional per 
-        // Return error for now
-        Err(SlateError::ReloadFailed(
-            "ghostty".to_string(),
-            "Ghostty hot-reload not implemented yet.".to_string(),
-        ))
+        // Send SIGUSR2 to all Ghostty processes to trigger config reload
+        let output = std::process::Command::new("pkill")
+            .arg("-SIGUSR2")
+            .arg("-x")
+            .arg("ghostty")
+            .output()
+            .map_err(|e| SlateError::ReloadFailed("ghostty".to_string(), e.to_string()))?;
+
+        if output.status.success() || output.status.code() == Some(1) {
+            // code 1 = no matching process (Ghostty not running), that's fine
+            Ok(())
+        } else {
+            Err(SlateError::ReloadFailed(
+                "ghostty".to_string(),
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ))
+        }
     }
 
     fn get_current_theme(&self) -> Result<Option<String>> {
@@ -351,10 +362,11 @@ mod tests {
     }
 
     #[test]
-    fn test_reload_returns_error() {
+    fn test_reload_via_sigusr2() {
         let adapter = GhosttyAdapter;
         let result = adapter.reload();
-        assert!(result.is_err());
+        // Ok if Ghostty is running or not running (pkill exit code 1 = no match)
+        assert!(result.is_ok());
     }
 
     #[test]
