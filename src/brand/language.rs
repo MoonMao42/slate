@@ -47,7 +47,7 @@ impl Language {
     pub const STATUS_LABEL_FONT: &str = "font:";
     pub const LIST_HEADER: &str = "Available themes";
     pub const RESTORE_SUCCESS: &str = "✓ Configuration restored";
-    pub const SET_PICKER_PENDING: &str = "Interactive theme picker lands in .";
+    pub const SET_PICKER_PENDING: &str = "Interactive theme picker coming soon. For now, use: slate set <theme-name>";
     pub const STATUS_PENDING: &str = "Status display lands in .";
     pub const LIST_PENDING: &str = "Theme listing lands in .";
     pub const RESTORE_PICKER_PENDING: &str = "Restore point selection lands in .";

@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use crate::adapter::ToolAdapter;
+use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::error::Result;
 use crate::theme::ThemeVariant;
+use std::collections::HashMap;
 
 /// Registry for all tool adapters.
 /// Manages adapter instances and coordinates theme application across tools.
@@ -49,11 +49,16 @@ impl ToolRegistry {
 
     /// Apply theme to all registered tools (ignores if tool not installed).
     /// Returns results for each tool: Ok or Err.
-    /// Per research: partial failure pattern (apply to others even if one fails)
+    /// Per research: partial failure pattern (apply to others even if one fails).
+    /// Detect-and-install adapters are not theme targets and are skipped.
     pub fn apply_theme_to_all(&self, theme: &ThemeVariant) -> HashMap<String, Result<()>> {
         let mut results = HashMap::new();
         for adapter in &self.adapters {
             let tool_name = adapter.tool_name().to_string();
+
+            if adapter.apply_strategy() == ApplyStrategy::DetectAndInstall {
+                continue;
+            }
 
             // Skip if not installed
             if !adapter.is_installed().unwrap_or(false) {
@@ -105,6 +110,7 @@ mod tests {
     /// Mock adapter for testing
     struct MockAdapter {
         name: &'static str,
+        strategy: crate::adapter::ApplyStrategy,
     }
 
     impl ToolAdapter for MockAdapter {
@@ -125,7 +131,7 @@ mod tests {
         }
 
         fn apply_strategy(&self) -> crate::adapter::ApplyStrategy {
-            crate::adapter::ApplyStrategy::WriteAndInclude
+            self.strategy
         }
 
         fn apply_theme(&self, _theme: &ThemeVariant) -> Result<()> {
@@ -136,7 +142,10 @@ mod tests {
     #[test]
     fn test_registry_register_and_retrieve() {
         let mut registry = ToolRegistry::new();
-        let adapter = Box::new(MockAdapter { name: "test_tool" });
+        let adapter = Box::new(MockAdapter {
+            name: "test_tool",
+            strategy: crate::adapter::ApplyStrategy::WriteAndInclude,
+        });
         registry.register(adapter);
 
         assert_eq!(registry.adapters().len(), 1);
@@ -147,7 +156,10 @@ mod tests {
     #[test]
     fn test_detect_installed() {
         let mut registry = ToolRegistry::new();
-        let adapter = Box::new(MockAdapter { name: "test_tool" });
+        let adapter = Box::new(MockAdapter {
+            name: "test_tool",
+            strategy: crate::adapter::ApplyStrategy::WriteAndInclude,
+        });
         registry.register(adapter);
 
         let installed = registry.detect_installed();
@@ -159,6 +171,25 @@ mod tests {
         let registry = ToolRegistry::default();
         assert_eq!(registry.adapters().len(), 11);
     }
+
+    #[test]
+    fn test_apply_theme_skips_detect_and_install_adapters() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(MockAdapter {
+            name: "themeable",
+            strategy: crate::adapter::ApplyStrategy::WriteAndInclude,
+        }));
+        registry.register(Box::new(MockAdapter {
+            name: "detector",
+            strategy: crate::adapter::ApplyStrategy::DetectAndInstall,
+        }));
+
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        let results = registry.apply_theme_to_all(&theme);
+
+        assert!(results.contains_key("themeable"));
+        assert!(!results.contains_key("detector"));
+    }
 }
 
 #[cfg(test)]
@@ -169,7 +200,7 @@ mod registry_extended_tests {
     #[test]
     fn test_registry_with_new_adapters() {
         let mut registry = ToolRegistry::new();
-        
+
         registry.register(Box::new(AlacrittyAdapter));
         registry.register(Box::new(DeltaAdapter));
         registry.register(Box::new(TmuxAdapter));

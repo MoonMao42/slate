@@ -21,7 +21,7 @@ pub fn handle(args: &[&str]) -> Result<()> {
 
         println!("{} Theme switched to '{}'", Symbols::SUCCESS, theme.name);
     } else {
-        // No theme argument: will implement interactive picker
+        // No theme argument: interactive picker deferred to 
         println!("{}", Language::SET_PICKER_PENDING);
     }
 

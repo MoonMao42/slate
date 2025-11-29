@@ -81,6 +81,14 @@ pub fn execute_setup(
                 }
             }
         }
+
+        // Persist user's font choice so adapters write the correct font-family
+        if summary.font_applied {
+            if let Ok(config_mgr) = ConfigManager::new() {
+                let family = resolve_font_family(font_name);
+                let _ = config_mgr.set_current_font(&family);
+            }
+        }
     }
 
     // Setup shell integration: write marker block to .zshrc and env.zsh
@@ -119,12 +127,13 @@ pub(crate) fn apply_theme_selection(theme: &ThemeVariant) -> Result<()> {
     // Use registry loop instead of hardcoded calls
     let registry = ToolRegistry::default();
     let results = registry.apply_theme_to_all(theme);
+    let ghostty_applied = matches!(results.get("ghostty"), Some(Ok(())));
 
     // Visual error report per adapter
     let mut success_count = 0;
     let mut failure_count = 0;
 
-    for (tool_name, result) in results {
+    for (tool_name, result) in &results {
         match result {
             Ok(()) => {
                 eprintln!("✓ {}", tool_name);
@@ -138,7 +147,7 @@ pub(crate) fn apply_theme_selection(theme: &ThemeVariant) -> Result<()> {
     }
 
     // Ghostty restart hint (after all adapters complete)
-    if registry.get_adapter("ghostty").is_some() {
+    if ghostty_applied {
         eprintln!("Ghostty requires restart to apply theme.");
     }
 
@@ -146,7 +155,7 @@ pub(crate) fn apply_theme_selection(theme: &ThemeVariant) -> Result<()> {
     if failure_count > 0 && success_count == 0 {
         return Err(crate::error::SlateError::ApplyThemeFailed(
             "all".to_string(),
-            "No adapters were successfully configured".to_string()
+            "No adapters were successfully configured".to_string(),
         ));
     }
 
@@ -241,12 +250,39 @@ fn is_font_installed(font_name_or_id: &str) -> bool {
     use crate::adapter::font::FontAdapter;
     if let Ok(installed) = FontAdapter::detect_installed_fonts() {
         let lookup = FontCatalog::get_font(font_name_or_id)
-            .map(|f| f.name.replace(" Nerd Font", ""))
+            .map(|f| f.name.to_string())
             .unwrap_or_else(|| font_name_or_id.to_string());
-        installed.iter().any(|f| f.contains(&lookup))
+        let lookup_key = FontAdapter::family_match_key(&lookup);
+        installed
+            .iter()
+            .any(|family| FontAdapter::family_match_key(family) == lookup_key)
     } else {
         false
     }
+}
+
+/// Resolve a font id/name to the canonical family name for terminal configs.
+/// E.g. "jetbrains-mono" → "JetBrainsMono Nerd Font"
+fn resolve_font_family(font_name_or_id: &str) -> String {
+    use crate::adapter::font::FontAdapter;
+
+    // Try catalog first (id → display name)
+    if let Some(font) = FontCatalog::get_font(font_name_or_id) {
+        // Catalog name is e.g. "JetBrains Mono Nerd Font" — but the actual
+        // installed file may be "JetBrainsMonoNerdFont-Regular.ttf".
+        // Detect what's actually installed and return its normalized form.
+        if let Ok(installed) = FontAdapter::detect_installed_fonts() {
+            let catalog_key = FontAdapter::family_match_key(font.name);
+            if let Some(matched) = installed
+                .iter()
+                .find(|f| FontAdapter::family_match_key(f) == catalog_key)
+            {
+                return matched.clone();
+            }
+        }
+        return font.name.to_string();
+    }
+    font_name_or_id.to_string()
 }
 
 /// Install a Nerd Font via Homebrew

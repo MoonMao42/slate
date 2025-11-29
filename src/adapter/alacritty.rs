@@ -3,7 +3,7 @@
 //! This adapter edits the import field idempotently using toml_edit::DocumentMut
 //! (AST-aware, not regex-based) to ensure safe, structured modifications.
 
-use crate::adapter::{ToolAdapter, ApplyStrategy};
+use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -16,8 +16,7 @@ pub struct AlacrittyAdapter;
 impl AlacrittyAdapter {
     /// Get config home directory (XDG default)
     fn config_home() -> Result<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| SlateError::MissingHomeDir)?;
+        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home).join(".config"))
     }
 
@@ -31,19 +30,6 @@ impl AlacrittyAdapter {
 
     /// Render Palette into Alacritty TOML color scheme structure.
     /// Maps palette colors to Alacritty's colors.primary, colors.normal, colors.bright sections.
-        /// Format font name to display format
-    /// Example: "JetBrainsMonoNerdFont" → "JetBrains Mono Nerd Font"
-    fn format_font_family(font_name: &str) -> String {
-        let mut result = String::new();
-        for (i, c) in font_name.chars().enumerate() {
-            if i > 0 && c.is_uppercase() {
-                result.push(' ');
-            }
-            result.push(c);
-        }
-        result
-    }
-
     fn render_alacritty_colors(theme: &ThemeVariant) -> String {
         let palette = &theme.palette;
 
@@ -90,26 +76,24 @@ impl AlacrittyAdapter {
         };
 
         // Parse as TOML AST (preserves comments and formatting)
-        let mut doc: toml_edit::DocumentMut = content.parse()
-            .map_err(|e| SlateError::InvalidConfig(
-                format!("Failed to parse Alacritty TOML: {}", e)
-            ))?;
+        let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e| {
+            SlateError::InvalidConfig(format!("Failed to parse Alacritty TOML: {}", e))
+        })?;
 
         // Get or create the import array
         if doc.get("import").is_none() {
-            doc["import"] = toml_edit::Item::Value(toml_edit::Value::Array(toml_edit::Array::new()));
+            doc["import"] =
+                toml_edit::Item::Value(toml_edit::Value::Array(toml_edit::Array::new()));
         }
 
-        let import_array = doc["import"]
-            .as_array_mut()
-            .ok_or_else(|| SlateError::InvalidConfig(
-                "Alacritty 'import' field is not an array".to_string()
-            ))?;
+        let import_array = doc["import"].as_array_mut().ok_or_else(|| {
+            SlateError::InvalidConfig("Alacritty 'import' field is not an array".to_string())
+        })?;
 
         // Idempotent: check if managed path already present
-        let already_present = import_array.iter().any(|v| {
-            v.as_str().map_or(false, |s| s == managed_str)
-        });
+        let already_present = import_array
+            .iter()
+            .any(|v| v.as_str().map_or(false, |s| s == managed_str));
 
         if already_present {
             return Ok(());
@@ -174,19 +158,20 @@ impl ToolAdapter for AlacrittyAdapter {
         // Render theme as TOML color scheme
         let colors_content = Self::render_alacritty_colors(theme);
 
-        // Step 2b: Add font-family to colors TOML if Nerd Font detected 
-        // Step 2b: Add font-family to colors TOML if Nerd Font detected 
+        // Step 2b: Add font-family — prefer user's saved choice, fallback to detection
         let mut final_colors_content = colors_content;
-        if let Ok(fonts) = crate::adapter::font::FontAdapter::detect_installed_fonts() {
-            if !fonts.is_empty() {
-                let font_family = Self::format_font_family(&fonts[0]);
-                let font_section = format!("[font.normal]\nfamily = \"{}\"\n\n", font_family);
-                final_colors_content = font_section + &final_colors_content;
-            }
+        let chosen_font = crate::config::ConfigManager::new()
+            .ok()
+            .and_then(|cm| cm.get_current_font().ok().flatten());
+        let font_family = chosen_font.or_else(|| {
+            crate::adapter::font::FontAdapter::detect_installed_fonts()
+                .ok()
+                .and_then(|f| f.into_iter().next())
+        });
+        if let Some(family) = font_family {
+            let font_section = format!("[font.normal]\nfamily = \"{}\"\n\n", family);
+            final_colors_content = font_section + &final_colors_content;
         }
-
-
-
         // Write managed colors file
         let config_mgr = ConfigManager::new()?;
         config_mgr.write_managed_file("alacritty", "colors.toml", &final_colors_content)?;
@@ -206,7 +191,8 @@ impl ToolAdapter for AlacrittyAdapter {
         Err(SlateError::ReloadFailed(
             "alacritty".to_string(),
             "Alacritty reload depends on live_config_reload setting. \
-             Restart your terminal or set live_config_reload = true in alacritty.toml.".to_string(),
+             Restart your terminal or set live_config_reload = true in alacritty.toml."
+                .to_string(),
         ))
     }
 }

@@ -5,7 +5,7 @@
 //! D-05b: Idempotent config-file directive insertion ensures running twice
 //! produces the same result (no duplicate include lines).
 
-use crate::adapter::{ToolAdapter, ApplyStrategy};
+use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -43,20 +43,6 @@ impl GhosttyAdapter {
         }
 
         paths
-    }
-
-
-    /// Format font name to display format
-    /// Example: "JetBrainsMonoNerdFont" → "JetBrains Mono Nerd Font"
-    fn format_font_family(font_name: &str) -> String {
-        let mut result = String::new();
-        for (i, c) in font_name.chars().enumerate() {
-            if i > 0 && c.is_uppercase() {
-                result.push(' ');
-            }
-            result.push(c);
-        }
-        result
     }
 
     fn first_existing_path(candidates: &[PathBuf]) -> Option<PathBuf> {
@@ -112,6 +98,52 @@ impl GhosttyAdapter {
 
         Ok(())
     }
+
+    /// Update or insert font-family in the user's main Ghostty config.
+    /// Ghostty's main config takes precedence over config-file includes,
+    /// so font-family must live in the main config, not in managed theme.conf.
+    fn update_font_in_config(config_path: &Path, font_family: &str) -> Result<()> {
+        use atomic_write_file::AtomicWriteFile;
+        use std::io::Write;
+
+        if !config_path.exists() {
+            return Ok(());
+        }
+
+        let content = fs::read_to_string(config_path)?;
+        let new_line = format!("font-family = \"{}\"", font_family);
+
+        // Replace all existing font-family lines (may be duplicated)
+        let mut found = false;
+        let mut lines: Vec<String> = Vec::new();
+        for line in content.lines() {
+            if line.trim_start().starts_with("font-family") {
+                if !found {
+                    lines.push(new_line.clone());
+                    found = true;
+                }
+                // skip duplicates
+            } else {
+                lines.push(line.to_string());
+            }
+        }
+
+        if !found {
+            // Insert after first comment block or at the top
+            lines.insert(0, new_line);
+        }
+
+        let mut output = lines.join("\n");
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+
+        let mut file = AtomicWriteFile::open(config_path)?;
+        file.write_all(output.as_bytes())?;
+        file.commit()?;
+
+        Ok(())
+    }
 }
 
 impl ToolAdapter for GhosttyAdapter {
@@ -131,11 +163,8 @@ impl ToolAdapter for GhosttyAdapter {
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| SlateError::MissingHomeDir)?;
-        let xdg_dir = PathBuf::from(&home)
-            .join(".config")
-            .join("ghostty");
+        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
+        let xdg_dir = PathBuf::from(&home).join(".config").join("ghostty");
 
         let candidates = Self::candidate_paths(&xdg_dir, Some(&home));
 
@@ -173,19 +202,10 @@ impl ToolAdapter for GhosttyAdapter {
             })?
             .to_string();
 
-        // Step 2: Render managed config as simple theme = "Name" line
-        let mut managed_content = format!("theme = \"{}\"\n", ghostty_theme);
+        // Step 2: Render managed config as theme-only line
+        let managed_content = format!("theme = \"{}\"\n", ghostty_theme);
 
-
-        // Step 3: Add font-family if Nerd Font is detected 
-        if let Ok(fonts) = crate::adapter::font::FontAdapter::detect_installed_fonts() {
-            if !fonts.is_empty() {
-                let font_family = Self::format_font_family(&fonts[0]);
-                managed_content.push_str(&format!("font-family = \"{}\"
-", font_family));
-            }
-        }
-        // Step 3: Write to managed config directory via ConfigManager
+        // Step 3: Write managed theme config
         let config_manager = ConfigManager::new()?;
         config_manager.write_managed_file("ghostty", "theme.conf", &managed_content)?;
 
@@ -201,6 +221,20 @@ impl ToolAdapter for GhosttyAdapter {
         }
 
         Self::ensure_integration_includes_managed(&integration_path, &managed_path)?;
+
+        // Step 5: Update font-family in user's main config (not managed — Ghostty
+        // main config takes precedence over config-file includes for font-family)
+        let chosen_font = crate::config::ConfigManager::new()
+            .ok()
+            .and_then(|cm| cm.get_current_font().ok().flatten());
+        let font_family = chosen_font.or_else(|| {
+            crate::adapter::font::FontAdapter::detect_installed_fonts()
+                .ok()
+                .and_then(|f| f.into_iter().next())
+        });
+        if let Some(family) = font_family {
+            Self::update_font_in_config(&integration_path, &family)?;
+        }
 
         Ok(())
     }
@@ -241,8 +275,10 @@ mod tests {
     fn test_managed_config_path_returns_correct_directory() {
         let adapter = GhosttyAdapter;
         let path = adapter.managed_config_path();
-        
-        assert!(path.to_string_lossy().contains(".config/slate/managed/ghostty"));
+
+        assert!(path
+            .to_string_lossy()
+            .contains(".config/slate/managed/ghostty"));
     }
 
     #[test]
@@ -307,7 +343,7 @@ mod tests {
     #[test]
     fn test_apply_theme_with_missing_tool_refs_returns_error() {
         let adapter = GhosttyAdapter;
-        
+
         // Create a theme with empty tool_refs (would fail in real code)
         // This test just verifies error handling path exists
         let result = adapter.is_installed();
@@ -325,7 +361,7 @@ mod tests {
     fn test_get_current_theme_returns_none() {
         let adapter = GhosttyAdapter;
         let result = adapter.get_current_theme();
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
     }

@@ -53,6 +53,12 @@ impl ConfigManager {
         self.base_path.join("current")
     }
 
+    /// Path to selected font tracking file
+    /// ~/.config/slate/current-font — plain text with canonical font family name
+    fn current_font_path(&self) -> PathBuf {
+        self.base_path.join("current-font")
+    }
+
     /// Write managed config for a tool.
     /// Slate owns this tier — regenerate freely without losing user data.
     /// Use atomic_write_file to prevent partial writes.
@@ -139,6 +145,29 @@ fi
 
         let content = fs::read_to_string(&path)?;
         Ok(Some(content.trim().to_string()))
+    }
+
+    /// Persist user's chosen font family name.
+    pub fn set_current_font(&self, font_family: &str) -> Result<()> {
+        let path = self.current_font_path();
+        let mut file = AtomicWriteFile::open(&path)?;
+        file.write_all(font_family.as_bytes())?;
+        file.commit()?;
+        Ok(())
+    }
+
+    /// Get the user's chosen font family name.
+    pub fn get_current_font(&self) -> Result<Option<String>> {
+        let path = self.current_font_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = fs::read_to_string(&path)?;
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(trimmed.to_string()))
     }
 
     /// Edit a field in a TOML config file using AST-aware editing.

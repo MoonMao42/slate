@@ -51,9 +51,15 @@ fn main() -> Result<()> {
             // Dispatch to setup handler
             match cli::setup::handle(quick, force, only) {
                 Err(error::SlateError::UserCancelled) => {
-                    // Graceful cancellation message
-                    cliclack::outro_cancel("✦ Setup cancelled.");
-                    std::process::exit(130);  // Standard Unix exit code for SIGINT
+                    let _ = cliclack::outro_cancel("✦ Setup cancelled.");
+                    std::process::exit(130);
+                }
+                Err(error::SlateError::IOError(ref e))
+                    if e.kind() == std::io::ErrorKind::Interrupted =>
+                {
+                    // Fallback: IO interrupted that slipped past handle_cliclack_error
+                    let _ = cliclack::outro_cancel("✦ Setup cancelled.");
+                    std::process::exit(130);
                 }
                 other => other?,
             }
@@ -70,7 +76,10 @@ fn main() -> Result<()> {
             cli::list::handle(&[])?;
         }
         Commands::Reset { backup_id } => {
-            let args: Vec<&str> = backup_id.as_ref().map(|id| vec![id.as_str()]).unwrap_or_default();
+            let args: Vec<&str> = backup_id
+                .as_ref()
+                .map(|id| vec![id.as_str()])
+                .unwrap_or_default();
             cli::restore::handle(&args)?;
         }
     }

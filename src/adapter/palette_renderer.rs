@@ -28,18 +28,24 @@ impl PaletteRenderer {
         }
 
         // Parse hex values
-        let r = u8::from_str_radix(&hex[0..2], 16)
-            .map_err(|_| SlateError::InvalidThemeData(
-                format!("Invalid hex color '{}': invalid red component", hex)
-            ))?;
-        let g = u8::from_str_radix(&hex[2..4], 16)
-            .map_err(|_| SlateError::InvalidThemeData(
-                format!("Invalid hex color '{}': invalid green component", hex)
-            ))?;
-        let b = u8::from_str_radix(&hex[4..6], 16)
-            .map_err(|_| SlateError::InvalidThemeData(
-                format!("Invalid hex color '{}': invalid blue component", hex)
-            ))?;
+        let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| {
+            SlateError::InvalidThemeData(format!(
+                "Invalid hex color '{}': invalid red component",
+                hex
+            ))
+        })?;
+        let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| {
+            SlateError::InvalidThemeData(format!(
+                "Invalid hex color '{}': invalid green component",
+                hex
+            ))
+        })?;
+        let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| {
+            SlateError::InvalidThemeData(format!(
+                "Invalid hex color '{}': invalid blue component",
+                hex
+            ))
+        })?;
 
         Ok((r, g, b))
     }
@@ -57,10 +63,7 @@ impl PaletteRenderer {
     }
 
     /// Render Palette to TOML format for Starship.
-    pub fn to_toml(
-        palette: &Palette,
-        semantic_map: &HashMap<&str, &str>,
-    ) -> Result<String> {
+    pub fn to_toml(palette: &Palette, semantic_map: &HashMap<&str, &str>) -> Result<String> {
         if semantic_map.is_empty() {
             return Err(SlateError::InvalidThemeData(
                 "semantic_map cannot be empty".to_string(),
@@ -80,10 +83,7 @@ impl PaletteRenderer {
     }
 
     /// Render Palette to YAML format for eza, lazygit.
-    pub fn to_yaml(
-        palette: &Palette,
-        semantic_map: &HashMap<&str, &str>,
-    ) -> Result<String> {
+    pub fn to_yaml(palette: &Palette, semantic_map: &HashMap<&str, &str>) -> Result<String> {
         if semantic_map.is_empty() {
             return Err(SlateError::InvalidThemeData(
                 "semantic_map cannot be empty".to_string(),
@@ -133,10 +133,7 @@ impl PaletteRenderer {
     }
 
     /// Render Palette to shell environment variables format.
-    pub fn to_shell_vars(
-        palette: &Palette,
-        semantic_map: &HashMap<&str, &str>,
-    ) -> Result<String> {
+    pub fn to_shell_vars(palette: &Palette, semantic_map: &HashMap<&str, &str>) -> Result<String> {
         let semantic_pairs: Vec<_> = semantic_map
             .iter()
             .map(|(palette_key, shell_var)| (*palette_key, *shell_var))
@@ -173,23 +170,17 @@ impl PaletteRenderer {
 
         // ZSH_HIGHLIGHT_STYLES is a zsh associative array — must be set per-key,
         // not exported as a flat string.
-        let mut output = String::new();
+        let mut output = String::from("typeset -gA ZSH_HIGHLIGHT_STYLES\n");
         for segment in &segments {
             if let Some((token, color)) = segment.split_once('=') {
-                output.push_str(&format!(
-                    "ZSH_HIGHLIGHT_STYLES[{}]='fg={}'\n",
-                    token, color
-                ));
+                output.push_str(&format!("ZSH_HIGHLIGHT_STYLES[{}]='fg={}'\n", token, color));
             }
         }
         Ok(output)
     }
 
     /// Render Palette to tmux format.
-    pub fn to_tmux(
-        palette: &Palette,
-        semantic_map: &HashMap<&str, &str>,
-    ) -> Result<String> {
+    pub fn to_tmux(palette: &Palette, semantic_map: &HashMap<&str, &str>) -> Result<String> {
         if semantic_map.is_empty() {
             return Err(SlateError::InvalidThemeData(
                 "semantic_map cannot be empty".to_string(),
@@ -232,10 +223,7 @@ impl PaletteRenderer {
     }
 
     /// Render Palette to JSONC format for fastfetch.
-    pub fn to_jsonc(
-        palette: &Palette,
-        semantic_map: &HashMap<&str, &str>,
-    ) -> Result<String> {
+    pub fn to_jsonc(palette: &Palette, semantic_map: &HashMap<&str, &str>) -> Result<String> {
         if semantic_map.is_empty() {
             return Err(SlateError::InvalidThemeData(
                 "semantic_map cannot be empty".to_string(),
@@ -495,6 +483,7 @@ mod tests {
         semantic_map.insert("red", "error");
 
         let result = PaletteRenderer::to_shell_vars(&palette, &semantic_map).unwrap();
+        assert!(result.starts_with("typeset -gA ZSH_HIGHLIGHT_STYLES\n"));
         assert!(result.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=#"));
     }
 
@@ -504,6 +493,7 @@ mod tests {
         let semantic_pairs = vec![("red", "error"), ("red", "arg0")];
 
         let result = PaletteRenderer::to_shell_vars_from_pairs(&palette, &semantic_pairs).unwrap();
+        assert!(result.starts_with("typeset -gA ZSH_HIGHLIGHT_STYLES\n"));
         assert!(result.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=#"));
         assert!(result.contains("ZSH_HIGHLIGHT_STYLES[arg0]='fg=#"));
     }

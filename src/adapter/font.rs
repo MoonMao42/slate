@@ -2,38 +2,78 @@
 //! Per through Detects installed Nerd Fonts on macOS and provides
 //! installation command mapping. Scope: detect + install mapping only (no config writing).
 
-use std::path::PathBuf;
-use std::fs;
-use crate::adapter::{ToolAdapter, ApplyStrategy};
+use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::error::Result;
 use crate::theme::ThemeVariant;
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::PathBuf;
 
 /// Nerd Font adapter implementing v2 ToolAdapter trait.
 pub struct FontAdapter;
 
 impl FontAdapter {
+    const CANONICAL_SUFFIXES: [(&'static str, &'static str); 8] = [
+        ("Nerd Font Complete Mono", " Nerd Font Mono"),
+        ("Nerd Font Complete", " Nerd Font"),
+        ("NerdFontMono", " Nerd Font Mono"),
+        ("Nerd Font Mono", " Nerd Font Mono"),
+        ("NerdFontPropo", " Nerd Font Propo"),
+        ("Nerd Font Propo", " Nerd Font Propo"),
+        ("NerdFont", " Nerd Font"),
+        ("Nerd Font", " Nerd Font"),
+    ];
+
     /// Get home directory
     fn home() -> Result<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| crate::error::SlateError::MissingHomeDir)?;
+        let home = std::env::var("HOME").map_err(|_| crate::error::SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home))
     }
 
-    /// Detect installed Nerd Fonts by scanning font directories
-    /// Returns list of installed Nerd Font names (without extension)
+    fn looks_like_nerd_font(name: &str) -> bool {
+        name.contains("NerdFont") || name.contains("Nerd Font")
+    }
+
+    /// Normalize a font filename into the family name terminal configs expect.
+    /// Example: "JetBrainsMonoNerdFont-Regular.ttf" -> "JetBrainsMono Nerd Font"
+    pub(crate) fn normalize_font_family(name: &str) -> String {
+        let stem = name
+            .rsplit_once('.')
+            .map(|(value, _)| value)
+            .unwrap_or(name)
+            .trim();
+        let family_candidate = stem.split('-').next().unwrap_or(stem).trim();
+
+        for (suffix, canonical_suffix) in Self::CANONICAL_SUFFIXES {
+            if let Some(prefix) = family_candidate.strip_suffix(suffix) {
+                let prefix = prefix.trim();
+                return format!("{}{}", prefix, canonical_suffix);
+            }
+        }
+
+        family_candidate.to_string()
+    }
+
+    /// Collapse spacing/punctuation so display names and filesystem family names
+    /// can be compared safely.
+    pub(crate) fn family_match_key(name: &str) -> String {
+        name.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(|c| c.to_lowercase())
+            .collect()
+    }
+
+    /// Detect installed Nerd Fonts by scanning font directories.
+    /// Returns canonical family names suitable for terminal config files.
     pub fn detect_installed_fonts() -> Result<Vec<String>> {
-        let mut fonts = Vec::new();
+        let mut fonts = BTreeSet::new();
 
         // Scan user fonts directory
         if let Ok(user_fonts) = fs::read_dir(Self::home()?.join("Library/Fonts")) {
             for entry in user_fonts.flatten() {
                 if let Ok(name) = entry.file_name().into_string() {
-                    if name.contains("NerdFont") || name.contains("Nerd Font") {
-                        // Extract font name without extension
-                        let font_name = name.split('.').next().unwrap_or(&name).to_string();
-                        if !fonts.contains(&font_name) {
-                            fonts.push(font_name);
-                        }
+                    if Self::looks_like_nerd_font(&name) {
+                        fonts.insert(Self::normalize_font_family(&name));
                     }
                 }
             }
@@ -43,17 +83,14 @@ impl FontAdapter {
         if let Ok(sys_fonts) = fs::read_dir("/Library/Fonts") {
             for entry in sys_fonts.flatten() {
                 if let Ok(name) = entry.file_name().into_string() {
-                    if name.contains("NerdFont") || name.contains("Nerd Font") {
-                        let font_name = name.split('.').next().unwrap_or(&name).to_string();
-                        if !fonts.contains(&font_name) {
-                            fonts.push(font_name);
-                        }
+                    if Self::looks_like_nerd_font(&name) {
+                        fonts.insert(Self::normalize_font_family(&name));
                     }
                 }
             }
         }
 
-        Ok(fonts)
+        Ok(fonts.into_iter().collect())
     }
 
     /// Map font name to brew cask name
@@ -66,10 +103,7 @@ impl FontAdapter {
             .trim();
 
         // Convert to kebab-case
-        let kebab = base_name
-            .to_lowercase()
-            .replace(" ", "-")
-            .replace("_", "-");
+        let kebab = base_name.to_lowercase().replace(" ", "-").replace("_", "-");
 
         // Ensure font- prefix and nerd-font suffix
         let cask_name = if kebab.starts_with("font-") {
@@ -224,5 +258,31 @@ mod tests {
         let result = adapter.is_installed();
         assert!(result.is_ok());
         // Result may be true or false depending on installed fonts
+    }
+
+    #[test]
+    fn test_normalize_font_family_regular_file() {
+        let family = FontAdapter::normalize_font_family("FiraCodeNerdFont-Regular.ttf");
+        assert_eq!(family, "FiraCode Nerd Font");
+    }
+
+    #[test]
+    fn test_normalize_font_family_mono_file() {
+        let family = FontAdapter::normalize_font_family("FiraCodeNerdFontMono-SemiBold.ttf");
+        assert_eq!(family, "FiraCode Nerd Font Mono");
+    }
+
+    #[test]
+    fn test_normalize_font_family_preserves_base_name_shape() {
+        let family =
+            FontAdapter::normalize_font_family("JetBrainsMonoNerdFontPropo-ThinItalic.ttf");
+        assert_eq!(family, "JetBrainsMono Nerd Font Propo");
+    }
+
+    #[test]
+    fn test_family_match_key_ignores_spacing_differences() {
+        let display = FontAdapter::family_match_key("JetBrains Mono Nerd Font");
+        let detected = FontAdapter::family_match_key("JetBrainsMono Nerd Font");
+        assert_eq!(display, detected);
     }
 }
