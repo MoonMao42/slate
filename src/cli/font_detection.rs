@@ -9,12 +9,12 @@ pub fn detect_current_font() -> Result<Option<String>> {
     if let Ok(Some(font)) = read_ghostty_font() {
         return Ok(Some(font));
     }
-    
+
     // Fall back to Alacritty
     if let Ok(Some(font)) = read_alacritty_font() {
         return Ok(Some(font));
     }
-    
+
     // No custom font found
     Ok(None)
 }
@@ -45,26 +45,23 @@ fn read_alacritty_font() -> Result<Option<String>> {
     if home.is_none() {
         return Ok(None);
     }
-    
-    let config_path = PathBuf::from(home.unwrap())
-        .join(".config/alacritty/alacritty.toml");
-    
+
+    let config_path = PathBuf::from(home.unwrap()).join(".config/alacritty/alacritty.toml");
+
     if !config_path.exists() {
         return Ok(None);
     }
-    
+
     match fs::read_to_string(&config_path) {
         Ok(content) => {
             if let Ok(doc) = content.parse::<toml_edit::DocumentMut>() {
                 // Look for [font] section, then [font.normal] section, then family field
-                if let Some(font_table) = doc.get("font")
-                    .and_then(|v| v.as_table()) {
-                    
-                    if let Some(normal_table) = font_table.get("normal")
-                        .and_then(|v| v.as_table()) {
-                        
-                        if let Some(family_val) = normal_table.get("family")
-                            .and_then(|v| v.as_str()) {
+                if let Some(font_table) = doc.get("font").and_then(|v| v.as_table()) {
+                    if let Some(normal_table) = font_table.get("normal").and_then(|v| v.as_table())
+                    {
+                        if let Some(family_val) =
+                            normal_table.get("family").and_then(|v| v.as_str())
+                        {
                             return Ok(Some(family_val.to_string()));
                         }
                     }
@@ -155,14 +152,15 @@ mod tests {
 
     #[test]
     fn test_ghostty_config_paths_include_current_and_legacy_locations() {
-        let paths = ghostty_config_paths_from_env(
-            Some("/tmp/home".as_ref()),
-            Some("/tmp/xdg".as_ref()),
-        );
+        let paths =
+            ghostty_config_paths_from_env(Some("/tmp/home".as_ref()), Some("/tmp/xdg".as_ref()));
 
         assert_eq!(paths[0], PathBuf::from("/tmp/xdg/ghostty/config.ghostty"));
         assert_eq!(paths[1], PathBuf::from("/tmp/xdg/ghostty/config"));
-        assert_eq!(paths[2], PathBuf::from("/tmp/home/.config/ghostty/config.ghostty"));
+        assert_eq!(
+            paths[2],
+            PathBuf::from("/tmp/home/.config/ghostty/config.ghostty")
+        );
         assert_eq!(paths[3], PathBuf::from("/tmp/home/.config/ghostty/config"));
     }
 }

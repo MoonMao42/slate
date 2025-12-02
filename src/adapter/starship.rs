@@ -3,7 +3,7 @@
 //! include/import mechanism, so uses EditInPlace strategy to modify user's
 //! starship.toml in-place with careful scoping to [palettes.slate] section.
 
-use crate::adapter::{ToolAdapter, ApplyStrategy};
+use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -44,8 +44,7 @@ impl ToolAdapter for StarshipAdapter {
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| SlateError::MissingHomeDir)?;
+        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
         let config_home = PathBuf::from(home).join(".config");
         Ok(Self::resolve_path(
             std::env::var("STARSHIP_CONFIG").ok().as_deref(),
@@ -74,11 +73,11 @@ impl ToolAdapter for StarshipAdapter {
         let _backup_path = config_manager.backup_file(&config_path)?;
 
         // Step 1: Read and parse TOML (preserves comments via toml_edit)
-        let content = fs::read_to_string(&config_path)
-            .map_err(|e| SlateError::ConfigReadError(config_path.display().to_string(), e.to_string()))?;
+        let content = fs::read_to_string(&config_path).map_err(|e| {
+            SlateError::ConfigReadError(config_path.display().to_string(), e.to_string())
+        })?;
 
-        let mut doc: DocumentMut = content.parse()
-            .map_err(|e| SlateError::TomlParseError(e))?;
+        let mut doc: DocumentMut = content.parse().map_err(|e| SlateError::TomlParseError(e))?;
 
         // Step 2: Set palette = "slate" at root level
         doc["palette"] = toml_edit::value("slate");
@@ -122,7 +121,10 @@ impl ToolAdapter for StarshipAdapter {
             semantic_map.insert("black", "crust");
             semantic_map.insert("white", "white");
 
-            let palette_colors = crate::adapter::palette_renderer::PaletteRenderer::to_toml(&theme.palette, &semantic_map)?;
+            let palette_colors = crate::adapter::palette_renderer::PaletteRenderer::to_toml(
+                &theme.palette,
+                &semantic_map,
+            )?;
 
             // Parse the rendered TOML colors and add them to slate_palette
             for line in palette_colors.lines() {
@@ -141,14 +143,17 @@ impl ToolAdapter for StarshipAdapter {
         use atomic_write_file::AtomicWriteFile;
         use std::io::Write;
 
-        let mut file = AtomicWriteFile::open(&config_path)
-            .map_err(|e| SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string()))?;
+        let mut file = AtomicWriteFile::open(&config_path).map_err(|e| {
+            SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string())
+        })?;
 
-        file.write_all(new_content.as_bytes())
-            .map_err(|e| SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string()))?;
+        file.write_all(new_content.as_bytes()).map_err(|e| {
+            SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string())
+        })?;
 
-        file.commit()
-            .map_err(|e| SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string()))?;
+        file.commit().map_err(|e| {
+            SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string())
+        })?;
 
         Ok(())
     }
@@ -179,7 +184,9 @@ mod tests {
     fn test_managed_config_path_returns_correct_directory() {
         let adapter = StarshipAdapter;
         let path = adapter.managed_config_path();
-        assert!(path.to_string_lossy().contains(".config/slate/managed/starship"));
+        assert!(path
+            .to_string_lossy()
+            .contains(".config/slate/managed/starship"));
     }
 
     #[test]

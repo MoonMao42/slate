@@ -18,8 +18,8 @@ fn test_generates_valid_json_for_all_10_themes() {
             .expect(&format!("Failed to generate JSONC for theme {}", theme.id));
 
         // Verify it's valid JSON (can be parsed)
-        let parsed: serde_json::Value = serde_json::from_str(&jsonc)
-            .expect(&format!("Invalid JSON for theme {}", theme.id));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&jsonc).expect(&format!("Invalid JSON for theme {}", theme.id));
 
         // Verify it's a valid object
         assert!(
@@ -90,13 +90,11 @@ fn test_color_codes_are_ansi_24bit_format() {
         serde_json::from_str(&jsonc).expect("Failed to parse JSON for catppuccin-mocha");
 
     // Check color format in the color object
-    let color_obj = parsed
-        .get("color")
-        .expect("Missing color object in JSONC");
+    let color_obj = parsed.get("color").expect("Missing color object in JSONC");
 
     // ANSI 24-bit format regex: 38;2;R;G;B where R,G,B are 0-255
-    let ansi_24bit_regex = regex::Regex::new(r"^38;2;\d{1,3};\d{1,3};\d{1,3}$")
-        .expect("Failed to compile regex");
+    let ansi_24bit_regex =
+        regex::Regex::new(r"^38;2;\d{1,3};\d{1,3};\d{1,3}$").expect("Failed to compile regex");
 
     for (key, value) in color_obj.as_object().expect("color should be an object") {
         let color_str = value
@@ -129,7 +127,10 @@ fn test_modules_array_contains_at_least_6_items() {
             .get("modules")
             .expect(&format!("Missing modules array for theme {}", theme.id))
             .as_array()
-            .expect(&format!("modules should be an array for theme {}", theme.id));
+            .expect(&format!(
+                "modules should be an array for theme {}",
+                theme.id
+            ));
 
         assert!(
             modules.len() >= 6 && modules.len() <= 8,
@@ -166,9 +167,7 @@ fn test_gruvbox_dark_legibility_sanity_check() {
     let parsed: serde_json::Value =
         serde_json::from_str(&jsonc).expect("Failed to parse JSON for gruvbox-dark");
 
-    let color_obj = parsed
-        .get("color")
-        .expect("Missing color object");
+    let color_obj = parsed.get("color").expect("Missing color object");
 
     let keys_color = color_obj
         .get("keys")

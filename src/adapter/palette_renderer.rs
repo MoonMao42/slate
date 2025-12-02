@@ -350,13 +350,13 @@ impl PaletteRenderer {
         if let Some(v) = &palette.surface0 {
             colors.insert("surface0".to_string(), v.clone());
         }
-        if let Some(v) = &palette.base {
+        if let Some(v) = &palette.bg_dim {
             colors.insert("base".to_string(), v.clone());
         }
-        if let Some(v) = &palette.mantle {
+        if let Some(v) = &palette.bg_darker {
             colors.insert("mantle".to_string(), v.clone());
         }
-        if let Some(v) = &palette.crust {
+        if let Some(v) = &palette.bg_darkest {
             colors.insert("crust".to_string(), v.clone());
         }
 
@@ -405,9 +405,10 @@ mod tests {
             surface2: Some("#585b70".to_string()),
             surface1: Some("#45475a".to_string()),
             surface0: Some("#313244".to_string()),
-            base: Some("#313244".to_string()),
-            mantle: Some("#292c3c".to_string()),
-            crust: Some("#11111b".to_string()),
+            bg_dim: Some("#313244".to_string()),
+            bg_darker: Some("#292c3c".to_string()),
+            bg_darkest: Some("#11111b".to_string()),
+            extras: std::collections::HashMap::new(),
         }
     }
 

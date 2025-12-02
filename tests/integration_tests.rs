@@ -66,7 +66,6 @@ fn test_reset_subcommand_help() {
     assert!(stdout.contains("reset"));
 }
 
-
 #[test]
 fn test_setup_quick_flag() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
@@ -119,7 +118,6 @@ fn test_reset_with_backup_id() {
     assert!(stdout.contains("backup123"));
 }
 
-
 // Setup wizard tests 
 
 #[test]
@@ -127,10 +125,10 @@ fn test_setup_wizard_intro_displays() {
     // Verify wizard displays intro frame and completes successfully
     let mut cmd = Command::cargo_bin("slate").unwrap();
     cmd.arg("setup").arg("--quick");
-    
+
     let output = cmd.output().unwrap();
     assert!(output.status.success());
-    
+
     let stderr = String::from_utf8(output.stderr).unwrap();
     // Step counter should appear in stderr
     assert!(stderr.contains("Step") || stderr.contains("✦"));
@@ -141,7 +139,7 @@ fn test_setup_wizard_completion_message() {
     // Verify "Your terminal is now beautiful!" appears in output
     let mut cmd = Command::cargo_bin("slate").unwrap();
     cmd.arg("setup").arg("--quick");
-    
+
     let output = cmd.output().unwrap();
     assert!(output.status.success());
 }
@@ -151,10 +149,10 @@ fn test_setup_wizard_step_counter_present() {
     // Verify step counter format "Step X of Y" is logged
     let mut cmd = Command::cargo_bin("slate").unwrap();
     cmd.arg("setup").arg("--quick");
-    
+
     let output = cmd.output().unwrap();
     let _stderr = String::from_utf8(output.stderr).unwrap();
-    
+
     // In quick mode, step counter should log completion
     assert!(output.status.success());
 }
@@ -164,15 +162,15 @@ fn test_setup_quick_mode_minimal_interactions() {
     // Verify --quick flag skips mode selection
     let mut cmd = Command::cargo_bin("slate").unwrap();
     cmd.arg("setup").arg("--quick");
-    
+
     let output = cmd.output().unwrap();
     assert!(output.status.success());
-    
+
     // Quick mode should complete without asking for mode selection
     let stdout = String::from_utf8(output.stdout).unwrap();
     let stderr = String::from_utf8(output.stderr).unwrap();
     let combined = format!("{}{}", stdout, stderr);
-    
+
     // Should show completion even in non-interactive quick mode
     assert!(combined.contains("beautiful") || combined.contains("Step") || output.status.success());
 }
@@ -182,7 +180,7 @@ fn test_setup_quick_mode_minimal_interactions() {
 #[cfg(test)]
 mod tool_selection_tests {
     use slate_cli::cli::tool_selection::{
-        ToolCatalog, BrewKind, compute_install_candidates, filter_valid_selections, ReviewReceipt
+        compute_install_candidates, filter_valid_selections, BrewKind, ReviewReceipt, ToolCatalog,
     };
     use std::collections::HashMap;
 
@@ -191,7 +189,7 @@ mod tool_selection_tests {
         // Verify catalog has core tools
         let all_tools = ToolCatalog::all_tools();
         let tool_ids: Vec<&str> = all_tools.iter().map(|t| t.id).collect();
-        
+
         assert!(tool_ids.contains(&"ghostty"));
         assert!(tool_ids.contains(&"starship"));
         assert!(tool_ids.contains(&"bat"));
@@ -211,7 +209,7 @@ mod tool_selection_tests {
         installed.insert("tmux".to_string(), false); // not installed
 
         let candidates = compute_install_candidates(&installed);
-        
+
         // Even though tmux is not installed, it should NOT be a candidate
         assert!(!candidates.iter().any(|t| t.id == "tmux"));
     }
@@ -227,7 +225,7 @@ mod tool_selection_tests {
 
         // ghostty is installed → not a candidate
         assert!(!candidates.iter().any(|t| t.id == "ghostty"));
-        
+
         // starship is not installed → should be a candidate
         assert!(candidates.iter().any(|t| t.id == "starship"));
     }
@@ -237,7 +235,7 @@ mod tool_selection_tests {
         // Verify that formula and cask installs are correctly distinguished
         let ghostty = ToolCatalog::get_tool("ghostty").unwrap();
         assert_eq!(ghostty.brew_kind, BrewKind::Cask);
-        
+
         let starship = ToolCatalog::get_tool("starship").unwrap();
         assert_eq!(starship.brew_kind, BrewKind::Formula);
     }
@@ -246,8 +244,8 @@ mod tool_selection_tests {
     fn test_filter_valid_selections_removes_invalid() {
         // filter_valid_selections should remove non-installable tools
         let selected = vec![
-            "ghostty".to_string(),  // installable ✓
-            "tmux".to_string(),     // detect-only ✗
+            "ghostty".to_string(),     // installable ✓
+            "tmux".to_string(),        // detect-only ✗
             "nonexistent".to_string(), // unknown ✗
         ];
 
@@ -262,17 +260,17 @@ mod tool_selection_tests {
     fn test_review_receipt_format_shows_actions() {
         // Verify that review receipt displays install actions correctly
         let mut receipt = ReviewReceipt::new();
-        
+
         if let Some(ghostty) = ToolCatalog::get_tool("ghostty") {
             let action = slate_cli::cli::tool_selection::InstallAction::from_metadata(&ghostty);
             receipt.add_install_action(action);
         }
-        
+
         receipt.selected_font = Some("JetBrains Mono".to_string());
         receipt.selected_theme = Some("Catppuccin Mocha".to_string());
 
         let formatted = receipt.format_for_display();
-        
+
         // Receipt should contain both install action and selections
         assert!(formatted.contains("Ghostty"));
         assert!(formatted.contains("JetBrains Mono"));
@@ -284,21 +282,21 @@ mod tool_selection_tests {
     fn test_receipt_distinguishes_brew_kinds() {
         // Verify that receipt shows formula vs cask distinction
         let mut receipt = ReviewReceipt::new();
-        
+
         if let Some(ghostty) = ToolCatalog::get_tool("ghostty") {
             receipt.add_install_action(
-                slate_cli::cli::tool_selection::InstallAction::from_metadata(&ghostty)
+                slate_cli::cli::tool_selection::InstallAction::from_metadata(&ghostty),
             );
         }
-        
+
         if let Some(starship) = ToolCatalog::get_tool("starship") {
             receipt.add_install_action(
-                slate_cli::cli::tool_selection::InstallAction::from_metadata(&starship)
+                slate_cli::cli::tool_selection::InstallAction::from_metadata(&starship),
             );
         }
 
         let formatted = receipt.format_for_display();
-        
+
         // Should contain both formula and cask labels
         assert!(formatted.contains("formula"));
         assert!(formatted.contains("cask"));
@@ -311,15 +309,21 @@ mod tool_selection_tests {
             assert!(!tool.id.is_empty(), "Tool id must not be empty");
             assert!(!tool.label.is_empty(), "Tool label must not be empty");
             assert!(!tool.pitch.is_empty(), "Tool pitch must not be empty");
-            
+
             // If installable, must have a brew package
             if tool.installable {
-                assert!(!tool.brew_package.is_empty(), "Installable tool must have brew package");
+                assert!(
+                    !tool.brew_package.is_empty(),
+                    "Installable tool must have brew package"
+                );
             }
-            
+
             // detect-only tools should not be installable
             if tool.detect_only {
-                assert!(!tool.installable, "Detect-only tools should not be installable");
+                assert!(
+                    !tool.installable,
+                    "Detect-only tools should not be installable"
+                );
             }
         }
     }
@@ -336,11 +340,14 @@ mod tool_selection_tests {
 
         // Should have fewer actions than total tools (due to detect-only)
         assert!(actions.len() < ToolCatalog::all_tools().len());
-        
+
         // All actions should be for installable tools
         for action in actions {
             let tool = ToolCatalog::get_tool(&action.tool_id).unwrap();
-            assert!(tool.installable, "Action must only include installable tools");
+            assert!(
+                tool.installable,
+                "Action must only include installable tools"
+            );
         }
     }
 }
@@ -349,8 +356,8 @@ mod tool_selection_tests {
 
 #[cfg(test)]
 mod preset_font_theme_mapping {
-    use slate_cli::cli::preset_selection::PresetCatalog;
     use slate_cli::cli::font_selection::FontCatalog;
+    use slate_cli::cli::preset_selection::PresetCatalog;
     use slate_cli::cli::theme_selection::ThemeSelector;
 
     #[test]
@@ -386,7 +393,12 @@ mod preset_font_theme_mapping {
         let presets = PresetCatalog::all_presets();
         for preset in presets {
             let font = FontCatalog::get_font(preset.font_id);
-            assert!(font.is_some(), "Preset {} references nonexistent font {}", preset.id, preset.font_id);
+            assert!(
+                font.is_some(),
+                "Preset {} references nonexistent font {}",
+                preset.id,
+                preset.font_id
+            );
         }
     }
 
@@ -397,7 +409,12 @@ mod preset_font_theme_mapping {
         let presets = PresetCatalog::all_presets();
         for preset in presets {
             let theme = selector.get_theme(preset.theme_id);
-            assert!(theme.is_some(), "Preset {} references nonexistent theme {}", preset.id, preset.theme_id);
+            assert!(
+                theme.is_some(),
+                "Preset {} references nonexistent theme {}",
+                preset.id,
+                preset.theme_id
+            );
         }
     }
 
@@ -413,8 +430,14 @@ mod preset_font_theme_mapping {
     fn test_gruvbox_themes_selectable() {
         // Verify Gruvbox Dark and Light are in the selection
         let selector = ThemeSelector::new().unwrap();
-        assert!(selector.get_theme("gruvbox-dark").is_some(), "Gruvbox Dark must be available");
-        assert!(selector.get_theme("gruvbox-light").is_some(), "Gruvbox Light must be available");
+        assert!(
+            selector.get_theme("gruvbox-dark").is_some(),
+            "Gruvbox Dark must be available"
+        );
+        assert!(
+            selector.get_theme("gruvbox-light").is_some(),
+            "Gruvbox Light must be available"
+        );
     }
 
     #[test]
@@ -422,7 +445,7 @@ mod preset_font_theme_mapping {
         // Verify family grouping has correct distribution
         let selector = ThemeSelector::new().unwrap();
         let families = selector.themes_by_family();
-        
+
         assert_eq!(families.len(), 5, "Must have 5 families");
         assert_eq!(families.get("Catppuccin").map(|v| v.len()), Some(4));
         assert_eq!(families.get("Tokyo Night").map(|v| v.len()), Some(2));
@@ -480,7 +503,8 @@ mod rerun_behavior {
         assert_eq!(context.selected_theme, None);
         // But detection fields are available:
         let has_font_detection = context.current_font.is_some() || context.current_font.is_none();
-        let has_theme_detection = context.current_theme.is_some() || context.current_theme.is_none();
+        let has_theme_detection =
+            context.current_theme.is_some() || context.current_theme.is_none();
         assert!(has_font_detection && has_theme_detection);
     }
 
@@ -489,12 +513,12 @@ mod rerun_behavior {
         // Per constraints: Quick mode step count differs from Manual
         let mut wizard = Wizard::new().unwrap();
         let manual_steps = wizard.get_context().total_steps;
-        
+
         wizard = Wizard::new().unwrap();
         wizard.get_context_mut().mode = WizardMode::Quick;
         wizard.get_context_mut().total_steps = 4; // Quick is shorter
         let quick_steps = wizard.get_context().total_steps;
-        
+
         assert!(quick_steps < manual_steps || quick_steps == 4);
     }
 
@@ -535,8 +559,13 @@ mod optional_automations {
         // Visual settings must be sensible
         let presets = PresetCatalog::all_presets();
         for preset in presets {
-            assert!(preset.visuals.background_opacity > 0.0 && preset.visuals.background_opacity <= 1.0);
-            assert!(matches!(preset.visuals.cursor_style, "block" | "underline" | "bar"));
+            assert!(
+                preset.visuals.background_opacity > 0.0 && preset.visuals.background_opacity <= 1.0
+            );
+            assert!(matches!(
+                preset.visuals.cursor_style,
+                "block" | "underline" | "bar"
+            ));
         }
     }
 
@@ -563,39 +592,42 @@ mod optional_automations {
 #[cfg(test)]
 mod polish_and_clarity {
     use slate_cli::brand::language::Language;
-    use slate_cli::design::typography::Typography;
     use slate_cli::cli::tool_selection::ReviewReceipt;
     use slate_cli::cli::wizard_core::Wizard;
+    use slate_cli::design::typography::Typography;
 
     #[test]
     fn test_completion_message_contains_dopamine() {
         // Per requirement: Time-to-Dopamine visible in completion
         assert!(Language::SETUP_COMPLETE.contains("beautiful"));
-        assert!(Language::COMPLETION_TIME_TAKEN.contains("Time") || Language::COMPLETION_TIME_TAKEN.contains("dopamine"));
+        assert!(
+            Language::COMPLETION_TIME_TAKEN.contains("Time")
+                || Language::COMPLETION_TIME_TAKEN.contains("dopamine")
+        );
     }
 
     #[test]
     fn test_receipt_maintains_action_clarity() {
         // Per constraint: activation guidance remains visible after polish
         let mut receipt = ReviewReceipt::new();
-        
+
         if let Some(ghostty) = slate_cli::cli::tool_selection::ToolCatalog::get_tool("ghostty") {
             receipt.add_install_action(
-                slate_cli::cli::tool_selection::InstallAction::from_metadata(&ghostty)
+                slate_cli::cli::tool_selection::InstallAction::from_metadata(&ghostty),
             );
         }
-        
+
         receipt.selected_font = Some("JetBrains Mono".to_string());
         receipt.selected_theme = Some("Catppuccin Mocha".to_string());
 
         let formatted = receipt.format_for_display();
-        
+
         // Key information must be present and readable
-        assert!(formatted.contains("Review"));  // section header
+        assert!(formatted.contains("Review")); // section header
         assert!(formatted.contains("Ghostty")); // tool names
         assert!(formatted.contains("JetBrains Mono")); // selected items
         assert!(formatted.contains("Catppuccin Mocha")); // theme
-        
+
         // Receipt footer (activation guidance) must be visible
         assert!(formatted.contains("Ready") || formatted.contains("apply"));
     }
@@ -609,7 +641,7 @@ mod polish_and_clarity {
 
         let strong = Typography::strong_emphasis("Your terminal is now beautiful!");
         assert!(strong.contains("Your terminal is now beautiful!")); // Content visible
-        
+
         let item = Typography::list_item('✓', "Ghostty", "Makes your terminal glow");
         assert!(item.contains("Ghostty")); // Label visible
         assert!(item.contains("Makes your terminal glow")); // Description visible
@@ -621,7 +653,7 @@ mod polish_and_clarity {
         let activation = Language::activation_guidance("Ghostty", "new_window");
         assert!(activation.contains("Ghostty"));
         assert!(activation.contains("new_window"));
-        
+
         let immediate = Language::activation_guidance("Starship", "immediate");
         assert!(immediate.contains("Starship"));
         assert!(immediate.contains("immediate"));
@@ -630,7 +662,10 @@ mod polish_and_clarity {
     #[test]
     fn test_receipt_categories_clearly_labeled() {
         // Section headers must be clear
-        assert!(Language::RECEIPT_HEADER.contains("Review") || Language::RECEIPT_HEADER.contains("confirm"));
+        assert!(
+            Language::RECEIPT_HEADER.contains("Review")
+                || Language::RECEIPT_HEADER.contains("confirm")
+        );
         assert!(!Language::RECEIPT_INSTALL_SECTION.is_empty());
         assert!(!Language::RECEIPT_FONT_SECTION.is_empty());
         assert!(!Language::RECEIPT_THEME_SECTION.is_empty());
@@ -641,7 +676,9 @@ mod polish_and_clarity {
         // Timing should only appear if meaningful (not cluttering output)
         let wizard = Wizard::new().unwrap();
         // context.start_time is optional
-        assert!(wizard.get_context().start_time.is_none() || wizard.get_context().start_time.is_some());
+        assert!(
+            wizard.get_context().start_time.is_none() || wizard.get_context().start_time.is_some()
+        );
         // The important thing: timing doesn't make output noisy
     }
 
@@ -662,6 +699,6 @@ mod polish_and_clarity {
         let _section = Typography::section_header("Test"); // Can be used
         let _secondary = Typography::secondary_label("label", "value"); // Can be used
         let _list_item = Typography::list_item('•', "item", "description"); // Can be used
-        // Wizard can still work without them (backward compatibility implicit)
+                                                                            // Wizard can still work without them (backward compatibility implicit)
     }
 }

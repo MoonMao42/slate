@@ -3,7 +3,7 @@
 //! Managed config path is created for future use; apply_theme() returns Ok()
 //! because actual export happens in shell init.
 
-use crate::adapter::{ToolAdapter, ApplyStrategy};
+use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::path::{Path, PathBuf};
@@ -33,8 +33,7 @@ impl BatAdapter {
 
     /// Get config home directory (XDG default)
     fn config_home() -> Result<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| SlateError::MissingHomeDir)?;
+        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home).join(".config"))
     }
 }
@@ -123,7 +122,7 @@ mod tests {
     #[test]
     fn test_integration_config_path_resolves_via_priority() {
         let config_home = PathBuf::from("/home/user/.config");
-        
+
         // Test BAT_CONFIG_PATH priority
         let path1 = BatAdapter::resolve_path(Some("/custom/bat-config"), None, &config_home);
         assert_eq!(path1, PathBuf::from("/custom/bat-config"));
@@ -147,7 +146,7 @@ mod tests {
     fn test_apply_theme_returns_ok_without_writing() {
         let adapter = BatAdapter;
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
-        
+
         let result = adapter.apply_theme(&theme);
         assert!(result.is_ok());
     }
@@ -156,7 +155,7 @@ mod tests {
     fn test_managed_config_path_returns_correct_directory() {
         let adapter = BatAdapter;
         let path = adapter.managed_config_path();
-        
+
         assert!(path.to_string_lossy().contains(".config/slate/managed/bat"));
     }
 
@@ -164,7 +163,7 @@ mod tests {
     fn test_get_current_theme_returns_none() {
         let adapter = BatAdapter;
         let result = adapter.get_current_theme();
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
     }

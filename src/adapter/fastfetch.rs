@@ -2,7 +2,7 @@
 //! Per , Implements EnvironmentVariable strategy.
 //! Generates managed JSONC config with themed colors while preserving Apple logo.
 
-use crate::adapter::{ToolAdapter, ApplyStrategy};
+use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -15,8 +15,7 @@ pub struct FastfetchAdapter;
 impl FastfetchAdapter {
     /// Get config home directory (XDG default)
     fn config_home() -> Result<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| SlateError::MissingHomeDir)?;
+        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home).join(".config"))
     }
 }
@@ -85,8 +84,8 @@ impl ToolAdapter for FastfetchAdapter {
 
 impl FastfetchAdapter {
     pub fn generate_jsonc_config(&self, theme: &ThemeVariant) -> Result<String> {
-        use serde_json::json;
         use crate::adapter::palette_renderer::PaletteRenderer;
+        use serde_json::json;
 
         let palette = &theme.palette;
 
@@ -163,7 +162,9 @@ mod tests {
     fn test_managed_config_path_returns_correct_directory() {
         let adapter = FastfetchAdapter;
         let path = adapter.managed_config_path();
-        assert!(path.to_string_lossy().contains(".config/slate/managed/fastfetch"));
+        assert!(path
+            .to_string_lossy()
+            .contains(".config/slate/managed/fastfetch"));
     }
 
     #[test]

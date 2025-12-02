@@ -1,7 +1,6 @@
 /// Typography hierarchy helpers for setup wizard output.
 /// Provides reusable text-emphasis primitives to improve visual hierarchy
 /// without noisy decoration. All helpers are optional — Claude discretion on usage.
-
 use crate::design::colors::Colors;
 use crate::design::symbols::Symbols;
 

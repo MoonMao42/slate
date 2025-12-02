@@ -1,9 +1,9 @@
 use crate::brand::language::Language;
-use crate::error::Result;
-use crate::cli::wizard_core::Wizard;
 use crate::cli::preflight;
 use crate::cli::setup_executor;
 use crate::cli::tool_selection::ToolCatalog;
+use crate::cli::wizard_core::Wizard;
+use crate::error::Result;
 use std::io::IsTerminal;
 use std::time::Instant;
 
@@ -81,7 +81,10 @@ fn handle_retry_only(tool_id: &str) -> Result<()> {
     if summary.success_count() > 0 {
         eprintln!("\n✓ Tool '{}' installed successfully.\n", tool.label);
     } else {
-        eprintln!("\n✗ Tool '{}' installation failed. Check logs above.\n", tool.label);
+        eprintln!(
+            "\n✗ Tool '{}' installation failed. Check logs above.\n",
+            tool.label
+        );
     }
 
     Ok(())
@@ -89,9 +92,10 @@ fn handle_retry_only(tool_id: &str) -> Result<()> {
 
 fn validate_retry_tool(tool_id: &str) -> Result<crate::cli::tool_selection::ToolMetadata> {
     let Some(tool) = ToolCatalog::get_tool(tool_id) else {
-        return Err(crate::error::SlateError::Internal(
-            format!("Unknown tool: '{}'. Run 'slate setup' to see available tools.", tool_id),
-        ));
+        return Err(crate::error::SlateError::Internal(format!(
+            "Unknown tool: '{}'. Run 'slate setup' to see available tools.",
+            tool_id
+        )));
     };
 
     if !tool.installable {

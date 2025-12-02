@@ -50,7 +50,7 @@ mod tests {
         // Ensure symbols can be used in format strings
         let formatted = format!("{} Success message", Symbols::SUCCESS);
         assert!(formatted.contains("✓"));
-        
+
         let cta = format!("{} Install tools", Symbols::CTA_ARROW);
         assert!(cta.contains("→"));
     }
@@ -67,7 +67,7 @@ mod tests {
             Symbols::CHEVRON,
             Symbols::DIAMOND,
         ];
-        
+
         for (i, &sym1) in symbols.iter().enumerate() {
             for &sym2 in symbols.iter().skip(i + 1) {
                 assert_ne!(sym1, sym2, "Symbols must be distinct for clarity");

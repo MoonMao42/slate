@@ -1,17 +1,17 @@
-pub mod setup;
-pub mod set;
-pub mod status;
-pub mod list;
-pub mod restore;
-pub mod wizard_core;
-pub mod font_detection;
-pub mod tool_selection;
-pub mod preset_selection;
-pub mod font_selection;
-pub mod theme_selection;
-pub mod preflight;
 pub mod failure_handler;
+pub mod font_detection;
+pub mod font_selection;
+pub mod list;
+pub mod preflight;
+pub mod preset_selection;
+pub mod restore;
+pub mod set;
+pub mod setup;
 pub mod setup_executor;
+pub mod status;
+pub mod theme_selection;
+pub mod tool_selection;
+pub mod wizard_core;
 
 use crate::error::Result;
 
@@ -23,8 +23,9 @@ pub fn dispatch(command: &str, args: &[&str]) -> Result<()> {
         "status" => status::handle(args),
         "list" => list::handle(args),
         "restore" => restore::handle(args),
-        _ => Err(crate::error::SlateError::Internal(
-            format!("Unknown command: {}", command)
-        )),
+        _ => Err(crate::error::SlateError::Internal(format!(
+            "Unknown command: {}",
+            command
+        ))),
     }
 }

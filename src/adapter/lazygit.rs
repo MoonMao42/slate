@@ -3,7 +3,7 @@
 //! Per , Fixes macOS path resolution to check LG_CONFIG_FILE first.
 //! Preserves pager sync logic (bat/delta themes) as competitive advantage.
 
-use crate::adapter::{ToolAdapter, ApplyStrategy};
+use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -56,8 +56,7 @@ impl LazygitAdapter {
         }
 
         // Step 3: Default to macOS location
-        let home = std::env::var("HOME")
-            .map_err(|_| SlateError::MissingHomeDir)?;
+        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
 
         if cfg!(target_os = "macos") {
             Ok(PathBuf::from(home).join("Library/Application Support/lazygit/config.yml"))
@@ -96,14 +95,12 @@ impl ToolAdapter for LazygitAdapter {
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
         // Step 1: Extract theme name from tool_refs
-        theme.tool_refs
-            .get("lazygit")
-            .ok_or_else(|| {
-                SlateError::InvalidThemeData(format!(
-                    "Theme '{}' missing lazygit tool reference",
-                    theme.id
-                ))
-            })?;
+        theme.tool_refs.get("lazygit").ok_or_else(|| {
+            SlateError::InvalidThemeData(format!(
+                "Theme '{}' missing lazygit tool reference",
+                theme.id
+            ))
+        })?;
 
         // Step 2: Generate managed YAML using PaletteRenderer
         let managed_content = self.generate_yaml_config(theme)?;
@@ -125,11 +122,12 @@ impl ToolAdapter for LazygitAdapter {
 
 impl LazygitAdapter {
     fn generate_yaml_config(&self, theme: &ThemeVariant) -> Result<String> {
-        let lazygit_ref = theme.tool_refs
-            .get("lazygit")
-            .ok_or_else(|| SlateError::InvalidThemeData(format!(
-                "Theme '{}' missing lazygit tool reference", theme.id
-            )))?;
+        let lazygit_ref = theme.tool_refs.get("lazygit").ok_or_else(|| {
+            SlateError::InvalidThemeData(format!(
+                "Theme '{}' missing lazygit tool reference",
+                theme.id
+            ))
+        })?;
 
         // Generate lazygit YAML config with themed GUI colors
         let mut semantic_map = std::collections::HashMap::new();
@@ -137,12 +135,16 @@ impl LazygitAdapter {
         semantic_map.insert("foreground", "gui.theme.activeBorderColor");
         semantic_map.insert("red", "gui.theme.selectedLineBgColor");
 
-        let yaml_content = crate::adapter::palette_renderer::PaletteRenderer::to_yaml(&theme.palette, &semantic_map)?;
+        let yaml_content = crate::adapter::palette_renderer::PaletteRenderer::to_yaml(
+            &theme.palette,
+            &semantic_map,
+        )?;
 
         // Wrap in gui.theme section
         let config = format!(
             "gui:\n  theme:\n{}\npager:\n  commands:\n    theme: \"{}\"\n",
-            yaml_content.lines()
+            yaml_content
+                .lines()
                 .map(|line| format!("  {}", line))
                 .collect::<Vec<_>>()
                 .join("\n"),
@@ -173,7 +175,9 @@ mod tests {
     fn test_managed_config_path_returns_correct_directory() {
         let adapter = LazygitAdapter;
         let path = adapter.managed_config_path();
-        assert!(path.to_string_lossy().contains(".config/slate/managed/lazygit"));
+        assert!(path
+            .to_string_lossy()
+            .contains(".config/slate/managed/lazygit"));
     }
 
     #[test]

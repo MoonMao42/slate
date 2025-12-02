@@ -2,7 +2,6 @@
 /// Each preset locks theme + font + terminal visual settings.
 /// Per and from 02-, four locked presets are defined.
 
-
 /// Terminal visual settings that bundle with presets
 #[derive(Debug, Clone)]
 pub struct TerminalVisuals {
@@ -118,7 +117,11 @@ mod tests {
     #[test]
     fn test_all_presets_exist() {
         let presets = PresetCatalog::all_presets();
-        assert_eq!(presets.len(), 4, "Must have exactly 4 locked presets per ");
+        assert_eq!(
+            presets.len(),
+            4,
+            "Must have exactly 4 locked presets per "
+        );
     }
 
     #[test]
@@ -180,7 +183,12 @@ mod tests {
         let presets = PresetCatalog::all_presets();
         for preset in presets {
             let font = FontCatalog::get_font(preset.font_id);
-            assert!(font.is_some(), "Preset {} references nonexistent font {}", preset.id, preset.font_id);
+            assert!(
+                font.is_some(),
+                "Preset {} references nonexistent font {}",
+                preset.id,
+                preset.font_id
+            );
         }
     }
 
@@ -192,7 +200,12 @@ mod tests {
         let presets = PresetCatalog::all_presets();
         for preset in presets {
             let theme = selector.get_theme(preset.theme_id);
-            assert!(theme.is_some(), "Preset {} references nonexistent theme {}", preset.id, preset.theme_id);
+            assert!(
+                theme.is_some(),
+                "Preset {} references nonexistent theme {}",
+                preset.id,
+                preset.theme_id
+            );
         }
     }
 
@@ -222,5 +235,4 @@ mod tests {
         assert_eq!(clean.theme_id, "catppuccin-latte");
         assert_eq!(clean.font_id, "fira-code");
     }
-
 }

@@ -25,8 +25,10 @@ impl Language {
 
     pub const COMPLETION_TIME_TAKEN: &str = "Time to dopamine:";
     pub const COMPLETION_NEXT_STEPS: &str = "What's next:";
-    pub const COMPLETION_ACTIVATION_NOTE: &str = "Note: Changes may require a new terminal window to take full effect.";
-    pub const COMPLETION_CALL_TO_ACTION: &str = "Open a fresh terminal to see your new setup shine!";
+    pub const COMPLETION_ACTIVATION_NOTE: &str =
+        "Note: Changes may require a new terminal window to take full effect.";
+    pub const COMPLETION_CALL_TO_ACTION: &str =
+        "Open a fresh terminal to see your new setup shine!";
 
     // Tool selling points (one-liner visual value per)
     pub const PITCH_GHOSTTY: &str = "Makes your terminal glow";
@@ -47,7 +49,8 @@ impl Language {
     pub const STATUS_LABEL_FONT: &str = "font:";
     pub const LIST_HEADER: &str = "Available themes";
     pub const RESTORE_SUCCESS: &str = "✓ Configuration restored";
-    pub const SET_PICKER_PENDING: &str = "Interactive theme picker coming soon. For now, use: slate set <theme-name>";
+    pub const SET_PICKER_PENDING: &str =
+        "Interactive theme picker coming soon. For now, use: slate set <theme-name>";
     pub const STATUS_PENDING: &str = "Status display lands in .";
     pub const LIST_PENDING: &str = "Theme listing lands in .";
     pub const RESTORE_PICKER_PENDING: &str = "Restore point selection lands in .";
@@ -118,7 +121,8 @@ impl Language {
     }
 
     pub fn activation_guidance(tool: &str, activation_type: &str) -> String {
-        format!("  {} {} — {}", 
+        format!(
+            "  {} {} — {}",
             match activation_type {
                 "immediate" => "✓",
                 "new_window" => "➔",

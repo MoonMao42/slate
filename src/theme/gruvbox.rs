@@ -1,5 +1,6 @@
+use super::{Palette, ThemeVariant};
 use crate::error::Result;
-use super::{ThemeVariant, ToolRefs, Palette};
+use std::collections::HashMap;
 
 /// Gruvbox Dark — warm, dark palette inspired by classic Vim colorscheme
 pub fn gruvbox_dark() -> Result<ThemeVariant> {
@@ -7,18 +8,21 @@ pub fn gruvbox_dark() -> Result<ThemeVariant> {
         id: "gruvbox-dark".to_string(),
         name: "Gruvbox Dark".to_string(),
         family: "Gruvbox".to_string(),
-        tool_refs: ToolRefs {
-            ghostty: "Gruvbox Dark".to_string(),
-            alacritty: "gruvbox_dark".to_string(),
-            bat: "Gruvbox Dark".to_string(),
-            delta: "gruvbox_dark".to_string(),
-            starship: "gruvbox_dark".to_string(),
-            eza: "gruvbox_dark".to_string(),
-            lazygit: "gruvbox_dark".to_string(),
-            fastfetch: "gruvbox_dark".to_string(),
-            tmux: "gruvbox_dark".to_string(),
-            zsh_syntax_highlighting: "gruvbox_dark".to_string(),
-        },
+        tool_refs: HashMap::from([
+            ("ghostty".to_string(), "Gruvbox Dark".to_string()),
+            ("alacritty".to_string(), "gruvbox_dark".to_string()),
+            ("bat".to_string(), "Gruvbox Dark".to_string()),
+            ("delta".to_string(), "gruvbox_dark".to_string()),
+            ("starship".to_string(), "gruvbox_dark".to_string()),
+            ("eza".to_string(), "gruvbox_dark".to_string()),
+            ("lazygit".to_string(), "gruvbox_dark".to_string()),
+            ("fastfetch".to_string(), "gruvbox_dark".to_string()),
+            ("tmux".to_string(), "gruvbox_dark".to_string()),
+            (
+                "zsh_syntax_highlighting".to_string(),
+                "gruvbox_dark".to_string(),
+            ),
+        ]),
         palette: Palette {
             foreground: "#ebdbb2".to_string(),
             background: "#282828".to_string(),
@@ -41,6 +45,9 @@ pub fn gruvbox_dark() -> Result<ThemeVariant> {
             bright_magenta: "#d3869b".to_string(),
             bright_cyan: "#8ec07c".to_string(),
             bright_white: "#ebdbb2".to_string(),
+            bg_dim: Some("#32302f".to_string()),
+            bg_darker: Some("#282828".to_string()),
+            bg_darkest: Some("#1d2021".to_string()),
             rosewater: Some("#ebdbb2".to_string()),
             flamingo: Some("#d75f5f".to_string()),
             pink: Some("#d75f5f".to_string()),
@@ -55,9 +62,7 @@ pub fn gruvbox_dark() -> Result<ThemeVariant> {
             surface2: Some("#7c6f64".to_string()),
             surface1: Some("#504945".to_string()),
             surface0: Some("#282828".to_string()),
-            base: Some("#282828".to_string()),
-            mantle: Some("#32302f".to_string()),
-            crust: Some("#1d2021".to_string()),
+            extras: HashMap::new(),
         },
     })
 }
@@ -68,18 +73,21 @@ pub fn gruvbox_light() -> Result<ThemeVariant> {
         id: "gruvbox-light".to_string(),
         name: "Gruvbox Light".to_string(),
         family: "Gruvbox".to_string(),
-        tool_refs: ToolRefs {
-            ghostty: "Gruvbox Light".to_string(),
-            alacritty: "gruvbox_light".to_string(),
-            bat: "Gruvbox Light".to_string(),
-            delta: "gruvbox_light".to_string(),
-            starship: "gruvbox_light".to_string(),
-            eza: "gruvbox_light".to_string(),
-            lazygit: "gruvbox_light".to_string(),
-            fastfetch: "gruvbox_light".to_string(),
-            tmux: "gruvbox_light".to_string(),
-            zsh_syntax_highlighting: "gruvbox_light".to_string(),
-        },
+        tool_refs: HashMap::from([
+            ("ghostty".to_string(), "Gruvbox Light".to_string()),
+            ("alacritty".to_string(), "gruvbox_light".to_string()),
+            ("bat".to_string(), "Gruvbox Light".to_string()),
+            ("delta".to_string(), "gruvbox_light".to_string()),
+            ("starship".to_string(), "gruvbox_light".to_string()),
+            ("eza".to_string(), "gruvbox_light".to_string()),
+            ("lazygit".to_string(), "gruvbox_light".to_string()),
+            ("fastfetch".to_string(), "gruvbox_light".to_string()),
+            ("tmux".to_string(), "gruvbox_light".to_string()),
+            (
+                "zsh_syntax_highlighting".to_string(),
+                "gruvbox_light".to_string(),
+            ),
+        ]),
         palette: Palette {
             foreground: "#3c3836".to_string(),
             background: "#fbf1c7".to_string(),
@@ -102,6 +110,9 @@ pub fn gruvbox_light() -> Result<ThemeVariant> {
             bright_magenta: "#8f3f71".to_string(),
             bright_cyan: "#427b58".to_string(),
             bright_white: "#3c3836".to_string(),
+            bg_dim: Some("#f4f1de".to_string()),
+            bg_darker: Some("#fbf1c7".to_string()),
+            bg_darkest: Some("#f9f5d9".to_string()),
             rosewater: Some("#282828".to_string()),
             flamingo: Some("#cc241d".to_string()),
             pink: Some("#cc241d".to_string()),
@@ -116,9 +127,7 @@ pub fn gruvbox_light() -> Result<ThemeVariant> {
             surface2: Some("#bdae93".to_string()),
             surface1: Some("#d4c4a1".to_string()),
             surface0: Some("#f4f1de".to_string()),
-            base: Some("#fbf1c7".to_string()),
-            mantle: Some("#f4f1de".to_string()),
-            crust: Some("#f9f5d9".to_string()),
+            extras: HashMap::new(),
         },
     })
 }

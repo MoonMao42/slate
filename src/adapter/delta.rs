@@ -3,7 +3,7 @@
 //! This adapter uses the MarkerBlock module from for safe, validated editing.
 //! Preserves pager sync logic: synchronizes bat --theme and delta --syntax-theme.
 
-use crate::adapter::{ToolAdapter, ApplyStrategy, marker_block};
+use crate::adapter::{marker_block, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -16,8 +16,7 @@ pub struct DeltaAdapter;
 impl DeltaAdapter {
     /// Path to ~/.gitconfig (integration file)
     fn gitconfig_path() -> Result<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| SlateError::MissingHomeDir)?;
+        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home).join(".gitconfig"))
     }
 
@@ -47,6 +46,7 @@ impl DeltaAdapter {
         let syntax_theme = theme
             .tool_refs
             .get("delta")
+            .map(|s| s.as_str())
             .unwrap_or("catppuccin-mocha");
         format!(
             "[delta]\n\
@@ -134,10 +134,10 @@ impl ToolAdapter for DeltaAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::{Palette, ToolRefs};
+    use std::collections::HashMap;
 
-    fn create_test_palette() -> Palette {
-        Palette {
+    fn create_test_palette() -> crate::theme::Palette {
+        crate::theme::Palette {
             foreground: "#ffffff".to_string(),
             background: "#000000".to_string(),
             cursor: None,
@@ -159,6 +159,9 @@ mod tests {
             bright_magenta: "#ff69ff".to_string(),
             bright_cyan: "#69ffff".to_string(),
             bright_white: "#ffffff".to_string(),
+            bg_dim: None,
+            bg_darker: None,
+            bg_darkest: None,
             rosewater: None,
             flamingo: None,
             pink: None,
@@ -173,9 +176,7 @@ mod tests {
             surface2: None,
             surface1: None,
             surface0: None,
-            base: None,
-            mantle: None,
-            crust: None,
+            extras: HashMap::new(),
         }
     }
 
@@ -185,18 +186,18 @@ mod tests {
             name: "Test Theme".to_string(),
             family: "Test".to_string(),
             palette: create_test_palette(),
-            tool_refs: ToolRefs {
-                ghostty: "test".to_string(),
-                alacritty: "test".to_string(),
-                bat: "test".to_string(),
-                delta: "test".to_string(),
-                starship: "test".to_string(),
-                eza: "test".to_string(),
-                lazygit: "test".to_string(),
-                fastfetch: "test".to_string(),
-                tmux: "test".to_string(),
-                zsh_syntax_highlighting: "test".to_string(),
-            },
+            tool_refs: HashMap::from([
+                ("ghostty".to_string(), "test".to_string()),
+                ("alacritty".to_string(), "test".to_string()),
+                ("bat".to_string(), "test".to_string()),
+                ("delta".to_string(), "test".to_string()),
+                ("starship".to_string(), "test".to_string()),
+                ("eza".to_string(), "test".to_string()),
+                ("lazygit".to_string(), "test".to_string()),
+                ("fastfetch".to_string(), "test".to_string()),
+                ("tmux".to_string(), "test".to_string()),
+                ("zsh_syntax_highlighting".to_string(), "test".to_string()),
+            ]),
         }
     }
 

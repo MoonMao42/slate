@@ -1,5 +1,5 @@
-use crate::error::Result;
 use crate::brand::language::Language;
+use crate::error::Result;
 
 /// Handle `slate status` command
 pub fn handle(_args: &[&str]) -> Result<()> {

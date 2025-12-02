@@ -1,14 +1,14 @@
-use crate::error::Result;
 use crate::brand::language::Language;
-use crate::design::typography::Typography;
 use crate::cli::font_detection::detect_current_font;
-use crate::cli::tool_selection::{
-    ToolCatalog, compute_install_candidates, detect_installed_tools, ReviewReceipt, InstallAction,
-    TerminalSettings,
-};
-use crate::cli::preset_selection::PresetCatalog;
 use crate::cli::font_selection::FontCatalog;
+use crate::cli::preset_selection::PresetCatalog;
 use crate::cli::theme_selection::ThemeSelector;
+use crate::cli::tool_selection::{
+    compute_install_candidates, detect_installed_tools, InstallAction, ReviewReceipt,
+    TerminalSettings, ToolCatalog,
+};
+use crate::design::typography::Typography;
+use crate::error::Result;
 use cliclack::{confirm, intro, multiselect, outro_cancel, select};
 use std::collections::HashMap;
 use std::fs;
@@ -59,7 +59,7 @@ impl Wizard {
         // Detect current font and theme on wizard startup
         let current_font = detect_current_font().ok().flatten();
         let current_theme = detect_current_theme_id();
-        
+
         Ok(Self {
             context: WizardContext {
                 mode: WizardMode::Manual,
@@ -150,7 +150,8 @@ impl Wizard {
         let mode_choice = select("Setup mode:")
             .item("quick", "Quick (pick a vibe)", "")
             .item("manual", "Manual (customize each)", "")
-            .interact().map_err(handle_cliclack_error)?;
+            .interact()
+            .map_err(handle_cliclack_error)?;
 
         self.context.mode = match mode_choice {
             "quick" => WizardMode::Quick,
@@ -171,7 +172,8 @@ impl Wizard {
             let preset = PresetCatalog::default_preset();
             self.context.selected_font = Some(preset.font_id.to_string());
             self.context.selected_theme = Some(preset.theme_id.to_string());
-            self.context.selected_terminal_settings = Some(self.terminal_settings_from_preset(&preset));
+            self.context.selected_terminal_settings =
+                Some(self.terminal_settings_from_preset(&preset));
             self.context.current_step += 1;
             return Ok(());
         }
@@ -184,12 +186,14 @@ impl Wizard {
 
         let selected_preset_id = select("Pick a vibe:")
             .items(&preset_options)
-            .interact().map_err(handle_cliclack_error)?;
+            .interact()
+            .map_err(handle_cliclack_error)?;
 
         if let Some(preset) = PresetCatalog::get_preset(selected_preset_id) {
             self.context.selected_font = Some(preset.font_id.to_string());
             self.context.selected_theme = Some(preset.theme_id.to_string());
-            self.context.selected_terminal_settings = Some(self.terminal_settings_from_preset(&preset));
+            self.context.selected_terminal_settings =
+                Some(self.terminal_settings_from_preset(&preset));
         }
 
         self.context.current_step += 1;
@@ -224,13 +228,7 @@ impl Wizard {
         // Build multiselect items: (id, label, pitch)
         let items: Vec<(&str, String, String)> = candidates
             .iter()
-            .map(|tool| {
-                (
-                    tool.id,
-                    tool.label.to_string(),
-                    tool.pitch.to_string(),
-                )
-            })
+            .map(|tool| (tool.id, tool.label.to_string(), tool.pitch.to_string()))
             .collect();
 
         eprintln!("Select tools to install:");
@@ -239,9 +237,10 @@ impl Wizard {
                 &items
                     .iter()
                     .map(|(id, label, pitch)| (*id, label.as_str(), pitch.as_str()))
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
             )
-            .interact().map_err(handle_cliclack_error)?;
+            .interact()
+            .map_err(handle_cliclack_error)?;
 
         // Convert &str to String
         self.context.selected_tools = selected.into_iter().map(|s| s.to_string()).collect();
@@ -256,7 +255,10 @@ impl Wizard {
         if let Some(ref current) = self.context.current_font {
             eprintln!("{}", Typography::secondary_label("current font", current));
         } else {
-            eprintln!("{}", Typography::secondary_label("current font", "system default"));
+            eprintln!(
+                "{}",
+                Typography::secondary_label("current font", "system default")
+            );
         }
         eprintln!();
 
@@ -283,9 +285,10 @@ impl Wizard {
                 &font_options
                     .iter()
                     .map(|(id, label, desc)| (*id, *label, desc.as_str()))
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
             )
-            .interact().map_err(handle_cliclack_error)?;
+            .interact()
+            .map_err(handle_cliclack_error)?;
 
         // Store selection only if not skip
         if selected_font_id != "skip" {
@@ -304,9 +307,15 @@ impl Wizard {
 
         if let Some(ref current_theme_id) = self.context.current_theme {
             let current_label = self.resolve_theme_label(current_theme_id);
-            eprintln!("{}", Typography::secondary_label("current theme", &current_label));
+            eprintln!(
+                "{}",
+                Typography::secondary_label("current theme", &current_label)
+            );
         } else {
-            eprintln!("{}", Typography::secondary_label("current theme", "not yet applied"));
+            eprintln!(
+                "{}",
+                Typography::secondary_label("current theme", "not yet applied")
+            );
         }
         eprintln!();
 
@@ -322,13 +331,11 @@ impl Wizard {
             ));
         }
 
-        theme_options.extend(all_themes.iter().map(|t| {
-            (
-                t.id.clone(),
-                t.name.clone(),
-                format!("— {}", t.family),
-            )
-        }));
+        theme_options.extend(
+            all_themes
+                .iter()
+                .map(|t| (t.id.clone(), t.name.clone(), format!("— {}", t.family))),
+        );
 
         if !std::io::stdin().is_terminal() {
             // Non-interactive: keep current theme if present, otherwise preserve preset/default.
@@ -347,9 +354,10 @@ impl Wizard {
                 &theme_options
                     .iter()
                     .map(|(id, label, desc)| (id.as_str(), label.as_str(), desc.as_str()))
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
             )
-            .interact().map_err(handle_cliclack_error)?;
+            .interact()
+            .map_err(handle_cliclack_error)?;
 
         if selected_theme_id != "keep-current" {
             self.context.selected_theme = Some(selected_theme_id.to_string());
@@ -362,7 +370,7 @@ impl Wizard {
 
     fn display_tool_inventory(&self, installed: &HashMap<String, bool>) -> Result<()> {
         eprintln!("\n{}\n", Typography::section_header("Tool Inventory"));
-        
+
         for tool in ToolCatalog::all_tools() {
             let status_mark = if installed.get(tool.id).copied().unwrap_or(false) {
                 "✓"
@@ -382,9 +390,11 @@ impl Wizard {
 
             eprintln!(
                 "{}",
-                Typography::list_item(status_mark.chars().next().unwrap_or('•'), 
-                    tool.label, 
-                    &format!("{}{}", tool.pitch, install_note))
+                Typography::list_item(
+                    status_mark.chars().next().unwrap_or('•'),
+                    tool.label,
+                    &format!("{}{}", tool.pitch, install_note)
+                )
             );
         }
         eprintln!();
@@ -419,7 +429,8 @@ impl Wizard {
 
         let confirmed = confirm(Language::SETUP_REVIEW)
             .initial_value(true)
-            .interact().map_err(handle_cliclack_error)?;
+            .interact()
+            .map_err(handle_cliclack_error)?;
 
         self.context.confirmed = confirmed;
         self.context.current_step += 1;
@@ -460,10 +471,9 @@ impl Wizard {
             .as_deref()
             .map(|theme_id| self.resolve_theme_label(theme_id))
             .or_else(|| {
-                self.context
-                    .current_theme
-                    .as_deref()
-                    .map(|theme_id| format!("Keep current ({})", self.resolve_theme_label(theme_id)))
+                self.context.current_theme.as_deref().map(|theme_id| {
+                    format!("Keep current ({})", self.resolve_theme_label(theme_id))
+                })
             });
         receipt.terminal_settings = self.context.selected_terminal_settings.clone();
 
@@ -584,7 +594,10 @@ mod tests {
 
         let receipt = wizard.build_review_receipt();
         assert_eq!(receipt.install_actions.len(), 2);
-        assert_eq!(receipt.selected_font.as_deref(), Some("JetBrains Mono Nerd Font"));
+        assert_eq!(
+            receipt.selected_font.as_deref(),
+            Some("JetBrains Mono Nerd Font")
+        );
         assert_eq!(receipt.selected_theme.as_deref(), Some("Catppuccin Mocha"));
     }
 
@@ -595,7 +608,10 @@ mod tests {
         wizard.context.current_theme = Some("catppuccin-mocha".to_string());
 
         let receipt = wizard.build_review_receipt();
-        assert_eq!(receipt.selected_font.as_deref(), Some("Keep current (SF Mono)"));
+        assert_eq!(
+            receipt.selected_font.as_deref(),
+            Some("Keep current (SF Mono)")
+        );
         assert_eq!(
             receipt.selected_theme.as_deref(),
             Some("Keep current (Catppuccin Mocha)")
@@ -613,7 +629,9 @@ mod tests {
         });
 
         let receipt = wizard.build_review_receipt();
-        let settings = receipt.terminal_settings.expect("terminal settings should exist");
+        let settings = receipt
+            .terminal_settings
+            .expect("terminal settings should exist");
         assert_eq!(settings.padding_x, 12);
         assert!(settings.blur_enabled);
     }

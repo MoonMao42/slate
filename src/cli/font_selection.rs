@@ -1,7 +1,6 @@
 /// Font selection for setup wizard.
 /// Per through from 02-.
 
-
 /// Font option for wizard selection
 #[derive(Debug, Clone)]
 pub struct FontOption {

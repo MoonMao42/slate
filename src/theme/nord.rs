@@ -1,5 +1,6 @@
+use super::{Palette, ThemeVariant};
 use crate::error::Result;
-use super::{ThemeVariant, ToolRefs, Palette};
+use std::collections::HashMap;
 
 /// Nord — arctic, north-bluish color palette
 pub fn nord() -> Result<ThemeVariant> {
@@ -7,18 +8,18 @@ pub fn nord() -> Result<ThemeVariant> {
         id: "nord".to_string(),
         name: "Nord".to_string(),
         family: "Nord".to_string(),
-        tool_refs: ToolRefs {
-            ghostty: "Nord".to_string(),
-            alacritty: "nord".to_string(),
-            bat: "Nord".to_string(),
-            delta: "nord".to_string(),
-            starship: "nord".to_string(),
-            eza: "nord".to_string(),
-            lazygit: "nord".to_string(),
-            fastfetch: "nord".to_string(),
-            tmux: "nord".to_string(),
-            zsh_syntax_highlighting: "nord".to_string(),
-        },
+        tool_refs: HashMap::from([
+            ("ghostty".to_string(), "Nord".to_string()),
+            ("alacritty".to_string(), "nord".to_string()),
+            ("bat".to_string(), "Nord".to_string()),
+            ("delta".to_string(), "nord".to_string()),
+            ("starship".to_string(), "nord".to_string()),
+            ("eza".to_string(), "nord".to_string()),
+            ("lazygit".to_string(), "nord".to_string()),
+            ("fastfetch".to_string(), "nord".to_string()),
+            ("tmux".to_string(), "nord".to_string()),
+            ("zsh_syntax_highlighting".to_string(), "nord".to_string()),
+        ]),
         palette: Palette {
             foreground: "#d8dee9".to_string(),
             background: "#2e3440".to_string(),
@@ -41,6 +42,9 @@ pub fn nord() -> Result<ThemeVariant> {
             bright_magenta: "#b48ead".to_string(),
             bright_cyan: "#88c0d0".to_string(),
             bright_white: "#eceff4".to_string(),
+            bg_dim: Some("#3b4252".to_string()),
+            bg_darker: Some("#2e3440".to_string()),
+            bg_darkest: Some("#2e3440".to_string()),
             rosewater: Some("#eceff4".to_string()),
             flamingo: Some("#bf616a".to_string()),
             pink: Some("#b48ead".to_string()),
@@ -55,9 +59,7 @@ pub fn nord() -> Result<ThemeVariant> {
             surface2: Some("#434c5e".to_string()),
             surface1: Some("#3b4252".to_string()),
             surface0: Some("#2e3440".to_string()),
-            base: Some("#2e3440".to_string()),
-            mantle: Some("#3b4252".to_string()),
-            crust: Some("#2e3440".to_string()),
+            extras: HashMap::new(),
         },
     })
 }

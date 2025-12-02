@@ -1,13 +1,13 @@
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::error::Result;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // Re-export theme variants
 pub mod catppuccin;
-pub mod tokyo_night;
 pub mod dracula;
-pub mod nord;
 pub mod gruvbox;
+pub mod nord;
+pub mod tokyo_night;
 
 /// Shared default theme ID used when Slate needs a fallback theme.
 pub const DEFAULT_THEME_ID: &str = "catppuccin-mocha";
@@ -18,7 +18,7 @@ pub const DEFAULT_THEME_ID: &str = "catppuccin-mocha";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Palette {
     // Semantic UI colors (all themes have these)
-    pub foreground: String,    // Hex: #RRGGBB
+    pub foreground: String, // Hex: #RRGGBB
     pub background: String,
     pub cursor: Option<String>,
     pub selection_bg: Option<String>,
@@ -43,8 +43,12 @@ pub struct Palette {
     pub bright_cyan: String,
     pub bright_white: String,
 
+    // Semantic background variants (language-neutral names)
+    pub bg_dim: Option<String>, // Medium background, was "base" in Catppuccin
+    pub bg_darker: Option<String>, // Darker background, was "mantle" in Catppuccin
+    pub bg_darkest: Option<String>, // Darkest background, was "crust" in Catppuccin
+
     // Catppuccin-specific colors (optional)
-    // All themes must populate base, mantle, crust fields for Starship powerline compatibility.
     pub rosewater: Option<String>,
     pub flamingo: Option<String>,
     pub pink: Option<String>,
@@ -59,9 +63,10 @@ pub struct Palette {
     pub surface2: Option<String>,
     pub surface1: Option<String>,
     pub surface0: Option<String>,
-    pub base: Option<String>,         // Catppuccin base (darker background variant)
-    pub mantle: Option<String>,       // Catppuccin mantle (slightly lighter background)
-    pub crust: Option<String>,        // Catppuccin crust (darkest, almost black)
+
+    // extras HashMap for theme-specific color values
+    #[serde(default)]
+    pub extras: HashMap<String, String>,
 }
 
 impl Palette {
@@ -69,7 +74,7 @@ impl Palette {
     pub fn validate(&self) -> Result<()> {
         if self.foreground.is_empty() || self.background.is_empty() {
             return Err(crate::error::SlateError::InvalidThemeData(
-                "Palette missing required colors".to_string()
+                "Palette missing required colors".to_string(),
             ));
         }
         Ok(())
@@ -77,62 +82,34 @@ impl Palette {
 }
 
 /// Per-tool theme references.
+/// ToolRefs is now a HashMap<String, String> type alias, enabling new adapters to be added
+/// without modifying the core type definition (Open/Closed principle).
 /// Each tool uses different naming convention.
 /// Example:
 /// - Ghostty: "Catppuccin Mocha" (Title Case with spaces)
 /// - Alacritty: "catppuccin_mocha" (snake_case)
 /// - bat: "Catppuccin Mocha" (Title Case)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolRefs {
-    pub ghostty: String,
-    pub alacritty: String,
-    pub bat: String,
-    pub delta: String,
-    pub starship: String,
-    pub eza: String,
-    pub lazygit: String,
-    pub fastfetch: String,
-    pub tmux: String,
-    pub zsh_syntax_highlighting: String,
-}
-
-impl ToolRefs {
-    /// Get theme reference for a specific tool
-    pub fn get(&self, tool: &str) -> Option<&str> {
-        match tool {
-            "ghostty" => Some(&self.ghostty),
-            "alacritty" => Some(&self.alacritty),
-            "bat" => Some(&self.bat),
-            "delta" => Some(&self.delta),
-            "starship" => Some(&self.starship),
-            "eza" => Some(&self.eza),
-            "lazygit" => Some(&self.lazygit),
-            "fastfetch" => Some(&self.fastfetch),
-            "tmux" => Some(&self.tmux),
-            "zsh-syntax-highlighting" => Some(&self.zsh_syntax_highlighting),
-            _ => None,
-        }
-    }
-}
+pub type ToolRefs = HashMap<String, String>;
 
 /// A single theme variant (e.g., "Catppuccin Mocha").
 /// Contains both tool_refs and palette for complete theme data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThemeVariant {
-    pub id: String,           // Unique identifier (e.g., "catppuccin-mocha") — kebab-case
-    pub name: String,         // Display name (e.g., "Catppuccin Mocha")
-    pub family: String,       // Family (e.g., "Catppuccin")
-    pub tool_refs: ToolRefs,  // Per-tool theme names
-    pub palette: Palette,     // Raw colors for tools without built-in support
+    pub id: String,     // Unique identifier (e.g., "catppuccin-mocha") — kebab-case
+    pub name: String,   // Display name (e.g., "Catppuccin Mocha")
+    pub family: String, // Family (e.g., "Catppuccin")
+    pub tool_refs: ToolRefs, // Now HashMap<String, String>
+    pub palette: Palette, // Raw colors for tools without built-in support
 }
 
 impl ThemeVariant {
     /// Validate theme variant
     pub fn validate(&self) -> Result<()> {
         if self.id.is_empty() || self.name.is_empty() {
-            return Err(crate::error::SlateError::InvalidThemeData(
-                format!("Theme {} missing required fields", self.id)
-            ));
+            return Err(crate::error::SlateError::InvalidThemeData(format!(
+                "Theme {} missing required fields",
+                self.id
+            )));
         }
         self.palette.validate()?;
         Ok(())
@@ -140,7 +117,7 @@ impl ThemeVariant {
 }
 
 /// Theme loader and registry.
-/// Embedded in binary; loads all 8 variants at startup.
+/// Embedded in binary; loads all 10 variants at startup.
 pub struct ThemeRegistry {
     variants: HashMap<String, ThemeVariant>,
 }
@@ -171,8 +148,18 @@ impl ThemeRegistry {
         let gruvbox_light = gruvbox::gruvbox_light()?;
 
         // Register all variants
-        for variant in &[&cat_latte, &cat_frappe, &cat_macchiato, &cat_mocha,
-                        &tn_light, &tn_dark, &drac, &nd, &gruvbox_dark, &gruvbox_light] {
+        for variant in &[
+            &cat_latte,
+            &cat_frappe,
+            &cat_macchiato,
+            &cat_mocha,
+            &tn_light,
+            &tn_dark,
+            &drac,
+            &nd,
+            &gruvbox_dark,
+            &gruvbox_light,
+        ] {
             variants.insert(variant.id.clone(), (*variant).clone());
         }
 
@@ -241,6 +228,9 @@ mod tests {
             bright_magenta: "#ff55ff".to_string(),
             bright_cyan: "#55ffff".to_string(),
             bright_white: "#ffffff".to_string(),
+            bg_dim: None,
+            bg_darker: None,
+            bg_darkest: None,
             rosewater: None,
             flamingo: None,
             pink: None,
@@ -255,9 +245,7 @@ mod tests {
             surface2: None,
             surface1: None,
             surface0: None,
-            base: None,
-            mantle: None,
-            crust: None,
+            extras: HashMap::new(),
         };
 
         assert!(palette.validate().is_ok());
@@ -265,21 +253,26 @@ mod tests {
 
     #[test]
     fn test_tool_refs_lookup() {
-        let refs = ToolRefs {
-            ghostty: "Test Ghostty".to_string(),
-            alacritty: "test_alacritty".to_string(),
-            bat: "Test Bat".to_string(),
-            delta: "test_delta".to_string(),
-            starship: "test_starship".to_string(),
-            eza: "test_eza".to_string(),
-            lazygit: "test_lazygit".to_string(),
-            fastfetch: "test_fastfetch".to_string(),
-            tmux: "test_tmux".to_string(),
-            zsh_syntax_highlighting: "test_zsh".to_string(),
-        };
+        let mut refs = HashMap::new();
+        refs.insert("ghostty".to_string(), "Test Ghostty".to_string());
+        refs.insert("alacritty".to_string(), "test_alacritty".to_string());
+        refs.insert("bat".to_string(), "Test Bat".to_string());
+        refs.insert("delta".to_string(), "test_delta".to_string());
+        refs.insert("starship".to_string(), "test_starship".to_string());
+        refs.insert("eza".to_string(), "test_eza".to_string());
+        refs.insert("lazygit".to_string(), "test_lazygit".to_string());
+        refs.insert("fastfetch".to_string(), "test_fastfetch".to_string());
+        refs.insert("tmux".to_string(), "test_tmux".to_string());
+        refs.insert(
+            "zsh_syntax_highlighting".to_string(),
+            "test_zsh".to_string(),
+        );
 
-        assert_eq!(refs.get("ghostty"), Some("Test Ghostty"));
-        assert_eq!(refs.get("bat"), Some("Test Bat"));
+        assert_eq!(
+            refs.get("ghostty").map(String::as_str),
+            Some("Test Ghostty")
+        );
+        assert_eq!(refs.get("bat").map(String::as_str), Some("Test Bat"));
         assert_eq!(refs.get("unknown"), None);
     }
 }

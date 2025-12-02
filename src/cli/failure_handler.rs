@@ -115,10 +115,7 @@ impl ExecutionSummary {
         if failed > 0 {
             output.push_str("🔄 Retry Failed Tools:\n\n");
             for tool_id in self.failed_tool_ids() {
-                output.push_str(&format!(
-                    "  slate setup --only {}\n",
-                    tool_id
-                ));
+                output.push_str(&format!("  slate setup --only {}\n", tool_id));
             }
             output.push('\n');
         }

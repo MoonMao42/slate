@@ -161,7 +161,7 @@ impl ToolAdapter for TmuxAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::{Palette, ToolRefs};
+    use crate::theme::Palette;
 
     fn create_test_palette() -> Palette {
         Palette {
@@ -200,9 +200,10 @@ mod tests {
             surface2: None,
             surface1: None,
             surface0: None,
-            base: None,
-            mantle: None,
-            crust: None,
+            bg_dim: None,
+            bg_darker: None,
+            bg_darkest: None,
+            extras: std::collections::HashMap::new(),
         }
     }
 
@@ -212,18 +213,18 @@ mod tests {
             name: "Test Theme".to_string(),
             family: "Test".to_string(),
             palette: create_test_palette(),
-            tool_refs: ToolRefs {
-                ghostty: "test".to_string(),
-                alacritty: "test".to_string(),
-                bat: "test".to_string(),
-                delta: "test".to_string(),
-                starship: "test".to_string(),
-                eza: "test".to_string(),
-                lazygit: "test".to_string(),
-                fastfetch: "test".to_string(),
-                tmux: "test".to_string(),
-                zsh_syntax_highlighting: "test".to_string(),
-            },
+            tool_refs: std::collections::HashMap::from([
+                ("ghostty".to_string(), "test".to_string()),
+                ("alacritty".to_string(), "test".to_string()),
+                ("bat".to_string(), "test".to_string()),
+                ("delta".to_string(), "test".to_string()),
+                ("starship".to_string(), "test".to_string()),
+                ("eza".to_string(), "test".to_string()),
+                ("lazygit".to_string(), "test".to_string()),
+                ("fastfetch".to_string(), "test".to_string()),
+                ("tmux".to_string(), "test".to_string()),
+                ("zsh_syntax_highlighting".to_string(), "test".to_string()),
+            ]),
         }
     }
 

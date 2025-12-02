@@ -1,5 +1,5 @@
-use crate::error::Result;
 use crate::brand::language::Language;
+use crate::error::Result;
 
 /// Handle `slate restore [backup-id]` command
 pub fn handle(args: &[&str]) -> Result<()> {

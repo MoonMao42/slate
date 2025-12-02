@@ -1,5 +1,6 @@
+use super::{Palette, ThemeVariant};
 use crate::error::Result;
-use super::{ThemeVariant, ToolRefs, Palette};
+use std::collections::HashMap;
 
 /// Tokyo Night Light — light, modern palette
 pub fn tokyo_night_light() -> Result<ThemeVariant> {
@@ -7,18 +8,21 @@ pub fn tokyo_night_light() -> Result<ThemeVariant> {
         id: "tokyo-night-light".to_string(),
         name: "Tokyo Night Light".to_string(),
         family: "Tokyo Night".to_string(),
-        tool_refs: ToolRefs {
-            ghostty: "Tokyo Night Light".to_string(),
-            alacritty: "tokyo_night_light".to_string(),
-            bat: "Tokyo Night Light".to_string(),
-            delta: "tokyo_night_light".to_string(),
-            starship: "tokyo_night_light".to_string(),
-            eza: "tokyo_night_light".to_string(),
-            lazygit: "tokyo_night_light".to_string(),
-            fastfetch: "tokyo_night_light".to_string(),
-            tmux: "tokyo_night_light".to_string(),
-            zsh_syntax_highlighting: "tokyo_night_light".to_string(),
-        },
+        tool_refs: HashMap::from([
+            ("ghostty".to_string(), "Tokyo Night Light".to_string()),
+            ("alacritty".to_string(), "tokyo_night_light".to_string()),
+            ("bat".to_string(), "Tokyo Night Light".to_string()),
+            ("delta".to_string(), "tokyo_night_light".to_string()),
+            ("starship".to_string(), "tokyo_night_light".to_string()),
+            ("eza".to_string(), "tokyo_night_light".to_string()),
+            ("lazygit".to_string(), "tokyo_night_light".to_string()),
+            ("fastfetch".to_string(), "tokyo_night_light".to_string()),
+            ("tmux".to_string(), "tokyo_night_light".to_string()),
+            (
+                "zsh_syntax_highlighting".to_string(),
+                "tokyo_night_light".to_string(),
+            ),
+        ]),
         palette: Palette {
             foreground: "#3760f6".to_string(),
             background: "#ffffff".to_string(),
@@ -41,6 +45,9 @@ pub fn tokyo_night_light() -> Result<ThemeVariant> {
             bright_magenta: "#b15ea4".to_string(),
             bright_cyan: "#007197".to_string(),
             bright_white: "#ffffff".to_string(),
+            bg_dim: Some("#f5f5f5".to_string()),
+            bg_darker: Some("#eeeeee".to_string()),
+            bg_darkest: Some("#e8e8e8".to_string()),
             rosewater: Some("#c0caf5".to_string()),
             flamingo: Some("#f7768e".to_string()),
             pink: Some("#f7768e".to_string()),
@@ -55,13 +62,10 @@ pub fn tokyo_night_light() -> Result<ThemeVariant> {
             surface2: Some("#444b6a".to_string()),
             surface1: Some("#3f4751".to_string()),
             surface0: Some("#1a1b26".to_string()),
-            base: Some("#1a1b26".to_string()),
-            mantle: Some("#16161e".to_string()),
-            crust: Some("#0f0f14".to_string()),
+            extras: HashMap::new(),
         },
     })
 }
-
 
 /// Tokyo Night Dark — dark, vibrant palette
 pub fn tokyo_night_dark() -> Result<ThemeVariant> {
@@ -69,18 +73,21 @@ pub fn tokyo_night_dark() -> Result<ThemeVariant> {
         id: "tokyo-night-dark".to_string(),
         name: "Tokyo Night Dark".to_string(),
         family: "Tokyo Night".to_string(),
-        tool_refs: ToolRefs {
-            ghostty: "Tokyo Night".to_string(),  // Ghostty uses "Tokyo Night" not "Tokyo Night Dark"
-            alacritty: "tokyo_night_dark".to_string(),
-            bat: "Tokyo Night".to_string(),
-            delta: "tokyo_night_dark".to_string(),
-            starship: "tokyo_night_dark".to_string(),
-            eza: "tokyo_night_dark".to_string(),
-            lazygit: "tokyo_night_dark".to_string(),
-            fastfetch: "tokyo_night_dark".to_string(),
-            tmux: "tokyo_night_dark".to_string(),
-            zsh_syntax_highlighting: "tokyo_night_dark".to_string(),
-        },
+        tool_refs: HashMap::from([
+            ("ghostty".to_string(), "Tokyo Night".to_string()), // Ghostty uses "Tokyo Night" not "Tokyo Night Dark"
+            ("alacritty".to_string(), "tokyo_night_dark".to_string()),
+            ("bat".to_string(), "Tokyo Night".to_string()),
+            ("delta".to_string(), "tokyo_night_dark".to_string()),
+            ("starship".to_string(), "tokyo_night_dark".to_string()),
+            ("eza".to_string(), "tokyo_night_dark".to_string()),
+            ("lazygit".to_string(), "tokyo_night_dark".to_string()),
+            ("fastfetch".to_string(), "tokyo_night_dark".to_string()),
+            ("tmux".to_string(), "tokyo_night_dark".to_string()),
+            (
+                "zsh_syntax_highlighting".to_string(),
+                "tokyo_night_dark".to_string(),
+            ),
+        ]),
         palette: Palette {
             foreground: "#c0caf5".to_string(),
             background: "#1a1b26".to_string(),
@@ -103,6 +110,9 @@ pub fn tokyo_night_dark() -> Result<ThemeVariant> {
             bright_magenta: "#bb9af7".to_string(),
             bright_cyan: "#7dcfff".to_string(),
             bright_white: "#ffffff".to_string(),
+            bg_dim: Some("#2a2b35".to_string()),
+            bg_darker: Some("#1f2029".to_string()),
+            bg_darkest: Some("#16161e".to_string()),
             rosewater: Some("#c0caf5".to_string()),
             flamingo: Some("#f7768e".to_string()),
             pink: Some("#f7768e".to_string()),
@@ -117,9 +127,7 @@ pub fn tokyo_night_dark() -> Result<ThemeVariant> {
             surface2: Some("#444b6a".to_string()),
             surface1: Some("#3f4751".to_string()),
             surface0: Some("#1a1b26".to_string()),
-            base: Some("#1a1b26".to_string()),
-            mantle: Some("#16161e".to_string()),
-            crust: Some("#0f0f14".to_string()),
+            extras: HashMap::new(),
         },
     })
 }

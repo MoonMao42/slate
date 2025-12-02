@@ -1,6 +1,5 @@
 /// Pre-flight checks before setup execution
 /// Verifies environment readiness: Homebrew, network, write permissions
-
 use crate::error::Result;
 use std::path::Path;
 use std::process::Command;
@@ -25,13 +24,21 @@ impl PreflightResult {
         let mut output = String::new();
         output.push_str("✦ Pre-flight Checks:\n\n");
 
-        let brew_status = if self.homebrew_available { "✓" } else { "✗" };
+        let brew_status = if self.homebrew_available {
+            "✓"
+        } else {
+            "✗"
+        };
         output.push_str(&format!("  {} Homebrew available\n", brew_status));
 
         let network_status = if self.network_reachable { "✓" } else { "✗" };
         output.push_str(&format!("  {} Network reachable\n", network_status));
 
-        let write_status = if self.write_permissions_ok { "✓" } else { "✗" };
+        let write_status = if self.write_permissions_ok {
+            "✓"
+        } else {
+            "✗"
+        };
         output.push_str(&format!("  {} Write permissions OK\n", write_status));
 
         if !self.blockers.is_empty() {
@@ -57,27 +64,27 @@ pub fn run_checks() -> Result<PreflightResult> {
     // Check 1: Homebrew availability
     result.homebrew_available = check_homebrew_available();
     if !result.homebrew_available {
-        result.blockers.push(
-            "Homebrew not found. Install from https://brew.sh".to_string()
-        );
+        result
+            .blockers
+            .push("Homebrew not found. Install from https://brew.sh".to_string());
     }
 
     // Check 2: Network reachability (only if brew is available)
     if result.homebrew_available {
         result.network_reachable = check_network_reachable();
         if !result.network_reachable {
-            result.blockers.push(
-                "Network unreachable. Cannot download packages.".to_string()
-            );
+            result
+                .blockers
+                .push("Network unreachable. Cannot download packages.".to_string());
         }
     }
 
     // Check 3: Write permissions in config directory
     result.write_permissions_ok = check_write_permissions();
     if !result.write_permissions_ok {
-        result.blockers.push(
-            "No write permissions in ~/.config directory.".to_string()
-        );
+        result
+            .blockers
+            .push("No write permissions in ~/.config directory.".to_string());
     }
 
     Ok(result)

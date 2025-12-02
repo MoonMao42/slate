@@ -1,6 +1,5 @@
 /// Tool selection for setup wizard.
 /// Single source of truth for tool metadata, installability, and selection logic.
-
 use crate::brand::language::Language;
 use crate::design::typography::Typography;
 use std::collections::HashMap;
@@ -61,7 +60,15 @@ impl ToolMetadata {
         pitch: &'static str,
         brew_package: &'static str,
     ) -> Self {
-        Self::new(id, label, pitch, true, brew_package, BrewKind::Formula, false)
+        Self::new(
+            id,
+            label,
+            pitch,
+            true,
+            brew_package,
+            BrewKind::Formula,
+            false,
+        )
     }
 
     /// Create cask install metadata
@@ -75,11 +82,7 @@ impl ToolMetadata {
     }
 
     /// Create detect-only metadata (no installation offered)
-    fn detect_only(
-        id: &'static str,
-        label: &'static str,
-        pitch: &'static str,
-    ) -> Self {
+    fn detect_only(id: &'static str, label: &'static str, pitch: &'static str) -> Self {
         Self::new(id, label, pitch, false, "", BrewKind::Formula, true)
     }
 }
@@ -93,42 +96,12 @@ impl ToolCatalog {
     pub fn all_tools() -> Vec<ToolMetadata> {
         vec![
             // Installable tools
-            ToolMetadata::cask(
-                "ghostty",
-                "Ghostty",
-                Language::PITCH_GHOSTTY,
-                "ghostty",
-            ),
-            ToolMetadata::formula(
-                "starship",
-                "Starship",
-                Language::PITCH_STARSHIP,
-                "starship",
-            ),
-            ToolMetadata::formula(
-                "bat",
-                "bat",
-                Language::PITCH_BAT,
-                "bat",
-            ),
-            ToolMetadata::formula(
-                "delta",
-                "delta",
-                Language::PITCH_DELTA,
-                "delta",
-            ),
-            ToolMetadata::formula(
-                "eza",
-                "eza",
-                Language::PITCH_EZA,
-                "eza",
-            ),
-            ToolMetadata::formula(
-                "lazygit",
-                "lazygit",
-                Language::PITCH_LAZYGIT,
-                "lazygit",
-            ),
+            ToolMetadata::cask("ghostty", "Ghostty", Language::PITCH_GHOSTTY, "ghostty"),
+            ToolMetadata::formula("starship", "Starship", Language::PITCH_STARSHIP, "starship"),
+            ToolMetadata::formula("bat", "bat", Language::PITCH_BAT, "bat"),
+            ToolMetadata::formula("delta", "delta", Language::PITCH_DELTA, "delta"),
+            ToolMetadata::formula("eza", "eza", Language::PITCH_EZA, "eza"),
+            ToolMetadata::formula("lazygit", "lazygit", Language::PITCH_LAZYGIT, "lazygit"),
             ToolMetadata::formula(
                 "fastfetch",
                 "fastfetch",
@@ -149,11 +122,7 @@ impl ToolCatalog {
                 "alacritty",
             ),
             // Detect-only: synced if installed, not offered for install
-            ToolMetadata::detect_only(
-                "tmux",
-                "tmux",
-                Language::PITCH_TMUX,
-            ),
+            ToolMetadata::detect_only("tmux", "tmux", Language::PITCH_TMUX),
         ]
     }
 
@@ -247,7 +216,10 @@ impl ReviewReceipt {
     /// Format receipt as human-readable string for display using typography helpers
     pub fn format_for_display(&self) -> String {
         let mut output = String::new();
-        output.push_str(&format!("{}\n\n", Typography::section_header("Review and confirm")));
+        output.push_str(&format!(
+            "{}\n\n",
+            Typography::section_header("Review and confirm")
+        ));
 
         if !self.install_actions.is_empty() {
             output.push_str(&format!("{}\n", Typography::category_heading("Install")));
@@ -256,40 +228,54 @@ impl ReviewReceipt {
                     BrewKind::Formula => "formula",
                     BrewKind::Cask => "cask",
                 };
-                output.push_str(&format!("{}\n", 
-                    Typography::list_item('•', 
-                        &action.tool_label, 
-                        &kind_str)));
+                output.push_str(&format!(
+                    "{}\n",
+                    Typography::list_item('•', &action.tool_label, &kind_str)
+                ));
             }
             output.push('\n');
         }
 
         if let Some(font) = &self.selected_font {
-            output.push_str(&format!("{}\n", Language::receipt_line(Language::RECEIPT_FONT_SECTION, font)));
+            output.push_str(&format!(
+                "{}\n",
+                Language::receipt_line(Language::RECEIPT_FONT_SECTION, font)
+            ));
         }
 
         if let Some(theme) = &self.selected_theme {
-            output.push_str(&format!("{}\n", Language::receipt_line(Language::RECEIPT_THEME_SECTION, theme)));
+            output.push_str(&format!(
+                "{}\n",
+                Language::receipt_line(Language::RECEIPT_THEME_SECTION, theme)
+            ));
         }
 
         if let Some(settings) = &self.terminal_settings {
-            output.push_str(&format!("{}\n", Language::receipt_line(Language::RECEIPT_TERMINAL_SECTION, 
-                &format!("opacity {}, {}padding {}x{}", 
-                    settings.background_opacity,
-                    if settings.blur_enabled { "blur, " } else { "" },
-                    settings.padding_x, 
-                    settings.padding_y))));
+            output.push_str(&format!(
+                "{}\n",
+                Language::receipt_line(
+                    Language::RECEIPT_TERMINAL_SECTION,
+                    &format!(
+                        "opacity {}, {}padding {}x{}",
+                        settings.background_opacity,
+                        if settings.blur_enabled { "blur, " } else { "" },
+                        settings.padding_x,
+                        settings.padding_y
+                    )
+                )
+            ));
         }
 
-        output.push_str(&format!("\n{}\n", Typography::explanation(Language::RECEIPT_FOOTER)));
+        output.push_str(&format!(
+            "\n{}\n",
+            Typography::explanation(Language::RECEIPT_FOOTER)
+        ));
         output
     }
 }
 
 /// Install candidates: missing tools that are installable (used for multiselect)
-pub fn compute_install_candidates(
-    installed: &HashMap<String, bool>,
-) -> Vec<ToolMetadata> {
+pub fn compute_install_candidates(installed: &HashMap<String, bool>) -> Vec<ToolMetadata> {
     ToolCatalog::installable_tools()
         .into_iter()
         .filter(|tool| {
@@ -384,7 +370,11 @@ mod tests {
 
     #[test]
     fn test_filter_valid_selections() {
-        let selected = vec!["ghostty".to_string(), "tmux".to_string(), "unknown".to_string()];
+        let selected = vec![
+            "ghostty".to_string(),
+            "tmux".to_string(),
+            "unknown".to_string(),
+        ];
         let actions = filter_valid_selections(selected);
 
         assert!(actions.iter().any(|a| a.tool_id == "ghostty"));

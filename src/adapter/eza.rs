@@ -3,7 +3,7 @@
 //! a managed theme.yml to ~/.config/slate/managed/eza/ and expects EZA_CONFIG_DIR
 //! environment variable to be exported by shell init.
 
-use crate::adapter::{ToolAdapter, ApplyStrategy};
+use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -15,8 +15,7 @@ pub struct EzaAdapter;
 impl EzaAdapter {
     /// Get config home directory (XDG default)
     fn config_home() -> Result<PathBuf> {
-        let home = std::env::var("HOME")
-            .map_err(|_| SlateError::MissingHomeDir)?;
+        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home).join(".config"))
     }
 
@@ -141,17 +140,20 @@ mod tests {
         let adapter = EzaAdapter;
         let result = adapter.integration_config_path();
         assert!(result.is_ok());
-        
+
         let path = result.unwrap();
         // Should be either custom EZA_CONFIG_DIR or ~/.config/eza
-        assert!(path.to_string_lossy().contains("eza") || path.to_string_lossy().contains("EZA_CONFIG_DIR"));
+        assert!(
+            path.to_string_lossy().contains("eza")
+                || path.to_string_lossy().contains("EZA_CONFIG_DIR")
+        );
     }
 
     #[test]
     fn test_managed_config_path_returns_correct_directory() {
         let adapter = EzaAdapter;
         let path = adapter.managed_config_path();
-        
+
         assert!(path.to_string_lossy().contains(".config/slate/managed/eza"));
     }
 
@@ -165,7 +167,7 @@ mod tests {
     fn test_apply_theme_writes_managed_yaml_theme() {
         let adapter = EzaAdapter;
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
-        
+
         // Just verify it returns Ok without errors
         // Actual file writing would require mocking ConfigManager
         let result = adapter.apply_theme(&theme);
@@ -176,7 +178,7 @@ mod tests {
     fn test_render_eza_yaml_produces_valid_yaml_structure() {
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
         let yaml = EzaAdapter::render_eza_yaml(&theme);
-        
+
         assert!(yaml.contains("colors:"));
         assert!(yaml.contains("text:"));
         assert!(yaml.contains("background:"));
@@ -186,7 +188,7 @@ mod tests {
         assert!(yaml.contains("info:"));
         assert!(yaml.contains("special:"));
         assert!(yaml.contains("modified:"));
-        
+
         // Verify it's valid YAML format (basic check)
         assert!(yaml.contains("#"));
     }
@@ -202,7 +204,7 @@ mod tests {
     fn test_get_current_theme_returns_none() {
         let adapter = EzaAdapter;
         let result = adapter.get_current_theme();
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
     }

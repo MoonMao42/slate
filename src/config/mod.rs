@@ -94,7 +94,11 @@ impl ConfigManager {
         content.push_str(&format!(
             "export BAT_THEME=\"{}\"
 ",
-            theme.tool_refs.bat
+            theme
+                .tool_refs
+                .get("bat")
+                .map(|s| s.as_str())
+                .unwrap_or("Catppuccin Mocha")
         ));
 
         // Export EZA_CONFIG_DIR

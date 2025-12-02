@@ -1,9 +1,8 @@
+use crate::error::Result;
 /// Theme selection for setup wizard.
 /// Per and from 02-.
 /// Provides access to 10 theme variants grouped by family.
-
 use crate::theme::{ThemeRegistry, DEFAULT_THEME_ID};
-use crate::error::Result;
 use std::collections::HashMap;
 
 /// Theme choice helper: groups themes by family with descriptions
@@ -81,20 +80,19 @@ impl ThemeSelector {
 
         for theme_id in &expected {
             if !themes.contains(&theme_id.to_string()) {
-                return Err(crate::error::SlateError::InvalidThemeData(
-                    format!("Missing required theme: {}", theme_id)
-                ));
+                return Err(crate::error::SlateError::InvalidThemeData(format!(
+                    "Missing required theme: {}",
+                    theme_id
+                )));
             }
         }
 
         if themes.len() != expected.len() {
-            return Err(crate::error::SlateError::InvalidThemeData(
-                format!(
-                    "Expected {} theme variants, found {}",
-                    expected.len(),
-                    themes.len()
-                )
-            ));
+            return Err(crate::error::SlateError::InvalidThemeData(format!(
+                "Expected {} theme variants, found {}",
+                expected.len(),
+                themes.len()
+            )));
         }
 
         Ok(())
@@ -183,16 +181,14 @@ mod tests {
 
     #[test]
     fn test_family_descriptions_exist() {
-        let families = vec![
-            "Catppuccin",
-            "Tokyo Night",
-            "Dracula",
-            "Nord",
-            "Gruvbox",
-        ];
+        let families = vec!["Catppuccin", "Tokyo Night", "Dracula", "Nord", "Gruvbox"];
         for family in families {
             let desc = ThemeSelector::family_description(family);
-            assert!(!desc.is_empty(), "Family description should not be empty: {}", family);
+            assert!(
+                !desc.is_empty(),
+                "Family description should not be empty: {}",
+                family
+            );
         }
     }
 
@@ -208,8 +204,14 @@ mod tests {
     fn test_gruvbox_themes_selectable() {
         // Verify Gruvbox Dark and Light are in the selection
         let selector = ThemeSelector::new().unwrap();
-        assert!(selector.get_theme("gruvbox-dark").is_some(), "Gruvbox Dark must be available");
-        assert!(selector.get_theme("gruvbox-light").is_some(), "Gruvbox Light must be available");
+        assert!(
+            selector.get_theme("gruvbox-dark").is_some(),
+            "Gruvbox Dark must be available"
+        );
+        assert!(
+            selector.get_theme("gruvbox-light").is_some(),
+            "Gruvbox Light must be available"
+        );
     }
 
     #[test]
@@ -220,5 +222,4 @@ mod tests {
         assert!(!selector.all_theme_ids().is_empty());
         assert!(selector.theme_count() > 0);
     }
-
 }
