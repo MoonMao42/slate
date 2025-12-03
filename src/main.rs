@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
-use slate_cli::{cli, error};
+use slate_cli::{cli, env::SlateEnv, error};
 
 #[derive(Parser)]
 #[command(name = "slate")]
@@ -43,6 +43,9 @@ enum Commands {
 
 fn main() -> Result<()> {
     error::install_error_handler()?;
+
+    // Initialize SlateEnv from process environment early
+    let _env = SlateEnv::from_process()?;
 
     let cli = Cli::parse();
 
