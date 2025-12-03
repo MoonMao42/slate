@@ -3,13 +3,18 @@ use crate::cli::preflight;
 use crate::cli::setup_executor;
 use crate::cli::tool_selection::ToolCatalog;
 use crate::cli::wizard_core::Wizard;
+use crate::env::SlateEnv;
 use crate::error::Result;
 use std::io::IsTerminal;
 use std::time::Instant;
 
-/// Handle `slate setup` command with optional flags
-/// Supports: --quick, --force, --only <tool>
-pub fn handle(quick: bool, force: bool, only: Option<String>) -> Result<()> {
+/// Handle `slate setup` command with injected SlateEnv (preferred for testability)
+pub fn handle_with_env(
+    quick: bool,
+    force: bool,
+    only: Option<String>,
+    env: &SlateEnv,
+) -> Result<()> {
     // If --only flag is set, handle retry flow
     if let Some(tool_id) = only {
         return handle_retry_only(&tool_id);
@@ -49,7 +54,12 @@ pub fn handle(quick: bool, force: bool, only: Option<String>) -> Result<()> {
     let selected_theme = context.selected_theme.as_deref();
 
     // Execute the setup (install tools, apply configurations)
-    let summary = setup_executor::execute_setup(&selected_tools, selected_font, selected_theme)?;
+    let summary = setup_executor::execute_setup_with_env(
+        &selected_tools,
+        selected_font,
+        selected_theme,
+        env,
+    )?;
 
     // Display completion message with visibility guidance
     eprintln!("\n{}", summary.format_completion_message());
@@ -58,6 +68,13 @@ pub fn handle(quick: bool, force: bool, only: Option<String>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Handle `slate setup` command with optional flags (backward compatibility)
+/// Supports: --quick, --force, --only <tool>
+pub fn handle(quick: bool, force: bool, only: Option<String>) -> Result<()> {
+    let env = SlateEnv::from_process()?;
+    handle_with_env(quick, force, only, &env)
 }
 
 /// Handle --only flag: retry a single tool installation

@@ -5,19 +5,20 @@ use crate::cli::failure_handler::{ExecutionSummary, InstallStatus, ToolInstallRe
 use crate::cli::font_selection::FontCatalog;
 use crate::cli::tool_selection::{BrewKind, ToolCatalog};
 use crate::config::ConfigManager;
+use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::{ThemeRegistry, ThemeVariant};
 use atomic_write_file::AtomicWriteFile;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
 use std::process::Command;
 
-/// Execute the setup based on wizard selections
-pub fn execute_setup(
+/// Execute the setup based on wizard selections with injected SlateEnv (preferred)
+pub fn execute_setup_with_env(
     tools_to_install: &[String],
     font: Option<&str>,
     theme: Option<&str>,
+    env: &SlateEnv,
 ) -> Result<ExecutionSummary> {
     let mut summary = ExecutionSummary::new();
 
@@ -84,7 +85,7 @@ pub fn execute_setup(
 
         // Persist user's font choice so adapters write the correct font-family
         if summary.font_applied {
-            if let Ok(config_mgr) = ConfigManager::new() {
+            if let Ok(config_mgr) = ConfigManager::with_env(env) {
                 let family = resolve_font_family(font_name);
                 let _ = config_mgr.set_current_font(&family);
             }
@@ -93,7 +94,7 @@ pub fn execute_setup(
 
     // Setup shell integration: write marker block to .zshrc and env.zsh
     spinner.start("Setting up shell integration...");
-    match setup_shell_integration(theme) {
+    match setup_shell_integration_with_env(theme, env) {
         Ok(selected_theme) => {
             summary.theme_applied = true;
             spinner.stop(format!(
@@ -111,6 +112,16 @@ pub fn execute_setup(
     summary.overall_success = summary.failure_count() == 0 || summary.success_count() > 0;
 
     Ok(summary)
+}
+
+/// Execute the setup based on wizard selections (backward compat)
+pub fn execute_setup(
+    tools_to_install: &[String],
+    font: Option<&str>,
+    theme: Option<&str>,
+) -> Result<ExecutionSummary> {
+    let env = SlateEnv::from_process()?;
+    execute_setup_with_env(tools_to_install, font, theme, &env)
 }
 
 /// Resolve the selected theme, persist it, regenerate shell integration, and
@@ -184,11 +195,11 @@ fn resolve_selected_theme(theme: Option<&str>) -> Result<ThemeVariant> {
 }
 
 /// Setup shell integration: write marker block to .zshrc and apply the selected theme.
-fn setup_shell_integration(theme: Option<&str>) -> Result<ThemeVariant> {
+/// With injected SlateEnv (preferred for testing)
+fn setup_shell_integration_with_env(theme: Option<&str>, env: &SlateEnv) -> Result<ThemeVariant> {
     use crate::adapter::marker_block;
 
-    let home = std::env::var("HOME").map_err(|_| crate::error::SlateError::MissingHomeDir)?;
-    let zshrc_path = PathBuf::from(home).join(".zshrc");
+    let zshrc_path = env.zshrc_path();
 
     // Load or create ~/.zshrc content
     let zshrc_content = if zshrc_path.exists() {
@@ -219,6 +230,13 @@ fn setup_shell_integration(theme: Option<&str>) -> Result<ThemeVariant> {
     apply_theme_selection(&selected_theme)?;
 
     Ok(selected_theme)
+}
+
+/// Setup shell integration: write marker block to .zshrc and apply the selected theme (backward compat)
+#[allow(dead_code)]
+fn setup_shell_integration(theme: Option<&str>) -> Result<ThemeVariant> {
+    let env = SlateEnv::from_process()?;
+    setup_shell_integration_with_env(theme, &env)
 }
 
 /// Install a tool via Homebrew

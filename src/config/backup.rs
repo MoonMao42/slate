@@ -1,3 +1,4 @@
+use crate::env::SlateEnv;
 use crate::error::{ThemeError, ThemeResult};
 use atomic_write_file::AtomicWriteFile;
 use std::collections::HashMap;
@@ -65,16 +66,15 @@ static RESTORE_POINT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Get the backup directory path (~/.cache/slate/backups/)
 pub fn backup_directory() -> ThemeResult<PathBuf> {
-    let cache_dir = if let Ok(cache) = std::env::var("XDG_CACHE_HOME") {
-        PathBuf::from(cache)
-    } else if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".cache")
-    } else {
-        return Err(ThemeError::Other(
-            "Cannot determine cache directory: HOME not set".to_string(),
-        ));
-    };
+    let env = SlateEnv::from_process().map_err(|_| ThemeError::Other(
+        "Cannot initialize SlateEnv to determine cache directory".to_string(),
+    ))?;
+    backup_directory_with_env(&env)
+}
 
+/// Get the backup directory path with injected SlateEnv (preferred for testing)
+pub fn backup_directory_with_env(env: &SlateEnv) -> ThemeResult<PathBuf> {
+    let cache_dir = env.cache_dir();
     let backup_dir = cache_dir.join("slate").join("backups");
 
     // Create directory if missing
@@ -88,6 +88,12 @@ pub fn backup_directory() -> ThemeResult<PathBuf> {
 /// Get a specific restore point directory path
 fn restore_point_directory(restore_point_id: &str) -> ThemeResult<PathBuf> {
     let backup_dir = backup_directory()?;
+    Ok(backup_dir.join(restore_point_id))
+}
+
+/// Get a specific restore point directory path with injected SlateEnv
+fn restore_point_directory_with_env(env: &SlateEnv, restore_point_id: &str) -> ThemeResult<PathBuf> {
+    let backup_dir = backup_directory_with_env(env)?;
     Ok(backup_dir.join(restore_point_id))
 }
 

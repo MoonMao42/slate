@@ -9,12 +9,14 @@ use crate::error::Result;
 pub struct SlateEnv {
     home: PathBuf,
     config_dir: PathBuf,
+    cache_dir: PathBuf,
 }
 
 impl SlateEnv {
     /// Initialize from process environment
-    /// Reads $HOME and $XDG_CONFIG_HOME from std::env.
+    /// Reads $HOME, $XDG_CONFIG_HOME, and $XDG_CACHE_HOME from std::env.
     /// Prefers $XDG_CONFIG_HOME if set, otherwise uses $HOME/.config.
+    /// Prefers $XDG_CACHE_HOME if set, otherwise uses $HOME/.cache.
     pub fn from_process() -> Result<Self> {
         let home = std::env::var("HOME")
             .map(PathBuf::from)
@@ -24,15 +26,20 @@ impl SlateEnv {
             .map(|xdg| PathBuf::from(xdg).join("slate"))
             .unwrap_or_else(|_| home.join(".config").join("slate"));
 
-        Ok(SlateEnv { home, config_dir })
+        let cache_dir = std::env::var("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| home.join(".cache"));
+
+        Ok(SlateEnv { home, config_dir, cache_dir })
     }
 
     /// Create with injected home path (for testing)
     /// Useful for sandboxing tests: SlateEnv::with_home(tempdir.path().to_path_buf())
-    /// will ensure all config file writes go to tempdir instead of developer's home.
+    /// will ensure all config and cache file writes go to tempdir instead of developer's home.
     pub fn with_home(home: PathBuf) -> Self {
         let config_dir = home.join(".config").join("slate");
-        SlateEnv { home, config_dir }
+        let cache_dir = home.join(".cache");
+        SlateEnv { home, config_dir, cache_dir }
     }
 
     /// Get home directory path
@@ -43,6 +50,11 @@ impl SlateEnv {
     /// Get slate config directory path (~/.config/slate or $XDG_CONFIG_HOME/slate)
     pub fn config_dir(&self) -> &Path {
         &self.config_dir
+    }
+
+    /// Get cache directory path (~/.cache or $XDG_CACHE_HOME)
+    pub fn cache_dir(&self) -> &Path {
+        &self.cache_dir
     }
 
     /// Get .zshrc path (for shell integration marker block)
@@ -82,6 +94,7 @@ mod tests {
 
         assert_eq!(env.home(), tempdir.path());
         assert!(env.config_dir().ends_with(".config/slate"));
+        assert!(env.cache_dir().ends_with(".cache"));
     }
 
     #[test]
@@ -109,5 +122,13 @@ mod tests {
         let managed_dir = env.managed_subdir("managed");
 
         assert!(managed_dir.ends_with(".config/slate/managed"));
+    }
+
+    #[test]
+    fn test_cache_dir() {
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+
+        assert!(env.cache_dir().ends_with(".cache"));
     }
 }

@@ -1,0 +1,4 @@
+--- 在 backup.rs 中添加 SlateEnv 支持的关键更改
+1. 导入 SlateEnv
+2. 添加 backup_directory_with_env(env: &SlateEnv)
+3. 保持 backup_directory() 使用 from_process() 以兼容

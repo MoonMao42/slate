@@ -45,14 +45,14 @@ fn main() -> Result<()> {
     error::install_error_handler()?;
 
     // Initialize SlateEnv from process environment early
-    let _env = SlateEnv::from_process()?;
+    let env = SlateEnv::from_process()?;
 
     let cli = Cli::parse();
 
     match cli.command {
         Commands::Setup { quick, force, only } => {
-            // Dispatch to setup handler
-            match cli::setup::handle(quick, force, only) {
+            // Dispatch to setup handler with env
+            match cli::setup::handle_with_env(quick, force, only, &env) {
                 Err(error::SlateError::UserCancelled) => {
                     let _ = cliclack::outro_cancel("✦ Setup cancelled.");
                     std::process::exit(130);
