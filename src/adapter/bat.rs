@@ -5,7 +5,7 @@
 
 use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::env::SlateEnv;
-use crate::error::{Result, SlateError};
+use crate::error::{Result};
 use crate::theme::ThemeVariant;
 use std::path::{Path, PathBuf};
 

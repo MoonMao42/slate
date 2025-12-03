@@ -1,4 +1,5 @@
 use crate::brand::language::Language;
+use crate::env::SlateEnv;
 use crate::cli::font_detection::detect_current_font;
 use crate::cli::font_selection::FontCatalog;
 use crate::cli::preset_selection::PresetCatalog;
@@ -521,7 +522,7 @@ impl Wizard {
 }
 
 fn detect_current_theme_id() -> Option<String> {
-    let home = std::env::var("HOME").ok()?;
+    let home = SlateEnv::from_process().ok().and_then(|e| e.home().to_str().map(|s| s.to_string()))?;
     let path = PathBuf::from(home).join(".config/slate/current");
 
     if !path.exists() {

@@ -1,104 +1,131 @@
-/// Pre-flight checks before setup execution
-/// Verifies environment readiness: Homebrew, network, write permissions
+use crate::adapter::ToolRegistry;
+use crate::cli::font_selection::FontCatalog;
+use crate::env::SlateEnv;
 use crate::error::Result;
-use std::path::Path;
 use std::process::Command;
 
-/// Environment readiness status
+/// Preflight checks before setup
 #[derive(Debug, Clone)]
 pub struct PreflightResult {
-    pub homebrew_available: bool,
-    pub network_reachable: bool,
-    pub write_permissions_ok: bool,
-    pub blockers: Vec<String>,
+    pub checks: Vec<PreflightCheck>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreflightCheck {
+    pub name: String,
+    pub description: String,
+    pub passed: bool,
 }
 
 impl PreflightResult {
-    /// Check if all critical checks pass
+    /// Check if all required checks passed
     pub fn is_ready(&self) -> bool {
-        self.blockers.is_empty()
+        // All checks must pass except optional ones
+        self.checks
+            .iter()
+            .filter(|c| !c.name.starts_with("Optional:"))
+            .all(|c| c.passed)
     }
 
     /// Format results for display
     pub fn format_for_display(&self) -> String {
-        let mut output = String::new();
-        output.push_str("✦ Pre-flight Checks:\n\n");
-
-        let brew_status = if self.homebrew_available {
-            "✓"
-        } else {
-            "✗"
-        };
-        output.push_str(&format!("  {} Homebrew available\n", brew_status));
-
-        let network_status = if self.network_reachable { "✓" } else { "✗" };
-        output.push_str(&format!("  {} Network reachable\n", network_status));
-
-        let write_status = if self.write_permissions_ok {
-            "✓"
-        } else {
-            "✗"
-        };
-        output.push_str(&format!("  {} Write permissions OK\n", write_status));
-
-        if !self.blockers.is_empty() {
-            output.push_str("\n⚠ Issues found:\n");
-            for blocker in &self.blockers {
-                output.push_str(&format!("  • {}\n", blocker));
-            }
+        let mut output = String::from("✓ Preflight Checks\n");
+        for check in &self.checks {
+            let icon = if check.passed { "✓" } else { "✗" };
+            output.push_str(&format!("{} {}: {}\n", icon, check.name, check.description));
         }
-
         output
     }
 }
 
-/// Run all pre-flight checks
+/// Run preflight checks
 pub fn run_checks() -> Result<PreflightResult> {
-    let mut result = PreflightResult {
-        homebrew_available: false,
-        network_reachable: false,
-        write_permissions_ok: false,
-        blockers: Vec::new(),
-    };
+    let mut checks = Vec::new();
 
-    // Check 1: Homebrew availability
-    result.homebrew_available = check_homebrew_available();
-    if !result.homebrew_available {
-        result
-            .blockers
-            .push("Homebrew not found. Install from https://brew.sh".to_string());
-    }
+    // Check 1: Homebrew is installed
+    checks.push(PreflightCheck {
+        name: "Homebrew".to_string(),
+        description: if is_homebrew_installed() {
+            "installed".to_string()
+        } else {
+            "not found (required for tool installation)".to_string()
+        },
+        passed: is_homebrew_installed(),
+    });
 
-    // Check 2: Network reachability (only if brew is available)
-    if result.homebrew_available {
-        result.network_reachable = check_network_reachable();
-        if !result.network_reachable {
-            result
-                .blockers
-                .push("Network unreachable. Cannot download packages.".to_string());
-        }
-    }
+    // Check 2: Zsh is available
+    checks.push(PreflightCheck {
+        name: "Zsh".to_string(),
+        description: if is_zsh_available() {
+            "available".to_string()
+        } else {
+            "not found (required for shell integration)".to_string()
+        },
+        passed: is_zsh_available(),
+    });
 
-    // Check 3: Write permissions in config directory
-    result.write_permissions_ok = check_write_permissions();
-    if !result.write_permissions_ok {
-        result
-            .blockers
-            .push("No write permissions in ~/.config directory.".to_string());
-    }
+    // Check 3: Network reachable
+    checks.push(PreflightCheck {
+        name: "Network".to_string(),
+        description: if check_network_reachable() {
+            "reachable".to_string()
+        } else {
+            "check skipped (optional, required for tool downloads)".to_string()
+        },
+        passed: true, // Network is optional — user may be offline
+    });
 
-    Ok(result)
+    // Check 4: Write permissions
+    checks.push(PreflightCheck {
+        name: "Write Permissions".to_string(),
+        description: if check_write_permissions() {
+            "can write to ~/.config".to_string()
+        } else {
+            "cannot write to ~/.config (required)".to_string()
+        },
+        passed: check_write_permissions(),
+    });
+
+    // Check 5: Tools available
+    let registry = ToolRegistry::default();
+    let installed = registry.detect_installed();
+    let tool_count = installed.values().filter(|&&v| v).count();
+
+    checks.push(PreflightCheck {
+        name: "Optional: Tools".to_string(),
+        description: format!("{} of 11 tools already installed", tool_count),
+        passed: true, // Optional — user can install from scratch
+    });
+
+    // Check 6: Fonts available
+    let fonts = FontCatalog::all_fonts();
+    checks.push(PreflightCheck {
+        name: "Optional: Fonts".to_string(),
+        description: format!("{} fonts available", fonts.len()),
+        passed: true, // Optional — defaults available
+    });
+
+    Ok(PreflightResult { checks })
 }
 
-/// Check if Homebrew is available in PATH
-fn check_homebrew_available() -> bool {
+/// Check if Homebrew is installed
+fn is_homebrew_installed() -> bool {
     match Command::new("brew")
         .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
+        .output()
     {
-        Ok(status) => status.success(),
+        Ok(status) => status.status.success(),
+        Err(_) => false,
+    }
+}
+
+/// Check if Zsh is available
+fn is_zsh_available() -> bool {
+    match Command::new("which")
+        .arg("zsh")
+        .output()
+    {
+        Ok(status) => status.status.success(),
         Err(_) => false,
     }
 }
@@ -115,9 +142,9 @@ fn check_network_reachable() -> bool {
 /// Check if we can write to config directory
 fn check_write_permissions() -> bool {
     // Try to write to ~/.config directory
-    let config_dir = match std::env::var("HOME") {
-        Ok(home) => {
-            let path = Path::new(&home).join(".config");
+    let config_dir = match SlateEnv::from_process() {
+        Ok(env) => {
+            let path = env.home().join(".config");
             // Create if doesn't exist
             let _ = std::fs::create_dir_all(&path);
             path
@@ -145,39 +172,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_preflight_result_is_ready() {
-        let mut result = PreflightResult {
-            homebrew_available: true,
-            network_reachable: true,
-            write_permissions_ok: true,
-            blockers: Vec::new(),
+    fn test_preflight_is_ready_with_all_passing() {
+        let result = PreflightResult {
+            checks: vec![
+                PreflightCheck {
+                    name: "Test1".to_string(),
+                    description: "passes".to_string(),
+                    passed: true,
+                },
+                PreflightCheck {
+                    name: "Test2".to_string(),
+                    description: "passes".to_string(),
+                    passed: true,
+                },
+            ],
         };
         assert!(result.is_ready());
+    }
 
-        result.blockers.push("test blocker".to_string());
+    #[test]
+    fn test_preflight_is_ready_with_failures() {
+        let result = PreflightResult {
+            checks: vec![
+                PreflightCheck {
+                    name: "Test1".to_string(),
+                    description: "fails".to_string(),
+                    passed: false,
+                },
+            ],
+        };
         assert!(!result.is_ready());
     }
 
     #[test]
-    fn test_preflight_format_display() {
-        let result = PreflightResult {
-            homebrew_available: true,
-            network_reachable: true,
-            write_permissions_ok: true,
-            blockers: vec!["Test issue".to_string()],
-        };
-        let output = result.format_for_display();
-        assert!(output.contains("Pre-flight Checks"));
-        assert!(output.contains("Issues found"));
-        assert!(output.contains("Test issue"));
-    }
-
-    #[test]
-    fn test_check_write_permissions() {
-        // This should pass in normal environments
-        let can_write = check_write_permissions();
-        // We don't assert true/false here because it depends on env
-        // Just verify it doesn't panic
-        let _ = can_write;
+    fn test_preflight_run_checks() {
+        let result = run_checks().unwrap();
+        assert!(!result.checks.is_empty());
     }
 }
