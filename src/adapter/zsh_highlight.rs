@@ -5,6 +5,7 @@
 
 use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::fs;
@@ -17,7 +18,8 @@ pub struct ZshHighlightAdapter;
 impl ZshHighlightAdapter {
     /// Get home directory
     fn home() -> Result<PathBuf> {
-        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
+        let env = SlateEnv::from_process()?;
+let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home))
     }
 
@@ -78,7 +80,8 @@ impl ToolAdapter for ZshHighlightAdapter {
     }
 
     fn managed_config_path(&self) -> PathBuf {
-        let home = std::env::var("HOME").ok();
+        let env = SlateEnv::from_process().ok();
+let home = env.as_ref().and_then(|e| e.home().to_str().map(|s| s.to_string()));
         if let Some(h) = home {
             PathBuf::from(h).join(".config/slate/managed/zsh")
         } else {

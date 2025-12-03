@@ -4,6 +4,7 @@
 //! starship.toml in-place with careful scoping to [palettes.slate] section.
 
 use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::env::SlateEnv;
 use crate::config::ConfigManager;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -44,7 +45,8 @@ impl ToolAdapter for StarshipAdapter {
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
-        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
+        let env = SlateEnv::from_process()?;
+let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
         let config_home = PathBuf::from(home).join(".config");
         Ok(Self::resolve_path(
             std::env::var("STARSHIP_CONFIG").ok().as_deref(),
@@ -53,7 +55,8 @@ impl ToolAdapter for StarshipAdapter {
     }
 
     fn managed_config_path(&self) -> PathBuf {
-        let home = std::env::var("HOME").ok();
+        let env = SlateEnv::from_process().ok();
+let home = env.as_ref().and_then(|e| e.home().to_str().map(|s| s.to_string()));
         if let Some(h) = home {
             PathBuf::from(h).join(".config/slate/managed/starship")
         } else {

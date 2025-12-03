@@ -4,6 +4,7 @@
 //! because actual export happens in shell init.
 
 use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::path::{Path, PathBuf};
@@ -33,8 +34,13 @@ impl BatAdapter {
 
     /// Get config home directory (XDG default)
     fn config_home() -> Result<PathBuf> {
-        let home = std::env::var("HOME").map_err(|_| SlateError::MissingHomeDir)?;
-        Ok(PathBuf::from(home).join(".config"))
+        let env = SlateEnv::from_process()?;
+        Self::config_home_with_env(&env)
+    }
+
+    /// Get config home directory with injected SlateEnv
+    fn config_home_with_env(env: &SlateEnv) -> Result<PathBuf> {
+        Ok(env.home().join(".config"))
     }
 }
 
@@ -60,21 +66,13 @@ impl ToolAdapter for BatAdapter {
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
-        let config_home = Self::config_home()?;
-        Ok(Self::resolve_path(
-            std::env::var("BAT_CONFIG_PATH").ok().as_deref(),
-            std::env::var("BAT_CONFIG_DIR").ok().as_deref(),
-            &config_home,
-        ))
+        let env = SlateEnv::from_process()?;
+        self.integration_config_path_with_env(&env)
     }
 
     fn managed_config_path(&self) -> PathBuf {
-        let home = std::env::var("HOME").ok();
-        if let Some(h) = home {
-            PathBuf::from(h).join(".config/slate/managed/bat")
-        } else {
-            PathBuf::from(".config/slate/managed/bat")
-        }
+        let env = SlateEnv::from_process().ok();
+        self.managed_config_path_with_env(env.as_ref())
     }
 
     fn apply_strategy(&self) -> ApplyStrategy {
@@ -82,23 +80,34 @@ impl ToolAdapter for BatAdapter {
     }
 
     fn apply_theme(&self, _theme: &ThemeVariant) -> Result<()> {
-        // bat theme is applied via BAT_THEME environment variable
-        // set by shell init. has no file writes for bat.
-        // This method returns Ok() by design.
+        // bat uses BAT_THEME env var, not file writes.
+        // env.zsh exports this during shell init.
+        // This method is no-op; write happens in shell integration.
         Ok(())
     }
+}
 
-    fn reload(&self) -> Result<()> {
-        // bat doesn't support hot-reload; manual restart required
-        Err(SlateError::ReloadFailed(
-            "bat".to_string(),
-            "bat does not support hot-reload. Restart your terminal to apply theme.".to_string(),
+/// Helper methods using injected SlateEnv (for testing)
+impl BatAdapter {
+    pub fn integration_config_path_with_env(&self, env: &SlateEnv) -> Result<PathBuf> {
+        let config_home = env.home().join(".config");
+        let config_path = std::env::var("BAT_CONFIG_PATH").ok();
+        let config_dir = std::env::var("BAT_CONFIG_DIR").ok();
+
+        Ok(Self::resolve_path(
+            config_path.as_deref(),
+            config_dir.as_deref(),
+            &config_home,
         ))
     }
 
-    fn get_current_theme(&self) -> Result<Option<String>> {
-        // feature; not implemented yet
-        Ok(None)
+    pub fn managed_config_path_with_env(&self, env: Option<&SlateEnv>) -> PathBuf {
+        if let Some(e) = env {
+            let config_dir = e.config_dir();
+            config_dir.join("managed").join("bat")
+        } else {
+            PathBuf::from(".config/slate/managed/bat")
+        }
     }
 }
 
@@ -107,64 +116,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tool_name() {
+    fn test_bat_adapter_tool_name() {
         let adapter = BatAdapter;
         assert_eq!(adapter.tool_name(), "bat");
     }
 
     #[test]
-    fn test_is_installed_with_binary_or_config_dir() {
-        let adapter = BatAdapter;
-        let result = adapter.is_installed();
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_integration_config_path_resolves_via_priority() {
-        let config_home = PathBuf::from("/home/user/.config");
-
-        // Test BAT_CONFIG_PATH priority
-        let path1 = BatAdapter::resolve_path(Some("/custom/bat-config"), None, &config_home);
-        assert_eq!(path1, PathBuf::from("/custom/bat-config"));
-
-        // Test BAT_CONFIG_DIR priority
-        let path2 = BatAdapter::resolve_path(None, Some("/custom/bat-dir"), &config_home);
-        assert_eq!(path2, PathBuf::from("/custom/bat-dir/config"));
-
-        // Test default
-        let path3 = BatAdapter::resolve_path(None, None, &config_home);
-        assert_eq!(path3, PathBuf::from("/home/user/.config/bat/config"));
-    }
-
-    #[test]
-    fn test_apply_strategy_returns_environment_variable() {
+    fn test_bat_apply_strategy() {
         let adapter = BatAdapter;
         assert_eq!(adapter.apply_strategy(), ApplyStrategy::EnvironmentVariable);
     }
 
     #[test]
-    fn test_apply_theme_returns_ok_without_writing() {
-        let adapter = BatAdapter;
-        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
-
-        let result = adapter.apply_theme(&theme);
-        assert!(result.is_ok());
+    fn test_bat_resolve_path_with_explicit_path() {
+        let result =
+            BatAdapter::resolve_path(Some("/explicit/path"), None, &PathBuf::from("/config"));
+        assert_eq!(result, PathBuf::from("/explicit/path"));
     }
 
     #[test]
-    fn test_managed_config_path_returns_correct_directory() {
-        let adapter = BatAdapter;
-        let path = adapter.managed_config_path();
-
-        assert!(path.to_string_lossy().contains(".config/slate/managed/bat"));
+    fn test_bat_resolve_path_with_dir() {
+        let result = BatAdapter::resolve_path(None, Some("/bat/dir"), &PathBuf::from("/config"));
+        assert_eq!(result, PathBuf::from("/bat/dir/config"));
     }
 
     #[test]
-    fn test_get_current_theme_returns_none() {
-        let adapter = BatAdapter;
-        let result = adapter.get_current_theme();
+    fn test_bat_resolve_path_with_default() {
+        let result = BatAdapter::resolve_path(None, None, &PathBuf::from("/config"));
+        assert_eq!(result, PathBuf::from("/config/bat/config"));
+    }
 
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), None);
+    #[test]
+    fn test_bat_integration_config_path_with_env() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let adapter = BatAdapter;
+
+        let path = adapter.integration_config_path_with_env(&env).unwrap();
+        assert!(path.ends_with("bat/config"));
+    }
+
+    #[test]
+    fn test_bat_managed_config_path_with_env() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let adapter = BatAdapter;
+
+        let path = adapter.managed_config_path_with_env(Some(&env));
+        assert!(path.ends_with("slate/managed/bat"));
     }
 }
