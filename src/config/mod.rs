@@ -1,3 +1,4 @@
+use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use atomic_write_file::AtomicWriteFile;
 use std::fs;
@@ -15,17 +16,24 @@ pub struct ConfigManager {
 }
 
 impl ConfigManager {
-    /// Create ConfigManager with default base path.
-    /// hardcode ~/.config/slate/ (macOS-only, no ProjectDirs)
-    pub fn new() -> Result<Self> {
-        let home = std::env::var("HOME").map_err(|_| crate::error::SlateError::MissingHomeDir)?;
-
-        let base_path = PathBuf::from(home).join(".config/slate");
+    /// Create ConfigManager with injected SlateEnv.
+    /// All path resolution goes through SlateEnv for testability.
+    /// Prefer this method over new() for new code.
+    pub fn with_env(env: &SlateEnv) -> Result<Self> {
+        let base_path = env.config_dir().to_path_buf();
 
         // Ensure base directory exists
         fs::create_dir_all(&base_path)?;
 
         Ok(Self { base_path })
+    }
+
+    /// Create ConfigManager from process environment (backward compatibility).
+    /// Reads $HOME and $XDG_CONFIG_HOME via SlateEnv::from_process().
+    /// For new code: use with_env() instead to enable testing with injected paths.
+    pub fn new() -> Result<Self> {
+        let env = SlateEnv::from_process()?;
+        Self::with_env(&env)
     }
 
     /// Path to managed directory for a tool
@@ -301,32 +309,19 @@ fi
     }
 }
 
-impl Default for ConfigManager {
-    fn default() -> Self {
-        // In production, this could fail if $HOME is not set
-        // Tests should handle this via environment setup
-        Self::new().expect("Failed to initialize ConfigManager: $HOME not set or invalid")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
 
     #[test]
-    fn test_config_manager_creates_base_path() {
-        // Test that ConfigManager can be created
-        // Using real environment HOME for integration test
-        match ConfigManager::new() {
-            Ok(cm) => {
-                // Verify base_path exists and is correct
-                assert!(cm.base_path.ends_with(".config/slate"));
-            }
-            Err(_) => {
-                // HOME not set in test env, that's ok
-            }
-        }
+    fn test_config_manager_with_env() {
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let cm = ConfigManager::with_env(&env).unwrap();
+
+        // Verify base_path is set correctly
+        assert!(cm.base_path.ends_with(".config/slate"));
     }
 
     #[test]
