@@ -133,6 +133,12 @@ impl Language {
             activation_type
         )
     }
+
+    /// Hub entry messages 
+    pub const HUB_WELCOME: &str = "✦ Welcome to slate. Let's set it up.";
+    pub const HUB_TITLE: &str = "✦ slate";
+    pub const HUB_WHAT_TO_DO: &str = "What would you like to do?";
+    pub const AUTO_CONFIGURED: &str = "✓ Auto theme configured. Run slate set --auto to apply.";
 }
 
 #[cfg(test)]

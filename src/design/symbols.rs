@@ -23,6 +23,15 @@ impl Symbols {
 
     /// Diamond marker (used for special/metadata info)
     pub const DIAMOND: char = '◆';
+
+    /// Preferences/settings icon
+    pub const PREFERENCES: char = '⚙';
+
+    /// Quit/exit icon
+    pub const QUIT: char = '⏊';
+
+    /// Back/return icon
+    pub const BACK: char = '←';
 }
 
 // Example usage:
@@ -43,6 +52,9 @@ mod tests {
         assert_eq!(Symbols::CTA_ARROW, '→');
         assert_eq!(Symbols::CHEVRON, '❯');
         assert_eq!(Symbols::DIAMOND, '◆');
+        assert_eq!(Symbols::PREFERENCES, '⚙');
+        assert_eq!(Symbols::QUIT, '⏊');
+        assert_eq!(Symbols::BACK, '←');
     }
 
     #[test]
@@ -66,6 +78,9 @@ mod tests {
             Symbols::CTA_ARROW,
             Symbols::CHEVRON,
             Symbols::DIAMOND,
+            Symbols::PREFERENCES,
+            Symbols::QUIT,
+            Symbols::BACK,
         ];
 
         for (i, &sym1) in symbols.iter().enumerate() {
