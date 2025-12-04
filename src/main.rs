@@ -8,7 +8,7 @@ use slate_cli::{cli, env::SlateEnv, error};
 #[command(long_about = "Transform your terminal in 30 seconds")]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -50,7 +50,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Setup { quick, force, only } => {
+        None => {
+            // Bare `slate` invocation routes to hub
+            cli::hub::handle()?;
+        }
+        Some(Commands::Setup { quick, force, only }) => {
             // Dispatch to setup handler with env
             match cli::setup::handle_with_env(quick, force, only, &env) {
                 Err(error::SlateError::UserCancelled) => {
@@ -67,18 +71,18 @@ fn main() -> Result<()> {
                 other => other?,
             }
         }
-        Commands::Set { theme } => {
+        Some(Commands::Set { theme }) => {
             // Dispatch to set handler
             let args: Vec<&str> = theme.as_ref().map(|t| vec![t.as_str()]).unwrap_or_default();
             cli::set::handle(&args)?;
         }
-        Commands::Status => {
+        Some(Commands::Status) => {
             cli::status::handle(&[])?;
         }
-        Commands::List => {
+        Some(Commands::List) => {
             cli::list::handle(&[])?;
         }
-        Commands::Reset { backup_id } => {
+        Some(Commands::Reset { backup_id }) => {
             let args: Vec<&str> = backup_id
                 .as_ref()
                 .map(|id| vec![id.as_str()])
