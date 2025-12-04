@@ -182,6 +182,28 @@ fi
         Ok(Some(trimmed.to_string()))
     }
 
+
+    /// Path to current opacity tracking file
+    /// ~/.config/slate/current-opacity — plain text with opacity preset (solid|frosted|clear)
+    /// Note: This is temporary for 06-01 Hub. 06-03 will add full opacity persistence.
+    fn current_opacity_path(&self) -> PathBuf {
+        self.base_path.join("current-opacity")
+    }
+
+    /// Get the current opacity preset.
+    /// Note: This is temporary for 06-01 Hub. 06-03 will enhance this implementation.
+    pub fn get_current_opacity(&self) -> Result<Option<String>> {
+        let path = self.current_opacity_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = fs::read_to_string(&path)?;
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(trimmed.to_string()))
+    }
     /// Edit a field in a TOML config file using AST-aware editing.
     /// Per RESEARCH Pitfall 1: Use toml_edit, never regex.
     /// Preserves comments and formatting.

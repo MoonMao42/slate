@@ -1,6 +1,7 @@
 pub mod failure_handler;
 pub mod font_detection;
 pub mod font_selection;
+pub mod hub;
 pub mod list;
 pub mod preflight;
 pub mod preset_selection;
