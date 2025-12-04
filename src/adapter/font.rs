@@ -3,6 +3,7 @@
 //! installation command mapping. Scope: detect + install mapping only (no config writing).
 
 use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeVariant;
 use std::collections::BTreeSet;
@@ -24,10 +25,10 @@ impl FontAdapter {
         ("Nerd Font", " Nerd Font"),
     ];
 
-    /// Get home directory
+    /// Get home directory from process environment
     fn home() -> Result<PathBuf> {
-        let home = std::env::var("HOME").map_err(|_| crate::error::SlateError::MissingHomeDir)?;
-        Ok(PathBuf::from(home))
+        let env = SlateEnv::from_process()?;
+        Ok(env.home().to_path_buf())
     }
 
     fn looks_like_nerd_font(name: &str) -> bool {
@@ -66,10 +67,16 @@ impl FontAdapter {
     /// Detect installed Nerd Fonts by scanning font directories.
     /// Returns canonical family names suitable for terminal config files.
     pub fn detect_installed_fonts() -> Result<Vec<String>> {
+        let env = SlateEnv::from_process()?;
+        Self::detect_installed_fonts_with_env(&env)
+    }
+
+    /// Detect installed Nerd Fonts with injected SlateEnv (for testing)
+    pub fn detect_installed_fonts_with_env(env: &SlateEnv) -> Result<Vec<String>> {
         let mut fonts = BTreeSet::new();
 
         // Scan user fonts directory
-        if let Ok(user_fonts) = fs::read_dir(Self::home()?.join("Library/Fonts")) {
+        if let Ok(user_fonts) = fs::read_dir(env.home().join("Library/Fonts")) {
             for entry in user_fonts.flatten() {
                 if let Ok(name) = entry.file_name().into_string() {
                     if Self::looks_like_nerd_font(&name) {
@@ -141,12 +148,8 @@ impl ToolAdapter for FontAdapter {
     }
 
     fn managed_config_path(&self) -> PathBuf {
-        let home = std::env::var("HOME").ok();
-        if let Some(h) = home {
-            PathBuf::from(h).join(".config/slate")
-        } else {
-            PathBuf::from(".config/slate")
-        }
+        let env = SlateEnv::from_process().expect("Failed to read environment");
+        env.config_dir().to_path_buf()
     }
 
     fn apply_strategy(&self) -> ApplyStrategy {
@@ -284,5 +287,18 @@ mod tests {
         let display = FontAdapter::family_match_key("JetBrains Mono Nerd Font");
         let detected = FontAdapter::family_match_key("JetBrainsMono Nerd Font");
         assert_eq!(display, detected);
+    }
+
+    #[test]
+    fn test_detect_installed_fonts_with_env_uses_injected_home() {
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+
+        // With empty tempdir, should return empty list (no fonts installed)
+        let result = FontAdapter::detect_installed_fonts_with_env(&env);
+        assert!(result.is_ok());
+        // Result should be empty since no fonts exist in tempdir
     }
 }

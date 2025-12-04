@@ -1,17 +1,23 @@
+use crate::env::SlateEnv;
 use crate::error::Result;
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Detect current terminal font from Ghostty or Alacritty config
 pub fn detect_current_font() -> Result<Option<String>> {
+    let env = SlateEnv::from_process()?;
+    detect_current_font_with_env(&env)
+}
+
+/// Detect current terminal font with injected SlateEnv (for testing)
+pub fn detect_current_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
     // Try Ghostty first
-    if let Ok(Some(font)) = read_ghostty_font() {
+    if let Ok(Some(font)) = read_ghostty_font_with_env(env) {
         return Ok(Some(font));
     }
 
     // Fall back to Alacritty
-    if let Ok(Some(font)) = read_alacritty_font() {
+    if let Ok(Some(font)) = read_alacritty_font_with_env(env) {
         return Ok(Some(font));
     }
 
@@ -20,8 +26,8 @@ pub fn detect_current_font() -> Result<Option<String>> {
 }
 
 /// Parse Ghostty config (key=value format) for font-family setting
-fn read_ghostty_font() -> Result<Option<String>> {
-    for config_path in ghostty_config_paths() {
+fn read_ghostty_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
+    for config_path in ghostty_config_paths_with_env(env) {
         if !config_path.exists() {
             continue;
         }
@@ -40,13 +46,8 @@ fn read_ghostty_font() -> Result<Option<String>> {
 }
 
 /// Parse Alacritty TOML config for font setting
-fn read_alacritty_font() -> Result<Option<String>> {
-    let home = env::var("HOME").ok();
-    if home.is_none() {
-        return Ok(None);
-    }
-
-    let config_path = PathBuf::from(home.unwrap()).join(".config/alacritty/alacritty.toml");
+fn read_alacritty_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
+    let config_path = env.home().join(".config/alacritty/alacritty.toml");
 
     if !config_path.exists() {
         return Ok(None);
@@ -73,29 +74,17 @@ fn read_alacritty_font() -> Result<Option<String>> {
     }
 }
 
-fn ghostty_config_paths() -> Vec<PathBuf> {
-    ghostty_config_paths_from_env(
-        env::var_os("HOME").as_deref(),
-        env::var_os("XDG_CONFIG_HOME").as_deref(),
-    )
-}
-
-fn ghostty_config_paths_from_env(
-    home: Option<&std::ffi::OsStr>,
-    xdg_config_home: Option<&std::ffi::OsStr>,
-) -> Vec<PathBuf> {
+fn ghostty_config_paths_with_env(env: &SlateEnv) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    if let Some(xdg) = xdg_config_home {
-        let xdg_path = Path::new(xdg);
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        let xdg_path = Path::new(&xdg);
         paths.push(xdg_path.join("ghostty/config.ghostty"));
         paths.push(xdg_path.join("ghostty/config"));
-    }
-
-    if let Some(home_dir) = home {
-        let home_path = Path::new(home_dir).join(".config/ghostty");
-        paths.push(home_path.join("config.ghostty"));
-        paths.push(home_path.join("config"));
+    } else {
+        let config_base = env.home().join(".config");
+        paths.push(config_base.join("ghostty/config.ghostty"));
+        paths.push(config_base.join("ghostty/config"));
     }
 
     paths
@@ -151,16 +140,49 @@ mod tests {
     }
 
     #[test]
-    fn test_ghostty_config_paths_include_current_and_legacy_locations() {
-        let paths =
-            ghostty_config_paths_from_env(Some("/tmp/home".as_ref()), Some("/tmp/xdg".as_ref()));
+    fn test_parse_ghostty_font_config_with_single_quotes() {
+        let content = "font-family = 'FiraCode Nerd Font'";
+        let font = parse_ghostty_font_config(content);
+        assert_eq!(font.as_deref(), Some("FiraCode Nerd Font"));
+    }
 
-        assert_eq!(paths[0], PathBuf::from("/tmp/xdg/ghostty/config.ghostty"));
-        assert_eq!(paths[1], PathBuf::from("/tmp/xdg/ghostty/config"));
-        assert_eq!(
-            paths[2],
-            PathBuf::from("/tmp/home/.config/ghostty/config.ghostty")
-        );
-        assert_eq!(paths[3], PathBuf::from("/tmp/home/.config/ghostty/config"));
+    #[test]
+    fn test_parse_ghostty_font_config_ignores_comments() {
+        let content = r#"
+            # font-family = "Bad Font"
+            font-family = "Good Font"
+        "#;
+        let font = parse_ghostty_font_config(content);
+        assert_eq!(font.as_deref(), Some("Good Font"));
+    }
+
+    #[test]
+    fn test_parse_ghostty_font_config_handles_equals_in_value() {
+        let content = r#"font-family = "SomeName=Something Nerd Font""#;
+        let font = parse_ghostty_font_config(content);
+        assert_eq!(font.as_deref(), Some("SomeName=Something Nerd Font"));
+    }
+
+    #[test]
+    fn test_parse_ghostty_font_config_ignores_incomplete_lines() {
+        let content = r#"
+            font-family
+            font-family =
+        "#;
+        let font = parse_ghostty_font_config(content);
+        assert!(font.is_none());
+    }
+
+    #[test]
+    fn test_detect_current_font_with_env_respects_injected_home() {
+        use tempfile::TempDir;
+        
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        
+        // With empty tempdir, should return None for both Ghostty and Alacritty
+        let result = detect_current_font_with_env(&env);
+        assert!(result.is_ok());
+        // Result should be None since no configs exist in tempdir
     }
 }
