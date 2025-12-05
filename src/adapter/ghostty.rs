@@ -236,6 +236,40 @@ impl GhosttyAdapter {
     }
 }
 
+
+/// Write opacity configuration to managed Ghostty config file.
+/// Per , Sets background-opacity value based on OpacityPreset.
+/// Path: ~/.config/slate/managed/ghostty/opacity.conf
+pub fn write_opacity_config(env: &SlateEnv, opacity: crate::opacity::OpacityPreset) -> Result<()> {
+    let config_manager = ConfigManager::with_env(env)?;
+    
+    let opacity_value = opacity.to_f32();
+    let config_content = format!("background-opacity = {}
+", opacity_value);
+    
+    // Write to managed file, will be idempotently included by integration file
+    config_manager.write_managed_file("ghostty", "opacity.conf", &config_content)?;
+    
+    Ok(())
+}
+
+/// Write blur radius configuration to managed Ghostty config file.
+/// Frosted preset → 20px blur, others → 0 (no blur).
+/// Path: ~/.config/slate/managed/ghostty/blur.conf
+pub fn write_blur_radius(env: &SlateEnv, opacity: crate::opacity::OpacityPreset) -> Result<()> {
+    let config_manager = ConfigManager::with_env(env)?;
+    
+    let blur_value = opacity.blur_radius();
+    let config_content = format!("background-blur-radius = {}
+", blur_value);
+    
+    // Write to managed file
+    config_manager.write_managed_file("ghostty", "blur.conf", &config_content)?;
+    
+    Ok(())
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
