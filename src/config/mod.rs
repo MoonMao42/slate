@@ -224,8 +224,7 @@ fi
             return Ok(crate::opacity::OpacityPreset::Solid);
         }
         
-        // Parse opacity preset from file
-        use std::str::FromStr;
+        // Parse opacity preset from file (FromStr trait is auto in scope)
         trimmed.parse::<crate::opacity::OpacityPreset>()
     }
 
