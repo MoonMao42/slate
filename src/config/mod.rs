@@ -204,6 +204,48 @@ fi
         }
         Ok(Some(trimmed.to_string()))
     }
+
+    /// Get the current opacity preset, parsing from file.
+    /// Returns OpacityPreset::Solid if file missing (fallback).
+    /// Per D-08b: Opacity persists independently of theme.
+    pub fn get_current_opacity_preset(&self) -> Result<crate::opacity::OpacityPreset> {
+        let path = self.current_opacity_path();
+        
+        if !path.exists() {
+            // Fallback to Solid when file missing
+            return Ok(crate::opacity::OpacityPreset::Solid);
+        }
+        
+        let content = fs::read_to_string(&path)?;
+        let trimmed = content.trim();
+        
+        if trimmed.is_empty() {
+            // Fallback to Solid when file is empty
+            return Ok(crate::opacity::OpacityPreset::Solid);
+        }
+        
+        // Parse opacity preset from file
+        use std::str::FromStr;
+        trimmed.parse::<crate::opacity::OpacityPreset>()
+    }
+
+    /// Set the current opacity preset, persisting to file.
+    /// Opacity persists independently of theme.
+    /// Called on explicit commit/apply paths: Enter, explicit `slate set`, `--auto`, setup wizard completion.
+    /// Atomic write pattern: temp file + rename to prevent TOCTOU.
+    pub fn set_current_opacity_preset(&self, preset: crate::opacity::OpacityPreset) -> Result<()> {
+        let path = self.current_opacity_path();
+        
+        // Write as lowercase string (no newline)
+        let content = preset.to_string().to_lowercase();
+        
+        let mut file = AtomicWriteFile::open(&path)?;
+        file.write_all(content.as_bytes())?;
+        file.commit()?;
+        
+        Ok(())
+    }
+
     /// Edit a field in a TOML config file using AST-aware editing.
     /// Per RESEARCH Pitfall 1: Use toml_edit, never regex.
     /// Preserves comments and formatting.
@@ -465,4 +507,57 @@ format = "..."
         assert!(backup_path.starts_with(config_manager.backups_dir("starship")));
         assert!(backup_path.exists());
     }
+
+    #[test]
+    fn test_opacity_persistence_missing_file_defaults_to_solid() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+
+        // When file missing, should default to Solid
+        let preset = config_manager.get_current_opacity_preset().unwrap();
+        assert_eq!(preset, crate::opacity::OpacityPreset::Solid);
+    }
+
+    #[test]
+    fn test_opacity_persistence_round_trip() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+
+        // Set opacity
+        config_manager
+            .set_current_opacity_preset(crate::opacity::OpacityPreset::Frosted)
+            .unwrap();
+
+        // Read it back
+        let preset = config_manager.get_current_opacity_preset().unwrap();
+        assert_eq!(preset, crate::opacity::OpacityPreset::Frosted);
+
+        // Verify file content is lowercase
+        let path = config_manager.current_opacity_path();
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "frosted");
+    }
+
+    #[test]
+    fn test_opacity_persistence_all_presets() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+
+        for preset in &[
+            crate::opacity::OpacityPreset::Solid,
+            crate::opacity::OpacityPreset::Frosted,
+            crate::opacity::OpacityPreset::Clear,
+        ] {
+            config_manager.set_current_opacity_preset(*preset).unwrap();
+            let read_preset = config_manager.get_current_opacity_preset().unwrap();
+            assert_eq!(&read_preset, preset);
+        }
+    }
+
 }
