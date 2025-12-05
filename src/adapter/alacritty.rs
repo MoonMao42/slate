@@ -200,6 +200,26 @@ let home = env.as_ref().and_then(|e| e.home().to_str().map(|s| s.to_string()));
     }
 }
 
+
+/// Write opacity configuration to managed Alacritty config file.
+/// Alacritty only supports opacity (alpha), no blur.
+/// Writes [window] opacity = {f32} to managed config file.
+/// Path: ~/.config/slate/managed/alacritty/opacity.toml
+pub fn write_opacity_config(env: &SlateEnv, opacity: crate::opacity::OpacityPreset) -> Result<()> {
+    let config_manager = ConfigManager::with_env(env)?;
+    
+    let opacity_value = opacity.to_f32();
+    let config_content = format!("[window]
+opacity = {}
+", opacity_value);
+    
+    // Write to managed file, will be idempotently included in import array
+    config_manager.write_managed_file("alacritty", "opacity.toml", &config_content)?;
+    
+    Ok(())
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
