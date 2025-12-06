@@ -36,6 +36,7 @@ pub struct WizardContext {
     pub selected_tools: Vec<String>,
     pub selected_font: Option<String>,
     pub selected_theme: Option<String>,
+    pub selected_opacity: Option<crate::opacity::OpacityPreset>,
     pub selected_terminal_settings: Option<TerminalSettings>,
     pub current_font: Option<String>,
     pub current_theme: Option<String>,
@@ -65,10 +66,11 @@ impl Wizard {
             context: WizardContext {
                 mode: WizardMode::Manual,
                 current_step: 0,
-                total_steps: 6, // intro → mode/preset → tools → font → theme → action list → apply
+                total_steps: 6, // intro → mode/preset → tools → font → theme → opacity → action list → apply
                 selected_tools: Vec::new(),
                 selected_font: None,
                 selected_theme: None,
+                selected_opacity: None,
                 selected_terminal_settings: None,
                 current_font,
                 current_theme,
@@ -93,7 +95,7 @@ impl Wizard {
             eprintln!("⚙ Force mode: ignoring current state\n");
         }
 
-        self.context.total_steps = if quick_mode { 4 } else { 5 };
+        self.context.total_steps = if quick_mode { 5 } else { 6 };
 
         // Step 0: Intro
         self.show_intro()?;
@@ -125,6 +127,11 @@ impl Wizard {
         // Step 4+: Theme selection (manual mode only)
         if self.context.mode == WizardMode::Manual {
             self.step_select_theme()?;
+        }
+
+        // Step 5+: Opacity selection (manual mode only)
+        if self.context.mode == WizardMode::Manual {
+            self.step_select_opacity()?;
         }
 
         self.step_review_and_confirm()?;
@@ -417,6 +424,96 @@ impl Wizard {
         &mut self.context
     }
 
+    fn step_select_opacity(&mut self) -> Result<()> {
+        self.log_step("Select Background Style");
+
+        // Get selected theme to make recommendation
+        let selected_theme_id = if let Some(tid) = &self.context.selected_theme {
+            tid.clone()
+        } else if let Some(tid) = &self.context.current_theme {
+            tid.clone()
+        } else {
+            // Fallback: use first theme
+            if let Some(first_theme) = self.theme_selector.all_themes().first() {
+                first_theme.id.clone()
+            } else {
+                return Err(crate::error::SlateError::InvalidThemeData(
+                    "No themes available".to_string()
+                ));
+            }
+        };
+
+        // Load the theme and get recommendation
+        let registry = crate::theme::ThemeRegistry::new()?;
+        let theme = registry.get(&selected_theme_id)
+            .ok_or_else(|| crate::error::SlateError::InvalidThemeData(
+                format!("Theme not found: {}", selected_theme_id)
+            ))?;
+
+        let recommended = crate::opacity::recommended_opacity_for_theme(theme);
+
+        if !std::io::stdin().is_terminal() {
+            // Non-interactive: use recommended opacity
+            self.context.selected_opacity = Some(recommended);
+            self.context.current_step += 1;
+            return Ok(());
+        }
+
+        eprintln!("Background style — opacity and visual effects:");
+        let options = vec![
+            ("solid", "● Solid", "Opaque, best for light themes"),
+            ("frosted", "○ Frosted", "macOS-style blur, recommended"),
+            ("clear", "○ Clear", "Highly transparent"),
+        ];
+
+        let selected_opacity_str = if recommended == crate::opacity::OpacityPreset::Frosted {
+            // Default to frosted
+            select("Background style:")
+                .items(
+                    &options
+                        .iter()
+                        .map(|(id, label, desc)| (*id, label, desc))
+                        .collect::<Vec<_>>(),
+                )
+                .interact()
+                .map_err(handle_cliclack_error)?
+        } else {
+            // Default to solid (for light themes)
+            select("Background style:")
+                .items(
+                    &options
+                        .iter()
+                        .map(|(id, label, desc)| (*id, label, desc))
+                        .collect::<Vec<_>>(),
+                )
+                .interact()
+                .map_err(handle_cliclack_error)?
+        };
+
+        use std::str::FromStr;
+        let selected_opacity = crate::opacity::OpacityPreset::from_str(selected_opacity_str)
+            .map_err(|e| crate::error::SlateError::Internal(e.to_string()))?;
+
+        // Warn if translucent + light theme (D-26b)
+        if crate::opacity::should_warn_for_translucent_light_theme(theme, selected_opacity) {
+            eprintln!(
+                "⚠ Light themes with transparency may reduce text legibility. "
+            );
+            let confirm_choice = confirm("Continue with this style?")
+                .interact()
+                .map_err(handle_cliclack_error)?;
+            
+            if !confirm_choice {
+                // Re-prompt for opacity
+                return self.step_select_opacity();
+            }
+        }
+
+        self.context.selected_opacity = Some(selected_opacity);
+        self.context.current_step += 1;
+        Ok(())
+    }
+
     fn step_review_and_confirm(&mut self) -> Result<()> {
         self.log_step("Review and Confirm");
         let receipt = self.build_review_receipt();
@@ -489,9 +586,9 @@ impl Wizard {
     fn sync_total_steps(&mut self, include_mode_step: bool) {
         self.context.total_steps = match (self.context.mode, include_mode_step) {
             (WizardMode::Quick, true) => 5,
-            (WizardMode::Quick, false) => 4,
-            (WizardMode::Manual, true) => 6,
-            (WizardMode::Manual, false) => 5,
+            (WizardMode::Quick, false) => 5,
+            (WizardMode::Manual, true) => 7,
+            (WizardMode::Manual, false) => 6,
         };
     }
 

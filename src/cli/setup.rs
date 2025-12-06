@@ -52,6 +52,7 @@ pub fn handle_with_env(
     let selected_tools = context.selected_tools.clone();
     let selected_font = context.selected_font.as_deref();
     let selected_theme = context.selected_theme.as_deref();
+    let selected_opacity = context.selected_opacity;
 
     // Execute the setup (install tools, apply configurations)
     let summary = setup_executor::execute_setup_with_env(
@@ -60,6 +61,17 @@ pub fn handle_with_env(
         selected_theme,
         env,
     )?;
+
+    // Persist selected opacity if chosen (manual mode only)
+    if let Some(opacity) = selected_opacity {
+        if let Ok(config_mgr) = crate::config::ConfigManager::with_env(env) {
+            let _ = config_mgr.set_current_opacity_preset(opacity);
+        }
+        // Write opacity to adapters
+        let _ = crate::adapter::ghostty::write_opacity_config(env, opacity);
+        let _ = crate::adapter::ghostty::write_blur_radius(env, opacity);
+        let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
+    }
 
     // Display completion message with visibility guidance
     eprintln!("\n{}", summary.format_completion_message());
