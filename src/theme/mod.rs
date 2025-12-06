@@ -200,6 +200,37 @@ impl Default for ThemeRegistry {
     }
 }
 
+
+/// Static family sort order
+/// Guides users toward most popular and well-regarded themes first
+pub const FAMILY_SORT_ORDER: &[&str] = &[
+    "Catppuccin",
+    "Tokyo Night",
+    "Rosé Pine",
+    "Kanagawa",
+    "Everforest",
+    "Dracula",
+    "Nord",
+    "Gruvbox",
+];
+
+/// Get display description for a theme
+/// Used by `slate list` command 
+pub fn get_theme_description(theme_id: &str) -> Option<&'static str> {
+    match theme_id {
+        "catppuccin-mocha" => Some("Deep, warm mocha with sophisticated contrast"),
+        "catppuccin-frappe" => Some("Elegant frappé with subtle charm"),
+        "catppuccin-macchiato" => Some("Smooth macchiato for balanced aesthetics"),
+        "catppuccin-latte" => Some("Bright, airy latte perfect for light mode"),
+        "tokyo-night-dark" => Some("Modern dark with electric blues and purples"),
+        "tokyo-night-light" => Some("Crisp light theme with Tokyo Night flair"),
+        "gruvbox-dark" => Some("Retro-inspired dark with earthy tones"),
+        "gruvbox-light" => Some("Vintage light theme with warm nostalgia"),
+        "dracula" => Some("Moody and dramatic with vibrant accents"),
+        "nord" => Some("Arctic, north-bluish dark color palette"),
+        _ => None,
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
