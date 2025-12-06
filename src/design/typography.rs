@@ -154,3 +154,22 @@ mod tests {
         assert!(!Typography::divider(10).is_empty());
     }
 }
+
+/// Format a line with 2 spaces left padding 
+/// Used for all non-cliclack output (status, list, afterglow)
+pub fn padded_line(content: &str) -> String {
+    format!("  {}", content)
+}
+
+/// Format a section header for panels
+/// Example: "✦ Core Vibe" for status dashboard sections 
+pub fn section_header(symbol: &str, title: &str) -> String {
+    padded_line(&format!("{} {}", symbol, title))
+}
+
+/// Format a label-value pair with proper color hierarchy
+/// Labels in subtext (gray), values in text (bright)
+/// Returns unformatted; caller applies ANSI codes per theme
+pub fn label_value_pair(label: &str, value: &str) -> String {
+    padded_line(&format!("{}    {}", label, value))
+}
