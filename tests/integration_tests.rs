@@ -87,13 +87,19 @@ fn test_set_with_theme_argument() {
 }
 
 #[test]
+#[test]
 fn test_status_command_runs() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
     let output = cmd.arg("status").output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    assert!(stdout.contains(Language::STATUS_PENDING));
+    // slate status now shows rounded panel dashboard with 4 sections
+    assert!(stdout.contains("slate status")); // Panel header
+    assert!(stdout.contains("Core Vibe")); // Section 1
+    assert!(stdout.contains("Typography")); // Section 2
+    assert!(stdout.contains("Background")); // Section 3
+    assert!(stdout.contains("Toolkit")); // Section 4
 }
 
 #[test]
@@ -103,9 +109,10 @@ fn test_list_command_runs() {
     let output = cmd.arg("list").output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    // slate list now shows themes with TrueColor palette blocks
-    assert!(stdout.contains(Language::LIST_HEADER));
-    assert!(stdout.contains("Catppuccin")); // At least one theme should be listed
+    // slate list shows families grouped with separators, sort order
+    assert!(stdout.contains("Catppuccin")); // First family in  order
+    assert!(stdout.contains("Tokyo Night")); // Second family in  order
+    assert!(stdout.contains("━━")); // Family separator from 
 }
 
 #[test]
