@@ -228,6 +228,8 @@ mod tests {
                 ("tmux".to_string(), "test".to_string()),
                 ("zsh_syntax_highlighting".to_string(), "test".to_string()),
             ]),
+            appearance: crate::theme::ThemeAppearance::Dark,
+            auto_pair: None,
         }
     }
 

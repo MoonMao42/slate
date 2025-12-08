@@ -64,6 +64,8 @@ pub fn gruvbox_dark() -> Result<ThemeVariant> {
             surface0: Some("#282828".to_string()),
             extras: HashMap::new(),
         },
+        appearance: crate::theme::ThemeAppearance::Dark,
+        auto_pair: Some("gruvbox-light"),
     })
 }
 
@@ -129,5 +131,7 @@ pub fn gruvbox_light() -> Result<ThemeVariant> {
             surface0: Some("#f4f1de".to_string()),
             extras: HashMap::new(),
         },
+        appearance: crate::theme::ThemeAppearance::Light,
+        auto_pair: Some("gruvbox-dark"),
     })
 }

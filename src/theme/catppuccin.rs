@@ -79,6 +79,8 @@ pub fn catppuccin_latte() -> Result<ThemeVariant> {
                 ("lavender".to_string(), "#7287fd".to_string()),
             ]),
         },
+        appearance: crate::theme::ThemeAppearance::Light,
+        auto_pair: Some("catppuccin-mocha"),
     })
 }
 
@@ -159,6 +161,8 @@ pub fn catppuccin_frappe() -> Result<ThemeVariant> {
                 ("lavender".to_string(), "#babbf1".to_string()),
             ]),
         },
+        appearance: crate::theme::ThemeAppearance::Dark,
+        auto_pair: Some("catppuccin-latte"),
     })
 }
 
@@ -239,6 +243,8 @@ pub fn catppuccin_macchiato() -> Result<ThemeVariant> {
                 ("lavender".to_string(), "#b7bdf8".to_string()),
             ]),
         },
+        appearance: crate::theme::ThemeAppearance::Dark,
+        auto_pair: Some("catppuccin-latte"),
     })
 }
 
@@ -319,5 +325,7 @@ pub fn catppuccin_mocha() -> Result<ThemeVariant> {
                 ("lavender".to_string(), "#b4befe".to_string()),
             ]),
         },
+        appearance: crate::theme::ThemeAppearance::Dark,
+        auto_pair: Some("catppuccin-latte"),
     })
 }

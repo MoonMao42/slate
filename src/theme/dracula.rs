@@ -61,5 +61,7 @@ pub fn dracula() -> Result<ThemeVariant> {
             surface0: Some("#21222c".to_string()),
             extras: HashMap::new(),
         },
+        appearance: crate::theme::ThemeAppearance::Dark,
+        auto_pair: None,
     })
 }

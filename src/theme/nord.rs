@@ -61,5 +61,7 @@ pub fn nord() -> Result<ThemeVariant> {
             surface0: Some("#2e3440".to_string()),
             extras: HashMap::new(),
         },
+        appearance: crate::theme::ThemeAppearance::Dark,
+        auto_pair: None,
     })
 }

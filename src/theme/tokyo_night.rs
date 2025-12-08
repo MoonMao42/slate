@@ -64,6 +64,8 @@ pub fn tokyo_night_light() -> Result<ThemeVariant> {
             surface0: Some("#1a1b26".to_string()),
             extras: HashMap::new(),
         },
+        appearance: crate::theme::ThemeAppearance::Light,
+        auto_pair: Some("tokyo-night-dark"),
     })
 }
 
@@ -129,5 +131,7 @@ pub fn tokyo_night_dark() -> Result<ThemeVariant> {
             surface0: Some("#1a1b26".to_string()),
             extras: HashMap::new(),
         },
+        appearance: crate::theme::ThemeAppearance::Dark,
+        auto_pair: Some("tokyo-night-light"),
     })
 }

@@ -91,6 +91,19 @@ impl Palette {
 /// - bat: "Catppuccin Mocha" (Title Case)
 pub type ToolRefs = HashMap<String, String>;
 
+/// Theme appearance classification for auto-follow detection.
+/// Themes are classified as either Dark or Light.
+/// This enables the auto-follow feature to match system appearance (macOS Settings)
+/// with the appropriate theme variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ThemeAppearance {
+    /// Dark theme (suitable when macOS is in Dark mode)
+    Dark,
+    /// Light theme (suitable when macOS is in Light mode)
+    Light,
+}
+
+
 /// A single theme variant (e.g., "Catppuccin Mocha").
 /// Contains both tool_refs and palette for complete theme data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +113,8 @@ pub struct ThemeVariant {
     pub family: String, // Family (e.g., "Catppuccin")
     pub tool_refs: ToolRefs, // Now HashMap<String, String>
     pub palette: Palette, // Raw colors for tools without built-in support
+    pub appearance: ThemeAppearance, // Dark or Light classification
+    pub auto_pair: Option<&'static str>, // Paired dark/light variant ID, if applicable
 }
 
 impl ThemeVariant {

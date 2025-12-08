@@ -212,6 +212,8 @@ mod tests {
                 surface0: None,
                 extras: HashMap::new(),
             },
+            appearance: crate::theme::ThemeAppearance::Light,
+            auto_pair: None,
         };
 
         assert_eq!(
@@ -271,6 +273,8 @@ mod tests {
                 surface0: None,
                 extras: HashMap::new(),
             },
+            appearance: crate::theme::ThemeAppearance::Dark,
+            auto_pair: None,
         };
 
         assert_eq!(
@@ -330,6 +334,8 @@ mod tests {
                 surface0: None,
                 extras: HashMap::new(),
             },
+            appearance: crate::theme::ThemeAppearance::Light,
+            auto_pair: None,
         };
 
         // Light theme + Frosted should warn
