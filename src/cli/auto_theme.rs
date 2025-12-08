@@ -216,4 +216,106 @@ mod tests {
         assert_eq!(ThemeAppearance::Light, ThemeAppearance::Light);
         assert_ne!(ThemeAppearance::Dark, ThemeAppearance::Light);
     }
+
+    #[test]
+    fn test_resolve_auto_theme_with_existing_auto_config() {
+        use tempfile::TempDir;
+        
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let config = ConfigManager::with_env(&env).unwrap();
+        
+        // Write auto.toml with dark and light themes
+        config.write_auto_config(Some("catppuccin-mocha"), Some("catppuccin-latte")).unwrap();
+        
+        // Set current theme to something else
+        config.set_current_theme("tokyo-night-dark").unwrap();
+        
+        // resolve_auto_theme should read from auto.toml regardless of current theme
+        let resolved = resolve_auto_theme(&env, &config).unwrap();
+        
+        // Since we can't control system appearance in tests, check that it either
+        // resolves to one of the configured themes or a fallback
+        let theme_registry = ThemeRegistry::new().unwrap();
+        assert!(theme_registry.get(&resolved).is_some());
+    }
+    
+    #[test]
+    fn test_resolve_auto_theme_fallback_with_auto_pair() {
+        use tempfile::TempDir;
+        
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let config = ConfigManager::with_env(&env).unwrap();
+        
+        // Don't write auto.toml, so fallback pipeline is used
+        // Set current theme to one with auto_pair (e.g., catppuccin-mocha pairs with catppuccin-latte)
+        config.set_current_theme("catppuccin-mocha").unwrap();
+        
+        // resolve_auto_theme should use fallback pipeline
+        let resolved = resolve_auto_theme(&env, &config).unwrap();
+        
+        // Verify resolved theme is valid
+        let theme_registry = ThemeRegistry::new().unwrap();
+        assert!(theme_registry.get(&resolved).is_some());
+    }
+    
+    #[test]
+    fn test_auto_config_read_write_round_trip() {
+        use tempfile::TempDir;
+        
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let config = ConfigManager::with_env(&env).unwrap();
+        
+        // Initially no config
+        let initial = config.read_auto_config().unwrap();
+        assert!(initial.is_none());
+        
+        // Write config
+        config.write_auto_config(Some("catppuccin-mocha"), Some("catppuccin-latte")).unwrap();
+        
+        // Read it back
+        let read_back = config.read_auto_config().unwrap();
+        assert!(read_back.is_some());
+        
+        let auto_cfg = read_back.unwrap();
+        assert_eq!(auto_cfg.dark_theme, Some("catppuccin-mocha".to_string()));
+        assert_eq!(auto_cfg.light_theme, Some("catppuccin-latte".to_string()));
+    }
+    
+    #[test]
+    fn test_auto_config_partial_update() {
+        use tempfile::TempDir;
+        
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let config = ConfigManager::with_env(&env).unwrap();
+        
+        // Write initial config with both values
+        config.write_auto_config(Some("catppuccin-mocha"), Some("catppuccin-latte")).unwrap();
+        
+        // Update only dark theme, should preserve light theme
+        config.write_auto_config(Some("tokyo-night-dark"), None).unwrap();
+        
+        // Read back
+        let read_back = config.read_auto_config().unwrap().unwrap();
+        assert_eq!(read_back.dark_theme, Some("tokyo-night-dark".to_string()));
+        assert_eq!(read_back.light_theme, Some("catppuccin-latte".to_string()));
+    }
+    
+    #[test]
+    fn test_resolve_auto_theme_defaults_when_no_config() {
+        use tempfile::TempDir;
+        
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let config = ConfigManager::with_env(&env).unwrap();
+        
+        // No auto.toml, no current theme
+        let resolved = resolve_auto_theme(&env, &config).unwrap();
+        
+        // Should resolve to a brand default (catppuccin-mocha or catppuccin-latte)
+        assert!(resolved == "catppuccin-mocha" || resolved == "catppuccin-latte");
+    }
 }
