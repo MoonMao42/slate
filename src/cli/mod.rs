@@ -1,4 +1,5 @@
 pub mod status_panel;
+pub mod auto_theme;
 pub mod failure_handler;
 pub mod font_detection;
 pub mod font_selection;

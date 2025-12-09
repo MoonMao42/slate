@@ -11,6 +11,13 @@ use toml_edit::DocumentMut;
 /// Manages three tiers per /// 1. Managed tier: ~/.config/slate/managed/{tool}/ — Slate writes here (regenerates freely)
 /// 2. Integration tier: ~/.config/{tool}/config — User's entry file (slate ensures it includes managed, never modifies content)
 /// 3. User tier: ~/.config/slate/user/{tool}/ — User's custom overrides (slate never touches)
+/// Auto-configuration structure for reading/writing auto.toml
+#[derive(Debug, Clone)]
+pub struct AutoConfig {
+    pub dark_theme: Option<String>,
+    pub light_theme: Option<String>,
+}
+
 pub struct ConfigManager {
     base_path: PathBuf, // ~/.config/slate
 }
@@ -238,6 +245,71 @@ fi
         // Write as lowercase string (no newline)
         let content = preset.to_string().to_lowercase();
         
+        let mut file = AtomicWriteFile::open(&path)?;
+        file.write_all(content.as_bytes())?;
+        file.commit()?;
+        
+        Ok(())
+    }
+
+
+    /// Read auto.toml from ~/.config/slate/auto.toml if it exists.
+    /// Returns None if file doesn't exist; error if file is unreadable.
+    pub fn read_auto_config(&self) -> Result<Option<AutoConfig>> {
+        let path = self.base_path.join("auto.toml");
+        
+        if !path.exists() {
+            return Ok(None);
+        }
+        
+        let content = fs::read_to_string(&path)?;
+        
+        // Parse simple TOML with two optional fields
+        let mut dark_theme = None;
+        let mut light_theme = None;
+        
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            
+            if let Some(value) = line.strip_prefix("dark_theme = ") {
+                dark_theme = Some(value.trim_matches('"').to_string());
+            } else if let Some(value) = line.strip_prefix("light_theme = ") {
+                light_theme = Some(value.trim_matches('"').to_string());
+            }
+        }
+        
+        Ok(Some(AutoConfig {
+            dark_theme,
+            light_theme,
+        }))
+    }
+    
+    /// Write auto.toml with the specified dark and light themes.
+    /// File is flat TOML with two optional string fields.
+    /// Preserves existing field if new value is None.
+    /// Uses atomic write to prevent corruption.
+    pub fn write_auto_config(&self, dark_theme: Option<&str>, light_theme: Option<&str>) -> Result<()> {
+        // Read current config if it exists
+        let current = self.read_auto_config()?;
+        
+        // Merge with new values (new values take precedence)
+        let final_dark = dark_theme.map(String::from).or(current.as_ref().and_then(|c| c.dark_theme.clone()));
+        let final_light = light_theme.map(String::from).or(current.as_ref().and_then(|c| c.light_theme.clone()));
+        
+        // Build TOML content
+        let mut content = String::new();
+        if let Some(dark) = final_dark {
+            content.push_str(&format!("dark_theme = \"{}\"\n", dark));
+        }
+        if let Some(light) = final_light {
+            content.push_str(&format!("light_theme = \"{}\"\n", light));
+        }
+        
+        // Write atomically
+        let path = self.base_path.join("auto.toml");
         let mut file = AtomicWriteFile::open(&path)?;
         file.write_all(content.as_bytes())?;
         file.commit()?;
