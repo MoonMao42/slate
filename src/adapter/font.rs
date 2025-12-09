@@ -3,6 +3,7 @@
 //! installation command mapping. Scope: detect + install mapping only (no config writing).
 
 use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeVariant;
@@ -66,6 +67,7 @@ impl FontAdapter {
 
     /// Detect installed Nerd Fonts by scanning font directories.
     /// Returns canonical family names suitable for terminal config files.
+    /// JetBrainsMono Nerd Font is marked as recommended and placed first.
     pub fn detect_installed_fonts() -> Result<Vec<String>> {
         let env = SlateEnv::from_process()?;
         Self::detect_installed_fonts_with_env(&env)
@@ -97,7 +99,49 @@ impl FontAdapter {
             }
         }
 
-        Ok(fonts.into_iter().collect())
+        // Convert to Vec and reorder with recommendation first 
+        let mut fonts_vec: Vec<String> = fonts.into_iter().collect();
+        Self::apply_recommendation_ordering(&mut fonts_vec);
+        Ok(fonts_vec)
+    }
+
+    /// Apply recommendation ordering: JetBrainsMono Nerd Font first (if installed),
+    /// then all others alphabetically. Per.
+    fn apply_recommendation_ordering(fonts: &mut Vec<String>) {
+        const RECOMMENDED: &str = "JetBrainsMono Nerd Font";
+
+        // Find and move recommended font to front (if present)
+        if let Some(pos) = fonts.iter().position(|f| f == RECOMMENDED) {
+            fonts.remove(pos);
+            fonts.insert(0, RECOMMENDED.to_string());
+        } else {
+            // If recommended font not installed, add it at the front with note
+            fonts.insert(0, format!("{} (not installed)", RECOMMENDED));
+        }
+
+        // Keep rest alphabetically sorted
+        fonts[1..].sort();
+    }
+
+    /// Persist chosen font to config and apply to terminal adapters.
+    /// Updates current-font, Ghostty font-family, and Alacritty [font.normal] family.
+    pub fn apply_font(env: &SlateEnv, font_name: &str) -> Result<()> {
+        let config = ConfigManager::with_env(env)?;
+
+        // Persist to current-font file
+        config.set_current_font(font_name)?;
+
+        // Apply to Ghostty managed config
+        // Write to managed/ghostty/font.conf
+        let font_conf_content = format!("font-family = \"{}\"\n", font_name);
+        config.write_managed_file("ghostty", "font.conf", &font_conf_content)?;
+
+        // Apply to Alacritty managed config
+        // Write to managed/alacritty/font.toml
+        let alacritty_font_content = format!("[font.normal]\nfamily = \"{}\"\n", font_name);
+        config.write_managed_file("alacritty", "font.toml", &alacritty_font_content)?;
+
+        Ok(())
     }
 
     /// Map font name to brew cask name
@@ -300,5 +344,30 @@ mod tests {
         let result = FontAdapter::detect_installed_fonts_with_env(&env);
         assert!(result.is_ok());
         // Result should be empty since no fonts exist in tempdir
+    }
+
+    #[test]
+    fn test_recommendation_ordering_puts_jetbrains_first() {
+        let mut fonts = vec![
+            "Fira Code Nerd Font".to_string(),
+            "JetBrainsMono Nerd Font".to_string(),
+            "Iosevka Nerd Font".to_string(),
+        ];
+        FontAdapter::apply_recommendation_ordering(&mut fonts);
+        assert_eq!(fonts[0], "JetBrainsMono Nerd Font");
+        assert_eq!(fonts[1], "Fira Code Nerd Font");
+        assert_eq!(fonts[2], "Iosevka Nerd Font");
+    }
+
+    #[test]
+    fn test_recommendation_ordering_adds_not_installed_note() {
+        let mut fonts = vec![
+            "Fira Code Nerd Font".to_string(),
+            "Iosevka Nerd Font".to_string(),
+        ];
+        FontAdapter::apply_recommendation_ordering(&mut fonts);
+        assert_eq!(fonts[0], "JetBrainsMono Nerd Font (not installed)");
+        assert_eq!(fonts[1], "Fira Code Nerd Font");
+        assert_eq!(fonts[2], "Iosevka Nerd Font");
     }
 }
