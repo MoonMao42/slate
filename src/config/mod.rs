@@ -357,6 +357,33 @@ fi
     /// "catppuccin-mocha"
     /// )?;
     /// ```
+
+    /// Check if fastfetch auto-run is enabled via marker file.
+    /// Marker is an empty file; existence = enabled.
+    pub fn has_fastfetch_autorun(&self) -> Result<bool> {
+        let path = self.base_path.join("autorun-fastfetch");
+        Ok(path.exists())
+    }
+
+    /// Enable fastfetch auto-run by creating marker file atomically.
+    /// Creates empty file at ~/.config/slate/autorun-fastfetch
+    pub fn enable_fastfetch_autorun(&self) -> Result<()> {
+        let path = self.base_path.join("autorun-fastfetch");
+        let mut file = AtomicWriteFile::open(&path)?;
+        file.write_all(b"")?;
+        file.commit()?;
+        Ok(())
+    }
+
+    /// Disable fastfetch auto-run by deleting marker file.
+    /// Best-effort deletion; no error if file doesn't exist.
+    pub fn disable_fastfetch_autorun(&self) -> Result<()> {
+        let path = self.base_path.join("autorun-fastfetch");
+        if path.exists() {
+            fs::remove_file(&path).ok();
+        }
+        Ok(())
+    }
     pub fn edit_config_field(&self, config_path: &Path, keys: &[&str], value: &str) -> Result<()> {
         if !config_path.exists() {
             return Err(crate::error::SlateError::ConfigNotFound(
@@ -631,4 +658,46 @@ format = "..."
         }
     }
 
+
+    #[test]
+    fn test_fastfetch_autorun_marker_toggle() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+
+        // Initially not enabled
+        let enabled = config_manager.has_fastfetch_autorun().unwrap();
+        assert!(!enabled);
+
+        // Enable it
+        config_manager.enable_fastfetch_autorun().unwrap();
+        let enabled = config_manager.has_fastfetch_autorun().unwrap();
+        assert!(enabled);
+
+        // Verify marker file exists
+        let path = config_manager.base_path().join("autorun-fastfetch");
+        assert!(path.exists());
+
+        // Disable it
+        config_manager.disable_fastfetch_autorun().unwrap();
+        let enabled = config_manager.has_fastfetch_autorun().unwrap();
+        assert!(!enabled);
+    }
+
+    #[test]
+    fn test_fastfetch_disable_is_idempotent() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+
+        // Disable when not enabled should not error
+        let result = config_manager.disable_fastfetch_autorun();
+        assert!(result.is_ok());
+
+        // Disable again should also work
+        let result = config_manager.disable_fastfetch_autorun();
+        assert!(result.is_ok());
+    }
 }
