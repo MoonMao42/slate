@@ -37,6 +37,7 @@ pub struct WizardContext {
     pub selected_font: Option<String>,
     pub selected_theme: Option<String>,
     pub selected_opacity: Option<crate::opacity::OpacityPreset>,
+    pub fastfetch_enabled: bool,
     pub selected_terminal_settings: Option<TerminalSettings>,
     pub current_font: Option<String>,
     pub current_theme: Option<String>,
@@ -70,6 +71,7 @@ impl Wizard {
                 selected_tools: Vec::new(),
                 selected_font: None,
                 selected_theme: None,
+                fastfetch_enabled: false,
                 selected_opacity: None,
                 selected_terminal_settings: None,
                 current_font,
@@ -133,6 +135,9 @@ impl Wizard {
         if self.context.mode == WizardMode::Manual {
             self.step_select_opacity()?;
         }
+        
+        // Step 5+: Fastfetch auto-run (both modes with confirmation)
+        self.step_select_fastfetch()?;
 
         self.step_review_and_confirm()?;
 
@@ -510,6 +515,26 @@ impl Wizard {
         }
 
         self.context.selected_opacity = Some(selected_opacity);
+        self.context.current_step += 1;
+        Ok(())
+    }
+
+    fn step_select_fastfetch(&mut self) -> Result<()> {
+        // Default disabled (N), ask user in both modes
+        self.log_step("Fastfetch Auto-Run");
+
+        if !std::io::stdin().is_terminal() {
+            // Non-interactive mode: skip fastfetch prompt
+            self.context.current_step += 1;
+            return Ok(());
+        }
+
+        let enable_fastfetch = confirm("Show system info every time you open a terminal?")
+            .initial_value(false)  // Default N (disabled)
+            .interact()
+            .map_err(handle_cliclack_error)?;
+
+        self.context.fastfetch_enabled = enable_fastfetch;
         self.context.current_step += 1;
         Ok(())
     }

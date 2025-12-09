@@ -53,6 +53,7 @@ pub fn handle_with_env(
     let selected_font = context.selected_font.as_deref();
     let selected_theme = context.selected_theme.as_deref();
     let selected_opacity = context.selected_opacity;
+    let fastfetch_enabled = context.fastfetch_enabled;
 
     // Execute the setup (install tools, apply configurations)
     let summary = setup_executor::execute_setup_with_env(
@@ -71,6 +72,13 @@ pub fn handle_with_env(
         let _ = crate::adapter::ghostty::write_opacity_config(env, opacity);
         let _ = crate::adapter::ghostty::write_blur_radius(env, opacity);
         let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
+    }
+
+    // Persist fastfetch auto-run preference if selected
+    if fastfetch_enabled {
+        if let Ok(config_mgr) = crate::config::ConfigManager::with_env(env) {
+            let _ = config_mgr.enable_fastfetch_autorun();
+        }
     }
 
     // Display completion message with visibility guidance
