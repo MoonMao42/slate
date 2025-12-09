@@ -119,9 +119,10 @@ fn handle_preferences() -> Result<()> {
             Ok(())
         }
         "auto" => {
-            // 06-05 owns the actual auto-theme implementation.
-            cliclack::log::info("Configure Auto Theme is wired in 06-05.")?;
-            Ok(())
+            // 06-05: Wire configure_auto_theme interactive flow
+            crate::cli::auto_theme::configure_auto_theme()?;
+            // Return to preferences menu to allow additional changes
+            handle_preferences()
         }
         "setup" => {
             let env = crate::env::SlateEnv::from_process()?;
