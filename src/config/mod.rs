@@ -138,6 +138,13 @@ impl ConfigManager {
 fi
 ",
         );
+        // Conditionally run fastfetch on terminal open if auto-run enabled
+        // Check for marker file presence
+        if self.has_fastfetch_autorun()? {
+            content.push_str("nif command -v fastfetch &> /dev/null; thenn");
+            content.push_str("  fastfetchn");
+            content.push_str("fin");
+        }
 
         // Write atomically to ~/.config/slate/managed/shell/env.zsh
         self.write_managed_file("shell", "env.zsh", &content)?;
