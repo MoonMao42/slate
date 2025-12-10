@@ -707,4 +707,60 @@ format = "..."
         let result = config_manager.disable_fastfetch_autorun();
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_write_shell_integration_includes_fastfetch_when_marker_present() {
+        use tempfile::TempDir;
+
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+
+        // Create marker file
+        config_manager.enable_fastfetch_autorun().unwrap();
+
+        // Get a theme for shell integration
+        let registry = crate::theme::ThemeRegistry::new().unwrap();
+        let theme = registry.get("catppuccin-mocha").unwrap();
+
+        // Write shell integration
+        config_manager.write_shell_integration_file(theme).unwrap();
+
+        // Read the generated env.zsh
+        let env_zsh_path = temp.path().join("managed/shell/env.zsh");
+        let content = std::fs::read_to_string(&env_zsh_path).unwrap();
+
+        // Verify fastfetch command is present
+        assert!(content.contains("if command -v fastfetch &> /dev/null; then"));
+        assert!(content.contains("  fastfetch"));
+        assert!(content.contains("fi"));
+    }
+
+    #[test]
+    fn test_write_shell_integration_excludes_fastfetch_when_marker_absent() {
+        use tempfile::TempDir;
+
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+
+        // Do NOT create marker file (fastfetch disabled by default)
+
+        // Get a theme for shell integration
+        let registry = crate::theme::ThemeRegistry::new().unwrap();
+        let theme = registry.get("catppuccin-mocha").unwrap();
+
+        // Write shell integration
+        config_manager.write_shell_integration_file(theme).unwrap();
+
+        // Read the generated env.zsh
+        let env_zsh_path = temp.path().join("managed/shell/env.zsh");
+        let content = std::fs::read_to_string(&env_zsh_path).unwrap();
+
+        // Verify fastfetch conditional is NOT present
+        assert!(!content.contains("if command -v fastfetch &> /dev/null; then"));
+        assert!(!content.contains("  fastfetch\nfi"));
+    }
 }
