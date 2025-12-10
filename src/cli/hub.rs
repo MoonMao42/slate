@@ -1,6 +1,8 @@
 use crate::config::ConfigManager;
 use crate::error::Result;
 use crate::theme::ThemeRegistry;
+use crate::adapter::FontAdapter;
+use crate::env::SlateEnv;
 
 /// Handle bare `slate` invocation 
 pub fn handle() -> Result<()> {
@@ -114,9 +116,10 @@ fn handle_preferences() -> Result<()> {
 
     match selection {
         "font" => {
-            // 06-06 wires Change Font.
-            cliclack::log::info("Font selection coming in .")?;
-            Ok(())
+            // 06-06: Wire Change Font interactive flow
+            handle_change_font()?;
+            // Return to preferences menu to allow additional changes
+            handle_preferences()
         }
         "auto" => {
             // 06-05: Wire configure_auto_theme interactive flow
@@ -136,4 +139,70 @@ fn handle_preferences() -> Result<()> {
         }
         _ => Ok(()),
     }
+}
+
+fn handle_change_font() -> Result<()> {
+    use cliclack::select;
+
+    cliclack::intro("✦ Change Font")?;
+
+    let env = SlateEnv::from_process()?;
+    let _config = ConfigManager::with_env(&env)?;
+
+    // Get installed fonts using the font adapter
+    let fonts = FontAdapter::detect_installed_fonts()?;
+
+    if fonts.is_empty() {
+        cliclack::log::error("No Nerd Fonts found. Run slate setup to install fonts.")?;
+        return Ok(());
+    }
+
+    // Apply recommendation ordering: JetBrainsMono first if installed
+    let mut ordered_fonts = fonts.clone();
+    let jetbrains_idx = ordered_fonts.iter().position(|f| f == "JetBrains Mono Nerd Font");
+
+    if let Some(idx) = jetbrains_idx {
+        // Move JetBrainsMono to front
+        let jetbrains = ordered_fonts.remove(idx);
+        ordered_fonts.insert(0, format!("✦ {} (recommended)", jetbrains));
+    } else {
+        // Not installed, add note
+        ordered_fonts.insert(0, "✦ JetBrains Mono Nerd Font (not installed)".to_string());
+    }
+
+    // Build items for cliclack select
+    let items: Vec<(&str, &str, &str)> = ordered_fonts
+        .iter()
+        .map(|f| (f.as_str(), f.as_str(), ""))
+        .collect();
+
+    cliclack::log::remark("")?;
+    let selected = select("Select font")
+        .items(items.as_slice())
+        .interact()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::Interrupted {
+                crate::error::SlateError::UserCancelled
+            } else {
+                crate::error::SlateError::IOError(e)
+            }
+        })?;
+
+    // Extract the actual font name (remove recommendation marker if present)
+    let selected_font = selected
+        .strip_prefix("✦ ")
+        .and_then(|s| s.split(" (recommended)").next())
+        .and_then(|s| s.split(" (not installed)").next())
+        .unwrap_or(selected);
+
+    // Apply the font using the adapter
+    FontAdapter::apply_font(&env, selected_font)?;
+
+    // Show receipt
+    cliclack::log::remark("")?;
+    cliclack::log::success(format!("✓ Font changed to {}", selected_font))?;
+    cliclack::log::info("Font will be used on next terminal session.")?;
+    cliclack::log::remark("")?;
+
+    Ok(())
 }
