@@ -141,9 +141,9 @@ fi
         // Conditionally run fastfetch on terminal open if auto-run enabled
         // Check for marker file presence
         if self.has_fastfetch_autorun()? {
-            content.push_str("nif command -v fastfetch &> /dev/null; thenn");
-            content.push_str("  fastfetchn");
-            content.push_str("fin");
+            content.push_str("\nif command -v fastfetch &> /dev/null; then\n");
+            content.push_str("  fastfetch\n");
+            content.push_str("fi\n");
         }
 
         // Write atomically to ~/.config/slate/managed/shell/env.zsh
