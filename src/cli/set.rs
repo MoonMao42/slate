@@ -13,7 +13,7 @@ use crate::adapter::{ghostty, alacritty};
 /// Supports three modes:
 /// 1. `slate set <theme>` — Set explicit theme
 /// 2. `slate set --auto` — Apply auto-follow based on system appearance
-/// 3. Interactive picker (deferred)
+/// 3. `slate set` (no args) — Interactive picker
 pub fn handle(args: &[&str]) -> Result<()> {
     // Check for --auto flag
     if args.contains(&"--auto") {
@@ -49,8 +49,9 @@ pub fn handle(args: &[&str]) -> Result<()> {
 
         println!("{} Theme switched to '{}'", Symbols::SUCCESS, theme.name);
     } else {
-        // No theme argument: interactive picker deferred to 
-        println!("{}", Language::SET_PICKER_PENDING);
+        // No theme argument: launch interactive picker
+        let env = SlateEnv::from_process()?;
+        crate::cli::picker::launch_picker(&env)?;
     }
 
     Ok(())
