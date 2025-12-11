@@ -5,6 +5,7 @@ pub mod font_detection;
 pub mod font_selection;
 pub mod hub;
 pub mod list;
+pub mod picker;
 pub mod preflight;
 pub mod preset_selection;
 pub mod restore;
