@@ -24,3 +24,20 @@ pub fn handle_resume_auto(_state: &mut super::state::PickerState, _env: &SlateEn
     // TODO: Implement auto-resume logic in Task 4
     Ok(())
 }
+
+/// Check if light theme opacity guardrail should apply
+pub fn should_guard_light_theme_opacity(_state: &super::state::PickerState) -> bool {
+    // TODO: Task 5 - implement light-theme guardrail logic
+    false
+}
+
+/// Render Afterglow receipt with atomic flush
+pub fn render_afterglow_receipt(_state: &super::state::PickerState, _env: &SlateEnv) -> Result<()> {
+    // TODO: Task 7 - implement Afterglow rendering
+    Ok(())
+}
+
+/// Show Frosted preview approximation cue for non-Ghostty terminals
+pub fn show_frosted_preview_cue(_env: &SlateEnv) {
+    // TODO: Task 6 - detect terminal and show cue for Frosted preview approximation
+}
