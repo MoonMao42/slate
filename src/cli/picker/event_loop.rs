@@ -12,3 +12,15 @@ pub fn launch_picker(env: &SlateEnv) -> Result<()> {
     // For now, stub return Ok to allow compilation
     Ok(())
 }
+
+/// Handle 's' (save auto theme) key in picker
+pub fn handle_save_auto(_state: &mut super::state::PickerState, _env: &SlateEnv) -> Result<()> {
+    // TODO: Implement auto-save logic in Task 4
+    Ok(())
+}
+
+/// Handle 'r' (resume auto theme) key in picker
+pub fn handle_resume_auto(_state: &mut super::state::PickerState, _env: &SlateEnv) -> Result<()> {
+    // TODO: Implement auto-resume logic in Task 4
+    Ok(())
+}
