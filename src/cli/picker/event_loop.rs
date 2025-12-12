@@ -1,113 +1,473 @@
 //! Event loop and rendering for the interactive crossterm picker.
 //! Per , and 06-CONTEXT research on crossterm + live preview.
 
-use crate::error::Result;
-use crate::env::SlateEnv;
-use crate::config::ConfigManager;
 use crate::cli::auto_theme;
-use crate::theme::ThemeAppearance;
-use crate::opacity::OpacityPreset;
+use crate::config::ConfigManager;
 use crate::design::symbols::Symbols;
+use crate::env::SlateEnv;
+use crate::error::Result;
+use crate::opacity::OpacityPreset;
+use crate::theme::{ThemeAppearance, ThemeRegistry};
 use std::env;
 use std::io::{self, Write};
+use std::time::{Duration, Instant};
+
+use crossterm::{
+    cursor::{Hide, MoveTo, Show},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    execute, queue,
+    style::{Color, Print, ResetColor, SetAttribute, SetForegroundColor, Attribute},
+    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+};
+
+use super::state::PickerState;
+
+/// Flash message shown at the bottom of the picker for ~900ms.
+struct Flash {
+    text: String,
+    until: Instant,
+}
+
+/// Terminal state cleanup guard — restores screen on drop even if we panic.
+struct TerminalGuard;
+
+impl TerminalGuard {
+    fn enter() -> Result<Self> {
+        terminal::enable_raw_mode()
+            .map_err(|e| crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e)))?;
+        let mut stdout = io::stdout();
+        execute!(stdout, EnterAlternateScreen, Hide)
+            .map_err(|e| crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e)))?;
+        Ok(Self)
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, Show, LeaveAlternateScreen);
+        let _ = terminal::disable_raw_mode();
+    }
+}
 
 /// Launch the interactive 2D picker for theme + opacity selection.
 /// Enters alternate screen, sets up raw mode, manages crossterm event loop.
-/// Returns Ok if user commits (Enter), or rollbacks cleanly on ESC/Ctrl+C.
-pub fn launch_picker(_env: &SlateEnv) -> Result<()> {
-    // TODO: Complete event loop implementation in Task 3+
-    // For now, stub return Ok to allow compilation
+/// Returns Ok if user commits (Enter), or rolls back cleanly on ESC/Ctrl+C.
+pub fn launch_picker(env: &SlateEnv) -> Result<()> {
+    let config = ConfigManager::with_env(env)?;
+
+    // Resolve starting theme/opacity from current persisted state
+    let starting_theme_id = config
+        .get_current_theme()?
+        .unwrap_or_else(|| "catppuccin-mocha".to_string());
+    let starting_opacity = config
+        .get_current_opacity_preset()
+        .unwrap_or(OpacityPreset::Solid);
+
+    let mut state = PickerState::new(&starting_theme_id, starting_opacity)?;
+
+    // Guard ensures terminal state is restored even on panic.
+    let _guard = TerminalGuard::enter()?;
+
+    // Paint the user's starting selection on entry so the preview matches the
+    // cursor before any keystrokes. Best-effort — preview failures do not
+    // abort the picker.
+    let effective = get_effective_opacity_for_rendering(&state);
+    let _ = crate::cli::set::silent_preview_apply(env, state.get_current_theme_id(), effective);
+
+    let exit_action = event_loop(env, &mut state)?;
+
+    // Drop the guard explicitly to restore the terminal before we print anything
+    // visible to the user (Afterglow receipt or nothing).
+    drop(_guard);
+
+    match exit_action {
+        ExitAction::Commit => {
+            state.commit();
+            let theme_id = state.get_current_theme_id().to_string();
+            let opacity = get_effective_opacity_for_rendering(&state);
+            crate::cli::set::silent_commit_apply(env, &theme_id, opacity)?;
+            render_afterglow_receipt(&state, env)?;
+        }
+        ExitAction::Cancel => {
+            // Re-apply the user's original selection to undo any preview-side
+            // adapter writes. Best-effort — do not propagate rollback errors.
+            let _ = crate::cli::set::silent_preview_apply(
+                env,
+                state.original_theme_id(),
+                state.original_opacity(),
+            );
+        }
+    }
+
     Ok(())
 }
 
-/// Handle 's' (save auto theme) key in picker
-/// Per Task 4:
-/// - Detects current theme's appearance (Dark/Light)
-/// - Enters confirmation state with updated help text
-/// - On Enter: write auto.toml with dark_theme or light_theme field
-/// - Shows receipt and updates theme list with auto badge
-/// - Opacity stays at user's current selection
-pub fn handle_save_auto(state: &mut super::state::PickerState, env: &SlateEnv) -> Result<()> {
-    use cliclack::confirm;
+enum ExitAction {
+    Commit,
+    Cancel,
+}
 
-    let config = ConfigManager::with_env(env)?;
-    let current_theme = state.get_current_theme()?;
+fn event_loop(env: &SlateEnv, state: &mut PickerState) -> Result<ExitAction> {
+    let mut flash: Option<Flash> = None;
 
-    // Determine which appearance slot to save to
-    let is_dark = current_theme.appearance == ThemeAppearance::Dark;
-    let appearance_label = if is_dark { "Dark" } else { "Light" };
+    loop {
+        render(state, flash.as_ref())?;
 
-    // Confirmation prompt
-    let prompt = format!(
-        "Save {} as Auto {} theme?",
-        current_theme.name, appearance_label
-    );
-
-    match confirm(&prompt).interact() {
-        Ok(true) => {
-            // Write auto.toml with this theme for its appearance
-            let current_theme_id = state.get_current_theme_id();
-            if is_dark {
-                config.write_auto_config(Some(current_theme_id), None)?;
-            } else {
-                config.write_auto_config(None, Some(current_theme_id))?;
+        // Auto-expire flashes.
+        if let Some(f) = &flash {
+            if Instant::now() >= f.until {
+                flash = None;
             }
+        }
 
-            // Show success receipt (500ms visible, then continue)
-            cliclack::log::success(format!(
-                "✓ Auto {} saved: {}",
-                appearance_label, current_theme.name
-            ))?;
+        // Poll with a short timeout so flashes can expire and repaint.
+        if !event::poll(Duration::from_millis(150))
+            .map_err(|e| crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e)))?
+        {
+            continue;
+        }
 
-            Ok(())
+        match event::read()
+            .map_err(|e| crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e)))?
+        {
+            Event::Key(key) => match handle_key(key, state, env, &mut flash)? {
+                KeyOutcome::Continue => {
+                    let effective = get_effective_opacity_for_rendering(state);
+                    let _ = crate::cli::set::silent_preview_apply(
+                        env,
+                        state.get_current_theme_id(),
+                        effective,
+                    );
+                }
+                KeyOutcome::Inert => {}
+                KeyOutcome::Commit => return Ok(ExitAction::Commit),
+                KeyOutcome::Cancel => return Ok(ExitAction::Cancel),
+            },
+            Event::Resize(_, _) => {
+                // Repaint on next iteration
+            }
+            _ => {}
         }
-        Ok(false) => {
-            // User cancelled
-            Ok(())
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
-            Err(crate::error::SlateError::UserCancelled)
-        }
-        Err(e) => Err(crate::error::SlateError::IOError(e)),
     }
 }
 
-/// Handle 'r' (resume auto theme) key in picker
-/// Per Task 4:
-/// - Executes resolve_auto_theme pipeline to get the auto-resolved theme
-/// - Moves cursor to that theme's row
-/// - Renders cursor jump flash (entire row background in accent color ~300ms)
-/// - Shows hint: "→ resumed auto ({dark|light}): {theme-id}"
-/// - Opacity stays at user's current selection
-pub fn handle_resume_auto(state: &mut super::state::PickerState, env: &SlateEnv) -> Result<()> {
+enum KeyOutcome {
+    Continue, // Re-apply preview after navigation
+    Inert,    // Key handled without changing preview
+    Commit,   // Exit with commit
+    Cancel,   // Exit without commit
+}
+
+fn handle_key(
+    key: KeyEvent,
+    state: &mut PickerState,
+    env: &SlateEnv,
+    flash: &mut Option<Flash>,
+) -> Result<KeyOutcome> {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.move_up();
+            Ok(KeyOutcome::Continue)
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.move_down();
+            Ok(KeyOutcome::Continue)
+        }
+        KeyCode::Left | KeyCode::Char('h') => {
+            // Explicit opacity navigation unlocks the light-theme guardrail (D-26b).
+            let was_guarded = should_guard_light_theme_opacity(state);
+            state.set_opacity_override(true);
+            let at_edge = state.move_left();
+            if at_edge {
+                *flash = Some(Flash {
+                    text: "← Solid (hard stop)".to_string(),
+                    until: Instant::now() + Duration::from_millis(500),
+                });
+            } else if was_guarded {
+                *flash = Some(Flash {
+                    text: "(!) Translucent light themes may reduce text contrast".to_string(),
+                    until: Instant::now() + Duration::from_millis(1200),
+                });
+            }
+            Ok(KeyOutcome::Continue)
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            let was_guarded = should_guard_light_theme_opacity(state);
+            state.set_opacity_override(true);
+            let at_edge = state.move_right();
+            if at_edge {
+                *flash = Some(Flash {
+                    text: "→ Clear (hard stop)".to_string(),
+                    until: Instant::now() + Duration::from_millis(500),
+                });
+            } else if was_guarded {
+                *flash = Some(Flash {
+                    text: "(!) Translucent light themes may reduce text contrast".to_string(),
+                    until: Instant::now() + Duration::from_millis(1200),
+                });
+            } else if state.get_current_opacity() == OpacityPreset::Frosted && !is_ghostty() {
+                *flash = Some(Flash {
+                    text: "(i) Frosted is approximated here · Ghostty shows full blur"
+                        .to_string(),
+                    until: Instant::now() + Duration::from_millis(1200),
+                });
+            }
+            Ok(KeyOutcome::Continue)
+        }
+        KeyCode::Char('s') => {
+            quick_save_auto(state, env, flash)?;
+            Ok(KeyOutcome::Inert)
+        }
+        KeyCode::Char('r') => {
+            quick_resume_auto(state, env, flash)?;
+            Ok(KeyOutcome::Continue)
+        }
+        KeyCode::Enter => Ok(KeyOutcome::Commit),
+        KeyCode::Esc | KeyCode::Char('q') => Ok(KeyOutcome::Cancel),
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Ok(KeyOutcome::Cancel)
+        }
+        _ => Ok(KeyOutcome::Inert),
+    }
+}
+
+/// Write the current theme to auto.toml under its appearance slot without
+/// leaving the picker. Shows a flash receipt — no cliclack confirm, because
+/// cliclack's internal prompt writer would collide with our raw-mode
+/// alternate screen.
+fn quick_save_auto(
+    state: &PickerState,
+    env: &SlateEnv,
+    flash: &mut Option<Flash>,
+) -> Result<()> {
     let config = ConfigManager::with_env(env)?;
+    let theme = state.get_current_theme()?;
+    let theme_id = state.get_current_theme_id();
 
-    // Get the auto-resolved theme per pipeline
-    let auto_theme_id = auto_theme::resolve_auto_theme(env, &config)?;
-
-    // Detect current system appearance for messaging
-    let system_appearance = auto_theme::detect_system_appearance()?;
-    let appearance_label = match system_appearance {
-        ThemeAppearance::Dark => "dark",
-        ThemeAppearance::Light => "light",
+    let msg = match theme.appearance {
+        ThemeAppearance::Dark => {
+            config.write_auto_config(Some(theme_id), None)?;
+            format!("✓ Auto Dark saved: {}", theme.name)
+        }
+        ThemeAppearance::Light => {
+            config.write_auto_config(None, Some(theme_id))?;
+            format!("✓ Auto Light saved: {}", theme.name)
+        }
     };
 
-    // Find the auto theme in our list and jump cursor to it
-    if let Some(idx) = state
-        .theme_ids()
-        .iter()
-        .position(|id| id == &auto_theme_id)
-    {
-        state.jump_to_theme(idx);
+    *flash = Some(Flash {
+        text: msg,
+        until: Instant::now() + Duration::from_millis(1200),
+    });
+    Ok(())
+}
 
-        // Show hint (brief feedback)
-        cliclack::log::info(format!(
-            "→ resumed auto ({}): {}",
-            appearance_label, auto_theme_id
+/// Jump the cursor to the theme that pipeline resolves for the current
+/// system appearance.
+fn quick_resume_auto(
+    state: &mut PickerState,
+    env: &SlateEnv,
+    flash: &mut Option<Flash>,
+) -> Result<()> {
+    let config = ConfigManager::with_env(env)?;
+    let auto_theme_id = match auto_theme::resolve_auto_theme(env, &config) {
+        Ok(id) => id,
+        Err(e) => {
+            *flash = Some(Flash {
+                text: format!("(!) Resume auto failed: {}", e),
+                until: Instant::now() + Duration::from_millis(1500),
+            });
+            return Ok(());
+        }
+    };
+
+    if let Some(idx) = state.theme_ids().iter().position(|id| id == &auto_theme_id) {
+        state.jump_to_theme(idx);
+        let appearance = auto_theme::detect_system_appearance()
+            .map(|a| match a {
+                ThemeAppearance::Dark => "dark",
+                ThemeAppearance::Light => "light",
+            })
+            .unwrap_or("?");
+        *flash = Some(Flash {
+            text: format!("→ resumed auto ({}): {}", appearance, auto_theme_id),
+            until: Instant::now() + Duration::from_millis(1200),
+        });
+    }
+    Ok(())
+}
+
+fn render(state: &PickerState, flash: Option<&Flash>) -> Result<()> {
+    let mut stdout = io::stdout();
+    queue_io(queue!(stdout, Clear(ClearType::All), MoveTo(0, 0)))?;
+
+    // Header
+    queue_io(queue!(
+        stdout,
+        Print("\r\n  "),
+        SetForegroundColor(Color::Cyan),
+        SetAttribute(Attribute::Bold),
+        Print(Symbols::BRAND),
+        Print("  slate set"),
+        SetAttribute(Attribute::Reset),
+        ResetColor,
+        Print("   theme + opacity picker\r\n\r\n"),
+    ))?;
+
+    // Scroll window
+    let (_cols, rows) = terminal::size().map_err(io_err)?;
+    let chrome_lines: usize = 10;
+    let max_visible = (rows as usize).saturating_sub(chrome_lines).max(5);
+    let total = state.theme_ids().len();
+    let cursor = state.selected_theme_index();
+    let visible = max_visible.min(total);
+    let half = visible / 2;
+    let mut start = cursor.saturating_sub(half);
+    if start + visible > total {
+        start = total.saturating_sub(visible);
+    }
+    let end = (start + visible).min(total);
+
+    let registry = ThemeRegistry::new()?;
+    for idx in start..end {
+        let id = &state.theme_ids()[idx];
+        let theme = registry.get(id);
+        let is_sel = idx == cursor;
+
+        if is_sel {
+            queue_io(queue!(
+                stdout,
+                SetForegroundColor(Color::Cyan),
+                Print("  › "),
+                ResetColor,
+            ))?;
+        } else {
+            queue_io(queue!(stdout, Print("    ")))?;
+        }
+
+        match theme {
+            Some(t) => {
+                if is_sel {
+                    queue_io(queue!(
+                        stdout,
+                        SetForegroundColor(Color::White),
+                        SetAttribute(Attribute::Bold),
+                        Print(format!("{:20}", t.name)),
+                        SetAttribute(Attribute::Reset),
+                        SetForegroundColor(Color::DarkGrey),
+                        Print(format!(" {}", t.family)),
+                        ResetColor,
+                    ))?;
+                } else {
+                    queue_io(queue!(
+                        stdout,
+                        SetForegroundColor(Color::Grey),
+                        Print(format!("{:20}", t.name)),
+                        SetForegroundColor(Color::DarkGrey),
+                        Print(format!(" {}", t.family)),
+                        ResetColor,
+                    ))?;
+                }
+            }
+            None => {
+                queue_io(queue!(stdout, Print(id.as_str())))?;
+            }
+        }
+
+        queue_io(queue!(stdout, Print("\r\n")))?;
+    }
+
+    // Scroll hint
+    queue_io(queue!(
+        stdout,
+        SetForegroundColor(Color::DarkGrey),
+        Print(format!("\r\n  {}/{}\r\n", cursor + 1, total)),
+        ResetColor,
+    ))?;
+
+    // Opacity indicator — apply guardrail to the rendered selection
+    let effective = get_effective_opacity_for_rendering(state);
+    queue_io(queue!(stdout, Print("\r\n  Opacity:  ")))?;
+    render_opacity_slot(&mut stdout, OpacityPreset::Solid, effective)?;
+    queue_io(queue!(stdout, Print("    ")))?;
+    render_opacity_slot(&mut stdout, OpacityPreset::Frosted, effective)?;
+    queue_io(queue!(stdout, Print("    ")))?;
+    render_opacity_slot(&mut stdout, OpacityPreset::Clear, effective)?;
+    queue_io(queue!(stdout, Print("\r\n\r\n")))?;
+
+    // Help bar
+    queue_io(queue!(
+        stdout,
+        SetForegroundColor(Color::DarkGrey),
+        Print("  ↑↓/jk theme · ←→/hl opacity · Enter save · Esc cancel\r\n"),
+        Print("  s save-auto · r resume-auto\r\n"),
+        ResetColor,
+    ))?;
+
+    // Guardrail hint
+    if should_guard_light_theme_opacity(state) {
+        queue_io(queue!(
+            stdout,
+            SetForegroundColor(Color::Yellow),
+            Print("\r\n  (i) Light theme — press ←→ to unlock non-Solid opacity\r\n"),
+            ResetColor,
         ))?;
     }
 
+    // Flash
+    if let Some(f) = flash {
+        queue_io(queue!(
+            stdout,
+            Print("\r\n  "),
+            SetForegroundColor(Color::Magenta),
+            Print(&f.text),
+            ResetColor,
+            Print("\r\n"),
+        ))?;
+    }
+
+    stdout.flush().map_err(crate::error::SlateError::IOError)?;
     Ok(())
+}
+
+fn render_opacity_slot(
+    stdout: &mut io::Stdout,
+    slot: OpacityPreset,
+    effective: OpacityPreset,
+) -> Result<()> {
+    let is_active = slot == effective;
+    let label = opacity_to_label(slot);
+    let dot = if is_active { "●" } else { "○" };
+
+    if is_active {
+        queue_io(queue!(
+            stdout,
+            SetForegroundColor(Color::Cyan),
+            Print("< "),
+            SetAttribute(Attribute::Bold),
+            Print(format!("{} {}", dot, label)),
+            SetAttribute(Attribute::Reset),
+            Print(" >"),
+            ResetColor,
+        ))?;
+    } else {
+        queue_io(queue!(
+            stdout,
+            SetForegroundColor(Color::DarkGrey),
+            Print(format!("  {} {}  ", dot, label)),
+            ResetColor,
+        ))?;
+    }
+    Ok(())
+}
+
+fn queue_io<T>(result: std::result::Result<T, io::Error>) -> Result<()> {
+    result.map(|_| ()).map_err(crate::error::SlateError::IOError)
+}
+
+fn io_err(e: io::Error) -> crate::error::SlateError {
+    crate::error::SlateError::IOError(e)
 }
 
 /// Check if light theme opacity guardrail should apply
@@ -148,33 +508,6 @@ fn is_ghostty() -> bool {
     env::var("TERM_PROGRAM")
         .map(|prog| prog == "Ghostty")
         .unwrap_or(false)
-}
-
-/// Render Frosted preview approximation cue for non-Ghostty terminals
-/// Per and Task 6:
-/// - Detects current terminal via $TERM_PROGRAM / $TERM environment variables
-/// - If NOT ghostty and Frosted is selectable: adds hint "(preview approximated here)" next to Frosted dot
-/// - When user navigates to Frosted in non-Ghostty: briefly flashes help bar with message about fidelity gap
-/// - Allows selection regardless (no disable/skip logic)
-pub fn show_frosted_preview_cue(_env: &SlateEnv) {
-    // This function is called when user navigates to Frosted opacity in non-Ghostty
-    // Brief flash with message, no timeout (transparent fidelity communication)
-    if !is_ghostty() {
-        // Log to cliclack output for visibility
-        let _ = cliclack::log::info("(i) Frosted preview is approximate here · Ghostty shows full blur");
-    }
-}
-
-/// Get the opacity indicator label with Frosted approximation cue if needed
-/// Per and Task 6:
-/// - If in Ghostty: return standard "(Frosted)" label
-/// - If not in Ghostty: return "(Frosted) (preview approximated here)"
-pub fn get_opacity_indicator_label_with_cue(opacity: OpacityPreset) -> &'static str {
-    if opacity != OpacityPreset::Frosted || is_ghostty() {
-        ""
-    } else {
-        "(preview approximated here)"
-    }
 }
 
 /// Format an opacity preset as a user-friendly string

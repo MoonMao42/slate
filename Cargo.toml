@@ -14,6 +14,7 @@ path = "src/main.rs"
 cliclack = "0.5.4"
 ansi_term = "0.12"
 anyhow = "1"
+crossterm = "0.27"
 atomic-write-file = "0.1"
 atty = "0.2"
 clap = { version = "4.5", features = ["derive"] }

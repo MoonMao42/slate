@@ -92,6 +92,26 @@ impl PickerState {
         &self.theme_ids
     }
 
+    /// Current theme cursor index (for rendering scroll window).
+    pub fn selected_theme_index(&self) -> usize {
+        self.selected_theme_index
+    }
+
+    /// Original theme ID captured at picker launch (for rollback).
+    pub fn original_theme_id(&self) -> &str {
+        &self.original_theme_id
+    }
+
+    /// Original opacity captured at picker launch (for rollback).
+    pub fn original_opacity(&self) -> OpacityPreset {
+        self.original_opacity
+    }
+
+    /// Whether the user pressed Enter to commit this selection.
+    pub fn is_committed(&self) -> bool {
+        self.committed
+    }
+
     /// Jump to a specific theme by index (for resume-auto and mouse clicks)
     pub fn jump_to_theme(&mut self, index: usize) {
         if index < self.theme_ids.len() {
