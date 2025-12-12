@@ -87,6 +87,18 @@ impl PickerState {
         self.selected_opacity
     }
 
+    /// Get reference to theme IDs list (for external iteration)
+    pub fn theme_ids(&self) -> &[String] {
+        &self.theme_ids
+    }
+
+    /// Jump to a specific theme by index (for resume-auto and mouse clicks)
+    pub fn jump_to_theme(&mut self, index: usize) {
+        if index < self.theme_ids.len() {
+            self.selected_theme_index = index;
+        }
+    }
+
     /// Move up in theme list (wraps around)
     pub fn move_up(&mut self) {
         if self.selected_theme_index == 0 {
@@ -350,6 +362,19 @@ mod tests {
         state.revert();
         assert_eq!(state.get_current_theme_id(), "catppuccin-mocha");
         assert_eq!(state.get_current_opacity(), OpacityPreset::Solid);
+    }
+
+    #[test]
+    fn test_picker_state_jump_to_theme() {
+        let mut state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
+        let theme_count = state.theme_ids.len();
+
+        if theme_count > 1 {
+            let target_idx = theme_count - 1;
+            state.jump_to_theme(target_idx);
+            assert_eq!(state.selected_theme_index, target_idx);
+            assert_eq!(state.get_current_theme_id(), state.theme_ids[target_idx]);
+        }
     }
 
     #[test]
