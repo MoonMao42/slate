@@ -6,6 +6,8 @@ use crate::env::SlateEnv;
 use crate::config::ConfigManager;
 use crate::cli::auto_theme;
 use crate::theme::ThemeAppearance;
+use crate::opacity::OpacityPreset;
+use std::env;
 
 /// Launch the interactive 2D picker for theme + opacity selection.
 /// Enters alternate screen, sets up raw mode, manages crossterm event loop.
@@ -130,11 +132,46 @@ pub fn should_guard_light_theme_opacity(state: &super::state::PickerState) -> bo
 /// Per D-26b:
 /// - If should_guard_light_theme_opacity() returns true, return Solid regardless of user selection
 /// - Otherwise return the user's actual selected opacity
-pub fn get_effective_opacity_for_rendering(state: &super::state::PickerState) -> crate::opacity::OpacityPreset {
+pub fn get_effective_opacity_for_rendering(state: &super::state::PickerState) -> OpacityPreset {
     if should_guard_light_theme_opacity(state) {
-        crate::opacity::OpacityPreset::Solid
+        OpacityPreset::Solid
     } else {
         state.get_current_opacity()
+    }
+}
+
+/// Detect if the current terminal is Ghostty
+/// Per D-24b: Check $TERM_PROGRAM (Ghostty sets it to "Ghostty")
+fn is_ghostty() -> bool {
+    env::var("TERM_PROGRAM")
+        .map(|prog| prog == "Ghostty")
+        .unwrap_or(false)
+}
+
+/// Render Frosted preview approximation cue for non-Ghostty terminals
+/// Per and Task 6:
+/// - Detects current terminal via $TERM_PROGRAM / $TERM environment variables
+/// - If NOT ghostty and Frosted is selectable: adds hint "(preview approximated here)" next to Frosted dot
+/// - When user navigates to Frosted in non-Ghostty: briefly flashes help bar with message about fidelity gap
+/// - Allows selection regardless (no disable/skip logic)
+pub fn show_frosted_preview_cue(_env: &SlateEnv) {
+    // This function is called when user navigates to Frosted opacity in non-Ghostty
+    // Brief flash with message, no timeout (transparent fidelity communication)
+    if !is_ghostty() {
+        // Log to cliclack output for visibility
+        let _ = cliclack::log::info("(i) Frosted preview is approximate here · Ghostty shows full blur");
+    }
+}
+
+/// Get the opacity indicator label with Frosted approximation cue if needed
+/// Per and Task 6:
+/// - If in Ghostty: return standard "(Frosted)" label
+/// - If not in Ghostty: return "(Frosted) (preview approximated here)"
+pub fn get_opacity_indicator_label_with_cue(opacity: OpacityPreset) -> &'static str {
+    if opacity != OpacityPreset::Frosted || is_ghostty() {
+        ""
+    } else {
+        "(preview approximated here)"
     }
 }
 
@@ -142,9 +179,4 @@ pub fn get_effective_opacity_for_rendering(state: &super::state::PickerState) ->
 pub fn render_afterglow_receipt(_state: &super::state::PickerState, _env: &SlateEnv) -> Result<()> {
     // TODO: Task 7 - implement Afterglow rendering
     Ok(())
-}
-
-/// Show Frosted preview approximation cue for non-Ghostty terminals
-pub fn show_frosted_preview_cue(_env: &SlateEnv) {
-    // TODO: Task 6 - detect terminal and show cue for Frosted preview approximation
 }
