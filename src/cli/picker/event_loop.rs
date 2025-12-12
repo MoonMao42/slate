@@ -5,6 +5,7 @@ use crate::error::Result;
 use crate::env::SlateEnv;
 use crate::config::ConfigManager;
 use crate::cli::auto_theme;
+use crate::theme::ThemeAppearance;
 
 /// Launch the interactive 2D picker for theme + opacity selection.
 /// Enters alternate screen, sets up raw mode, manages crossterm event loop.
@@ -29,7 +30,7 @@ pub fn handle_save_auto(state: &mut super::state::PickerState, env: &SlateEnv) -
     let current_theme = state.get_current_theme()?;
 
     // Determine which appearance slot to save to
-    let is_dark = current_theme.appearance == crate::theme::ThemeAppearance::Dark;
+    let is_dark = current_theme.appearance == ThemeAppearance::Dark;
     let appearance_label = if is_dark { "Dark" } else { "Light" };
 
     // Confirmation prompt
@@ -83,8 +84,8 @@ pub fn handle_resume_auto(state: &mut super::state::PickerState, env: &SlateEnv)
     // Detect current system appearance for messaging
     let system_appearance = auto_theme::detect_system_appearance()?;
     let appearance_label = match system_appearance {
-        crate::theme::ThemeAppearance::Dark => "dark",
-        crate::theme::ThemeAppearance::Light => "light",
+        ThemeAppearance::Dark => "dark",
+        ThemeAppearance::Light => "light",
     };
 
     // Find the auto theme in our list and jump cursor to it
@@ -106,9 +107,35 @@ pub fn handle_resume_auto(state: &mut super::state::PickerState, env: &SlateEnv)
 }
 
 /// Check if light theme opacity guardrail should apply
-pub fn should_guard_light_theme_opacity(_state: &super::state::PickerState) -> bool {
-    // TODO: Task 5 - implement light-theme guardrail logic
-    false
+/// Per D-26b and Task 5:
+/// - Returns true if current theme is Light AND user has not yet overridden opacity
+/// - When true, rendering should force effective opacity to Solid
+/// - Help bar should show hint about navigating ←→ to unlock opacity
+/// - When user presses ←→ on light theme, call state.set_opacity_override(true)
+pub fn should_guard_light_theme_opacity(state: &super::state::PickerState) -> bool {
+    // Check if current theme is light and override not yet set
+    if state.opacity_overridden() {
+        return false; // Already overridden, no guardrail
+    }
+
+    // Get current theme and check if it's light
+    if let Ok(theme) = state.get_current_theme() {
+        theme.appearance == ThemeAppearance::Light
+    } else {
+        false
+    }
+}
+
+/// Get the effective opacity for rendering, applying light-theme guardrail if needed
+/// Per D-26b:
+/// - If should_guard_light_theme_opacity() returns true, return Solid regardless of user selection
+/// - Otherwise return the user's actual selected opacity
+pub fn get_effective_opacity_for_rendering(state: &super::state::PickerState) -> crate::opacity::OpacityPreset {
+    if should_guard_light_theme_opacity(state) {
+        crate::opacity::OpacityPreset::Solid
+    } else {
+        state.get_current_opacity()
+    }
 }
 
 /// Render Afterglow receipt with atomic flush
