@@ -7,7 +7,9 @@ use crate::config::ConfigManager;
 use crate::cli::auto_theme;
 use crate::theme::ThemeAppearance;
 use crate::opacity::OpacityPreset;
+use crate::design::symbols::Symbols;
 use std::env;
+use std::io::{self, Write};
 
 /// Launch the interactive 2D picker for theme + opacity selection.
 /// Enters alternate screen, sets up raw mode, manages crossterm event loop.
@@ -175,8 +177,96 @@ pub fn get_opacity_indicator_label_with_cue(opacity: OpacityPreset) -> &'static 
     }
 }
 
+/// Format an opacity preset as a user-friendly string
+fn opacity_to_label(opacity: OpacityPreset) -> &'static str {
+    match opacity {
+        OpacityPreset::Solid => "Solid",
+        OpacityPreset::Frosted => "Frosted",
+        OpacityPreset::Clear => "Clear",
+    }
+}
+
+/// Parse hex color string (#RRGGBB) into RGB tuple
+/// Returns (r, g, b) where each is 0-255, or None if invalid
+fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() != 6 {
+        return None;
+    }
+    
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    
+    Some((r, g, b))
+}
+
 /// Render Afterglow receipt with atomic flush
-pub fn render_afterglow_receipt(_state: &super::state::PickerState, _env: &SlateEnv) -> Result<()> {
-    // TODO: Task 7 - implement Afterglow rendering
+/// Per D-17b and Task 7:
+/// - Called after picker commit (Enter pressed)
+/// - Constructs receipt panel with theme and opacity info
+/// - Extracts colors from new theme's palette (use foreground for text)
+/// - Pre-assembles entire output to String with ANSI codes
+/// - Single atomic write + flush (no per-line writes)
+/// - Only renders on committed Enter path; ESC/q/Ctrl+C skip entirely
+pub fn render_afterglow_receipt(state: &super::state::PickerState, _env: &SlateEnv) -> Result<()> {
+    let current_theme = state.get_current_theme()?;
+    let current_opacity = state.get_current_opacity();
+
+    // Extract colors from theme palette
+    // Per D-17b: Use new theme's primary text color (foreground)
+    let text_color_hex = &current_theme.palette.foreground;
+    
+    // Parse hex color to RGB
+    let text_rgb = parse_hex_color(text_color_hex);
+
+    // Format Afterglow panel per D-17b spec
+    let mut output = String::new();
+
+    // ANSI codes for screen restoration (move to alternate → normal screen)
+    // Per Task 7: LeaveAlternateScreen + Show Cursor
+    output.push_str("\x1b[?1049l"); // Leave alternate screen
+    output.push_str("\x1b[?25h"); // Show cursor
+
+    // Output newline to separate from alternate screen
+    output.push_str("\n");
+
+    // Build receipt lines with theme colors
+    // Theme line: ✦ Theme {theme_name}
+    let theme_line = format!(
+        "  {}  Theme     {}\n",
+        Symbols::BRAND,
+        current_theme.name
+    );
+
+    // Opacity line: ◆ Opacity {opacity_label}
+    let opacity_line = format!(
+        "  {}  Opacity   {}\n",
+        Symbols::DIAMOND,
+        opacity_to_label(current_opacity)
+    );
+
+    // Apply theme colors to the output
+    // Use ANSI 24-bit RGB (38;2;R;G;B) from palette
+    if let Some((r, g, b)) = text_rgb {
+        let text_color = format!("\x1b[38;2;{};{};{}m", r, g, b);
+        let reset_color = "\x1b[0m";
+
+        // Construct colored receipt
+        output.push_str(&text_color);
+        output.push_str(&theme_line);
+        output.push_str(&opacity_line);
+        output.push_str(reset_color);
+    } else {
+        // Fallback if color parsing fails (no color codes)
+        output.push_str(&theme_line);
+        output.push_str(&opacity_line);
+    }
+
+    // Atomic write to stdout
+    let mut stdout = io::stdout();
+    stdout.write_all(output.as_bytes())?;
+    stdout.flush()?;
+
     Ok(())
 }
