@@ -52,10 +52,13 @@ impl GhosttyAdapter {
 
     /// Insert managed path in integration file idempotently.
     /// Per D-05b: integration file can be created by tool (zero-config setup).
-    /// If it doesn't exist, we still must track its path so apply_theme can upsert it later.
+    /// IMPORTANT: This function does NOT create the integration file if it doesn't exist.
+    /// The file must already exist (created by setup wizard or user).
+    /// This prevents slate from destructively creating a minimal config that could override
+    /// GUI-level settings (like macOS icon preferences stored in plist/defaults).
     /// Ghostty's correct syntax is `config-file = "path"`, not `include = "path"`.
     /// This function ensures idempotent integration by:
-    /// - Checking if slate's managed file is already referenced
+    /// - Checking if slate's managed file is already referenced (skips if so)
     /// - Migrating legacy `include = <slate-managed>` lines to `config-file = <slate-managed>`
     /// - Detecting by exact path match, not substring
     fn ensure_integration_includes_managed(
@@ -63,8 +66,9 @@ impl GhosttyAdapter {
         managed_path: &Path,
     ) -> Result<()> {
         if !integration_path.exists() {
-            // File doesn't exist yet; Ghostty will create it on first run.
-            // We've recorded the path for later when apply_theme upserts it.
+            // File doesn't exist; slate should not create it automatically.
+            // This protects against overwriting GUI-level settings.
+            // The integration config must be created by setup wizard or user manually.
             return Ok(());
         }
 
@@ -230,21 +234,43 @@ impl ToolAdapter for GhosttyAdapter {
     }
 
     fn reload(&self) -> Result<()> {
-        // Send SIGUSR2 to all Ghostty processes to trigger config reload
-        let output = std::process::Command::new("pkill")
-            .arg("-SIGUSR2")
-            .arg("-x")
-            .arg("ghostty")
-            .output()
-            .map_err(|e| SlateError::Internal(format!("Failed to reload ghostty: {}", e)))?;
+        // Hot reload strategy differs by platform:
+        // - Linux: SIGUSR2 signal works (Ghostty listens for it)
+        // - macOS: Signals don't work on AppKit apps. Ghostty must be reloaded manually
+        // via the ⇧⌘, (Cmd+Shift+Comma) keybind configured by the user.
+        // For now, on macOS we're unable to trigger reload programmatically.
+        // The user must manually press Shift+Cmd+, to reload Ghostty.
+        // The caller (slate set picker) will print a hint about this.
 
-        if !output.status.success() {
-            return Err(SlateError::Internal(
-                "pkill signal failed (Ghostty may not be running)".to_string(),
+        #[cfg(target_os = "macos")]
+        {
+            // On macOS, return a graceful "not supported" error.
+            // The caller should catch this and inform the user they need to press Shift+Cmd+,
+            return Err(SlateError::ReloadFailed(
+                "ghostty".to_string(),
+                "On macOS, Ghostty does not support programmatic config reload via signals. \
+                 Please press Shift+Cmd+, to reload Ghostty after the theme change.".to_string(),
             ));
         }
 
-        Ok(())
+        #[cfg(not(target_os = "macos"))]
+        {
+            // On Linux/other platforms, send SIGUSR2 signal
+            let output = std::process::Command::new("pkill")
+                .arg("-SIGUSR2")
+                .arg("-x")
+                .arg("ghostty")
+                .output()
+                .map_err(|e| SlateError::Internal(format!("Failed to reload ghostty: {}", e)))?;
+
+            if !output.status.success() {
+                return Err(SlateError::Internal(
+                    "pkill signal failed (Ghostty may not be running)".to_string(),
+                ));
+            }
+
+            Ok(())
+        }
     }
 }
 
