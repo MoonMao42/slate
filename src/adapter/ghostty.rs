@@ -53,12 +53,15 @@ impl GhosttyAdapter {
     /// Insert managed path in integration file idempotently.
     /// Per D-05b: integration file can be created by tool (zero-config setup).
     /// If it doesn't exist, we still must track its path so apply_theme can upsert it later.
+    /// Ghostty's correct syntax is `config-file = "path"`, not `include = "path"`.
+    /// This function ensures idempotent integration by:
+    /// - Checking if slate's managed file is already referenced
+    /// - Migrating legacy `include = <slate-managed>` lines to `config-file = <slate-managed>`
+    /// - Detecting by exact path match, not substring
     fn ensure_integration_includes_managed(
         integration_path: &Path,
         managed_path: &Path,
     ) -> Result<()> {
-        let include_line = format!("include = \"{}\"\n", managed_path.display());
-
         if !integration_path.exists() {
             // File doesn't exist yet; Ghostty will create it on first run.
             // We've recorded the path for later when apply_theme upserts it.
@@ -66,14 +69,56 @@ impl GhosttyAdapter {
         }
 
         let content = fs::read_to_string(integration_path)?;
+        let managed_path_str = managed_path.display().to_string();
 
-        if content.contains("include") {
-            // Include directive already present: idempotent.
+        // Parse content line-by-line to detect idempotence and handle migration
+        let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        let mut found_config_file = false;
+        let mut legacy_include_idx = None;
+
+        for (idx, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+
+            // Skip comments and empty lines
+            if trimmed.starts_with('#') || trimmed.is_empty() {
+                continue;
+            }
+
+            // Check for existing config-file pointing to our managed path
+            if trimmed.starts_with("config-file") && trimmed.contains(&managed_path_str) {
+                found_config_file = true;
+                break;
+            }
+
+            // Check for legacy include = pointing to our managed path (for migration)
+            if trimmed.starts_with("include") && trimmed.contains(&managed_path_str) {
+                legacy_include_idx = Some(idx);
+                break;
+            }
+        }
+
+        // If already using config-file pointing to our managed path, we're done
+        if found_config_file {
             return Ok(());
         }
 
-        // Append include line
-        fs::write(integration_path, format!("{}{}", content, include_line))?;
+        // If legacy include exists, migrate it to config-file
+        if let Some(idx) = legacy_include_idx {
+            let mut updated_lines = lines;
+            updated_lines[idx] = format!("config-file = \"{}\"", managed_path_str);
+            let new_content = updated_lines.join("\n");
+            fs::write(integration_path, format!("{}\n", new_content))?;
+            return Ok(());
+        }
+
+        // Otherwise, append the config-file line
+        let config_file_line = format!("config-file = \"{}\"\n", managed_path_str);
+        let new_content = if content.ends_with('\n') {
+            format!("{}{}", content, config_file_line)
+        } else {
+            format!("{}\n{}", content, config_file_line)
+        };
+        fs::write(integration_path, new_content)?;
 
         Ok(())
     }
@@ -158,9 +203,12 @@ impl ToolAdapter for GhosttyAdapter {
         let config_manager = ConfigManager::new()?;
         config_manager.write_managed_file("ghostty", "theme.conf", &managed_content)?;
 
-        // Step 4: Ensure integration file includes managed path idempotently
+        // Step 4: Ensure integration file includes all managed paths idempotently
         let integration_path = self.integration_config_path()?;
-        let managed_path = self.managed_config_path().join("theme.conf");
+        let managed_base = self.managed_config_path();
+        let theme_path = managed_base.join("theme.conf");
+        let opacity_path = managed_base.join("opacity.conf");
+        let blur_path = managed_base.join("blur.conf");
 
         // Ensure parent directory exists for integration file
         if let Some(parent) = integration_path.parent() {
@@ -169,21 +217,14 @@ impl ToolAdapter for GhosttyAdapter {
             }
         }
 
-        Self::ensure_integration_includes_managed(&integration_path, &managed_path)?;
+        // Include all three managed files
+        Self::ensure_integration_includes_managed(&integration_path, &theme_path)?;
+        Self::ensure_integration_includes_managed(&integration_path, &opacity_path)?;
+        Self::ensure_integration_includes_managed(&integration_path, &blur_path)?;
 
-        // Step 5: Update font-family in user's main config (not managed — Ghostty
-        // main config takes precedence over config-file includes for font-family)
-        let chosen_font = crate::config::ConfigManager::new()
-            .ok()
-            .and_then(|cm| cm.get_current_font().ok().flatten());
-        let font_family = chosen_font.or_else(|| {
-            crate::adapter::font::FontAdapter::detect_installed_fonts()
-                .ok()
-                .and_then(|f| f.into_iter().next())
-        });
-        if let Some(family) = font_family {
-            Self::update_font_in_config(&integration_path, &family)?;
-        }
+        // Note: Font updates are handled by the FontAdapter (applied in plan 06-06).
+        // Theme switches should only affect colors, not fonts.
+        // Font changes are an orthogonal concern managed separately.
 
         Ok(())
     }
@@ -330,5 +371,162 @@ mod tests {
 
         let path = adapter.managed_config_path_with_env(Some(&env));
         assert!(path.ends_with("slate/managed/ghostty"));
+    }
+
+    /// Test Bug 1 fix: config-file syntax, not include
+    #[test]
+    fn test_config_file_syntax_not_include() {
+        use tempfile::NamedTempFile;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        let temp_path = temp_file.path().to_path_buf();
+        let managed_path = PathBuf::from("/home/user/.config/slate/managed/ghostty/theme.conf");
+
+        // First call: should add config-file line
+        GhosttyAdapter::ensure_integration_includes_managed(&temp_path, &managed_path).unwrap();
+
+        let content = fs::read_to_string(&temp_path).unwrap();
+        assert!(content.contains("config-file = "));
+        assert!(!content.contains("include = "));
+        assert!(content.contains("/home/user/.config/slate/managed/ghostty/theme.conf"));
+    }
+
+    /// Test Bug 2 fix: idempotent re-run doesn't duplicate
+    #[test]
+    fn test_ensure_integration_includes_managed_idempotent() {
+        use tempfile::NamedTempFile;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        let temp_path = temp_file.path().to_path_buf();
+        let managed_path = PathBuf::from("/home/user/.config/slate/managed/ghostty/theme.conf");
+
+        // First call
+        GhosttyAdapter::ensure_integration_includes_managed(&temp_path, &managed_path).unwrap();
+        let content1 = fs::read_to_string(&temp_path).unwrap();
+
+        // Second call: should be idempotent
+        GhosttyAdapter::ensure_integration_includes_managed(&temp_path, &managed_path).unwrap();
+        let content2 = fs::read_to_string(&temp_path).unwrap();
+
+        assert_eq!(content1, content2);
+        assert_eq!(content1.matches("config-file = ").count(), 1);
+    }
+
+    /// Test Bug 2 fix: migration from legacy include = to config-file =
+    #[test]
+    fn test_migrate_legacy_include_to_config_file() {
+        use tempfile::TempDir;
+        use std::io::Write;
+
+        let tempdir = TempDir::new().unwrap();
+        let temp_path = tempdir.path().join("config");
+        let managed_path = PathBuf::from("/home/user/.config/slate/managed/ghostty/theme.conf");
+
+        // Write legacy include line
+        let mut file = fs::File::create(&temp_path).unwrap();
+        writeln!(file, "include = \"/home/user/.config/slate/managed/ghostty/theme.conf\"").unwrap();
+        drop(file);
+
+        // Apply ensure_integration_includes_managed
+        GhosttyAdapter::ensure_integration_includes_managed(&temp_path, &managed_path).unwrap();
+
+        let content = fs::read_to_string(&temp_path).unwrap();
+        assert!(!content.contains("include = "));
+        assert!(content.contains("config-file = "));
+        assert_eq!(content.matches("config-file = ").count(), 1);
+    }
+
+    /// Test Bug 2 fix: line-by-line detection, not substring
+    #[test]
+    fn test_idempotence_with_include_in_comment() {
+        use tempfile::TempDir;
+        use std::io::Write;
+
+        let tempdir = TempDir::new().unwrap();
+        let temp_path = tempdir.path().join("config");
+        let managed_path = PathBuf::from("/home/user/.config/slate/managed/ghostty/theme.conf");
+
+        // Write file with include in a comment
+        let mut file = fs::File::create(&temp_path).unwrap();
+        writeln!(file, "# Old include was: include = \"/path/to/somewhere\"").unwrap();
+        writeln!(file, "background = \"#1e1e2e\"").unwrap();
+        drop(file);
+
+        // Should append config-file line (comment "include" should not trigger idempotence)
+        GhosttyAdapter::ensure_integration_includes_managed(&temp_path, &managed_path).unwrap();
+
+        let content = fs::read_to_string(&temp_path).unwrap();
+        assert!(content.contains("config-file = \"/home/user/.config/slate/managed/ghostty/theme.conf\""));
+        assert_eq!(content.matches("config-file = ").count(), 1);
+    }
+
+    /// Test Bug 3 fix: opacity and blur files are included
+    #[test]
+    fn test_apply_theme_includes_all_three_managed_files() {
+        use tempfile::TempDir;
+        use std::io::Write;
+
+        let tempdir = TempDir::new().unwrap();
+        let temp_path = tempdir.path().join("config");
+
+        // Pre-create integration config file
+        let mut file = fs::File::create(&temp_path).unwrap();
+        writeln!(file, "background = \"#1e1e2e\"").unwrap();
+        drop(file);
+
+        let theme_path = PathBuf::from("/home/user/.config/slate/managed/ghostty/theme.conf");
+        let opacity_path = PathBuf::from("/home/user/.config/slate/managed/ghostty/opacity.conf");
+        let blur_path = PathBuf::from("/home/user/.config/slate/managed/ghostty/blur.conf");
+
+        // Apply all three includes (as apply_theme does)
+        GhosttyAdapter::ensure_integration_includes_managed(&temp_path, &theme_path).unwrap();
+        GhosttyAdapter::ensure_integration_includes_managed(&temp_path, &opacity_path).unwrap();
+        GhosttyAdapter::ensure_integration_includes_managed(&temp_path, &blur_path).unwrap();
+
+        let content = fs::read_to_string(&temp_path).unwrap();
+
+        // Should reference all three managed files with config-file = syntax
+        assert_eq!(content.matches("config-file = ").count(), 3);
+        assert!(content.contains("theme.conf"));
+        assert!(content.contains("opacity.conf"));
+        assert!(content.contains("blur.conf"));
+    }
+
+    /// Test Bug 4 fix: apply_theme does NOT modify font-family
+    #[test]
+    fn test_apply_theme_does_not_modify_font_family() {
+        use tempfile::TempDir;
+        use std::io::Write;
+
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let adapter = GhosttyAdapter;
+
+        // Create integration config with existing font-family
+        let integration_path = adapter.integration_config_path_with_env(&env).unwrap();
+        fs::create_dir_all(integration_path.parent().unwrap()).unwrap();
+        let mut file = fs::File::create(&integration_path).unwrap();
+        writeln!(file, "font-family = \"JetBrainsMono Nerd Font\"").unwrap();
+        drop(file);
+
+        let original_content = fs::read_to_string(&integration_path).unwrap();
+
+        // Apply theme
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        adapter.apply_theme(&theme).unwrap();
+
+        let new_content = fs::read_to_string(&integration_path).unwrap();
+
+        // Font-family should still be the same
+        assert!(new_content.contains("font-family = \"JetBrainsMono Nerd Font\""));
+        // Verify it wasn't rewritten (line should appear once before and after)
+        assert_eq!(
+            original_content.matches("font-family = \"JetBrainsMono Nerd Font\"").count(),
+            1
+        );
+        assert_eq!(
+            new_content.matches("font-family = \"JetBrainsMono Nerd Font\"").count(),
+            1
+        );
     }
 }
