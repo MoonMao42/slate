@@ -319,4 +319,47 @@ mod tests {
         assert_eq!(refs.get("bat").map(String::as_str), Some("Test Bat"));
         assert_eq!(refs.get("unknown"), None);
     }
+
+    /// Regression guard for the Ghostty theme-name naming convention.
+    /// Ghostty ships built-in themes under specific names — slate's ghostty
+    /// tool_ref strings must match those names exactly or Ghostty raises
+    /// `theme "X" not found` at reload time. This caught the tokyo-night
+    /// mismatch where slate was writing `"Tokyo Night Light"`/`"Tokyo Night"`
+    /// but Ghostty ships them as `"TokyoNight Day"`/`"TokyoNight"`.
+    /// The expected values below were captured from
+    /// `ghostty +list-themes` on Ghostty 1.3.1. When Ghostty adds or renames
+    /// built-ins, update this table alongside the corresponding theme file.
+    #[test]
+    fn test_ghostty_tool_refs_match_builtin_theme_names() {
+        let registry = ThemeRegistry::new().expect("registry constructs");
+        let expected: &[(&str, &str)] = &[
+            ("catppuccin-latte", "Catppuccin Latte"),
+            ("catppuccin-frappe", "Catppuccin Frappé"),
+            ("catppuccin-macchiato", "Catppuccin Macchiato"),
+            ("catppuccin-mocha", "Catppuccin Mocha"),
+            ("tokyo-night-light", "TokyoNight Day"),
+            ("tokyo-night-dark", "TokyoNight"),
+            ("dracula", "Dracula"),
+            ("nord", "Nord"),
+            ("gruvbox-dark", "Gruvbox Dark"),
+            ("gruvbox-light", "Gruvbox Light"),
+        ];
+
+        for (theme_id, expected_ghostty_name) in expected {
+            let theme = registry
+                .get(theme_id)
+                .unwrap_or_else(|| panic!("theme '{}' missing from registry", theme_id));
+            let actual = theme
+                .tool_refs
+                .get("ghostty")
+                .unwrap_or_else(|| panic!("theme '{}' has no ghostty tool_ref", theme_id));
+            assert_eq!(
+                actual, expected_ghostty_name,
+                "ghostty tool_ref for '{}' does not match Ghostty's built-in \
+                 theme name — slate will write an invalid `theme = \"...\"` \
+                 line and Ghostty will raise 'theme not found'",
+                theme_id
+            );
+        }
+    }
 }

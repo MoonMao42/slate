@@ -9,7 +9,10 @@ pub fn tokyo_night_light() -> Result<ThemeVariant> {
         name: "Tokyo Night Light".to_string(),
         family: "Tokyo Night".to_string(),
         tool_refs: HashMap::from([
-            ("ghostty".to_string(), "Tokyo Night Light".to_string()),
+            // Ghostty ships this family as "TokyoNight" (no space) with " Day"
+            // suffix for the light variant. Verified via `ghostty +list-themes`
+            // on Ghostty 1.3.1.
+            ("ghostty".to_string(), "TokyoNight Day".to_string()),
             ("alacritty".to_string(), "tokyo_night_light".to_string()),
             ("bat".to_string(), "Tokyo Night Light".to_string()),
             ("delta".to_string(), "tokyo_night_light".to_string()),
@@ -76,7 +79,10 @@ pub fn tokyo_night_dark() -> Result<ThemeVariant> {
         name: "Tokyo Night Dark".to_string(),
         family: "Tokyo Night".to_string(),
         tool_refs: HashMap::from([
-            ("ghostty".to_string(), "Tokyo Night".to_string()), // Ghostty uses "Tokyo Night" not "Tokyo Night Dark"
+            // Ghostty ships this family as "TokyoNight" (no space). The plain
+            // "TokyoNight" entry is the dark variant. Verified via
+            // `ghostty +list-themes` on Ghostty 1.3.1.
+            ("ghostty".to_string(), "TokyoNight".to_string()),
             ("alacritty".to_string(), "tokyo_night_dark".to_string()),
             ("bat".to_string(), "Tokyo Night".to_string()),
             ("delta".to_string(), "tokyo_night_dark".to_string()),
