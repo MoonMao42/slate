@@ -4,8 +4,8 @@
 //! Preserves pager sync logic: synchronizes bat --theme and delta --syntax-theme.
 
 use crate::adapter::{marker_block, ApplyStrategy, ToolAdapter};
-use crate::env::SlateEnv;
 use crate::config::ConfigManager;
+use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::fs;
@@ -18,7 +18,7 @@ impl DeltaAdapter {
     /// Path to ~/.gitconfig (integration file)
     fn gitconfig_path() -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
+        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home).join(".gitconfig"))
     }
 
@@ -77,7 +77,9 @@ impl ToolAdapter for DeltaAdapter {
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-let home = env.as_ref().and_then(|e| e.home().to_str().map(|s| s.to_string()));
+        let home = env
+            .as_ref()
+            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
         if let Some(h) = home {
             PathBuf::from(h).join(".config/slate/managed/delta")
         } else {

@@ -4,8 +4,8 @@
 //! Preserves pager sync logic (bat/delta themes) as competitive advantage.
 
 use crate::adapter::{ApplyStrategy, ToolAdapter};
-use crate::env::SlateEnv;
 use crate::config::ConfigManager;
+use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::path::PathBuf;
@@ -58,7 +58,7 @@ impl LazygitAdapter {
 
         // Step 3: Default to macOS location
         let env = SlateEnv::from_process()?;
-let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
+        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
 
         if cfg!(target_os = "macos") {
             Ok(PathBuf::from(home).join("Library/Application Support/lazygit/config.yml"))
@@ -84,7 +84,9 @@ impl ToolAdapter for LazygitAdapter {
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-let home = env.as_ref().and_then(|e| e.home().to_str().map(|s| s.to_string()));
+        let home = env
+            .as_ref()
+            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
         if let Some(h) = home {
             PathBuf::from(h).join(".config/slate/managed/lazygit")
         } else {

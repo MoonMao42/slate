@@ -2,9 +2,9 @@
 //! Provides three discrete opacity presets (Solid/Frosted/Clear) with terminal-specific
 //! configurations. Per ,.
 
-use std::str::FromStr;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
+use std::str::FromStr;
 
 /// Discrete opacity presets for terminal windows.
 /// Three levels with specific opacity values.
@@ -52,9 +52,10 @@ impl FromStr for OpacityPreset {
             "solid" => Ok(OpacityPreset::Solid),
             "frosted" => Ok(OpacityPreset::Frosted),
             "clear" => Ok(OpacityPreset::Clear),
-            _ => Err(SlateError::InvalidThemeData(
-                format!("Unknown opacity preset: '{}'. Use: solid, frosted, or clear", s)
-            )),
+            _ => Err(SlateError::InvalidThemeData(format!(
+                "Unknown opacity preset: '{}'. Use: solid, frosted, or clear",
+                s
+            ))),
         }
     }
 }
@@ -84,7 +85,10 @@ pub fn recommended_opacity_for_theme(theme: &ThemeVariant) -> OpacityPreset {
 
 /// Check if a translucent opacity would degrade light theme legibility.
 /// Per D-26b: Light themes with Frosted/Clear should warn user.
-pub fn should_warn_for_translucent_light_theme(theme: &ThemeVariant, preset: OpacityPreset) -> bool {
+pub fn should_warn_for_translucent_light_theme(
+    theme: &ThemeVariant,
+    preset: OpacityPreset,
+) -> bool {
     let is_light_theme = {
         let name_lower = theme.name.to_lowercase();
         name_lower.contains("light") || name_lower.contains("latte") || name_lower.contains("day")
@@ -119,30 +123,60 @@ mod tests {
 
     #[test]
     fn test_parse_solid() {
-        assert_eq!("solid".parse::<OpacityPreset>().unwrap(), OpacityPreset::Solid);
-        assert_eq!("Solid".parse::<OpacityPreset>().unwrap(), OpacityPreset::Solid);
-        assert_eq!("SOLID".parse::<OpacityPreset>().unwrap(), OpacityPreset::Solid);
+        assert_eq!(
+            "solid".parse::<OpacityPreset>().unwrap(),
+            OpacityPreset::Solid
+        );
+        assert_eq!(
+            "Solid".parse::<OpacityPreset>().unwrap(),
+            OpacityPreset::Solid
+        );
+        assert_eq!(
+            "SOLID".parse::<OpacityPreset>().unwrap(),
+            OpacityPreset::Solid
+        );
     }
 
     #[test]
     fn test_parse_frosted() {
-        assert_eq!("frosted".parse::<OpacityPreset>().unwrap(), OpacityPreset::Frosted);
-        assert_eq!("Frosted".parse::<OpacityPreset>().unwrap(), OpacityPreset::Frosted);
-        assert_eq!("FROSTED".parse::<OpacityPreset>().unwrap(), OpacityPreset::Frosted);
+        assert_eq!(
+            "frosted".parse::<OpacityPreset>().unwrap(),
+            OpacityPreset::Frosted
+        );
+        assert_eq!(
+            "Frosted".parse::<OpacityPreset>().unwrap(),
+            OpacityPreset::Frosted
+        );
+        assert_eq!(
+            "FROSTED".parse::<OpacityPreset>().unwrap(),
+            OpacityPreset::Frosted
+        );
     }
 
     #[test]
     fn test_parse_clear() {
-        assert_eq!("clear".parse::<OpacityPreset>().unwrap(), OpacityPreset::Clear);
-        assert_eq!("Clear".parse::<OpacityPreset>().unwrap(), OpacityPreset::Clear);
-        assert_eq!("CLEAR".parse::<OpacityPreset>().unwrap(), OpacityPreset::Clear);
+        assert_eq!(
+            "clear".parse::<OpacityPreset>().unwrap(),
+            OpacityPreset::Clear
+        );
+        assert_eq!(
+            "Clear".parse::<OpacityPreset>().unwrap(),
+            OpacityPreset::Clear
+        );
+        assert_eq!(
+            "CLEAR".parse::<OpacityPreset>().unwrap(),
+            OpacityPreset::Clear
+        );
     }
 
     #[test]
     fn test_parse_invalid() {
         let result = "translucent".parse::<OpacityPreset>();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unknown opacity preset"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown opacity preset"));
     }
 
     #[test]
@@ -154,7 +188,11 @@ mod tests {
 
     #[test]
     fn test_round_trip() {
-        for preset in &[OpacityPreset::Solid, OpacityPreset::Frosted, OpacityPreset::Clear] {
+        for preset in &[
+            OpacityPreset::Solid,
+            OpacityPreset::Frosted,
+            OpacityPreset::Clear,
+        ] {
             let s = preset.to_string();
             let parsed: OpacityPreset = s.parse().unwrap();
             assert_eq!(&parsed, preset);
@@ -339,10 +377,19 @@ mod tests {
         };
 
         // Light theme + Frosted should warn
-        assert!(should_warn_for_translucent_light_theme(&light_theme, OpacityPreset::Frosted));
+        assert!(should_warn_for_translucent_light_theme(
+            &light_theme,
+            OpacityPreset::Frosted
+        ));
         // Light theme + Clear should warn
-        assert!(should_warn_for_translucent_light_theme(&light_theme, OpacityPreset::Clear));
+        assert!(should_warn_for_translucent_light_theme(
+            &light_theme,
+            OpacityPreset::Clear
+        ));
         // Light theme + Solid should not warn
-        assert!(!should_warn_for_translucent_light_theme(&light_theme, OpacityPreset::Solid));
+        assert!(!should_warn_for_translucent_light_theme(
+            &light_theme,
+            OpacityPreset::Solid
+        ));
     }
 }

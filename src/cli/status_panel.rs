@@ -8,8 +8,8 @@ use crate::theme::{Palette, ThemeRegistry};
 /// Tool installation status 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolStatus {
-    Themed,      // ✓ Themed
-    Paused,      // ○ Paused ()
+    Themed,       // ✓ Themed
+    Paused,       // ○ Paused ()
     NotInstalled, // ✗ Not installed
 }
 
@@ -19,12 +19,15 @@ pub fn render() -> Result<()> {
     let registry = ThemeRegistry::new()?;
 
     // Get current state
-    let current_theme = config.get_current_theme()?
+    let current_theme = config
+        .get_current_theme()?
         .and_then(|id| registry.get(&id).cloned())
         .unwrap_or_else(|| registry.get("catppuccin-mocha").unwrap().clone());
-    let current_font = config.get_current_font()?
+    let current_font = config
+        .get_current_font()?
         .unwrap_or_else(|| "Not configured".to_string());
-    let current_opacity = config.get_current_opacity_preset()
+    let current_opacity = config
+        .get_current_opacity_preset()
         .map(|p| p.to_string())
         .unwrap_or_else(|_| "Solid".to_string());
     let terminal = detect_terminal();
@@ -33,8 +36,11 @@ pub fn render() -> Result<()> {
     println!();
 
     // Rounded panel header
-    println!("{}╭─ {} slate status ─────────────────────────────────────────╮",
-             " ", Symbols::BRAND);
+    println!(
+        "{}╭─ {} slate status ─────────────────────────────────────────╮",
+        " ",
+        Symbols::BRAND
+    );
 
     // Section 1 - Core Vibe
     println!("{}│", " ");
@@ -73,8 +79,10 @@ pub fn render() -> Result<()> {
     }
 
     // Panel footer
-    println!("{}╰─────────────────────────────────────────────────────────────╯",
-             " ");
+    println!(
+        "{}╰─────────────────────────────────────────────────────────────╯",
+        " "
+    );
 
     // Print blank line below 
     println!();
@@ -105,8 +113,17 @@ fn get_adapter_statuses() -> Result<Vec<(String, ToolStatus)>> {
     let mut statuses = vec![];
 
     let tools = vec![
-        "ghostty", "alacritty", "starship", "bat", "delta",
-        "eza", "lazygit", "fastfetch", "zsh-highlight", "tmux", "font",
+        "ghostty",
+        "alacritty",
+        "starship",
+        "bat",
+        "delta",
+        "eza",
+        "lazygit",
+        "fastfetch",
+        "zsh-highlight",
+        "tmux",
+        "font",
     ];
 
     for tool in tools {

@@ -1,5 +1,4 @@
 use crate::brand::language::Language;
-use crate::env::SlateEnv;
 use crate::cli::font_detection::detect_current_font;
 use crate::cli::font_selection::FontCatalog;
 use crate::cli::preset_selection::PresetCatalog;
@@ -9,6 +8,7 @@ use crate::cli::tool_selection::{
     TerminalSettings, ToolCatalog,
 };
 use crate::design::typography::Typography;
+use crate::env::SlateEnv;
 use crate::error::Result;
 use cliclack::{confirm, intro, multiselect, outro_cancel, select};
 use std::collections::HashMap;
@@ -135,7 +135,7 @@ impl Wizard {
         if self.context.mode == WizardMode::Manual {
             self.step_select_opacity()?;
         }
-        
+
         // Step 5+: Fastfetch auto-run (both modes with confirmation)
         self.step_select_fastfetch()?;
 
@@ -443,17 +443,19 @@ impl Wizard {
                 first_theme.id.clone()
             } else {
                 return Err(crate::error::SlateError::InvalidThemeData(
-                    "No themes available".to_string()
+                    "No themes available".to_string(),
                 ));
             }
         };
 
         // Load the theme and get recommendation
         let registry = crate::theme::ThemeRegistry::new()?;
-        let theme = registry.get(&selected_theme_id)
-            .ok_or_else(|| crate::error::SlateError::InvalidThemeData(
-                format!("Theme not found: {}", selected_theme_id)
-            ))?;
+        let theme = registry.get(&selected_theme_id).ok_or_else(|| {
+            crate::error::SlateError::InvalidThemeData(format!(
+                "Theme not found: {}",
+                selected_theme_id
+            ))
+        })?;
 
         let recommended = crate::opacity::recommended_opacity_for_theme(theme);
 
@@ -501,13 +503,11 @@ impl Wizard {
 
         // Warn if translucent + light theme (D-26b)
         if crate::opacity::should_warn_for_translucent_light_theme(theme, selected_opacity) {
-            eprintln!(
-                "⚠ Light themes with transparency may reduce text legibility. "
-            );
+            eprintln!("⚠ Light themes with transparency may reduce text legibility. ");
             let confirm_choice = confirm("Continue with this style?")
                 .interact()
                 .map_err(handle_cliclack_error)?;
-            
+
             if !confirm_choice {
                 // Re-prompt for opacity
                 return self.step_select_opacity();
@@ -530,7 +530,7 @@ impl Wizard {
         }
 
         let enable_fastfetch = confirm("Show system info every time you open a terminal?")
-            .initial_value(false)  // Default N (disabled)
+            .initial_value(false) // Default N (disabled)
             .interact()
             .map_err(handle_cliclack_error)?;
 
@@ -644,7 +644,9 @@ impl Wizard {
 }
 
 fn detect_current_theme_id() -> Option<String> {
-    let home = SlateEnv::from_process().ok().and_then(|e| e.home().to_str().map(|s| s.to_string()))?;
+    let home = SlateEnv::from_process()
+        .ok()
+        .and_then(|e| e.home().to_str().map(|s| s.to_string()))?;
     let path = PathBuf::from(home).join(".config/slate/current");
 
     if !path.exists() {

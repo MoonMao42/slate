@@ -43,10 +43,8 @@ impl PickerState {
         for family_name in FAMILY_SORT_ORDER.iter() {
             if let Some(themes_in_family) = by_family.get(*family_name) {
                 // Sort themes within family alphabetically by ID for consistency
-                let mut family_themes: Vec<_> = themes_in_family
-                    .iter()
-                    .map(|t| t.id.clone())
-                    .collect();
+                let mut family_themes: Vec<_> =
+                    themes_in_family.iter().map(|t| t.id.clone()).collect();
                 family_themes.sort();
                 theme_ids.extend(family_themes);
             }
@@ -206,12 +204,10 @@ impl PickerState {
             .get(self.get_current_theme_id())
             .cloned()
             .ok_or_else(|| {
-                crate::error::SlateError::InvalidThemeData(
-                    format!(
-                        "Theme '{}' not found in registry",
-                        self.get_current_theme_id()
-                    ),
-                )
+                crate::error::SlateError::InvalidThemeData(format!(
+                    "Theme '{}' not found in registry",
+                    self.get_current_theme_id()
+                ))
             })
     }
 }

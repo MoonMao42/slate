@@ -144,7 +144,10 @@ impl GhosttyAdapter {
 
         if let Some(idx) = content.find(font_pattern) {
             // Find end of line and replace
-            let end_of_line = content[idx..].find('\n').map(|i| idx + i + 1).unwrap_or(content.len());
+            let end_of_line = content[idx..]
+                .find('\n')
+                .map(|i| idx + i + 1)
+                .unwrap_or(content.len());
             content.replace_range(idx..end_of_line, &font_line);
         } else {
             // Append to end of file
@@ -246,11 +249,12 @@ impl ToolAdapter for GhosttyAdapter {
         {
             // On macOS, return a graceful "not supported" error.
             // The caller should catch this and inform the user they need to press Shift+Cmd+,
-            return Err(SlateError::ReloadFailed(
+            Err(SlateError::ReloadFailed(
                 "ghostty".to_string(),
                 "On macOS, Ghostty does not support programmatic config reload via signals. \
-                 Please press Shift+Cmd+, to reload Ghostty after the theme change.".to_string(),
-            ));
+                 Please press Shift+Cmd+, to reload Ghostty after the theme change."
+                    .to_string(),
+            ))
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -278,10 +282,7 @@ impl ToolAdapter for GhosttyAdapter {
 impl GhosttyAdapter {
     pub fn integration_config_path_with_env(&self, env: &SlateEnv) -> Result<PathBuf> {
         let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
-        let xdg_dir = env
-            .home()
-            .join(".config")
-            .join("ghostty");
+        let xdg_dir = env.home().join(".config").join("ghostty");
 
         let candidates = Self::candidate_paths(&xdg_dir, Some(home));
 
@@ -303,20 +304,22 @@ impl GhosttyAdapter {
     }
 }
 
-
 /// Write opacity configuration to managed Ghostty config file.
 /// Per , Sets background-opacity value based on OpacityPreset.
 /// Path: ~/.config/slate/managed/ghostty/opacity.conf
 pub fn write_opacity_config(env: &SlateEnv, opacity: crate::opacity::OpacityPreset) -> Result<()> {
     let config_manager = ConfigManager::with_env(env)?;
-    
+
     let opacity_value = opacity.to_f32();
-    let config_content = format!("background-opacity = {}
-", opacity_value);
-    
+    let config_content = format!(
+        "background-opacity = {}
+",
+        opacity_value
+    );
+
     // Write to managed file, will be idempotently included by integration file
     config_manager.write_managed_file("ghostty", "opacity.conf", &config_content)?;
-    
+
     Ok(())
 }
 
@@ -325,17 +328,19 @@ pub fn write_opacity_config(env: &SlateEnv, opacity: crate::opacity::OpacityPres
 /// Path: ~/.config/slate/managed/ghostty/blur.conf
 pub fn write_blur_radius(env: &SlateEnv, opacity: crate::opacity::OpacityPreset) -> Result<()> {
     let config_manager = ConfigManager::with_env(env)?;
-    
+
     let blur_value = opacity.blur_radius();
-    let config_content = format!("background-blur-radius = {}
-", blur_value);
-    
+    let config_content = format!(
+        "background-blur-radius = {}
+",
+        blur_value
+    );
+
     // Write to managed file
     config_manager.write_managed_file("ghostty", "blur.conf", &config_content)?;
-    
+
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -358,7 +363,9 @@ mod tests {
     fn test_ghostty_candidate_paths_includes_xdg() {
         let xdg_dir = PathBuf::from("/test/.config/ghostty");
         let candidates = GhosttyAdapter::candidate_paths(&xdg_dir, Some("/home/user"));
-        assert!(candidates.iter().any(|p| p.to_string_lossy().contains("config.ghostty")));
+        assert!(candidates
+            .iter()
+            .any(|p| p.to_string_lossy().contains("config.ghostty")));
     }
 
     #[test]
@@ -373,10 +380,7 @@ mod tests {
     #[test]
     fn test_ghostty_apply_strategy() {
         let adapter = GhosttyAdapter;
-        assert_eq!(
-            adapter.apply_strategy(),
-            ApplyStrategy::WriteAndInclude
-        );
+        assert_eq!(adapter.apply_strategy(), ApplyStrategy::WriteAndInclude);
     }
 
     #[test]
@@ -441,8 +445,8 @@ mod tests {
     /// Test Bug 2 fix: migration from legacy include = to config-file =
     #[test]
     fn test_migrate_legacy_include_to_config_file() {
-        use tempfile::TempDir;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let tempdir = TempDir::new().unwrap();
         let temp_path = tempdir.path().join("config");
@@ -450,7 +454,11 @@ mod tests {
 
         // Write legacy include line
         let mut file = fs::File::create(&temp_path).unwrap();
-        writeln!(file, "include = \"/home/user/.config/slate/managed/ghostty/theme.conf\"").unwrap();
+        writeln!(
+            file,
+            "include = \"/home/user/.config/slate/managed/ghostty/theme.conf\""
+        )
+        .unwrap();
         drop(file);
 
         // Apply ensure_integration_includes_managed
@@ -465,8 +473,8 @@ mod tests {
     /// Test Bug 2 fix: line-by-line detection, not substring
     #[test]
     fn test_idempotence_with_include_in_comment() {
-        use tempfile::TempDir;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let tempdir = TempDir::new().unwrap();
         let temp_path = tempdir.path().join("config");
@@ -482,15 +490,16 @@ mod tests {
         GhosttyAdapter::ensure_integration_includes_managed(&temp_path, &managed_path).unwrap();
 
         let content = fs::read_to_string(&temp_path).unwrap();
-        assert!(content.contains("config-file = \"/home/user/.config/slate/managed/ghostty/theme.conf\""));
+        assert!(content
+            .contains("config-file = \"/home/user/.config/slate/managed/ghostty/theme.conf\""));
         assert_eq!(content.matches("config-file = ").count(), 1);
     }
 
     /// Test Bug 3 fix: opacity and blur files are included
     #[test]
     fn test_apply_theme_includes_all_three_managed_files() {
-        use tempfile::TempDir;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let tempdir = TempDir::new().unwrap();
         let temp_path = tempdir.path().join("config");
@@ -521,8 +530,8 @@ mod tests {
     /// Test Bug 4 fix: apply_theme does NOT modify font-family
     #[test]
     fn test_apply_theme_does_not_modify_font_family() {
-        use tempfile::TempDir;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let tempdir = TempDir::new().unwrap();
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
@@ -547,11 +556,15 @@ mod tests {
         assert!(new_content.contains("font-family = \"JetBrainsMono Nerd Font\""));
         // Verify it wasn't rewritten (line should appear once before and after)
         assert_eq!(
-            original_content.matches("font-family = \"JetBrainsMono Nerd Font\"").count(),
+            original_content
+                .matches("font-family = \"JetBrainsMono Nerd Font\"")
+                .count(),
             1
         );
         assert_eq!(
-            new_content.matches("font-family = \"JetBrainsMono Nerd Font\"").count(),
+            new_content
+                .matches("font-family = \"JetBrainsMono Nerd Font\"")
+                .count(),
             1
         );
     }

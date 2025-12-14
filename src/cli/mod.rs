@@ -1,4 +1,3 @@
-pub mod status_panel;
 pub mod auto_theme;
 pub mod failure_handler;
 pub mod font_detection;
@@ -13,6 +12,7 @@ pub mod set;
 pub mod setup;
 pub mod setup_executor;
 pub mod status;
+pub mod status_panel;
 pub mod theme_selection;
 pub mod tool_selection;
 pub mod wizard_core;

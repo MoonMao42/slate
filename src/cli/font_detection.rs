@@ -176,10 +176,10 @@ mod tests {
     #[test]
     fn test_detect_current_font_with_env_respects_injected_home() {
         use tempfile::TempDir;
-        
+
         let tempdir = TempDir::new().unwrap();
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
-        
+
         // With empty tempdir, should return None for both Ghostty and Alacritty
         let result = detect_current_font_with_env(&env);
         assert!(result.is_ok());

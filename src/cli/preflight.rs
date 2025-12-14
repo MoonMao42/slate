@@ -110,10 +110,7 @@ pub fn run_checks() -> Result<PreflightResult> {
 
 /// Check if Homebrew is installed
 fn is_homebrew_installed() -> bool {
-    match Command::new("brew")
-        .arg("--version")
-        .output()
-    {
+    match Command::new("brew").arg("--version").output() {
         Ok(status) => status.status.success(),
         Err(_) => false,
     }
@@ -121,10 +118,7 @@ fn is_homebrew_installed() -> bool {
 
 /// Check if Zsh is available
 fn is_zsh_available() -> bool {
-    match Command::new("which")
-        .arg("zsh")
-        .output()
-    {
+    match Command::new("which").arg("zsh").output() {
         Ok(status) => status.status.success(),
         Err(_) => false,
     }
@@ -193,13 +187,11 @@ mod tests {
     #[test]
     fn test_preflight_is_ready_with_failures() {
         let result = PreflightResult {
-            checks: vec![
-                PreflightCheck {
-                    name: "Test1".to_string(),
-                    description: "fails".to_string(),
-                    passed: false,
-                },
-            ],
+            checks: vec![PreflightCheck {
+                name: "Test1".to_string(),
+                description: "fails".to_string(),
+                passed: false,
+            }],
         };
         assert!(!result.is_ready());
     }

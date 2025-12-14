@@ -1,8 +1,8 @@
+use crate::adapter::FontAdapter;
 use crate::config::ConfigManager;
+use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeRegistry;
-use crate::adapter::FontAdapter;
-use crate::env::SlateEnv;
 
 /// Handle bare `slate` invocation 
 pub fn handle() -> Result<()> {
@@ -11,7 +11,12 @@ pub fn handle() -> Result<()> {
     // First-time setup detection
     if !has_current_theme(&config)? {
         cliclack::intro("✦ Welcome to slate. Let's set it up.")?;
-        crate::cli::setup::handle_with_env(false, false, None, &crate::env::SlateEnv::from_process()?)?;
+        crate::cli::setup::handle_with_env(
+            false,
+            false,
+            None,
+            &crate::env::SlateEnv::from_process()?,
+        )?;
         // Return to hub after setup
     }
 
@@ -29,10 +34,12 @@ fn show_hub_menu(config: &ConfigManager) -> Result<()> {
     // Render dashboard using cliclack info to preserve left border
     let registry = ThemeRegistry::new()?;
 
-    let current_theme = config.get_current_theme()?
+    let current_theme = config
+        .get_current_theme()?
         .and_then(|id| registry.get(&id).cloned())
         .unwrap_or_else(|| {
-            registry.get("catppuccin-mocha")
+            registry
+                .get("catppuccin-mocha")
                 .cloned()
                 .unwrap_or_else(|| {
                     // Fallback: get first theme from registry
@@ -41,20 +48,16 @@ fn show_hub_menu(config: &ConfigManager) -> Result<()> {
         });
 
     let current_font = config.get_current_font()?;
-    let current_opacity = config.get_current_opacity()?
+    let current_opacity = config
+        .get_current_opacity()?
         .unwrap_or_else(|| "Solid".to_string());
 
     // Dashboard rendering with color hierarchy
     cliclack::log::info(format!(
         "\x1b[1m{}\x1b[0m    {}",
-        "Theme",
-        current_theme.name
+        "Theme", current_theme.name
     ))?;
-    cliclack::log::info(format!(
-        "\x1b[1m{}\x1b[0m  {}",
-        "Opacity",
-        current_opacity
-    ))?;
+    cliclack::log::info(format!("\x1b[1m{}\x1b[0m  {}", "Opacity", current_opacity))?;
     cliclack::log::info(format!(
         "\x1b[1m{}\x1b[0m    {}",
         "Font",
@@ -159,7 +162,9 @@ fn handle_change_font() -> Result<()> {
 
     // Apply recommendation ordering: JetBrainsMono first if installed
     let mut ordered_fonts = fonts.clone();
-    let jetbrains_idx = ordered_fonts.iter().position(|f| f == "JetBrains Mono Nerd Font");
+    let jetbrains_idx = ordered_fonts
+        .iter()
+        .position(|f| f == "JetBrains Mono Nerd Font");
 
     if let Some(idx) = jetbrains_idx {
         // Move JetBrainsMono to front

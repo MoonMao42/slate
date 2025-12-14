@@ -19,7 +19,7 @@ impl ZshHighlightAdapter {
     /// Get home directory
     fn home() -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
+        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home))
     }
 
@@ -81,7 +81,9 @@ impl ToolAdapter for ZshHighlightAdapter {
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-let home = env.as_ref().and_then(|e| e.home().to_str().map(|s| s.to_string()));
+        let home = env
+            .as_ref()
+            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
         if let Some(h) = home {
             PathBuf::from(h).join(".config/slate/managed/zsh")
         } else {

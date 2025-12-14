@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use crate::error::Result;
+use std::path::{Path, PathBuf};
 
 /// SlateEnv encapsulates environment paths for config and home directory.
 /// This abstraction enables:
@@ -30,7 +30,11 @@ impl SlateEnv {
             .map(PathBuf::from)
             .unwrap_or_else(|_| home.join(".cache"));
 
-        Ok(SlateEnv { home, config_dir, cache_dir })
+        Ok(SlateEnv {
+            home,
+            config_dir,
+            cache_dir,
+        })
     }
 
     /// Create with injected home path (for testing)
@@ -39,7 +43,11 @@ impl SlateEnv {
     pub fn with_home(home: PathBuf) -> Self {
         let config_dir = home.join(".config").join("slate");
         let cache_dir = home.join(".cache");
-        SlateEnv { home, config_dir, cache_dir }
+        SlateEnv {
+            home,
+            config_dir,
+            cache_dir,
+        }
     }
 
     /// Get home directory path

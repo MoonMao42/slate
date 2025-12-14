@@ -103,7 +103,6 @@ pub enum ThemeAppearance {
     Light,
 }
 
-
 /// A single theme variant (e.g., "Catppuccin Mocha").
 /// Contains both tool_refs and palette for complete theme data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,7 +213,6 @@ impl Default for ThemeRegistry {
         Self::new().expect("Failed to initialize ThemeRegistry with embedded themes")
     }
 }
-
 
 /// Static family sort order
 /// Guides users toward most popular and well-regarded themes first

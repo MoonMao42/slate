@@ -16,7 +16,7 @@ use crossterm::{
     cursor::{Hide, MoveTo, Show},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute, queue,
-    style::{Color, Print, ResetColor, SetAttribute, SetForegroundColor, Attribute},
+    style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor},
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
@@ -33,11 +33,13 @@ struct TerminalGuard;
 
 impl TerminalGuard {
     fn enter() -> Result<Self> {
-        terminal::enable_raw_mode()
-            .map_err(|e| crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e)))?;
+        terminal::enable_raw_mode().map_err(|e| {
+            crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e))
+        })?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, Hide)
-            .map_err(|e| crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e)))?;
+        execute!(stdout, EnterAlternateScreen, Hide).map_err(|e| {
+            crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e))
+        })?;
         Ok(Self)
     }
 }
@@ -122,15 +124,15 @@ fn event_loop(env: &SlateEnv, state: &mut PickerState) -> Result<ExitAction> {
         }
 
         // Poll with a short timeout so flashes can expire and repaint.
-        if !event::poll(Duration::from_millis(150))
-            .map_err(|e| crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e)))?
-        {
+        if !event::poll(Duration::from_millis(150)).map_err(|e| {
+            crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e))
+        })? {
             continue;
         }
 
-        match event::read()
-            .map_err(|e| crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e)))?
-        {
+        match event::read().map_err(|e| {
+            crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e))
+        })? {
             Event::Key(key) => match handle_key(key, state, env, &mut flash)? {
                 KeyOutcome::Continue => {
                     let effective = get_effective_opacity_for_rendering(state);
@@ -208,8 +210,7 @@ fn handle_key(
                 });
             } else if state.get_current_opacity() == OpacityPreset::Frosted && !is_ghostty() {
                 *flash = Some(Flash {
-                    text: "(i) Frosted is approximated here · Ghostty shows full blur"
-                        .to_string(),
+                    text: "(i) Frosted is approximated here · Ghostty shows full blur".to_string(),
                     until: Instant::now() + Duration::from_millis(1200),
                 });
             }
@@ -236,11 +237,7 @@ fn handle_key(
 /// leaving the picker. Shows a flash receipt — no cliclack confirm, because
 /// cliclack's internal prompt writer would collide with our raw-mode
 /// alternate screen.
-fn quick_save_auto(
-    state: &PickerState,
-    env: &SlateEnv,
-    flash: &mut Option<Flash>,
-) -> Result<()> {
+fn quick_save_auto(state: &PickerState, env: &SlateEnv, flash: &mut Option<Flash>) -> Result<()> {
     let config = ConfigManager::with_env(env)?;
     let theme = state.get_current_theme()?;
     let theme_id = state.get_current_theme_id();
@@ -463,7 +460,9 @@ fn render_opacity_slot(
 }
 
 fn queue_io<T>(result: std::result::Result<T, io::Error>) -> Result<()> {
-    result.map(|_| ()).map_err(crate::error::SlateError::IOError)
+    result
+        .map(|_| ())
+        .map_err(crate::error::SlateError::IOError)
 }
 
 fn io_err(e: io::Error) -> crate::error::SlateError {
@@ -526,11 +525,11 @@ fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
     if hex.len() != 6 {
         return None;
     }
-    
+
     let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
     let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
     let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-    
+
     Some((r, g, b))
 }
 
@@ -549,7 +548,7 @@ pub fn render_afterglow_receipt(state: &super::state::PickerState, _env: &SlateE
     // Extract colors from theme palette
     // Per D-17b: Use new theme's primary text color (foreground)
     let text_color_hex = &current_theme.palette.foreground;
-    
+
     // Parse hex color to RGB
     let text_rgb = parse_hex_color(text_color_hex);
 
@@ -566,11 +565,7 @@ pub fn render_afterglow_receipt(state: &super::state::PickerState, _env: &SlateE
 
     // Build receipt lines with theme colors
     // Theme line: ✦ Theme {theme_name}
-    let theme_line = format!(
-        "  {}  Theme     {}\n",
-        Symbols::BRAND,
-        current_theme.name
-    );
+    let theme_line = format!("  {}  Theme     {}\n", Symbols::BRAND, current_theme.name);
 
     // Opacity line: ◆ Opacity {opacity_label}
     let opacity_line = format!(

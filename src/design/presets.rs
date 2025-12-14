@@ -2,9 +2,9 @@
 //! Each preset combines a theme variant with a recommended opacity level,
 //! font family, and visual characteristics. Per.
 
-use crate::opacity::OpacityPreset;
-use crate::theme::{ThemeVariant, ThemeRegistry};
 use crate::error::{Result, SlateError};
+use crate::opacity::OpacityPreset;
+use crate::theme::{ThemeRegistry, ThemeVariant};
 
 /// A complete visual preset combining theme, opacity, and font.
 /// background_opacity field holds OpacityPreset instead of f32.
@@ -19,11 +19,9 @@ pub struct PresetVisuals {
 impl PresetVisuals {
     /// Load the full theme variant for this preset.
     pub fn load_theme(&self, registry: &ThemeRegistry) -> Result<ThemeVariant> {
-        registry.get(self.theme_id)
-            .cloned()
-            .ok_or_else(|| SlateError::InvalidThemeData(
-                format!("Theme not found: {}", self.theme_id)
-            ))
+        registry.get(self.theme_id).cloned().ok_or_else(|| {
+            SlateError::InvalidThemeData(format!("Theme not found: {}", self.theme_id))
+        })
     }
 }
 
@@ -82,8 +80,14 @@ mod tests {
 
     #[test]
     fn test_preset_opacity_values() {
-        assert_eq!(PRESET_MODERN_DARK.background_opacity, OpacityPreset::Frosted);
-        assert_eq!(PRESET_MINIMAL_FROST.background_opacity, OpacityPreset::Frosted);
+        assert_eq!(
+            PRESET_MODERN_DARK.background_opacity,
+            OpacityPreset::Frosted
+        );
+        assert_eq!(
+            PRESET_MINIMAL_FROST.background_opacity,
+            OpacityPreset::Frosted
+        );
         assert_eq!(PRESET_RETRO_WARM.background_opacity, OpacityPreset::Solid);
         assert_eq!(PRESET_CLEAN_LIGHT.background_opacity, OpacityPreset::Solid);
     }
@@ -91,10 +95,7 @@ mod tests {
     #[test]
     fn test_preset_light_theme_has_solid_opacity() {
         // Clean Light is a light theme and should use Solid opacity
-        assert_eq!(
-            PRESET_CLEAN_LIGHT.background_opacity,
-            OpacityPreset::Solid
-        );
+        assert_eq!(PRESET_CLEAN_LIGHT.background_opacity, OpacityPreset::Solid);
     }
 
     #[test]

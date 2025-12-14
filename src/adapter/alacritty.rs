@@ -4,8 +4,8 @@
 //! (AST-aware, not regex-based) to ensure safe, structured modifications.
 
 use crate::adapter::{ApplyStrategy, ToolAdapter};
-use crate::env::SlateEnv;
 use crate::config::ConfigManager;
+use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::fs;
@@ -18,7 +18,7 @@ impl AlacrittyAdapter {
     /// Get config home directory (XDG default)
     fn config_home() -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
+        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
         Ok(PathBuf::from(home).join(".config"))
     }
 
@@ -147,7 +147,9 @@ impl ToolAdapter for AlacrittyAdapter {
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-let home = env.as_ref().and_then(|e| e.home().to_str().map(|s| s.to_string()));
+        let home = env
+            .as_ref()
+            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
         if let Some(h) = home {
             PathBuf::from(h).join(".config/slate/managed/alacritty")
         } else {
@@ -205,25 +207,26 @@ let home = env.as_ref().and_then(|e| e.home().to_str().map(|s| s.to_string()));
     }
 }
 
-
 /// Write opacity configuration to managed Alacritty config file.
 /// Alacritty only supports opacity (alpha), no blur.
 /// Writes [window] opacity = {f32} to managed config file.
 /// Path: ~/.config/slate/managed/alacritty/opacity.toml
 pub fn write_opacity_config(env: &SlateEnv, opacity: crate::opacity::OpacityPreset) -> Result<()> {
     let config_manager = ConfigManager::with_env(env)?;
-    
+
     let opacity_value = opacity.to_f32();
-    let config_content = format!("[window]
+    let config_content = format!(
+        "[window]
 opacity = {}
-", opacity_value);
-    
+",
+        opacity_value
+    );
+
     // Write to managed file, will be idempotently included in import array
     config_manager.write_managed_file("alacritty", "opacity.toml", &config_content)?;
-    
+
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -1,6 +1,6 @@
 use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::error::Result;
-use crate::theme::{ThemeRegistry, get_theme_description, FAMILY_SORT_ORDER};
+use crate::theme::{get_theme_description, ThemeRegistry, FAMILY_SORT_ORDER};
 use std::collections::HashMap;
 
 /// Handle `slate list` command
@@ -13,11 +13,11 @@ pub fn handle(_args: &[&str]) -> Result<()> {
     println!();
 
     // Group themes by family
-    let mut families: HashMap<String, Vec<&crate::theme::ThemeVariant>> 
-        = HashMap::new();
+    let mut families: HashMap<String, Vec<&crate::theme::ThemeVariant>> = HashMap::new();
 
     for theme in registry.all() {
-        families.entry(theme.family.clone())
+        families
+            .entry(theme.family.clone())
             .or_insert_with(Vec::new)
             .push(theme);
     }
