@@ -64,18 +64,23 @@ let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
 
     /// Ensure integration file includes managed path in import array (idempotent).
     /// Uses toml_edit AST to safely modify the import array.
+    /// IMPORTANT: This function does NOT create the integration file if it doesn't exist.
+    /// The file must already exist (created by setup wizard or user).
+    /// This prevents slate from destructively creating a minimal config that could override
+    /// system-level settings.
     fn ensure_integration_includes_managed(
         integration_path: &Path,
         managed_path: &Path,
     ) -> Result<()> {
         let managed_str = managed_path.display().to_string();
 
-        // Read or create integration file
-        let content = if integration_path.exists() {
-            fs::read_to_string(integration_path)?
-        } else {
-            String::new()
-        };
+        // Integration file must already exist; we won't create it implicitly
+        if !integration_path.exists() {
+            return Ok(());
+        }
+
+        // Read existing integration file
+        let content = fs::read_to_string(integration_path)?;
 
         // Parse as TOML AST (preserves comments and formatting)
         let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e| {
