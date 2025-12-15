@@ -1,6 +1,7 @@
 use crate::adapter::{ApplyStrategy, ToolAdapter};
 use crate::error::Result;
 use crate::theme::ThemeVariant;
+use rayon::prelude::*;
 use std::collections::HashMap;
 
 /// Registry for all tool adapters.
@@ -52,23 +53,17 @@ impl ToolRegistry {
     /// Per research: partial failure pattern (apply to others even if one fails).
     /// Detect-and-install adapters are not theme targets and are skipped.
     pub fn apply_theme_to_all(&self, theme: &ThemeVariant) -> HashMap<String, Result<()>> {
-        let mut results = HashMap::new();
-        for adapter in &self.adapters {
-            let tool_name = adapter.tool_name().to_string();
+        let results: HashMap<String, Result<()>> = self.adapters
+            .par_iter()
+            .filter(|adapter| {
+                adapter.apply_strategy() != ApplyStrategy::DetectAndInstall
+                    && adapter.is_installed().unwrap_or(false)
+            })
+            .map(|adapter| {
+                (adapter.tool_name().to_string(), adapter.apply_theme(theme))
+            })
+            .collect();
 
-            if adapter.apply_strategy() == ApplyStrategy::DetectAndInstall {
-                continue;
-            }
-
-            // Skip if not installed
-            if !adapter.is_installed().unwrap_or(false) {
-                continue;
-            }
-
-            // Apply theme, capture result
-            let result = adapter.apply_theme(theme);
-            results.insert(tool_name, result);
-        }
         results
     }
 
