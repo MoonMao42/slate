@@ -91,7 +91,9 @@ pub fn catppuccin_frappe() -> Result<ThemeVariant> {
         name: "Catppuccin Frappé".to_string(),
         family: "Catppuccin".to_string(),
         tool_refs: HashMap::from([
-            ("ghostty".to_string(), "Catppuccin Frappé".to_string()),
+            // Ghostty ships this built-in without the accent. Verified via
+            // `ghostty +list-themes` on Ghostty 1.3.1.
+            ("ghostty".to_string(), "Catppuccin Frappe".to_string()),
             ("alacritty".to_string(), "catppuccin_frappe".to_string()),
             ("bat".to_string(), "Catppuccin Frappé".to_string()),
             ("delta".to_string(), "catppuccin_frappe".to_string()),

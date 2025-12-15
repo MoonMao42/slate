@@ -334,7 +334,7 @@ mod tests {
         let registry = ThemeRegistry::new().expect("registry constructs");
         let expected: &[(&str, &str)] = &[
             ("catppuccin-latte", "Catppuccin Latte"),
-            ("catppuccin-frappe", "Catppuccin Frappé"),
+            ("catppuccin-frappe", "Catppuccin Frappe"),
             ("catppuccin-macchiato", "Catppuccin Macchiato"),
             ("catppuccin-mocha", "Catppuccin Mocha"),
             ("tokyo-night-light", "TokyoNight Day"),

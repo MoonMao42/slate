@@ -12,6 +12,7 @@ use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Ghostty adapter implementing v2 ToolAdapter trait.
 pub struct GhosttyAdapter;
@@ -158,6 +159,58 @@ impl GhosttyAdapter {
 
         Ok(())
     }
+
+    fn send_reload_signal(command_name: &str) -> Result<()> {
+        let output = Command::new(command_name)
+            .arg("-SIGUSR2")
+            .arg("-x")
+            .arg("ghostty")
+            .output()
+            .map_err(|e| SlateError::Internal(format!("Failed to reload ghostty: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(SlateError::Internal(
+                "pkill signal failed (Ghostty may not be running)".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn reload_via_applescript(command_name: &str) -> Result<()> {
+        let script = r#"tell application "Ghostty"
+    set target_terminal to focused terminal of selected tab of front window
+    perform action "reload_config" on target_terminal
+end tell"#;
+
+        let output = Command::new(command_name)
+            .arg("-e")
+            .arg(script)
+            .output()
+            .map_err(|e| {
+                SlateError::ReloadFailed(
+                    "ghostty".to_string(),
+                    format!("Failed to invoke Ghostty AppleScript reload: {}", e),
+                )
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let detail = if stderr.is_empty() {
+                "Ghostty AppleScript reload failed. macOS may require Automation permission for the calling app.".to_string()
+            } else {
+                format!(
+                    "Ghostty AppleScript reload failed: {}. macOS may require Automation permission for the calling app.",
+                    stderr
+                )
+            };
+
+            return Err(SlateError::ReloadFailed("ghostty".to_string(), detail));
+        }
+
+        Ok(())
+    }
 }
 
 impl ToolAdapter for GhosttyAdapter {
@@ -237,43 +290,16 @@ impl ToolAdapter for GhosttyAdapter {
     }
 
     fn reload(&self) -> Result<()> {
-        // Hot reload strategy differs by platform:
-        // - Linux: SIGUSR2 signal works (Ghostty listens for it)
-        // - macOS: Signals don't work on AppKit apps. Ghostty must be reloaded manually
-        // via the ⇧⌘, (Cmd+Shift+Comma) keybind configured by the user.
-        // For now, on macOS we're unable to trigger reload programmatically.
-        // The user must manually press Shift+Cmd+, to reload Ghostty.
-        // The caller (slate set picker) will print a hint about this.
-
         #[cfg(target_os = "macos")]
         {
-            // On macOS, return a graceful "not supported" error.
-            // The caller should catch this and inform the user they need to press Shift+Cmd+,
-            Err(SlateError::ReloadFailed(
-                "ghostty".to_string(),
-                "On macOS, Ghostty does not support programmatic config reload via signals. \
-                 Please press Shift+Cmd+, to reload Ghostty after the theme change."
-                    .to_string(),
-            ))
+            // Native AppleScript action maps closest to the user-facing
+            // Shift+Cmd+, reload path and avoids Accessibility permissions.
+            Self::reload_via_applescript("osascript")
         }
 
         #[cfg(not(target_os = "macos"))]
         {
-            // On Linux/other platforms, send SIGUSR2 signal
-            let output = std::process::Command::new("pkill")
-                .arg("-SIGUSR2")
-                .arg("-x")
-                .arg("ghostty")
-                .output()
-                .map_err(|e| SlateError::Internal(format!("Failed to reload ghostty: {}", e)))?;
-
-            if !output.status.success() {
-                return Err(SlateError::Internal(
-                    "pkill signal failed (Ghostty may not be running)".to_string(),
-                ));
-            }
-
-            Ok(())
+            Self::send_reload_signal("pkill")
         }
     }
 }
@@ -567,5 +593,21 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn test_send_reload_signal_reports_spawn_failure() {
+        let err = GhosttyAdapter::send_reload_signal("this-command-should-not-exist").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Failed to reload ghostty"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_reload_via_applescript_reports_spawn_failure() {
+        let err =
+            GhosttyAdapter::reload_via_applescript("this-command-should-not-exist").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Ghostty AppleScript reload"));
     }
 }
