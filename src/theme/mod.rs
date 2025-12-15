@@ -5,8 +5,11 @@ use std::collections::HashMap;
 // Re-export theme variants
 pub mod catppuccin;
 pub mod dracula;
+pub mod everforest;
 pub mod gruvbox;
+pub mod kanagawa;
 pub mod nord;
+pub mod rose_pine;
 pub mod tokyo_night;
 
 /// Shared default theme ID used when Slate needs a fallback theme.
@@ -131,7 +134,7 @@ impl ThemeVariant {
 }
 
 /// Theme loader and registry.
-/// Embedded in binary; loads all 10 variants at startup.
+/// Embedded in binary; loads all 18 variants at startup.
 pub struct ThemeRegistry {
     variants: HashMap<String, ThemeVariant>,
 }
@@ -161,6 +164,20 @@ impl ThemeRegistry {
         let gruvbox_dark = gruvbox::gruvbox_dark()?;
         let gruvbox_light = gruvbox::gruvbox_light()?;
 
+        // Rosé Pine variants
+        let rp_main = rose_pine::rose_pine_main()?;
+        let rp_moon = rose_pine::rose_pine_moon()?;
+        let rp_dawn = rose_pine::rose_pine_dawn()?;
+
+        // Kanagawa variants
+        let kg_wave = kanagawa::kanagawa_wave()?;
+        let kg_dragon = kanagawa::kanagawa_dragon()?;
+        let kg_lotus = kanagawa::kanagawa_lotus()?;
+
+        // Everforest variants
+        let ef_dark = everforest::everforest_dark()?;
+        let ef_light = everforest::everforest_light()?;
+
         // Register all variants
         for variant in &[
             &cat_latte,
@@ -169,6 +186,14 @@ impl ThemeRegistry {
             &cat_mocha,
             &tn_light,
             &tn_dark,
+            &rp_main,
+            &rp_moon,
+            &rp_dawn,
+            &kg_wave,
+            &kg_dragon,
+            &kg_lotus,
+            &ef_dark,
+            &ef_light,
             &drac,
             &nd,
             &gruvbox_dark,
@@ -237,6 +262,14 @@ pub fn get_theme_description(theme_id: &str) -> Option<&'static str> {
         "catppuccin-latte" => Some("Bright, airy latte perfect for light mode"),
         "tokyo-night-dark" => Some("Modern dark with electric blues and purples"),
         "tokyo-night-light" => Some("Crisp light theme with Tokyo Night flair"),
+        "rose-pine-main" => Some("Dark, cozy & romantic. Love-inspired palette."),
+        "rose-pine-moon" => Some("Dark, moodier variant. Deep forest nights."),
+        "rose-pine-dawn" => Some("Light, warm & inviting. Sunrise through pines."),
+        "kanagawa-wave" => Some("Dark, Japanese ukiyo-e aesthetic. Calm waves."),
+        "kanagawa-dragon" => Some("Dark, deeper variant. Mountain mist & shadow."),
+        "kanagawa-lotus" => Some("Light, serene & elegant. Lotus pond reflection."),
+        "everforest-dark" => Some("Dark, nature-inspired. Forest-friendly alternative to Gruvbox."),
+        "everforest-light" => Some("Light, earthy & warm. Sunlit forest floor."),
         "gruvbox-dark" => Some("Retro-inspired dark with earthy tones"),
         "gruvbox-light" => Some("Vintage light theme with warm nostalgia"),
         "dracula" => Some("Moody and dramatic with vibrant accents"),
@@ -339,6 +372,14 @@ mod tests {
             ("catppuccin-mocha", "Catppuccin Mocha"),
             ("tokyo-night-light", "TokyoNight Day"),
             ("tokyo-night-dark", "TokyoNight"),
+            ("rose-pine-main", "Rosé Pine"),
+            ("rose-pine-moon", "Rosé Pine Moon"),
+            ("rose-pine-dawn", "Rosé Pine Dawn"),
+            ("kanagawa-wave", "Kanagawa Wave"),
+            ("kanagawa-dragon", "Kanagawa Dragon"),
+            ("kanagawa-lotus", "Kanagawa Lotus"),
+            ("everforest-dark", "Everforest Dark"),
+            ("everforest-light", "Everforest Light"),
             ("dracula", "Dracula"),
             ("nord", "Nord"),
             ("gruvbox-dark", "Gruvbox Dark"),

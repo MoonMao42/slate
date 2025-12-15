@@ -1,7 +1,7 @@
 use crate::error::Result;
 /// Theme selection for setup wizard.
 /// Per and from 02-.
-/// Provides access to 10 theme variants grouped by family.
+/// Provides access to 18 theme variants grouped by family.
 use crate::theme::{ThemeRegistry, DEFAULT_THEME_ID};
 use std::collections::HashMap;
 
@@ -19,7 +19,7 @@ impl ThemeSelector {
     }
 
     /// Get all available theme variants
-    /// Should be exactly 10 (Catppuccin 4 + Tokyo Night 2 + Dracula + Nord + Gruvbox 2)
+    /// Should be exactly 18 (Catppuccin 4 + Tokyo Night 2 + Rosé Pine 3 + Kanagawa 3 + Everforest 2 + Dracula + Nord + Gruvbox 2)
     pub fn all_themes(&self) -> Vec<&crate::theme::ThemeVariant> {
         self.registry.all()
     }
@@ -45,6 +45,9 @@ impl ThemeSelector {
         match family {
             "Catppuccin" => "Cozy, colorful community-driven palettes",
             "Tokyo Night" => "Vibrant Japanese-inspired themes",
+            "Rosé Pine" => "Modern, cozy design. Love-inspired palettes.",
+            "Kanagawa" => "Japanese ukiyo-e inspired. Serene aesthetics.",
+            "Everforest" => "Nature-inspired, earthy alternatives.",
             "Dracula" => "High contrast dark palette with vivid colors",
             "Nord" => "Arctic polar night color scheme",
             "Gruvbox" => "Retro warm palette inspired by classic Vim",
@@ -57,12 +60,12 @@ impl ThemeSelector {
         self.registry.list_ids()
     }
 
-    /// Count themes (should be exactly 10)
+    /// Count themes (should be exactly 18)
     pub fn theme_count(&self) -> usize {
         self.all_themes().len()
     }
 
-    /// Verify all 10 required theme variants are present
+    /// Verify all 18 required theme variants are present
     pub fn verify_all_variants_present(&self) -> Result<()> {
         let themes = self.all_theme_ids();
         let expected = vec![
@@ -72,6 +75,14 @@ impl ThemeSelector {
             "catppuccin-mocha",
             "tokyo-night-light",
             "tokyo-night-dark",
+            "rose-pine-main",
+            "rose-pine-moon",
+            "rose-pine-dawn",
+            "kanagawa-wave",
+            "kanagawa-dragon",
+            "kanagawa-lotus",
+            "everforest-dark",
+            "everforest-light",
             "dracula",
             "nord",
             "gruvbox-dark",
@@ -110,12 +121,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_all_10_themes_available() {
+    fn test_all_18_themes_available() {
         let selector = ThemeSelector::new().unwrap();
         assert_eq!(
             selector.theme_count(),
-            10,
-            "Must have exactly 10 theme variants per "
+            18,
+            "Must have exactly 18 theme variants (, , , )"
         );
     }
 
@@ -133,11 +144,11 @@ mod tests {
         let selector = ThemeSelector::new().unwrap();
         let families = selector.themes_by_family();
 
-        // Should have 5 families
+        // Should have 8 families 
         assert_eq!(
             families.len(),
-            5,
-            "Expected 5 theme families: Catppuccin, Tokyo Night, Dracula, Nord, Gruvbox"
+            8,
+            "Expected 8 theme families: Catppuccin, Tokyo Night, Rosé Pine, Kanagawa, Everforest, Dracula, Nord, Gruvbox"
         );
 
         // Each family should have the right count
@@ -150,6 +161,21 @@ mod tests {
             families.get("Tokyo Night").map(|v| v.len()),
             Some(2),
             "Tokyo Night should have 2 variants"
+        );
+        assert_eq!(
+            families.get("Rosé Pine").map(|v| v.len()),
+            Some(3),
+            "Rosé Pine should have 3 variants"
+        );
+        assert_eq!(
+            families.get("Kanagawa").map(|v| v.len()),
+            Some(3),
+            "Kanagawa should have 3 variants"
+        );
+        assert_eq!(
+            families.get("Everforest").map(|v| v.len()),
+            Some(2),
+            "Everforest should have 2 variants"
         );
         assert_eq!(
             families.get("Gruvbox").map(|v| v.len()),
@@ -181,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_family_descriptions_exist() {
-        let families = vec!["Catppuccin", "Tokyo Night", "Dracula", "Nord", "Gruvbox"];
+        let families = vec!["Catppuccin", "Tokyo Night", "Rosé Pine", "Kanagawa", "Everforest", "Dracula", "Nord", "Gruvbox"];
         for family in families {
             let desc = ThemeSelector::family_description(family);
             assert!(
