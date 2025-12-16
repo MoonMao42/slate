@@ -1,16 +1,16 @@
 //! Tests for fastfetch JSONC generation
-//! Per and Verify all 10 theme variants produce valid, consistent output
+//! Per and Verify all theme variants produce valid, consistent output
 
 use slate_cli::adapter::fastfetch::FastfetchAdapter;
 use slate_cli::theme::ThemeRegistry;
 
 #[test]
-fn test_generates_valid_json_for_all_10_themes() {
+fn test_generates_valid_json_for_all_themes() {
     let adapter = FastfetchAdapter;
     let registry = ThemeRegistry::new().expect("ThemeRegistry init failed");
 
     let all_themes = registry.all();
-    assert_eq!(all_themes.len(), 10, "Expected 10 theme variants");
+    assert_eq!(all_themes.len(), 18, "Expected 18 theme variants");
 
     for theme in all_themes {
         let jsonc = adapter

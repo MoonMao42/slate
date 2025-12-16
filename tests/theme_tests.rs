@@ -1,11 +1,15 @@
 use slate_cli::theme::ThemeRegistry;
 
 #[test]
-fn test_all_10_themes_load() {
+fn test_all_themes_load() {
     let registry = ThemeRegistry::new().expect("Failed to create registry");
     let all_themes = registry.all();
 
-    assert_eq!(all_themes.len(), 10, "Expected 10 theme variants (4 Catppuccin + 2 Tokyo Night + 1 Dracula + 1 Nord + 2 Gruvbox)");
+    assert_eq!(
+        all_themes.len(),
+        18,
+        "Expected 18 theme variants (4 Catppuccin + 2 Tokyo Night + 3 Rosé Pine + 3 Kanagawa + 2 Everforest + 1 Dracula + 1 Nord + 2 Gruvbox)"
+    );
 }
 
 #[test]
