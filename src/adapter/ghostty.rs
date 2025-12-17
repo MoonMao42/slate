@@ -10,9 +10,15 @@ use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
+#[cfg(target_os = "macos")]
+use crossterm::terminal;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(target_os = "macos")]
+use std::thread;
+#[cfg(target_os = "macos")]
+use std::time::Duration;
 
 /// Ghostty adapter implementing v2 ToolAdapter trait.
 pub struct GhosttyAdapter;
@@ -178,31 +184,40 @@ impl GhosttyAdapter {
     }
 
     #[cfg(target_os = "macos")]
-    fn reload_via_applescript(command_name: &str) -> Result<()> {
-        let script = r#"tell application "Ghostty"
+    fn perform_focused_terminal_action(command_name: &str, action: &str) -> Result<()> {
+        let script = format!(
+            r#"tell application "Ghostty"
     set target_terminal to focused terminal of selected tab of front window
-    perform action "reload_config" on target_terminal
-end tell"#;
+    perform action "{}" on target_terminal
+end tell"#,
+            action
+        );
 
         let output = Command::new(command_name)
             .arg("-e")
-            .arg(script)
+            .arg(&script)
             .output()
             .map_err(|e| {
                 SlateError::ReloadFailed(
                     "ghostty".to_string(),
-                    format!("Failed to invoke Ghostty AppleScript reload: {}", e),
+                    format!(
+                        "Failed to invoke Ghostty AppleScript action '{}': {}",
+                        action, e
+                    ),
                 )
             })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             let detail = if stderr.is_empty() {
-                "Ghostty AppleScript reload failed. macOS may require Automation permission for the calling app.".to_string()
+                format!(
+                    "Ghostty AppleScript action '{}' failed. macOS may require Automation permission for the calling app.",
+                    action
+                )
             } else {
                 format!(
-                    "Ghostty AppleScript reload failed: {}. macOS may require Automation permission for the calling app.",
-                    stderr
+                    "Ghostty AppleScript action '{}' failed: {}. macOS may require Automation permission for the calling app.",
+                    action, stderr
                 )
             };
 
@@ -210,6 +225,165 @@ end tell"#;
         }
 
         Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn reload_via_applescript(command_name: &str) -> Result<()> {
+        Self::perform_focused_terminal_action(command_name, "reload_config")
+    }
+
+    #[cfg(target_os = "macos")]
+    fn mark_focused_terminal_font_size_adjusted(command_name: &str) {
+        // Ghostty preserves font size across reload only for terminals marked
+        // as manually adjusted. A zero-delta increase is visually inert but
+        // still flips that internal flag for inherited-size windows/tabs.
+        let _ = Self::perform_focused_terminal_action(command_name, "increase_font_size:0");
+    }
+
+    #[cfg(target_os = "macos")]
+    fn running_inside_ghostty() -> bool {
+        std::env::var("TERM_PROGRAM")
+            .map(|value| value == "Ghostty")
+            .unwrap_or(false)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn current_terminal_grid() -> Option<(u16, u16)> {
+        terminal::size().ok()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn focused_window_size(command_name: &str) -> Option<(u32, u32)> {
+        let script = r#"tell application "System Events"
+    tell process "Ghostty"
+        set windowSize to size of front window
+        return ((item 1 of windowSize as text) & "," & (item 2 of windowSize as text))
+    end tell
+end tell"#;
+
+        let output = Command::new(command_name)
+            .arg("-e")
+            .arg(script)
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut parts = stdout.trim().split(',').map(str::trim);
+        let width = parts.next()?.parse().ok()?;
+        let height = parts.next()?.parse().ok()?;
+        Some((width, height))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn grid_distance(target: (u16, u16), current: (u16, u16)) -> u32 {
+        target.0.abs_diff(current.0) as u32 + target.1.abs_diff(current.1) as u32
+    }
+
+    #[cfg(target_os = "macos")]
+    fn window_size_distance(target: (u32, u32), current: (u32, u32)) -> u64 {
+        target.0.abs_diff(current.0) as u64 + target.1.abs_diff(current.1) as u64
+    }
+
+    #[cfg(target_os = "macos")]
+    fn restore_focused_window_size(target: (u32, u32)) -> bool {
+        if !Self::running_inside_ghostty() {
+            return false;
+        }
+
+        thread::sleep(Duration::from_millis(120));
+
+        let Some(current) = Self::focused_window_size("osascript") else {
+            return false;
+        };
+        if current == target {
+            return true;
+        }
+
+        let action = if current.0 < target.0 || current.1 < target.1 {
+            "increase_font_size:1"
+        } else {
+            "decrease_font_size:1"
+        };
+
+        let mut best = Self::window_size_distance(target, current);
+        let mut previous = current;
+
+        for _ in 0..24 {
+            if Self::perform_focused_terminal_action("osascript", action).is_err() {
+                return false;
+            }
+
+            thread::sleep(Duration::from_millis(40));
+
+            let Some(next) = Self::focused_window_size("osascript") else {
+                return false;
+            };
+            if next == target {
+                return true;
+            }
+
+            let distance = Self::window_size_distance(target, next);
+            if distance >= best || next == previous {
+                return false;
+            }
+
+            best = distance;
+            previous = next;
+        }
+
+        false
+    }
+
+    #[cfg(target_os = "macos")]
+    fn restore_focused_terminal_grid(target: (u16, u16)) {
+        if !Self::running_inside_ghostty() {
+            return;
+        }
+
+        // Give Ghostty a moment to finish applying the config before we sample.
+        thread::sleep(Duration::from_millis(120));
+
+        let Some(current) = Self::current_terminal_grid() else {
+            return;
+        };
+        if current == target {
+            return;
+        }
+
+        let action = if current.0 > target.0 || current.1 > target.1 {
+            "increase_font_size:1"
+        } else {
+            "decrease_font_size:1"
+        };
+
+        let mut best = Self::grid_distance(target, current);
+        let mut previous = current;
+
+        for _ in 0..24 {
+            if Self::perform_focused_terminal_action("osascript", action).is_err() {
+                return;
+            }
+
+            thread::sleep(Duration::from_millis(40));
+
+            let Some(next) = Self::current_terminal_grid() else {
+                return;
+            };
+            if next == target {
+                return;
+            }
+
+            let distance = Self::grid_distance(target, next);
+            if distance >= best || next == previous {
+                return;
+            }
+
+            best = distance;
+            previous = next;
+        }
     }
 }
 
@@ -292,9 +466,28 @@ impl ToolAdapter for GhosttyAdapter {
     fn reload(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
-            // Native AppleScript action maps closest to the user-facing
-            // Shift+Cmd+, reload path and avoids Accessibility permissions.
-            Self::reload_via_applescript("osascript")
+            let previous_window_size = Self::focused_window_size("osascript");
+            let previous_grid = Self::current_terminal_grid();
+
+            Self::mark_focused_terminal_font_size_adjusted("osascript");
+
+            // macOS uses Ghostty's terminal-targeted AppleScript reload so we
+            // only hot-reload the currently focused window.
+            let result = Self::reload_via_applescript("osascript");
+
+            if result.is_ok() {
+                let restored_window = previous_window_size
+                    .map(Self::restore_focused_window_size)
+                    .unwrap_or(false);
+
+                if !restored_window {
+                    if let Some(grid) = previous_grid {
+                        Self::restore_focused_terminal_grid(grid);
+                    }
+                }
+            }
+
+            result
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -608,6 +801,6 @@ mod tests {
         let err =
             GhosttyAdapter::reload_via_applescript("this-command-should-not-exist").unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("Ghostty AppleScript reload"));
+        assert!(msg.contains("Ghostty AppleScript action 'reload_config'"));
     }
 }
