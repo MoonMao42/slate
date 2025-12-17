@@ -43,11 +43,12 @@ fn test_apple_logo_preserved_in_all_themes() {
         let parsed: serde_json::Value =
             serde_json::from_str(&jsonc).expect(&format!("Failed to parse JSON for {}", theme.id));
 
-        // Check logo configuration
+        // Per fastfetch 2.x schema: `logo` is a top-level field with `source`
+        // (not `display.logo.name` — that is the old schema that fastfetch
+        // silently rejected with `JsonConfig Error: Unknown display property`).
         let logo = parsed
-            .get("display")
-            .and_then(|d| d.get("logo"))
-            .expect(&format!("Missing logo in display for theme {}", theme.id));
+            .get("logo")
+            .expect(&format!("Missing top-level logo for theme {}", theme.id));
 
         assert_eq!(
             logo.get("type").and_then(|v| v.as_str()),
@@ -57,16 +58,25 @@ fn test_apple_logo_preserved_in_all_themes() {
         );
 
         assert_eq!(
-            logo.get("name").and_then(|v| v.as_str()),
+            logo.get("source").and_then(|v| v.as_str()),
             Some("apple"),
-            "Logo name should be 'apple' for theme {}",
+            "Logo source should be 'apple' for theme {}",
             theme.id
         );
 
         assert_eq!(
-            logo.get("preserve").and_then(|v| v.as_bool()),
+            logo.get("preserveAspectRatio").and_then(|v| v.as_bool()),
             Some(true),
-            "Logo preserve should be true for theme {}",
+            "Logo preserveAspectRatio should be true for theme {}",
+            theme.id
+        );
+
+        // Defensive: the invalid legacy location must NOT be present. If
+        // someone accidentally reintroduces `display.logo`, fastfetch
+        // rejects the whole display block and the apple logo disappears.
+        assert!(
+            parsed.get("display").and_then(|d| d.get("logo")).is_none(),
+            "theme {} still has the legacy `display.logo` nesting — fastfetch 2.x requires top-level `logo`",
             theme.id
         );
     }
@@ -89,8 +99,11 @@ fn test_color_codes_are_ansi_24bit_format() {
     let parsed: serde_json::Value =
         serde_json::from_str(&jsonc).expect("Failed to parse JSON for catppuccin-mocha");
 
-    // Check color format in the color object
-    let color_obj = parsed.get("color").expect("Missing color object in JSONC");
+    // Per fastfetch 2.x schema: color overrides live under `display.color`.
+    let color_obj = parsed
+        .get("display")
+        .and_then(|d| d.get("color"))
+        .expect("Missing display.color object in JSONC");
 
     // ANSI 24-bit format regex: 38;2;R;G;B where R,G,B are 0-255
     let ansi_24bit_regex =
@@ -167,7 +180,10 @@ fn test_gruvbox_dark_legibility_sanity_check() {
     let parsed: serde_json::Value =
         serde_json::from_str(&jsonc).expect("Failed to parse JSON for gruvbox-dark");
 
-    let color_obj = parsed.get("color").expect("Missing color object");
+    let color_obj = parsed
+        .get("display")
+        .and_then(|d| d.get("color"))
+        .expect("Missing display.color object");
 
     let keys_color = color_obj
         .get("keys")
@@ -253,4 +269,72 @@ fn test_schema_reference_present() {
         schema.contains("fastfetch"),
         "Schema reference should point to fastfetch documentation"
     );
+}
+
+/// End-to-end guard: hand our generated jsonc to the real `fastfetch` binary
+/// and fail if fastfetch prints `JsonConfig Error`. This catches schema drift
+/// that JSON-level assertions miss — e.g., the pre-fix bug where
+/// `display.logo` and `display.key-width` were structurally valid JSON but
+/// silently rejected by fastfetch 2.x, so the Apple logo never rendered.
+/// Only runs when `fastfetch` is installed; otherwise skipped so CI without
+/// fastfetch still passes.
+#[test]
+fn test_generated_config_parses_in_real_fastfetch() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    // Locate fastfetch; skip if unavailable
+    let fastfetch_bin = match Command::new("fastfetch").arg("--version").output() {
+        Ok(out) if out.status.success() => "fastfetch".to_string(),
+        _ => match Command::new("/opt/homebrew/bin/fastfetch")
+            .arg("--version")
+            .output()
+        {
+            Ok(out) if out.status.success() => "/opt/homebrew/bin/fastfetch".to_string(),
+            _ => {
+                eprintln!("skipping: fastfetch binary not found");
+                return;
+            }
+        },
+    };
+
+    let adapter = FastfetchAdapter;
+    let registry = ThemeRegistry::new().expect("ThemeRegistry init failed");
+    let theme = registry
+        .get("catppuccin-mocha")
+        .expect("catppuccin-mocha theme not found");
+    let jsonc = adapter
+        .generate_jsonc_config(theme)
+        .expect("Failed to generate JSONC");
+
+    // Write to a temp file and invoke fastfetch -c <path>. Running with only
+    // the title module keeps the test cheap and avoids depending on GPU/etc.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cfg_path = dir.path().join("config.jsonc");
+    std::fs::write(&cfg_path, &jsonc).expect("write jsonc");
+
+    let output = Command::new(&fastfetch_bin)
+        .arg("-c")
+        .arg(&cfg_path)
+        .arg("-l")
+        .arg("none") // skip logo drawing to keep stdout small/stable
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn fastfetch");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{}{}", stdout, stderr);
+
+    assert!(
+        !combined.contains("JsonConfig Error"),
+        "fastfetch rejected the generated config — schema drift.\n\
+         jsonc:\n{}\n\nfastfetch stdout:\n{}\n\nfastfetch stderr:\n{}",
+        jsonc,
+        stdout,
+        stderr,
+    );
+
+    // Silence unused warning on the writer helper path
+    let _ = std::io::stdout().flush();
 }

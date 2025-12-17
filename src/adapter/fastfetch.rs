@@ -101,23 +101,28 @@ impl FastfetchAdapter {
         let color_keys = format!("38;2;{};{};{}", r_fg, g_fg, b_fg);
         let color_accent = format!("38;2;{};{};{}", r_blue, g_blue, b_blue);
 
+        // Schema targets fastfetch >= 2.x. Key structural rules:
+        // - `logo` is a TOP-LEVEL field (not nested under `display`)
+        // - `logo.source` is the builtin logo id (not `name`)
+        // - color overrides live under `display.color`
+        // - `key-width`/`keyWidth` is not a supported display field
+        // See `fastfetch --gen-config-full` for the authoritative schema.
         let config = json!({
             "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+            "logo": {
+                "type": "builtin",
+                "source": "apple",
+                "width": 20,
+                "height": 10,
+                "preserveAspectRatio": true
+            },
             "display": {
                 "separator": "─",
-                "key-width": 12,
-                "logo": {
-                    "type": "builtin",
-                    "name": "apple",
-                    "width": 20,
-                    "height": 10,
-                    "preserve": true
+                "color": {
+                    "keys": color_keys,
+                    "separator": color_keys,
+                    "output": color_keys
                 }
-            },
-            "color": {
-                "keys": color_keys,
-                "separator": color_keys,
-                "output": color_keys
             },
             "modules": [
                 { "type": "title" },
