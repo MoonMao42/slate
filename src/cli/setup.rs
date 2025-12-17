@@ -55,6 +55,17 @@ pub fn handle_with_env(
     let selected_opacity = context.selected_opacity;
     let fastfetch_enabled = context.fastfetch_enabled;
 
+    // Enable fastfetch auto-run marker BEFORE execute_setup_with_env writes
+    // env.zsh — write_shell_integration_file() checks the marker's existence
+    // and only emits the `if command -v fastfetch; then fastfetch; fi` block
+    // when the marker is present. Creating the marker after setup leaves
+    // env.zsh stale and silently breaks the "Yes" answer to auto-run.
+    if fastfetch_enabled {
+        if let Ok(config_mgr) = crate::config::ConfigManager::with_env(env) {
+            let _ = config_mgr.enable_fastfetch_autorun();
+        }
+    }
+
     // Execute the setup (install tools, apply configurations)
     let summary = setup_executor::execute_setup_with_env(
         &selected_tools,
@@ -72,13 +83,6 @@ pub fn handle_with_env(
         let _ = crate::adapter::ghostty::write_opacity_config(env, opacity);
         let _ = crate::adapter::ghostty::write_blur_radius(env, opacity);
         let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
-    }
-
-    // Persist fastfetch auto-run preference if selected
-    if fastfetch_enabled {
-        if let Ok(config_mgr) = crate::config::ConfigManager::with_env(env) {
-            let _ = config_mgr.enable_fastfetch_autorun();
-        }
     }
 
     // Display completion message with visibility guidance
