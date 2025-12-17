@@ -10,7 +10,7 @@ pub fn everforest_dark() -> Result<ThemeVariant> {
         name: "Everforest Dark".to_string(),
         family: "Everforest".to_string(),
         tool_refs: HashMap::from([
-            ("ghostty".to_string(), "Everforest Dark".to_string()),
+            ("ghostty".to_string(), "Everforest Dark Hard".to_string()),
             ("alacritty".to_string(), "everforest_dark".to_string()),
             ("bat".to_string(), "Everforest Dark".to_string()),
             ("delta".to_string(), "everforest_dark".to_string()),
@@ -86,7 +86,7 @@ pub fn everforest_light() -> Result<ThemeVariant> {
         name: "Everforest Light".to_string(),
         family: "Everforest".to_string(),
         tool_refs: HashMap::from([
-            ("ghostty".to_string(), "Everforest Light".to_string()),
+            ("ghostty".to_string(), "Everforest Light Med".to_string()),
             ("alacritty".to_string(), "everforest_light".to_string()),
             ("bat".to_string(), "Everforest Light".to_string()),
             ("delta".to_string(), "everforest_light".to_string()),

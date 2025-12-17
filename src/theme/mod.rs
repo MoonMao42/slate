@@ -372,14 +372,14 @@ mod tests {
             ("catppuccin-mocha", "Catppuccin Mocha"),
             ("tokyo-night-light", "TokyoNight Day"),
             ("tokyo-night-dark", "TokyoNight"),
-            ("rose-pine-main", "Rosé Pine"),
-            ("rose-pine-moon", "Rosé Pine Moon"),
-            ("rose-pine-dawn", "Rosé Pine Dawn"),
+            ("rose-pine-main", "Rose Pine"),
+            ("rose-pine-moon", "Rose Pine Moon"),
+            ("rose-pine-dawn", "Rose Pine Dawn"),
             ("kanagawa-wave", "Kanagawa Wave"),
             ("kanagawa-dragon", "Kanagawa Dragon"),
             ("kanagawa-lotus", "Kanagawa Lotus"),
-            ("everforest-dark", "Everforest Dark"),
-            ("everforest-light", "Everforest Light"),
+            ("everforest-dark", "Everforest Dark Hard"),
+            ("everforest-light", "Everforest Light Med"),
             ("dracula", "Dracula"),
             ("nord", "Nord"),
             ("gruvbox-dark", "Gruvbox Dark"),
@@ -402,5 +402,43 @@ mod tests {
                 theme_id
             );
         }
+    }
+
+    /// Cross-check ghostty tool_refs against the real Ghostty themes directory.
+    /// Unlike the hardcoded table above (which can drift silently if both the
+    /// theme file and the table are updated with the same wrong string), this
+    /// test reads the actual files Ghostty ships and fails if any theme_ref
+    /// cannot be resolved. Only runs on macOS when Ghostty.app is installed;
+    /// otherwise it is a no-op (CI without Ghostty still passes).
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_ghostty_tool_refs_exist_in_installed_ghostty() {
+        let themes_dir = std::path::PathBuf::from(
+            "/Applications/Ghostty.app/Contents/Resources/ghostty/themes",
+        );
+        if !themes_dir.exists() {
+            eprintln!("skipping: Ghostty not installed at /Applications/Ghostty.app");
+            return;
+        }
+
+        let registry = ThemeRegistry::new().expect("registry constructs");
+        let mut missing: Vec<(String, String)> = Vec::new();
+        for theme in registry.all() {
+            let Some(name) = theme.tool_refs.get("ghostty") else {
+                continue;
+            };
+            if !themes_dir.join(name).exists() {
+                missing.push((theme.id.clone(), name.clone()));
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "ghostty tool_refs reference themes that do not exist in \
+             {:?}. Either Ghostty renamed them or slate's theme files are \
+             wrong. Fix: {:?}",
+            themes_dir,
+            missing
+        );
     }
 }

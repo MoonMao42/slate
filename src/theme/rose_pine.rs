@@ -10,7 +10,7 @@ pub fn rose_pine_main() -> Result<ThemeVariant> {
         name: "Rosé Pine Main".to_string(),
         family: "Rosé Pine".to_string(),
         tool_refs: HashMap::from([
-            ("ghostty".to_string(), "Rosé Pine".to_string()),
+            ("ghostty".to_string(), "Rose Pine".to_string()),
             ("alacritty".to_string(), "rose_pine".to_string()),
             ("bat".to_string(), "Rosé Pine".to_string()),
             ("delta".to_string(), "rose_pine".to_string()),
@@ -87,7 +87,7 @@ pub fn rose_pine_moon() -> Result<ThemeVariant> {
         name: "Rosé Pine Moon".to_string(),
         family: "Rosé Pine".to_string(),
         tool_refs: HashMap::from([
-            ("ghostty".to_string(), "Rosé Pine Moon".to_string()),
+            ("ghostty".to_string(), "Rose Pine Moon".to_string()),
             ("alacritty".to_string(), "rose_pine_moon".to_string()),
             ("bat".to_string(), "Rosé Pine Moon".to_string()),
             ("delta".to_string(), "rose_pine_moon".to_string()),
@@ -164,7 +164,7 @@ pub fn rose_pine_dawn() -> Result<ThemeVariant> {
         name: "Rosé Pine Dawn".to_string(),
         family: "Rosé Pine".to_string(),
         tool_refs: HashMap::from([
-            ("ghostty".to_string(), "Rosé Pine Dawn".to_string()),
+            ("ghostty".to_string(), "Rose Pine Dawn".to_string()),
             ("alacritty".to_string(), "rose_pine_dawn".to_string()),
             ("bat".to_string(), "Rosé Pine Dawn".to_string()),
             ("delta".to_string(), "rose_pine_dawn".to_string()),
