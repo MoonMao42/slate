@@ -29,6 +29,9 @@ enum Commands {
     Set {
         /// Theme name (optional; if omitted, launches picker)
         theme: Option<String>,
+        /// Auto-follow macOS system appearance (light/dark)
+        #[arg(long, conflicts_with = "theme")]
+        auto: bool,
     },
     /// Show current configuration
     Status,
@@ -71,9 +74,14 @@ fn main() -> Result<()> {
                 other => other?,
             }
         }
-        Some(Commands::Set { theme }) => {
+        Some(Commands::Set { theme, auto }) => {
             // Dispatch to set handler
-            let args: Vec<&str> = theme.as_ref().map(|t| vec![t.as_str()]).unwrap_or_default();
+            let mut args: Vec<&str> = Vec::new();
+            if auto {
+                args.push("--auto");
+            } else if let Some(t) = theme.as_ref() {
+                args.push(t.as_str());
+            }
             cli::set::handle(&args)?;
         }
         Some(Commands::Status) => {
