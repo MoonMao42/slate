@@ -53,7 +53,8 @@ impl Language {
         "Interactive theme picker coming soon. For now, use: slate set <theme-name>";
     pub const STATUS_PENDING: &str = "Status display lands in .";
     pub const LIST_PENDING: &str = "Theme listing lands in .";
-    pub const RESTORE_PICKER_PENDING: &str = "Restore point selection lands in .";
+    pub const RESTORE_PICKER_PENDING: &str =
+        "Restore point selection is planned for the Safety Net phase.";
 
     // Status indicators (per)
     pub const INSTALLED: &str = "✓ installed";
@@ -108,7 +109,10 @@ impl Language {
     }
 
     pub fn restore_pending_backup(backup_id: &str) -> String {
-        format!("Restoring backup: {} lands in .", backup_id)
+        format!(
+            "Restoring backup: {} is planned for the Safety Net phase.",
+            backup_id
+        )
     }
 
     // Polish-pass formatting helpers

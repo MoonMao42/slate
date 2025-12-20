@@ -3,7 +3,7 @@ use crate::error::Result;
 
 /// Handle `slate restore [backup-id]` command
 pub fn handle(args: &[&str]) -> Result<()> {
-    // will implement full restore flow
+    // Full reset/restore flow is planned for the Safety Net phase.
 
     if let Some(backup_id) = args.first() {
         println!("{}", Language::restore_pending_backup(backup_id));
