@@ -1,5 +1,5 @@
 use crate::env::SlateEnv;
-use crate::error::{ThemeError, ThemeResult};
+use crate::error::{Result, SlateError};
 use atomic_write_file::AtomicWriteFile;
 use std::collections::HashMap;
 use std::fs;
@@ -65,34 +65,32 @@ struct RestoreManifest {
 static RESTORE_POINT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Get the backup directory path (~/.cache/slate/backups/)
-pub fn backup_directory() -> ThemeResult<PathBuf> {
-    let env = SlateEnv::from_process().map_err(|_| ThemeError::Other(
+pub fn backup_directory() -> Result<PathBuf> {
+    let env = SlateEnv::from_process().map_err(|_| SlateError::Internal(
         "Cannot initialize SlateEnv to determine cache directory".to_string(),
     ))?;
     backup_directory_with_env(&env)
 }
 
 /// Get the backup directory path with injected SlateEnv (preferred for testing)
-pub fn backup_directory_with_env(env: &SlateEnv) -> ThemeResult<PathBuf> {
+pub fn backup_directory_with_env(env: &SlateEnv) -> Result<PathBuf> {
     let cache_dir = env.cache_dir();
     let backup_dir = cache_dir.join("slate").join("backups");
 
     // Create directory if missing
-    fs::create_dir_all(&backup_dir).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to create backup directory: {}", e),
-    })?;
+    fs::create_dir_all(&backup_dir).map_err(|e| SlateError::BackupFailed(format!("Failed to create backup directory: {}", e),))?;
 
     Ok(backup_dir)
 }
 
 /// Get a specific restore point directory path
-fn restore_point_directory(restore_point_id: &str) -> ThemeResult<PathBuf> {
+fn restore_point_directory(restore_point_id: &str) -> Result<PathBuf> {
     let backup_dir = backup_directory()?;
     Ok(backup_dir.join(restore_point_id))
 }
 
 /// Get a specific restore point directory path with injected SlateEnv
-fn restore_point_directory_with_env(env: &SlateEnv, restore_point_id: &str) -> ThemeResult<PathBuf> {
+fn restore_point_directory_with_env(env: &SlateEnv, restore_point_id: &str) -> Result<PathBuf> {
     let backup_dir = backup_directory_with_env(env)?;
     Ok(backup_dir.join(restore_point_id))
 }
@@ -112,36 +110,24 @@ fn generate_restore_point_id(now: SystemTime) -> String {
     )
 }
 
-fn write_manifest_raw(manifest_path: &Path, manifest: &RestoreManifest) -> ThemeResult<()> {
-    let content = toml::to_string_pretty(manifest).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to serialize manifest.toml: {}", e),
-    })?;
+fn write_manifest_raw(manifest_path: &Path, manifest: &RestoreManifest) -> Result<()> {
+    let content = toml::to_string_pretty(manifest).map_err(|e| SlateError::BackupFailed(format!("Failed to serialize manifest.toml: {}", e),))?;
 
-    let mut file = AtomicWriteFile::open(manifest_path).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to open manifest.toml for writing: {}", e),
-    })?;
+    let mut file = AtomicWriteFile::open(manifest_path).map_err(|e| SlateError::BackupFailed(format!("Failed to open manifest.toml for writing: {}", e),))?;
 
     file.write_all(content.as_bytes())
-        .map_err(|e| ThemeError::BackupError {
-            reason: format!("Failed to write manifest.toml: {}", e),
-        })?;
+        .map_err(|e| SlateError::BackupFailed(format!("Failed to write manifest.toml: {}", e),))?;
 
-    file.commit().map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to commit manifest.toml: {}", e),
-    })
+    file.commit().map_err(|e| SlateError::BackupFailed(format!("Failed to commit manifest.toml: {}", e),))
 }
 
-fn read_manifest_raw(manifest_path: &Path) -> ThemeResult<RestoreManifest> {
-    let content = fs::read_to_string(manifest_path).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to read manifest.toml: {}", e),
-    })?;
+fn read_manifest_raw(manifest_path: &Path) -> Result<RestoreManifest> {
+    let content = fs::read_to_string(manifest_path).map_err(|e| SlateError::BackupFailed(format!("Failed to read manifest.toml: {}", e),))?;
 
-    toml::from_str(&content).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to parse manifest.toml: {}", e),
-    })
+    toml::from_str(&content).map_err(|e| SlateError::BackupFailed(format!("Failed to parse manifest.toml: {}", e),))
 }
 
-fn manifest_to_restore_point(manifest: RestoreManifest) -> ThemeResult<RestorePoint> {
+fn manifest_to_restore_point(manifest: RestoreManifest) -> Result<RestorePoint> {
     Ok(RestorePoint {
         id: manifest.metadata.id,
         theme_name: manifest.metadata.theme_name,
@@ -150,7 +136,7 @@ fn manifest_to_restore_point(manifest: RestoreManifest) -> ThemeResult<RestorePo
     })
 }
 
-fn append_manifest_entry(session: &BackupSession, entry: &RestoreEntry) -> ThemeResult<()> {
+fn append_manifest_entry(session: &BackupSession, entry: &RestoreEntry) -> Result<()> {
     let manifest_path = manifest_path(&session.restore_point_dir);
     let mut manifest = read_manifest_raw(&manifest_path)?;
 
@@ -185,11 +171,9 @@ pub fn display_tools(entries: &[RestoreEntry]) -> Vec<String> {
     tools
 }
 
-fn validate_restore_point_data(restore_point: &RestorePoint) -> ThemeResult<()> {
+fn validate_restore_point_data(restore_point: &RestorePoint) -> Result<()> {
     if restore_point.entries.is_empty() {
-        return Err(ThemeError::BackupError {
-            reason: format!("No entries in restore point: {}", restore_point.id),
-        });
+        return Err(SlateError::BackupFailed(format!("No entries in restore point: {}", restore_point.id),));
     }
 
     let mut has_delta = false;
@@ -197,29 +181,21 @@ fn validate_restore_point_data(restore_point: &RestorePoint) -> ThemeResult<()> 
 
     for entry in &restore_point.entries {
         if entry.original_path.as_os_str().is_empty() {
-            return Err(ThemeError::BackupError {
-                reason: format!(
+            return Err(SlateError::BackupFailed(format!(
                     "Restore entry '{}' is missing original_path metadata",
                     entry.tool_key
-                ),
-            });
+                ),));
         }
 
         let path = &entry.backup_path;
         if !path.exists() {
-            return Err(ThemeError::BackupError {
-                reason: format!("Backup file not found: {}", path.display()),
-            });
+            return Err(SlateError::BackupFailed(format!("Backup file not found: {}", path.display()),));
         }
 
-        let metadata = fs::metadata(path).map_err(|e| ThemeError::BackupError {
-            reason: format!("Cannot read backup file {}: {}", path.display(), e),
-        })?;
+        let metadata = fs::metadata(path).map_err(|e| SlateError::BackupFailed(format!("Cannot read backup file {}: {}", path.display(), e),))?;
 
         if metadata.len() == 0 {
-            return Err(ThemeError::BackupError {
-                reason: format!("Backup file is empty: {}", path.display()),
-            });
+            return Err(SlateError::BackupFailed(format!("Backup file is empty: {}", path.display()),));
         }
 
         if entry.tool_key == "delta" {
@@ -230,9 +206,7 @@ fn validate_restore_point_data(restore_point: &RestorePoint) -> ThemeResult<()> 
     }
 
     if has_delta != has_delta_gitconfig {
-        return Err(ThemeError::BackupError {
-            reason: "Delta restore point is incomplete. Both delta and delta-gitconfig backups must exist together.".to_string(),
-        });
+        return Err(SlateError::BackupFailed("Delta restore point is incomplete. Both delta and delta-gitconfig backups must exist together.".to_string(),));
     }
 
     Ok(())
@@ -241,7 +215,7 @@ fn validate_restore_point_data(restore_point: &RestorePoint) -> ThemeResult<()> 
 /// Begin a new restore point session for a set operation.
 /// Creates the restore_point_id directory and returns a BackupSession
 /// that groups all backups from this set operation.
-pub fn begin_restore_point(theme_name: &str) -> ThemeResult<BackupSession> {
+pub fn begin_restore_point(theme_name: &str) -> Result<BackupSession> {
     let created_at = SystemTime::now();
 
     for _ in 0..32 {
@@ -268,16 +242,12 @@ pub fn begin_restore_point(theme_name: &str) -> ThemeResult<BackupSession> {
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => {
-                return Err(ThemeError::BackupError {
-                    reason: format!("Failed to create restore point directory: {}", e),
-                });
+                return Err(SlateError::BackupFailed(format!("Failed to create restore point directory: {}", e),));
             }
         }
     }
 
-    Err(ThemeError::BackupError {
-        reason: "Failed to allocate a unique restore point ID".to_string(),
-    })
+    Err(SlateError::BackupFailed("Failed to allocate a unique restore point ID".to_string(),))
 }
 
 /// Create a backup of a config file within a restore session (manifest-backed).
@@ -293,11 +263,9 @@ pub fn create_backup_with_session(
     display_tool: &str,
     session: &BackupSession,
     config_path: &Path,
-) -> ThemeResult<RestoreEntry> {
+) -> Result<RestoreEntry> {
     // Read original config file
-    let content = fs::read_to_string(config_path).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to read config: {}", e),
-    })?;
+    let content = fs::read_to_string(config_path).map_err(|e| SlateError::BackupFailed(format!("Failed to read config: {}", e),))?;
 
     // Generate backup filename in the restore point directory
     // Format: {tool_key}.backup (simple, no timestamp needed)
@@ -305,18 +273,12 @@ pub fn create_backup_with_session(
     let backup_path = session.restore_point_dir.join(&backup_filename);
 
     // Write backup file atomically
-    let mut file = AtomicWriteFile::open(&backup_path).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to create backup file: {}", e),
-    })?;
+    let mut file = AtomicWriteFile::open(&backup_path).map_err(|e| SlateError::BackupFailed(format!("Failed to create backup file: {}", e),))?;
 
     file.write_all(content.as_bytes())
-        .map_err(|e| ThemeError::BackupError {
-            reason: format!("Failed to write backup: {}", e),
-        })?;
+        .map_err(|e| SlateError::BackupFailed(format!("Failed to write backup: {}", e),))?;
 
-    file.commit().map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to commit backup: {}", e),
-    })?;
+    file.commit().map_err(|e| SlateError::BackupFailed(format!("Failed to commit backup: {}", e),))?;
 
     let restore_entry = RestoreEntry {
         tool_key: tool_key.to_string(),
@@ -332,14 +294,12 @@ pub fn create_backup_with_session(
 
 /// Create a backup of a config file before modification
 /// Returns BackupInfo with both paths and timestamp
-pub fn create_backup(tool: &str, theme_name: &str, config_path: &Path) -> ThemeResult<BackupInfo> {
+pub fn create_backup(tool: &str, theme_name: &str, config_path: &Path) -> Result<BackupInfo> {
     // Get backup directory
     let backup_dir = backup_directory()?;
 
     // Read original config file
-    let content = fs::read_to_string(config_path).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to read config: {}", e),
-    })?;
+    let content = fs::read_to_string(config_path).map_err(|e| SlateError::BackupFailed(format!("Failed to read config: {}", e),))?;
 
     // Generate timestamp in ISO8601 format with Z suffix, colons escaped
     let now = SystemTime::now();
@@ -352,18 +312,12 @@ pub fn create_backup(tool: &str, theme_name: &str, config_path: &Path) -> ThemeR
     let backup_path = backup_dir.join(&backup_filename);
 
     // Write backup file atomically
-    let mut file = AtomicWriteFile::open(&backup_path).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to create backup file: {}", e),
-    })?;
+    let mut file = AtomicWriteFile::open(&backup_path).map_err(|e| SlateError::BackupFailed(format!("Failed to create backup file: {}", e),))?;
 
     file.write_all(content.as_bytes())
-        .map_err(|e| ThemeError::BackupError {
-            reason: format!("Failed to write backup: {}", e),
-        })?;
+        .map_err(|e| SlateError::BackupFailed(format!("Failed to write backup: {}", e),))?;
 
-    file.commit().map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to commit backup: {}", e),
-    })?;
+    file.commit().map_err(|e| SlateError::BackupFailed(format!("Failed to commit backup: {}", e),))?;
 
     Ok(BackupInfo {
         tool: tool.to_string(),
@@ -377,12 +331,10 @@ pub fn create_backup(tool: &str, theme_name: &str, config_path: &Path) -> ThemeR
 /// Parse a backup filename into (tool, theme, timestamp)
 /// Format: {tool}--{theme}--{timestamp}.backup
 /// Example: ghostty--Catppuccin-Mocha--2026-04-09T10-00-00Z.backup
-pub fn parse_backup_filename(filename: &str) -> ThemeResult<(String, String, String)> {
+pub fn parse_backup_filename(filename: &str) -> Result<(String, String, String)> {
     // Strip .backup suffix
     if !filename.ends_with(".backup") {
-        return Err(ThemeError::BackupError {
-            reason: format!("Invalid backup filename format: {}", filename),
-        });
+        return Err(SlateError::BackupFailed(format!("Invalid backup filename format: {}", filename),));
     }
 
     let without_suffix = &filename[..filename.len() - 7]; // Remove ".backup"
@@ -390,12 +342,10 @@ pub fn parse_backup_filename(filename: &str) -> ThemeResult<(String, String, Str
     // Split by "--"
     let parts: Vec<&str> = without_suffix.split("--").collect();
     if parts.len() != 3 {
-        return Err(ThemeError::BackupError {
-            reason: format!(
+        return Err(SlateError::BackupFailed(format!(
                 "Invalid backup filename format (expected 3 parts): {}",
                 filename
-            ),
-        });
+            ),));
     }
 
     let tool = parts[0].to_string();
@@ -408,12 +358,10 @@ pub fn parse_backup_filename(filename: &str) -> ThemeResult<(String, String, Str
 
 /// Parse ISO8601-like timestamp string back to SystemTime
 /// Format: "2026-04-09T10-00-00Z" (YYYY-MM-DDTHH-MM-SSZ with dashes instead of colons)
-pub fn timestamp_from_string(ts_str: &str) -> ThemeResult<SystemTime> {
+pub fn timestamp_from_string(ts_str: &str) -> Result<SystemTime> {
     // Expected format: 2026-04-09T10-00-00Z (20 chars)
     if ts_str.len() != 20 || !ts_str.ends_with('Z') {
-        return Err(ThemeError::BackupError {
-            reason: format!("Invalid timestamp format: {}", ts_str),
-        });
+        return Err(SlateError::BackupFailed(format!("Invalid timestamp format: {}", ts_str),));
     }
 
     // Check format pattern: YYYY-MM-DDTHH-MM-SSZ
@@ -424,42 +372,26 @@ pub fn timestamp_from_string(ts_str: &str) -> ThemeResult<SystemTime> {
         || chars[13] != '-'
         || chars[16] != '-'
     {
-        return Err(ThemeError::BackupError {
-            reason: format!("Invalid timestamp format: {}", ts_str),
-        });
+        return Err(SlateError::BackupFailed(format!("Invalid timestamp format: {}", ts_str),));
     }
 
     // Parse: YYYY-MM-DDTHH-MM-SS
-    let year: u64 = ts_str[0..4].parse().map_err(|_| ThemeError::BackupError {
-        reason: format!("Invalid year in timestamp: {}", ts_str),
-    })?;
-    let month: u64 = ts_str[5..7].parse().map_err(|_| ThemeError::BackupError {
-        reason: format!("Invalid month in timestamp: {}", ts_str),
-    })?;
-    let day: u64 = ts_str[8..10].parse().map_err(|_| ThemeError::BackupError {
-        reason: format!("Invalid day in timestamp: {}", ts_str),
-    })?;
+    let year: u64 = ts_str[0..4].parse().map_err(|_| SlateError::BackupFailed(format!("Invalid year in timestamp: {}", ts_str),))?;
+    let month: u64 = ts_str[5..7].parse().map_err(|_| SlateError::BackupFailed(format!("Invalid month in timestamp: {}", ts_str),))?;
+    let day: u64 = ts_str[8..10].parse().map_err(|_| SlateError::BackupFailed(format!("Invalid day in timestamp: {}", ts_str),))?;
     let hour: u64 = ts_str[11..13]
         .parse()
-        .map_err(|_| ThemeError::BackupError {
-            reason: format!("Invalid hour in timestamp: {}", ts_str),
-        })?;
+        .map_err(|_| SlateError::BackupFailed(format!("Invalid hour in timestamp: {}", ts_str),))?;
     let minute: u64 = ts_str[14..16]
         .parse()
-        .map_err(|_| ThemeError::BackupError {
-            reason: format!("Invalid minute in timestamp: {}", ts_str),
-        })?;
+        .map_err(|_| SlateError::BackupFailed(format!("Invalid minute in timestamp: {}", ts_str),))?;
     let second: u64 = ts_str[17..19]
         .parse()
-        .map_err(|_| ThemeError::BackupError {
-            reason: format!("Invalid second in timestamp: {}", ts_str),
-        })?;
+        .map_err(|_| SlateError::BackupFailed(format!("Invalid second in timestamp: {}", ts_str),))?;
 
     // Convert to Unix timestamp
     let days_since_epoch =
-        days_from_unix_epoch(year, month, day).ok_or_else(|| ThemeError::BackupError {
-            reason: format!("Invalid date in timestamp: {}", ts_str),
-        })?;
+        days_from_unix_epoch(year, month, day).ok_or_else(|| SlateError::BackupFailed(format!("Invalid date in timestamp: {}", ts_str),))?;
 
     let total_seconds = days_since_epoch * 86400 + hour * 3600 + minute * 60 + second;
 
@@ -505,23 +437,19 @@ fn days_from_unix_epoch(year: u64, month: u64, day: u64) -> Option<u64> {
 /// List all restore points in the backup directory
 /// Scans ~/.cache/slate/backups/ for restore_point_id directories with manifest.toml
 /// Returns Vec<RestorePoint> sorted by creation time descending (newest first)
-pub fn list_restore_points() -> ThemeResult<Vec<RestorePoint>> {
+pub fn list_restore_points() -> Result<Vec<RestorePoint>> {
     let backup_dir = backup_directory()?;
 
     if !backup_dir.exists() {
         return Ok(Vec::new());
     }
 
-    let entries = fs::read_dir(&backup_dir).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to read backup directory: {}", e),
-    })?;
+    let entries = fs::read_dir(&backup_dir).map_err(|e| SlateError::BackupFailed(format!("Failed to read backup directory: {}", e),))?;
 
     let mut restore_points = Vec::new();
 
     for entry in entries {
-        let entry = entry.map_err(|e| ThemeError::BackupError {
-            reason: format!("Failed to read backup directory entry: {}", e),
-        })?;
+        let entry = entry.map_err(|e| SlateError::BackupFailed(format!("Failed to read backup directory entry: {}", e),))?;
 
         let path = entry.path();
 
@@ -564,12 +492,10 @@ pub fn list_restore_points() -> ThemeResult<Vec<RestorePoint>> {
 }
 
 /// Read and parse a manifest.toml file
-fn read_manifest(manifest_path: &Path) -> ThemeResult<RestorePoint> {
+fn read_manifest(manifest_path: &Path) -> Result<RestorePoint> {
     let restore_point = manifest_to_restore_point(read_manifest_raw(manifest_path)?)?;
     if restore_point.entries.is_empty() {
-        return Err(ThemeError::BackupError {
-            reason: "manifest.toml has empty entries array".to_string(),
-        });
+        return Err(SlateError::BackupFailed("manifest.toml has empty entries array".to_string(),));
     }
     Ok(restore_point)
 }
@@ -581,7 +507,7 @@ fn read_manifest(manifest_path: &Path) -> ThemeResult<RestorePoint> {
 /// - At least one backup file exists
 /// - All backup files are readable and non-empty
 /// - If delta file exists, delta-gitconfig must also exist 
-pub fn validate_restore_point(restore_point_id: &str) -> ThemeResult<()> {
+pub fn validate_restore_point(restore_point_id: &str) -> Result<()> {
     let restore_point = get_restore_point(restore_point_id)?;
     validate_restore_point_data(&restore_point)
 }
@@ -830,24 +756,20 @@ mod tests {
 }
 
 /// Get a specific restore point by ID
-pub fn get_restore_point(restore_point_id: &str) -> ThemeResult<RestorePoint> {
+pub fn get_restore_point(restore_point_id: &str) -> Result<RestorePoint> {
     let restore_point_dir = restore_point_directory(restore_point_id)?;
     let manifest_path = manifest_path(&restore_point_dir);
 
     if !manifest_path.exists() {
-        return Err(ThemeError::BackupError {
-            reason: format!("Restore point not found: {}", restore_point_id),
-        });
+        return Err(SlateError::BackupFailed(format!("Restore point not found: {}", restore_point_id),));
     }
 
     let restore_point = read_manifest(&manifest_path)?;
     if restore_point.id != restore_point_id {
-        return Err(ThemeError::BackupError {
-            reason: format!(
+        return Err(SlateError::BackupFailed(format!(
                 "Restore point metadata mismatch: expected {}, found {}",
                 restore_point_id, restore_point.id
-            ),
-        });
+            ),));
     }
 
     Ok(restore_point)
@@ -856,7 +778,7 @@ pub fn get_restore_point(restore_point_id: &str) -> ThemeResult<RestorePoint> {
 /// Restore a specific restore point by writing backed-up files back to their original paths
 pub fn restore_restore_point(
     restore_point_id: &str,
-) -> ThemeResult<crate::adapter::ApplyThemeResult> {
+) -> Result<crate::adapter::ApplyThemeResult> {
     let restore_point = get_restore_point(restore_point_id)?;
     validate_restore_point_data(&restore_point)?;
 
@@ -865,13 +787,11 @@ pub fn restore_restore_point(
 
     for entry in &restore_point.entries {
         let backup_content =
-            fs::read_to_string(&entry.backup_path).map_err(|e| ThemeError::BackupError {
-                reason: format!(
+            fs::read_to_string(&entry.backup_path).map_err(|e| SlateError::BackupFailed(format!(
                     "Failed to read backup file {}: {}",
                     entry.backup_path.display(),
                     e
-                ),
-            })?;
+                ),))?;
 
         let state = states.entry(display_tool_name(entry)).or_insert(None);
         match restore_entry(&entry.original_path, &backup_content) {
@@ -894,48 +814,38 @@ pub fn restore_restore_point(
 }
 
 /// Helper to restore a single entry to its persisted original_path
-fn restore_entry(original_path: &Path, content: &str) -> ThemeResult<()> {
+fn restore_entry(original_path: &Path, content: &str) -> Result<()> {
     // Write content atomically
-    let mut file = AtomicWriteFile::open(original_path).map_err(|e| ThemeError::BackupError {
-        reason: format!(
+    let mut file = AtomicWriteFile::open(original_path).map_err(|e| SlateError::BackupFailed(format!(
             "Failed to open config for writing {}: {}",
             original_path.display(),
             e
-        ),
-    })?;
+        ),))?;
 
     file.write_all(content.as_bytes())
-        .map_err(|e| ThemeError::BackupError {
-            reason: format!(
+        .map_err(|e| SlateError::BackupFailed(format!(
                 "Failed to write restored content to {}: {}",
                 original_path.display(),
                 e
-            ),
-        })?;
+            ),))?;
 
-    file.commit().map_err(|e| ThemeError::BackupError {
-        reason: format!(
+    file.commit().map_err(|e| SlateError::BackupFailed(format!(
             "Failed to commit restored file {}: {}",
             original_path.display(),
             e
-        ),
-    })
+        ),))
 }
 
 /// Delete a specific restore point by ID (removes entire restore_point_id directory)
-pub fn delete_restore_point(restore_point_id: &str) -> ThemeResult<usize> {
+pub fn delete_restore_point(restore_point_id: &str) -> Result<usize> {
     let restore_point_dir = restore_point_directory(restore_point_id)?;
 
     if !restore_point_dir.exists() {
-        return Err(ThemeError::BackupError {
-            reason: format!("Restore point directory not found: {}", restore_point_id),
-        });
+        return Err(SlateError::BackupFailed(format!("Restore point directory not found: {}", restore_point_id),));
     }
 
     // Count files before deletion
-    let entries = fs::read_dir(&restore_point_dir).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to read restore point directory: {}", e),
-    })?;
+    let entries = fs::read_dir(&restore_point_dir).map_err(|e| SlateError::BackupFailed(format!("Failed to read restore point directory: {}", e),))?;
 
     let file_count: usize = entries
         .filter_map(|e| e.ok())
@@ -943,43 +853,33 @@ pub fn delete_restore_point(restore_point_id: &str) -> ThemeResult<usize> {
         .count();
 
     // Remove entire directory
-    fs::remove_dir_all(&restore_point_dir).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to delete restore point {}: {}", restore_point_id, e),
-    })?;
+    fs::remove_dir_all(&restore_point_dir).map_err(|e| SlateError::BackupFailed(format!("Failed to delete restore point {}: {}", restore_point_id, e),))?;
 
     Ok(file_count)
 }
 
 /// Delete all restore points (removes all restore_point_id directories)
-pub fn clear_all_restore_points() -> ThemeResult<usize> {
+pub fn clear_all_restore_points() -> Result<usize> {
     let backup_dir = backup_directory()?;
     if !backup_dir.exists() {
         return Ok(0);
     }
 
-    let entries = fs::read_dir(&backup_dir).map_err(|e| ThemeError::BackupError {
-        reason: format!("Failed to read backup directory: {}", e),
-    })?;
+    let entries = fs::read_dir(&backup_dir).map_err(|e| SlateError::BackupFailed(format!("Failed to read backup directory: {}", e),))?;
 
     let mut deleted_items = 0;
     for entry in entries {
-        let entry = entry.map_err(|e| ThemeError::BackupError {
-            reason: format!("Failed to read backup directory entry: {}", e),
-        })?;
+        let entry = entry.map_err(|e| SlateError::BackupFailed(format!("Failed to read backup directory entry: {}", e),))?;
         let path = entry.path();
         if path.is_dir() {
-            fs::remove_dir_all(&path).map_err(|e| ThemeError::BackupError {
-                reason: format!(
+            fs::remove_dir_all(&path).map_err(|e| SlateError::BackupFailed(format!(
                     "Failed to delete backup directory {}: {}",
                     path.display(),
                     e
-                ),
-            })?;
+                ),))?;
             deleted_items += 1;
         } else if path.is_file() {
-            fs::remove_file(&path).map_err(|e| ThemeError::BackupError {
-                reason: format!("Failed to delete backup file {}: {}", path.display(), e),
-            })?;
+            fs::remove_file(&path).map_err(|e| SlateError::BackupFailed(format!("Failed to delete backup file {}: {}", path.display(), e),))?;
             deleted_items += 1;
         }
     }
