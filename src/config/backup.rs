@@ -776,43 +776,6 @@ pub fn get_restore_point(restore_point_id: &str) -> Result<RestorePoint> {
 }
 
 /// Restore a specific restore point by writing backed-up files back to their original paths
-pub fn restore_restore_point(
-    restore_point_id: &str,
-) -> Result<crate::adapter::ApplyThemeResult> {
-    let restore_point = get_restore_point(restore_point_id)?;
-    validate_restore_point_data(&restore_point)?;
-
-    let mut states: HashMap<String, Option<String>> = HashMap::new();
-    let mut ordered_tools = display_tools(&restore_point.entries);
-
-    for entry in &restore_point.entries {
-        let backup_content =
-            fs::read_to_string(&entry.backup_path).map_err(|e| SlateError::BackupFailed(format!(
-                    "Failed to read backup file {}: {}",
-                    entry.backup_path.display(),
-                    e
-                ),))?;
-
-        let state = states.entry(display_tool_name(entry)).or_insert(None);
-        match restore_entry(&entry.original_path, &backup_content) {
-            Ok(_) => {}
-            Err(e) => *state = Some(e.to_string()),
-        }
-    }
-
-    ordered_tools.sort();
-
-    let mut result = crate::adapter::ApplyThemeResult::default();
-    for tool in ordered_tools {
-        match states.remove(&tool) {
-            Some(Some(error)) => result.failed.push((tool, error)),
-            _ => result.successful.push(tool),
-        }
-    }
-
-    Ok(result)
-}
-
 /// Helper to restore a single entry to its persisted original_path
 fn restore_entry(original_path: &Path, content: &str) -> Result<()> {
     // Write content atomically
