@@ -13,6 +13,7 @@ pub mod setup;
 pub mod setup_executor;
 pub mod status;
 pub mod status_panel;
+pub mod theme;
 pub mod theme_selection;
 pub mod tool_selection;
 pub mod wizard_core;

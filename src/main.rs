@@ -33,6 +33,14 @@ enum Commands {
         #[arg(long, conflicts_with = "theme")]
         auto: bool,
     },
+    /// Set or pick theme
+    Theme {
+        /// Theme name (optional; if omitted, launches picker)
+        name: Option<String>,
+        /// Apply currently auto-resolved theme based on system appearance
+        #[arg(long, conflicts_with = "name")]
+        auto: bool,
+    },
     /// Show current configuration
     Status,
     /// List available themes
@@ -83,6 +91,9 @@ fn main() -> Result<()> {
                 args.push(t.as_str());
             }
             cli::set::handle(&args)?;
+        }
+        Some(Commands::Theme { name, auto }) => {
+            cli::theme::handle_theme(name, auto)?;
         }
         Some(Commands::Status) => {
             cli::status::handle(&[])?;
