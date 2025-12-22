@@ -41,6 +41,11 @@ enum Commands {
         #[arg(long, conflicts_with = "name")]
         auto: bool,
     },
+    /// Set or pick font
+    Font {
+        /// Font name (optional; if omitted, launches picker)
+        name: Option<String>,
+    },
     /// Show current configuration
     Status,
     /// List available themes
@@ -94,6 +99,9 @@ fn main() -> Result<()> {
         }
         Some(Commands::Theme { name, auto }) => {
             cli::theme::handle_theme(name, auto)?;
+        }
+        Some(Commands::Font { name }) => {
+            cli::font::handle_font(name)?;
         }
         Some(Commands::Status) => {
             cli::status::handle(&[])?;
