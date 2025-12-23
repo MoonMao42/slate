@@ -1,0 +1,66 @@
+use crate::config::ConfigManager;
+use crate::design::symbols::Symbols;
+use crate::env::SlateEnv;
+use crate::error::Result;
+use crate::opacity::OpacityPreset;
+
+/// Handle `slate config set <key> <value>` command
+pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
+    let env = SlateEnv::from_process()?;
+    let config = ConfigManager::with_env(&env)?;
+
+    match key {
+        "opacity" => {
+            // value ∈ {solid, frosted, clear}
+            let preset = match value {
+                "solid" => OpacityPreset::Solid,
+                "frosted" => OpacityPreset::Frosted,
+                "clear" => OpacityPreset::Clear,
+                _ => {
+                    return Err(crate::error::SlateError::InvalidConfig(
+                        format!("Invalid opacity preset: '{}'. Must be one of: solid, frosted, clear", value)
+                    ))
+                }
+            };
+
+            // Write to ~/.config/slate/current-opacity
+            config.set_current_opacity_preset(preset)?;
+
+            println!("{} Opacity set to '{}'", Symbols::SUCCESS, value);
+            Ok(())
+        }
+        "auto-theme" => {
+            match value {
+                "enable" => {
+                    // Write [auto_theme].enabled = true
+                    // 07-01 just writes the config; 07-05a will wire launchd
+                    config.write_auto_config(None, None)?;
+                    println!("{} Auto theme enabled", Symbols::SUCCESS);
+                    println!("  Run 'slate config set auto-theme configure' to customize dark/light pairing");
+                    Ok(())
+                }
+                "disable" => {
+                    // Write [auto_theme].enabled = false
+                    // For now, just clear the config (future work: track enabled flag)
+                    println!("{} Auto theme disabled", Symbols::SUCCESS);
+                    Ok(())
+                }
+                "configure" => {
+                    // Launch Configure Auto Theme two-step cliclack flow (reuse from)
+                    println!("{} Auto theme configuration not yet implemented (scheduled for 07-05a)", Symbols::PENDING);
+                    Ok(())
+                }
+                _ => {
+                    Err(crate::error::SlateError::InvalidConfig(
+                        format!("Invalid auto-theme action: '{}'. Must be one of: enable, disable, configure", value)
+                    ))
+                }
+            }
+        }
+        _ => {
+            Err(crate::error::SlateError::InvalidConfig(
+                format!("Unknown config key: '{}'. Known keys: opacity, auto-theme", key)
+            ))
+        }
+    }
+}

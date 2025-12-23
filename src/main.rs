@@ -46,6 +46,12 @@ enum Commands {
         /// Font name (optional; if omitted, launches picker)
         name: Option<String>,
     },
+    /// Configure slate settings (opacity, auto-theme)
+    Config {
+        /// Subcommand (currently: set)
+        #[command(subcommand)]
+        subcommand: ConfigSubcommand,
+    },
     /// Show current configuration
     Status,
     /// List available themes
@@ -54,6 +60,17 @@ enum Commands {
     Reset {
         /// Backup point ID (optional; if omitted, shows list)
         backup_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigSubcommand {
+    /// Set a configuration value
+    Set {
+        /// Key to set (opacity, auto-theme)
+        key: String,
+        /// Value to set
+        value: String,
     },
 }
 
@@ -102,6 +119,13 @@ fn main() -> Result<()> {
         }
         Some(Commands::Font { name }) => {
             cli::font::handle_font(name)?;
+        }
+        Some(Commands::Config { subcommand }) => {
+            match subcommand {
+                ConfigSubcommand::Set { key, value } => {
+                    cli::config::handle_config_set(&key, &value)?;
+                }
+            }
         }
         Some(Commands::Status) => {
             cli::status::handle(&[])?;
