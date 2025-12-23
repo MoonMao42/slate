@@ -34,21 +34,20 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
                 "enable" => {
                     // Write [auto_theme].enabled = true
                     // 07-01 just writes the config; 07-05a will wire launchd
-                    config.write_auto_config(None, None)?;
+                    config.set_auto_theme_enabled(true)?;
                     println!("{} Auto theme enabled", Symbols::SUCCESS);
                     println!("  Run 'slate config set auto-theme configure' to customize dark/light pairing");
                     Ok(())
                 }
                 "disable" => {
                     // Write [auto_theme].enabled = false
-                    // For now, just clear the config (future work: track enabled flag)
+                    config.set_auto_theme_enabled(false)?;
                     println!("{} Auto theme disabled", Symbols::SUCCESS);
                     Ok(())
                 }
                 "configure" => {
                     // Launch Configure Auto Theme two-step cliclack flow (reuse from)
-                    println!("{} Auto theme configuration not yet implemented (scheduled for 07-05a)", Symbols::PENDING);
-                    Ok(())
+                    crate::cli::auto_theme::configure_auto_theme()
                 }
                 _ => {
                     Err(crate::error::SlateError::InvalidConfig(

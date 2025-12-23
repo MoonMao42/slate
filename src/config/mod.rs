@@ -333,6 +333,55 @@ fi
         Ok(())
     }
 
+    /// Check if auto-theme is enabled via config.toml [auto_theme].enabled field.
+    /// If config.toml or [auto_theme] section missing, defaults to false.
+    pub fn is_auto_theme_enabled(&self) -> Result<bool> {
+        let config_path = self.base_path.join("config.toml");
+
+        if !config_path.exists() {
+            return Ok(false);
+        }
+
+        let content = fs::read_to_string(&config_path)?;
+        let doc = content.parse::<DocumentMut>()?;
+
+        // Read [auto_theme].enabled; default to false if missing
+        let enabled = doc.get("auto_theme")
+            .and_then(|table| table.get("enabled"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+
+        Ok(enabled)
+    }
+
+    /// Write auto-theme enabled flag to config.toml.
+    /// Writes to [auto_theme].enabled field using atomic write.
+    pub fn set_auto_theme_enabled(&self, enabled: bool) -> Result<()> {
+        let config_path = self.base_path.join("config.toml");
+
+        // Read existing config or start with empty
+        let mut doc = if config_path.exists() {
+            fs::read_to_string(&config_path)?.parse::<DocumentMut>()?
+        } else {
+            DocumentMut::new()
+        };
+
+        // Ensure [auto_theme] table exists
+        if !doc.contains_key("auto_theme") {
+            doc.insert("auto_theme", toml_edit::table());
+        }
+
+        // Set the enabled field
+        doc["auto_theme"]["enabled"] = toml_edit::value(enabled);
+
+        // Write atomically
+        let mut file = AtomicWriteFile::open(&config_path)?;
+        file.write_all(doc.to_string().as_bytes())?;
+        file.commit()?;
+
+        Ok(())
+    }
+
     /// Edit a field in a TOML config file using AST-aware editing.
     /// Per RESEARCH Pitfall 1: Use toml_edit, never regex.
     /// Preserves comments and formatting.

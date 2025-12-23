@@ -1,6 +1,4 @@
-use crate::adapter::FontAdapter;
 use crate::config::ConfigManager;
-use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeRegistry;
 
@@ -33,6 +31,7 @@ fn show_hub_menu(config: &ConfigManager) -> Result<()> {
 
     // Render dashboard using cliclack info to preserve left border
     let registry = ThemeRegistry::new()?;
+    let env = crate::env::SlateEnv::from_process()?;
 
     let current_theme = config
         .get_current_theme()?
@@ -54,42 +53,117 @@ fn show_hub_menu(config: &ConfigManager) -> Result<()> {
 
     // Dashboard rendering with color hierarchy
     cliclack::log::info(format!(
-        "\x1b[1m{}\x1b[0m    {}",
+        "[1m{}[0m    {}",
         "Theme", current_theme.name
     ))?;
-    cliclack::log::info(format!("\x1b[1m{}\x1b[0m  {}", "Opacity", current_opacity))?;
+    cliclack::log::info(format!("[1m{}[0m  {}", "Opacity", current_opacity))?;
     cliclack::log::info(format!(
-        "\x1b[1m{}\x1b[0m    {}",
+        "[1m{}[0m    {}",
         "Font",
         current_font.unwrap_or_else(|| "Not configured".to_string())
     ))?;
 
     cliclack::log::remark("")?;
 
-    // Present menu using correct cliclack API
-    let selection = cliclack::select("What would you like to do?")
-        .item("switch", "✦ Switch Theme", "")
-        .item("status", "◆ View Status", "")
-        .item("prefs", "⚙ Preferences…", "")
-        .item("quit", "⏊ Quit", "")
-        .interact()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::Interrupted {
-                crate::error::SlateError::UserCancelled
+    // Compute Hub state machine (A/B/C)
+    let auto_enabled = config.is_auto_theme_enabled()?;
+    let current_theme_id = config.get_current_theme()?;
+    
+    let hub_state = if auto_enabled {
+        // Auto is enabled; check if current matches auto-resolved
+        let should_be_theme = crate::cli::auto_theme::resolve_auto_theme(&env, config)?;
+        if let Some(ref current_id) = current_theme_id {
+            if current_id == &should_be_theme {
+                HubState::A
             } else {
-                crate::error::SlateError::IOError(e)
+                HubState::B(should_be_theme)
             }
-        })?;
+        } else {
+            HubState::B(should_be_theme)
+        }
+    } else {
+        HubState::C
+    };
+
+    // Build menu items (6 base + 1 conditional)
+    let mut menu_builder = cliclack::select("What would you like to do?");
+
+    // Item 1: Theme action (varies by state)
+    let theme_label = match &hub_state {
+        HubState::A => "Pause Auto & Pick Theme",
+        HubState::B(_) | HubState::C => "Switch Theme",
+    };
+    menu_builder = menu_builder.item("switch", format!("✦ {}", theme_label), "");
+
+    // Item 2: Change Font
+    menu_builder = menu_builder.item("font", "🔤 Change Font", "");
+
+    // Item 3: Toggle Auto Theme
+    let auto_toggle_label = if auto_enabled {
+        "🌓 Toggle Auto Theme · on"
+    } else {
+        "🌓 Toggle Auto Theme · off"
+    };
+    menu_builder = menu_builder.item("toggle-auto", auto_toggle_label, "");
+
+    // Item 4: View Status
+    menu_builder = menu_builder.item("status", "◆ View Status", "");
+
+    // Conditional Item: Resume Auto (if State B)
+    if let HubState::B(ref destination) = hub_state {
+        let registry = ThemeRegistry::new()?;
+        let dest_display = registry
+            .get(destination)
+            .map(|t| t.name.clone())
+            .unwrap_or_else(|| destination.clone());
+        menu_builder = menu_builder.item(
+            "resume-auto",
+            format!("⟲ Resume Auto ({})", dest_display),
+            "",
+        );
+    }
+
+    // Item 5: Preferences
+    menu_builder = menu_builder.item("prefs", "⚙ Preferences…", "");
+
+    // Item 6: Quit
+    menu_builder = menu_builder.item("quit", "⏊ Quit", "");
+
+    // Render and handle selection
+    let selection = menu_builder.interact().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::Interrupted {
+            crate::error::SlateError::UserCancelled
+        } else {
+            crate::error::SlateError::IOError(e)
+        }
+    })?;
 
     match selection {
         "switch" => {
-            // 06-04 wires the picker path.
-            // For now, delegate to set command with no args (which will be picker in 06-04)
-            crate::cli::set::handle(&[])
+            // Route to picker
+            crate::cli::picker::launch_picker(&env)
+        }
+        "font" => {
+            // Delegate to font picker 
+            crate::cli::font::handle_font(None)
+        }
+        "toggle-auto" => {
+            // Toggle auto theme and re-render menu (loop)
+            let new_state = !auto_enabled;
+            config.set_auto_theme_enabled(new_state)?;
+            show_hub_menu(config)
         }
         "status" => {
-            // 06-02 wires the status path.
+            // View status
             crate::cli::status::handle(&[])
+        }
+        "resume-auto" => {
+            // Resume auto theme (apply the should-be theme)
+            if let HubState::B(ref destination) = hub_state {
+                crate::cli::theme::handle_theme(Some(destination.clone()), false)
+            } else {
+                Ok(())
+            }
         }
         "prefs" => handle_preferences(),
         "quit" => {
@@ -100,13 +174,34 @@ fn show_hub_menu(config: &ConfigManager) -> Result<()> {
     }
 }
 
+/// Hub state machine : tracks auto-theme enabled state and theme sync status
+#[derive(Debug)]
+enum HubState {
+    /// A: Auto-on and current == auto-resolved (synced)
+    A,
+    /// B: Auto-on and current != auto-resolved (out of sync); contains should-be theme ID
+    B(String),
+    /// C: Auto-off
+    C,
+}
+
+
 fn handle_preferences() -> Result<()> {
-    // Preferences submenu
+    // Preferences submenu reduced to 2 items + Back (no Reset, no auto, no font)
+    // Font and auto are now top-level in the main menu 
+    let config = ConfigManager::new()?;
+    
     let selection = cliclack::select("Preferences")
-        .item("font", "Change Font", "")
-        .item("auto", "Configure Auto Theme", "")
+        .item(
+            "fastfetch",
+            if config.has_fastfetch_autorun()? {
+                "Toggle Fastfetch · on"
+            } else {
+                "Toggle Fastfetch · off"
+            },
+            "",
+        )
         .item("setup", "Run Setup Wizard", "")
-        .item("reset", "Reset", "")
         .item("back", "← Back", "")
         .interact()
         .map_err(|e| {
@@ -118,96 +213,25 @@ fn handle_preferences() -> Result<()> {
         })?;
 
     match selection {
-        "font" => {
-            // 06-06: Wire Change Font interactive flow
-            handle_change_font()?;
-            // Return to preferences menu to allow additional changes
-            handle_preferences()
-        }
-        "auto" => {
-            // 06-05: Wire configure_auto_theme interactive flow
-            crate::cli::auto_theme::configure_auto_theme()?;
-            // Return to preferences menu to allow additional changes
+        "fastfetch" => {
+            // Toggle fastfetch autorun marker file
+            if config.has_fastfetch_autorun()? {
+                config.disable_fastfetch_autorun()?;
+            } else {
+                config.enable_fastfetch_autorun()?;
+            }
+            // Re-render preferences menu with updated toggle state
             handle_preferences()
         }
         "setup" => {
             let env = crate::env::SlateEnv::from_process()?;
             crate::cli::setup::handle_with_env(false, false, None, &env)
         }
-        "reset" => crate::cli::restore::handle(&[]),
         "back" => {
-            // Recursively show hub menu
-            let config = ConfigManager::new()?;
+            // Return to hub menu
             show_hub_menu(&config)
         }
         _ => Ok(()),
     }
 }
 
-fn handle_change_font() -> Result<()> {
-    use cliclack::select;
-
-    cliclack::intro("✦ Change Font")?;
-
-    let env = SlateEnv::from_process()?;
-    let _config = ConfigManager::with_env(&env)?;
-
-    // Get installed fonts using the font adapter
-    let fonts = FontAdapter::detect_installed_fonts()?;
-
-    if fonts.is_empty() {
-        cliclack::log::error("No Nerd Fonts found. Run slate setup to install fonts.")?;
-        return Ok(());
-    }
-
-    // Apply recommendation ordering: JetBrainsMono first if installed
-    let mut ordered_fonts = fonts.clone();
-    let jetbrains_idx = ordered_fonts
-        .iter()
-        .position(|f| f == "JetBrains Mono Nerd Font");
-
-    if let Some(idx) = jetbrains_idx {
-        // Move JetBrainsMono to front
-        let jetbrains = ordered_fonts.remove(idx);
-        ordered_fonts.insert(0, format!("✦ {} (recommended)", jetbrains));
-    } else {
-        // Not installed, add note
-        ordered_fonts.insert(0, "✦ JetBrains Mono Nerd Font (not installed)".to_string());
-    }
-
-    // Build items for cliclack select
-    let items: Vec<(&str, &str, &str)> = ordered_fonts
-        .iter()
-        .map(|f| (f.as_str(), f.as_str(), ""))
-        .collect();
-
-    cliclack::log::remark("")?;
-    let selected = select("Select font")
-        .items(items.as_slice())
-        .interact()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::Interrupted {
-                crate::error::SlateError::UserCancelled
-            } else {
-                crate::error::SlateError::IOError(e)
-            }
-        })?;
-
-    // Extract the actual font name (remove recommendation marker if present)
-    let selected_font = selected
-        .strip_prefix("✦ ")
-        .and_then(|s| s.split(" (recommended)").next())
-        .and_then(|s| s.split(" (not installed)").next())
-        .unwrap_or(selected);
-
-    // Apply the font using the adapter
-    FontAdapter::apply_font(&env, selected_font)?;
-
-    // Show receipt
-    cliclack::log::remark("")?;
-    cliclack::log::success(format!("✓ Font changed to {}", selected_font))?;
-    cliclack::log::info("Font will be used on next terminal session.")?;
-    cliclack::log::remark("")?;
-
-    Ok(())
-}
