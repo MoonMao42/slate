@@ -13,6 +13,25 @@ enum ToolStatus {
     NotInstalled, // ✗ Not installed
 }
 
+/// Check if auto-theme launchd agent is loaded 
+/// Run `launchctl list sh.slate.auto-theme` and check exit code
+/// Return format: "[loaded]" (exit 0) or "[not installed]" (non-zero)
+fn get_agent_status() -> String {
+    match std::process::Command::new("launchctl")
+        .args(&["list", "sh.slate.auto-theme"])
+        .output()
+    {
+        Ok(output) => {
+            if output.status.success() {
+                "[loaded]".to_string()
+            } else {
+                "[not installed]".to_string()
+            }
+        }
+        Err(_) => "[not installed]".to_string(),
+    }
+}
+
 /// Render the status dashboard 
 pub fn render() -> Result<()> {
     let config = ConfigManager::new()?;
@@ -78,6 +97,12 @@ pub fn render() -> Result<()> {
         println!();
     }
 
+    // Section 5 - Auto Theme Agent
+    println!("{}│", " ");
+    let agent_status = get_agent_status();
+    println!("{}│  {} Auto Theme Agent", " ", Symbols::DIAMOND);
+    println!("{}│    {}", " ", agent_status);
+
     // Panel footer
     println!(
         "{}╰─────────────────────────────────────────────────────────────╯",
@@ -123,7 +148,7 @@ fn get_adapter_statuses() -> Result<Vec<(String, ToolStatus)>> {
         "fastfetch",
         "zsh-highlight",
         "tmux",
-        "font",
+        "nerd-font",
     ];
 
     for tool in tools {
