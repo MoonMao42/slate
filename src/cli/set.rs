@@ -1,65 +1,44 @@
-use crate::adapter::{alacritty, ghostty};
-use crate::brand::language::Language;
-use crate::cli::auto_theme;
-use crate::cli::setup_executor::apply_theme_selection;
-use crate::config::ConfigManager;
-use crate::design::symbols::Symbols;
+use crate::design::typography::Typography;
 use crate::env::SlateEnv;
 use crate::error::Result;
-use crate::opacity::OpacityPreset;
-use crate::theme::ThemeRegistry;
 
 /// Handle `slate set <theme>` command
-/// Supports three modes:
-/// 1. `slate set <theme>` — Set explicit theme
-/// 2. `slate set --auto` — Apply auto-follow based on system appearance
-/// 3. `slate set` (no args) — Interactive picker
+/// Thin dispatcher that routes to new noun-driven subcommands:
+/// 1. `slate set <theme>` — Delegate to `slate theme <theme>` + show dim tip
+/// 2. `slate set --auto` — Delegate to `slate theme --auto` (no tip)
+/// 3. `slate set` (no args) — Delegate to `slate theme` picker
 pub fn handle(args: &[&str]) -> Result<()> {
-    // Check for --auto flag
+    // Check for --auto flag (auto path delegates to theme --auto)
     if args.contains(&"--auto") {
-        let env = SlateEnv::from_process()?;
-        let config = ConfigManager::with_env(&env)?;
-
-        // Resolve theme based on system appearance
-        let theme_id = auto_theme::resolve_auto_theme(&env, &config)?;
-
-        let registry = ThemeRegistry::new()?;
-        let theme = registry.get(&theme_id).ok_or_else(|| {
-            crate::error::SlateError::InvalidThemeData(format!(
-                "Auto-resolved theme '{}' not found",
-                theme_id
-            ))
-        })?;
-
-        apply_theme_selection(theme)?;
-
-        println!(
-            "{} Theme auto-switched to '{}' (system appearance)",
-            Symbols::SUCCESS,
-            theme.name
-        );
+        crate::cli::theme::handle_theme(None, true)?;
+        // No dim tip for auto path — it's already using the new surface
         return Ok(());
     }
 
+    // Explicit theme or picker path
     if let Some(theme_arg) = args.first() {
-        // Explicit theme argument: resolve and apply
-        let registry = ThemeRegistry::new()?;
+        // Direct theme apply with dispatcher
+        crate::cli::theme::handle_theme(Some(theme_arg.to_string()), false)?;
 
-        // Resolve theme from registry (fail if not found)
-        let theme = registry.get(theme_arg).ok_or_else(|| {
-            crate::error::SlateError::InvalidThemeData(format!("Theme '{}' not found", theme_arg))
-        })?;
-
-        apply_theme_selection(theme)?;
-
-        println!("{} Theme switched to '{}'", Symbols::SUCCESS, theme.name);
+        // Show dim tip for legacy usage
+        print_dim_tip();
+        Ok(())
     } else {
-        // No theme argument: launch interactive picker
+        // Picker path: launch interactive picker via theme
         let env = SlateEnv::from_process()?;
         crate::cli::picker::launch_picker(&env)?;
-    }
 
-    Ok(())
+        // After picker returns, show dim tip
+        print_dim_tip();
+        Ok(())
+    }
+}
+
+/// Print a dim tip teaching users about the new `slate theme` surface
+fn print_dim_tip() {
+    let tip = "(i) Tip: 'slate set' is transitioning to 'slate theme'. Try 'slate theme <name>' next time.";
+    println!();
+    println!("{}", Typography::explanation(tip));
 }
 
 /// Silent preview apply: updates only the live preview path without persisting theme/opacity state.
@@ -71,8 +50,8 @@ pub fn handle(args: &[&str]) -> Result<()> {
 /// 3. Applies theme palette to adapters for visual preview
 /// 4. Sends SIGUSR2 to Ghostty for hot-reload (best-effort)
 /// 5. Produces NO stdout output (silent)
-pub fn silent_preview_apply(env: &SlateEnv, theme_id: &str, opacity: OpacityPreset) -> Result<()> {
-    let registry = ThemeRegistry::new()?;
+pub fn silent_preview_apply(env: &SlateEnv, theme_id: &str, opacity: crate::opacity::OpacityPreset) -> Result<()> {
+    let registry = crate::theme::ThemeRegistry::new()?;
     let theme = registry.get(theme_id).ok_or_else(|| {
         crate::error::SlateError::InvalidThemeData(format!("Theme '{}' not found", theme_id))
     })?;
@@ -81,16 +60,16 @@ pub fn silent_preview_apply(env: &SlateEnv, theme_id: &str, opacity: OpacityPres
     // Just apply visual changes for preview
 
     // Apply theme palette to adapters (visual preview)
-    let _config = ConfigManager::with_env(env)?;
+    let _config = crate::config::ConfigManager::with_env(env)?;
     let adapter_registry = crate::adapter::ToolRegistry::default();
     let _results = adapter_registry.apply_theme_to_all(theme);
 
     // Update opacity/blur for Ghostty (best-effort)
-    let _ = ghostty::write_opacity_config(env, opacity);
-    let _ = ghostty::write_blur_radius(env, opacity);
+    let _ = crate::adapter::ghostty::write_opacity_config(env, opacity);
+    let _ = crate::adapter::ghostty::write_blur_radius(env, opacity);
 
     // Update opacity for Alacritty (best-effort)
-    let _ = alacritty::write_opacity_config(env, opacity);
+    let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
 
     // Attempt Ghostty hot-reload (best-effort, no error if fails)
     if let Some(ghostty_adapter) = adapter_registry.get_adapter("ghostty") {
@@ -110,9 +89,9 @@ pub fn silent_preview_apply(env: &SlateEnv, theme_id: &str, opacity: OpacityPres
 /// 4. Updates opacity/blur configs
 /// 5. Sends SIGUSR2 to Ghostty for hot-reload
 /// 6. Produces NO stdout output (silent, Afterglow receipt printed by caller)
-pub fn silent_commit_apply(env: &SlateEnv, theme_id: &str, opacity: OpacityPreset) -> Result<()> {
-    let config = ConfigManager::with_env(env)?;
-    let registry = ThemeRegistry::new()?;
+pub fn silent_commit_apply(env: &SlateEnv, theme_id: &str, opacity: crate::opacity::OpacityPreset) -> Result<()> {
+    let config = crate::config::ConfigManager::with_env(env)?;
+    let registry = crate::theme::ThemeRegistry::new()?;
 
     let theme = registry.get(theme_id).ok_or_else(|| {
         crate::error::SlateError::InvalidThemeData(format!("Theme '{}' not found", theme_id))
@@ -130,9 +109,9 @@ pub fn silent_commit_apply(env: &SlateEnv, theme_id: &str, opacity: OpacityPrese
     let _results = adapter_registry.apply_theme_to_all(theme);
 
     // Update opacity/blur for terminal adapters
-    let _ = ghostty::write_opacity_config(env, opacity);
-    let _ = ghostty::write_blur_radius(env, opacity);
-    let _ = alacritty::write_opacity_config(env, opacity);
+    let _ = crate::adapter::ghostty::write_opacity_config(env, opacity);
+    let _ = crate::adapter::ghostty::write_blur_radius(env, opacity);
+    let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
 
     // Hot-reload Ghostty
     if let Some(ghostty_adapter) = adapter_registry.get_adapter("ghostty") {
