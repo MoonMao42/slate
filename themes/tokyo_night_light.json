@@ -1,0 +1,31 @@
+{
+  "id": "tokyo_night_light",
+  "name": "Tokyo Night Light",
+  "family": "tokyo-night",
+  "appearance": "Light",
+  "colors": {
+    "foreground": "#3760b6",
+    "background": "#e1e6f0",
+    "black": "#e9e9ed",
+    "red": "#c64343",
+    "green": "#485e30",
+    "yellow": "#c4b82e",
+    "blue": "#34548a",
+    "magenta": "#5c4882",
+    "cyan": "#0f7b8f",
+    "white": "#6172b0",
+    "bright_black": "#a1a6c9",
+    "bright_red": "#c64343",
+    "bright_green": "#485e30",
+    "bright_yellow": "#c4b82e",
+    "bright_blue": "#34548a",
+    "bright_magenta": "#5c4882",
+    "bright_cyan": "#0f7b8f",
+    "bright_white": "#3760b6"
+  },
+  "semantic": {
+    "bg_dim": "#dde1f0",
+    "bg_darker": "#e1e6f0",
+    "bg_darkest": "#eef0f5"
+  }
+}

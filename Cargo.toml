@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "xtask"]
+
 [package]
 name = "slate-cli"
 version = "0.1.0"

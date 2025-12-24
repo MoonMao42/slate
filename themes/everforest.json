@@ -1,0 +1,31 @@
+{
+  "id": "everforest",
+  "name": "Everforest",
+  "family": "everforest",
+  "appearance": "Dark",
+  "colors": {
+    "foreground": "#d4be98",
+    "background": "#2b3339",
+    "black": "#323d43",
+    "red": "#e67e22",
+    "green": "#7fb539",
+    "yellow": "#dfa000",
+    "blue": "#38a89d",
+    "magenta": "#d699b6",
+    "cyan": "#6cbf9e",
+    "white": "#e0d5c7",
+    "bright_black": "#475258",
+    "bright_red": "#ff7730",
+    "bright_green": "#829b6d",
+    "bright_yellow": "#dfa000",
+    "bright_blue": "#76bdc6",
+    "bright_magenta": "#d699b6",
+    "bright_cyan": "#93d398",
+    "bright_white": "#f4f1de"
+  },
+  "semantic": {
+    "bg_dim": "#323d43",
+    "bg_darker": "#2b3339",
+    "bg_darkest": "#1e2326"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "one_dark",
+  "name": "One Dark",
+  "family": "one",
+  "appearance": "Dark",
+  "colors": {
+    "foreground": "#abb2bf",
+    "background": "#282c34",
+    "black": "#1e2127",
+    "red": "#e06c75",
+    "green": "#98c379",
+    "yellow": "#d19a66",
+    "blue": "#61afef",
+    "magenta": "#c678dd",
+    "cyan": "#56b6c2",
+    "white": "#abb2bf",
+    "bright_black": "#5c6370",
+    "bright_red": "#e06c75",
+    "bright_green": "#98c379",
+    "bright_yellow": "#d19a66",
+    "bright_blue": "#61afef",
+    "bright_magenta": "#c678dd",
+    "bright_cyan": "#56b6c2",
+    "bright_white": "#c8cad8"
+  },
+  "semantic": {
+    "bg_dim": "#323844",
+    "bg_darker": "#282c34",
+    "bg_darkest": "#1a1f28"
+  }
+}

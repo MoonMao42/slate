@@ -1,0 +1,31 @@
+{
+  "id": "dracula",
+  "name": "Dracula",
+  "family": "dracula",
+  "appearance": "Dark",
+  "colors": {
+    "foreground": "#f8f8f2",
+    "background": "#282a36",
+    "black": "#21222c",
+    "red": "#ff5555",
+    "green": "#50fa7b",
+    "yellow": "#f1fa8c",
+    "blue": "#bd93f9",
+    "magenta": "#ff79c6",
+    "cyan": "#8be9fd",
+    "white": "#f8f8f2",
+    "bright_black": "#6272a4",
+    "bright_red": "#ff5555",
+    "bright_green": "#50fa7b",
+    "bright_yellow": "#f1fa8c",
+    "bright_blue": "#bd93f9",
+    "bright_magenta": "#ff79c6",
+    "bright_cyan": "#8be9fd",
+    "bright_white": "#f8f8f2"
+  },
+  "semantic": {
+    "bg_dim": "#44475a",
+    "bg_darker": "#282a36",
+    "bg_darkest": "#1a1b1f"
+  }
+}
