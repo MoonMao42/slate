@@ -2,6 +2,7 @@ use crate::design::typography::Typography;
 use crate::env::SlateEnv;
 use crate::error::Result;
 
+use crate::brand::Language;
 /// Handle `slate set <theme>` command
 /// Thin dispatcher that routes to new noun-driven subcommands:
 /// 1. `slate set <theme>` — Delegate to `slate theme <theme>` + show dim tip
@@ -36,7 +37,7 @@ pub fn handle(args: &[&str]) -> Result<()> {
 
 /// Print a dim tip teaching users about the new `slate theme` surface
 fn print_dim_tip() {
-    let tip = "(i) Tip: 'slate set' is transitioning to 'slate theme'. Try 'slate theme <name>' next time.";
+    let tip = "Language::SLATE_SET_DEPRECATION_TIP";
     println!();
     println!("{}", Typography::explanation(tip));
 }

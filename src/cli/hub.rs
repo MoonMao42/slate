@@ -1,3 +1,4 @@
+use crate::brand::Language;
 use crate::config::ConfigManager;
 use crate::error::Result;
 use crate::theme::ThemeRegistry;
@@ -90,24 +91,24 @@ fn show_hub_menu(config: &ConfigManager) -> Result<()> {
 
     // Item 1: Theme action (varies by state)
     let theme_label = match &hub_state {
-        HubState::A => "Pause Auto & Pick Theme",
-        HubState::B(_) | HubState::C => "Switch Theme",
+        HubState::A => Language::HUB_PAUSE_AUTO_PICK,
+        HubState::B(_) | HubState::C => Language::HUB_SWITCH_THEME,
     };
-    menu_builder = menu_builder.item("switch", format!("✦ {}", theme_label), "");
+    menu_builder = menu_builder.item("switch", theme_label, "");
 
     // Item 2: Change Font
-    menu_builder = menu_builder.item("font", "🔤 Change Font", "");
+    menu_builder = menu_builder.item("font", Language::HUB_CHANGE_FONT, "");
 
     // Item 3: Toggle Auto Theme
     let auto_toggle_label = if auto_enabled {
-        "🌓 Toggle Auto Theme · on"
+        Language::HUB_TOGGLE_AUTO_ON
     } else {
-        "🌓 Toggle Auto Theme · off"
+        Language::HUB_TOGGLE_AUTO_OFF
     };
     menu_builder = menu_builder.item("toggle-auto", auto_toggle_label, "");
 
     // Item 4: View Status
-    menu_builder = menu_builder.item("status", "◆ View Status", "");
+    menu_builder = menu_builder.item("status", Language::HUB_VIEW_STATUS, "");
 
     // Conditional Item: Resume Auto (if State B)
     if let HubState::B(ref destination) = hub_state {
@@ -124,10 +125,10 @@ fn show_hub_menu(config: &ConfigManager) -> Result<()> {
     }
 
     // Item 5: Preferences
-    menu_builder = menu_builder.item("prefs", "⚙ Preferences…", "");
+    menu_builder = menu_builder.item("prefs", Language::HUB_PREFERENCES, "");
 
     // Item 6: Quit
-    menu_builder = menu_builder.item("quit", "⏊ Quit", "");
+    menu_builder = menu_builder.item("quit", Language::HUB_QUIT, "");
 
     // Render and handle selection
     let selection = menu_builder.interact().map_err(|e| {
@@ -195,14 +196,14 @@ fn handle_preferences() -> Result<()> {
         .item(
             "fastfetch",
             if config.has_fastfetch_autorun()? {
-                "Toggle Fastfetch · on"
+                Language::HUB_TOGGLE_FASTFETCH_ON
             } else {
-                "Toggle Fastfetch · off"
+                Language::HUB_TOGGLE_FASTFETCH_OFF
             },
             "",
         )
-        .item("setup", "Run Setup Wizard", "")
-        .item("back", "← Back", "")
+        .item("setup", Language::HUB_RUN_SETUP, "")
+        .item("back", Language::HUB_BACK, "")
         .interact()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::Interrupted {

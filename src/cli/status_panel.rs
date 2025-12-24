@@ -4,6 +4,7 @@ use crate::config::ConfigManager;
 use crate::design::symbols::Symbols;
 use crate::error::Result;
 use crate::theme::{Palette, ThemeRegistry};
+use crate::brand::Language;
 
 /// Tool installation status 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,12 +24,12 @@ fn get_agent_status() -> String {
     {
         Ok(output) => {
             if output.status.success() {
-                "[loaded]".to_string()
+                Language::STATUS_AUTO_AGENT_LOADED.to_string()
             } else {
-                "[not installed]".to_string()
+                Language::STATUS_AUTO_AGENT_NOT_INSTALLED.to_string()
             }
         }
-        Err(_) => "[not installed]".to_string(),
+        Err(_) => Language::STATUS_AUTO_AGENT_NOT_INSTALLED.to_string(),
     }
 }
 
