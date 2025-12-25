@@ -8,4 +8,5 @@ pub mod adapter;
 pub mod cli;
 pub mod config;
 pub mod error;
+pub mod wcag;
 pub mod theme;
