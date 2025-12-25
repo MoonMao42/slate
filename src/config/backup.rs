@@ -37,6 +37,7 @@ pub struct RestorePoint {
     pub theme_name: String,     // e.g., "Catppuccin Mocha"
     pub created_at: SystemTime, // When the slate set operation occurred
     pub entries: Vec<RestoreEntry>, // All backed-up files for this restore point
+    pub is_baseline: bool,      // If true, this is the pre-slate baseline; protected from  overwrite
 }
 
 /// Explicit backup session created at the start of a set operation.
@@ -54,6 +55,8 @@ struct RestoreManifestMetadata {
     id: String,
     theme_name: String,
     created_at: String,
+    #[serde(default)]
+    is_baseline: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -133,6 +136,7 @@ fn manifest_to_restore_point(manifest: RestoreManifest) -> Result<RestorePoint> 
         theme_name: manifest.metadata.theme_name,
         created_at: timestamp_from_string(&manifest.metadata.created_at)?,
         entries: manifest.entries,
+        is_baseline: manifest.metadata.is_baseline,
     })
 }
 
@@ -234,6 +238,7 @@ pub fn begin_restore_point(theme_name: &str) -> Result<BackupSession> {
                         id: session.restore_point_id.clone(),
                         theme_name: session.theme_name.clone(),
                         created_at: format_iso8601_timestamp(created_at),
+                        is_baseline: false,
                     },
                     entries: Vec::new(),
                 };
@@ -700,6 +705,7 @@ mod tests {
             theme_name: "Catppuccin Mocha".to_string(),
             created_at: SystemTime::now(),
             entries: vec![],
+            is_baseline: false,
         };
         assert_eq!(restore_point.id, "2026-04-09T10-00-00Z");
         assert_eq!(restore_point.theme_name, "Catppuccin Mocha");
@@ -746,6 +752,7 @@ mod tests {
                 original_path: PathBuf::from("/tmp/gitconfig"),
                 backup_path,
             }],
+            is_baseline: false,
         };
 
         let error = validate_restore_point_data(&restore_point).unwrap_err();
@@ -754,6 +761,53 @@ mod tests {
             .contains("Delta restore point is incomplete"));
     }
 }
+
+/// Create a baseline restore point before any slate mutations
+/// Special variant of begin_restore_point that marks the restore point as baseline
+/// This should be called BEFORE first setup to capture pre-slate state
+pub fn begin_restore_point_baseline(_home: &Path) -> Result<RestorePoint> {
+    let _env = SlateEnv::from_process()?;
+    let created_at = SystemTime::now();
+
+    for _ in 0..32 {
+        let restore_point_id = generate_restore_point_id(created_at);
+        let restore_point_dir = restore_point_directory(&restore_point_id)?;
+
+        match fs::create_dir(&restore_point_dir) {
+            Ok(()) => {
+                let session = BackupSession {
+                    restore_point_id,
+                    theme_name: "baseline-pre-slate".to_string(),
+                    restore_point_dir,
+                };
+                let manifest = RestoreManifest {
+                    metadata: RestoreManifestMetadata {
+                        id: session.restore_point_id.clone(),
+                        theme_name: session.theme_name.clone(),
+                        created_at: format_iso8601_timestamp(created_at),
+                        is_baseline: true,
+                    },
+                    entries: Vec::new(),
+                };
+                write_manifest_raw(&manifest_path(&session.restore_point_dir), &manifest)?;
+                return manifest_to_restore_point(manifest);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return Err(SlateError::BackupFailed(format!("Failed to create baseline restore point directory: {}", e),));
+            }
+        }
+    }
+
+    Err(SlateError::BackupFailed("Failed to allocate a unique baseline restore point ID".to_string(),))
+}
+
+/// Check if a restore point is the baseline restore point
+/// Used by reset to protect baseline from accidental overwrite
+pub fn is_baseline_restore_point(restore_point: &RestorePoint) -> bool {
+    restore_point.is_baseline
+}
+
 
 /// Get a specific restore point by ID
 pub fn get_restore_point(restore_point_id: &str) -> Result<RestorePoint> {
