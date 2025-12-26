@@ -61,6 +61,8 @@ enum Commands {
         /// Backup point ID (optional; if omitted, shows list)
         backup_id: Option<String>,
     },
+    /// Clean up slate-managed configuration
+    Clean,
 }
 
 #[derive(Subcommand)]
@@ -139,6 +141,9 @@ fn main() -> Result<()> {
                 .map(|id| vec![id.as_str()])
                 .unwrap_or_default();
             cli::restore::handle(&args)?;
+        }
+        Some(Commands::Clean) => {
+            cli::clean::handle_clean()?;
         }
     }
 

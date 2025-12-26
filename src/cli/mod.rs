@@ -1,4 +1,5 @@
 pub mod auto_theme;
+pub mod clean;
 pub mod config;
 pub mod failure_handler;
 pub mod font;
