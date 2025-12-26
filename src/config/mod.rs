@@ -8,7 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use toml_edit::DocumentMut;
 
 mod backup;
-pub use backup::{BackupInfo, RestoreEntry, RestorePoint, BackupSession};
+pub use backup::{
+    BackupInfo, RestoreEntry, RestorePoint, BackupSession,
+    list_restore_points, begin_restore_point_baseline, is_baseline_restore_point,
+};
 
 /// Three-tier configuration manager.
 /// Manages three tiers per /// 1. Managed tier: ~/.config/slate/managed/{tool}/ — Slate writes here (regenerates freely)

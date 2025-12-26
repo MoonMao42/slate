@@ -66,6 +66,24 @@ pub fn handle_with_env(
         }
     }
 
+    // Create baseline backup BEFORE any mutations (per)
+    // Check if baseline already exists (idempotent on subsequent runs)
+    {
+        use crate::config::{list_restore_points, begin_restore_point_baseline};
+        let backups = list_restore_points().ok();
+        let has_baseline = if let Some(backups) = backups {
+            backups.iter().any(|rp| rp.is_baseline)
+        } else {
+            false
+        };
+        
+        if !has_baseline {
+            if let Ok(baseline_point) = begin_restore_point_baseline(env.home()) {
+                eprintln!("✓ Baseline snapshot created ({})", baseline_point.id);
+            }
+        }
+    }
+
     // Execute the setup (install tools, apply configurations)
     let summary = setup_executor::execute_setup_with_env(
         &selected_tools,
