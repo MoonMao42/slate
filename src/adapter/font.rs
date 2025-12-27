@@ -11,6 +11,12 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
+/// Pure data structure for aggregated font discovery 
+pub struct FontDiscovery {
+    pub nerd_fonts: Vec<String>,
+    pub system_fonts: Vec<String>,
+}
+
 /// Nerd Font adapter implementing v2 ToolAdapter trait.
 pub struct FontAdapter;
 
@@ -123,6 +129,110 @@ impl FontAdapter {
         fonts[1..].sort();
     }
 
+    /// Helper: Check if filename is a font file (.ttf, .otf, or .ttc per)
+    fn is_font_file(name: &str) -> bool {
+        name.ends_with(".ttf") || name.ends_with(".otf") || name.ends_with(".ttc")
+    }
+
+    /// Detect only installed Nerd Fonts (pure data, no UI markers).
+    /// Returns real, verified Nerd Fonts found in font directories.
+    /// No "(not installed)" placeholders or UI badges — pure detection only.
+    pub fn detect_installed_nerd_fonts() -> Result<Vec<String>> {
+        let env = SlateEnv::from_process()?;
+        Self::detect_installed_nerd_fonts_with_env(&env)
+    }
+
+    /// Detect installed Nerd Fonts with injected SlateEnv (for testing).
+    /// Returns pure list of verified Nerd Fonts.
+    pub fn detect_installed_nerd_fonts_with_env(env: &SlateEnv) -> Result<Vec<String>> {
+        let mut fonts = BTreeSet::new();
+
+        // Scan font directories (extended paths)
+        let scan_paths = vec![
+            env.home().join("Library/Fonts"),
+            PathBuf::from("/Library/Fonts"),
+            PathBuf::from("/System/Library/Fonts"),
+            PathBuf::from("/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts"),
+        ];
+
+        for path in scan_paths {
+            if let Ok(entries) = fs::read_dir(&path) {
+                for entry in entries.flatten() {
+                    if let Ok(name) = entry.file_name().into_string() {
+                        // Add .ttc extension support
+                        if Self::is_font_file(&name) && Self::looks_like_nerd_font(&name) {
+                            fonts.insert(Self::normalize_font_family(&name));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Return as sorted Vec, no markers or placeholders (pure data)
+        let mut fonts_vec: Vec<String> = fonts.into_iter().collect();
+        fonts_vec.sort();
+        Ok(fonts_vec)
+    }
+
+    /// Detect available system fonts from macOS whitelist (pure data, no UI markers).
+    /// Returns only Monaco, Menlo, SF Mono if found.
+    pub fn detect_available_system_fonts() -> Result<Vec<String>> {
+        let env = SlateEnv::from_process()?;
+        Self::detect_available_system_fonts_with_env(&env)
+    }
+
+    /// Detect system fonts with injected SlateEnv (for testing).
+    /// Whitelist match only (Monaco, Menlo, SF Mono).
+    pub fn detect_available_system_fonts_with_env(env: &SlateEnv) -> Result<Vec<String>> {
+        let whitelist = ["Monaco", "Menlo", "SF Mono"];
+        let mut fonts = BTreeSet::new();
+
+        // Scan same paths as Nerd Font detection
+        let scan_paths = vec![
+            env.home().join("Library/Fonts"),
+            PathBuf::from("/Library/Fonts"),
+            PathBuf::from("/System/Library/Fonts"),
+            PathBuf::from("/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts"),
+        ];
+
+        for path in scan_paths {
+            if let Ok(entries) = fs::read_dir(&path) {
+                for entry in entries.flatten() {
+                    if let Ok(name) = entry.file_name().into_string() {
+                        // Check if file is a font file (include .ttc)
+                        if Self::is_font_file(&name) {
+                            let family = Self::normalize_font_family(&name);
+                            // Match against whitelist using canonical key
+                            for candidate in &whitelist {
+                                if Self::family_match_key(&family) == Self::family_match_key(candidate) {
+                                    fonts.insert(family);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Return as sorted Vec, no markers or placeholders (pure data)
+        let mut fonts_vec: Vec<String> = fonts.into_iter().collect();
+        fonts_vec.sort();
+        Ok(fonts_vec)
+    }
+
+    /// Aggregation method: Returns both nerd and system fonts grouped.
+    /// Convenience struct for picker assembly layer.
+    pub fn discover_all_fonts() -> Result<FontDiscovery> {
+        let env = SlateEnv::from_process()?;
+        let nerd_fonts = Self::detect_installed_nerd_fonts_with_env(&env)?;
+        let system_fonts = Self::detect_available_system_fonts_with_env(&env)?;
+        Ok(FontDiscovery {
+            nerd_fonts,
+            system_fonts,
+        })
+    }
+
     /// Persist chosen font to config and apply to terminal adapters.
     /// Updates current-font, Ghostty font-family, and Alacritty [font.normal] family.
     pub fn apply_font(env: &SlateEnv, font_name: &str) -> Result<()> {
@@ -177,7 +287,8 @@ impl ToolAdapter for FontAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        match Self::detect_installed_fonts() {
+        // Use nerd-only check per /
+        match Self::detect_installed_nerd_fonts() {
             Ok(fonts) => Ok(!fonts.is_empty()),
             Err(_) => {
                 // Gracefully handle permission errors
@@ -213,7 +324,7 @@ impl ToolAdapter for FontAdapter {
 
     fn get_current_theme(&self) -> Result<Option<String>> {
         // Return name of first installed Nerd Font, if any
-        match Self::detect_installed_fonts() {
+        match Self::detect_installed_nerd_fonts() {
             Ok(fonts) => Ok(fonts.first().cloned()),
             Err(_) => Ok(None),
         }
