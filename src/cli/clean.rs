@@ -210,4 +210,51 @@ mod tests {
         let result = fs::read_to_string(&zshrc_path).unwrap();
         assert!(result.ends_with('\n'));
     }
+
+
+    #[test]
+    fn test_remove_marker_block_nested_markers_not_supported() {
+        // Nested markers are not supported - only first level blocks are removed
+        let tempdir = TempDir::new().unwrap();
+        let zshrc_path = tempdir.path().join(".zshrc");
+        let content = "# slate:start
+outer
+# slate:start
+inner
+# slate:end
+# slate:end
+";
+        fs::write(&zshrc_path, content).unwrap();
+
+        remove_marker_block_from_zshrc(tempdir.path()).unwrap();
+
+        let result = fs::read_to_string(&zshrc_path).unwrap();
+        // First slate:start to first slate:end should be removed
+        assert!(!result.contains("outer"));
+        // But the second pair should remain (only processes first start-end pair per depth)
+        // Actually with current implementation, this will remove outer -> first end
+        assert_eq!(result.trim().lines().count(), 1);
+    }
+
+    #[test]
+    fn test_remove_marker_block_empty_block() {
+        // Marker block with no content between start and end
+        let tempdir = TempDir::new().unwrap();
+        let zshrc_path = tempdir.path().join(".zshrc");
+        let content = "echo before
+# slate:start
+# slate:end
+echo after
+";
+        fs::write(&zshrc_path, content).unwrap();
+
+        remove_marker_block_from_zshrc(tempdir.path()).unwrap();
+
+        let result = fs::read_to_string(&zshrc_path).unwrap();
+        assert_eq!(result, "echo before
+echo after
+");
+        assert!(!result.contains("slate:start"));
+    }
+
 }
