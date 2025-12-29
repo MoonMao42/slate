@@ -251,6 +251,10 @@ impl FontAdapter {
         let alacritty_font_content = format!("[font.normal]\nfamily = \"{}\"\n", font_name);
         config.write_managed_file("alacritty", "font.toml", &alacritty_font_content)?;
 
+        // B1 fix: Signal Ghostty to reload config via SIGUSR2 
+        let ghostty_adapter = crate::adapter::ghostty::GhosttyAdapter;
+        ghostty_adapter.reload()?;
+
         Ok(())
     }
 
