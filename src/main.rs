@@ -120,7 +120,7 @@ fn main() -> Result<()> {
             cli::theme::handle_theme(name, auto)?;
         }
         Some(Commands::Font { name }) => {
-            cli::font::handle_font(name)?;
+            cli::font::handle_font(name.as_deref())?;
         }
         Some(Commands::Config { subcommand }) => {
             match subcommand {
