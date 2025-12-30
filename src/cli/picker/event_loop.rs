@@ -383,6 +383,14 @@ fn render(state: &PickerState, flash: Option<&Flash>) -> Result<()> {
         ResetColor,
     ))?;
 
+    // Preview panel (positioning)
+    queue_io(queue!(stdout, Print("\r\n")))?;
+    let current_theme = state.get_current_theme()?;
+    let preview_output = super::preview_panel::render_preview(&current_theme.palette);
+    queue_io(queue!(stdout, Print("  ")))?;
+    queue_io(queue!(stdout, Print(preview_output)))?;
+    queue_io(queue!(stdout, Print("\r\n")))?;
+
     // Opacity indicator — apply guardrail to the rendered selection
     let effective = get_effective_opacity_for_rendering(state);
     queue_io(queue!(stdout, Print("\r\n  Opacity:  ")))?;
