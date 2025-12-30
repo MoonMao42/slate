@@ -82,6 +82,42 @@ impl Palette {
         }
         Ok(())
     }
+
+    /// Resolve a semantic color role to a palette color (hex string).
+    /// Maps semantic roles to ANSI slots and semantic colors.
+    pub fn resolve(&self, role: crate::cli::picker::preview_panel::SemanticColor) -> String {
+        use crate::cli::picker::preview_panel::SemanticColor;
+
+        match role {
+            // Git-related
+            SemanticColor::GitBranch => self.blue.clone(),
+            SemanticColor::GitAdded => self.green.clone(),
+            SemanticColor::GitModified => self.yellow.clone(),
+            SemanticColor::GitUntracked => self.red.clone(),
+
+            // File system
+            SemanticColor::Directory => self.cyan.clone(),
+            SemanticColor::FileExec => self.green.clone(),
+            SemanticColor::FileSymlink => self.magenta.clone(),
+            SemanticColor::FileDir => self.cyan.clone(),
+
+            // Prompt & interaction
+            SemanticColor::Prompt => self.blue.clone(),
+            SemanticColor::Accent => self.cyan.clone(),
+            SemanticColor::Error => self.red.clone(),
+            SemanticColor::Muted => self.bright_black.clone(),
+
+            // Starship/shell specific
+            SemanticColor::Success => self.green.clone(),
+            SemanticColor::Warning => self.yellow.clone(),
+            SemanticColor::Failed => self.red.clone(),
+            SemanticColor::Status => self.cyan.clone(),
+
+            // Text levels
+            SemanticColor::Text => self.foreground.clone(),
+            SemanticColor::Subtext => self.white.clone(),
+        }
+    }
 }
 
 /// Per-tool theme references.
