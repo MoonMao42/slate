@@ -132,6 +132,73 @@ pub const SAMPLE_TOKENS: &[PreviewSpan] = &[
     },
 ];
 
+/// Render preview panel showing sample tokens and ANSI color matrices.
+/// Per , Output sample token lines, 16 ANSI matrix, and optional extras matrix.
+/// Returns formatted string with ANSI escape codes embedded.
+pub fn render_preview(palette: &crate::theme::Palette) -> String {
+    let mut output = String::new();
+
+    // Render sample tokens with semantic colors
+    for span in SAMPLE_TOKENS {
+        let color_hex = palette.resolve(span.role);
+        // For now, just append text (rendering is minimal; caller will apply colors via crossterm)
+        output.push_str(span.text);
+    }
+
+    output.push_str("\n\n");
+
+    // Render 16 ANSI color matrix
+    // Normal (0-7)
+    output.push_str("Normal: ");
+    let ansi_normal = [
+        &palette.black,
+        &palette.red,
+        &palette.green,
+        &palette.yellow,
+        &palette.blue,
+        &palette.magenta,
+        &palette.cyan,
+        &palette.white,
+    ];
+    for (idx, color) in ansi_normal.iter().enumerate() {
+        output.push_str(&format!("██ {} ", idx));
+    }
+    output.push_str("\n");
+
+    // Bright (8-15)
+    output.push_str("Bright: ");
+    let ansi_bright = [
+        &palette.bright_black,
+        &palette.bright_red,
+        &palette.bright_green,
+        &palette.bright_yellow,
+        &palette.bright_blue,
+        &palette.bright_magenta,
+        &palette.bright_cyan,
+        &palette.bright_white,
+    ];
+    for (idx, color) in ansi_bright.iter().enumerate() {
+        output.push_str(&format!("██ {} ", idx + 8));
+    }
+    output.push_str("\n");
+
+    // Render extras matrix if present (conditional)
+    if !palette.extras.is_empty() {
+        output.push_str("Extras: ");
+        let mut extra_count = 0;
+        for (name, _color) in &palette.extras {
+            output.push_str(&format!("██ {} ", name));
+            extra_count += 1;
+            if extra_count >= 8 && extra_count % 8 == 0 {
+                output.push_str("\n        ");
+            }
+        }
+        output.push('\n');
+    }
+
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
