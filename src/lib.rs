@@ -2,6 +2,7 @@ pub mod brand;
 pub mod design;
 pub mod env;
 pub mod opacity;
+pub mod platform;
 
 // Placeholder modules for -02 and later
 pub mod adapter;

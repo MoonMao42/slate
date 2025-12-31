@@ -44,6 +44,9 @@ pub enum SlateError {
     #[error("Restore operation failed: {0}")]
     RestoreFailed(String),
 
+    #[error("Launchd operation failed: {0}")]
+    LaunchdError(String),
+
     #[error("IO error: {0}")]
     IOError(#[from] std::io::Error),
 
