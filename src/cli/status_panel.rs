@@ -5,6 +5,7 @@ use crate::design::symbols::Symbols;
 use crate::error::Result;
 use crate::theme::{Palette, ThemeRegistry};
 use crate::brand::Language;
+use crate::platform;
 
 /// Tool installation status 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,12 +19,9 @@ enum ToolStatus {
 /// Run `launchctl list sh.slate.auto-theme` and check exit code
 /// Return format: "[loaded]" (exit 0) or "[not installed]" (non-zero)
 fn get_agent_status() -> String {
-    match std::process::Command::new("launchctl")
-        .args(&["list", "sh.slate.auto-theme"])
-        .output()
-    {
-        Ok(output) => {
-            if output.status.success() {
+    match platform::launchd::check_agent_loaded() {
+        Ok(loaded) => {
+            if loaded {
                 Language::STATUS_AUTO_AGENT_LOADED.to_string()
             } else {
                 Language::STATUS_AUTO_AGENT_NOT_INSTALLED.to_string()
