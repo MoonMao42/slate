@@ -6,3 +6,7 @@ Cargo.lock
 .DS_Store
 .idea/
 .vscode/
+
+# Claude Code agent worktree scratch dirs — never commit these (they leak
+# as gitlink entries into parent commits when agents do `git add -A`).
+.claude/worktrees/
