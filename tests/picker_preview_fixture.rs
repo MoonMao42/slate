@@ -10,7 +10,7 @@ fn test_preview_renders_catppuccin_mocha_dark() {
     // Dark theme with full extras (Catppuccin)
     let registry = ThemeRegistry::new().expect("Registry init");
     let theme = registry
-        .get("catppuccin_mocha")
+        .get("catppuccin-mocha")
         .expect("catppuccin_mocha exists");
 
     let output = render_preview(&theme.palette);
@@ -29,7 +29,7 @@ fn test_preview_renders_catppuccin_latte_light() {
     // Light theme with full extras (Catppuccin)
     let registry = ThemeRegistry::new().expect("Registry init");
     let theme = registry
-        .get("catppuccin_latte")
+        .get("catppuccin-latte")
         .expect("catppuccin_latte exists");
 
     let output = render_preview(&theme.palette);
@@ -47,8 +47,8 @@ fn test_preview_renders_tokyo_night_dark_simple() {
     // Dark theme with minimal extras (Tokyo Night)
     let registry = ThemeRegistry::new().expect("Registry init");
     let theme = registry
-        .get("tokyo_night")
-        .expect("tokyo_night exists");
+        .get("tokyo-night-dark")
+        .expect("tokyo-night-dark exists");
 
     let output = render_preview(&theme.palette);
 
@@ -124,12 +124,13 @@ fn test_preview_with_dracula_dark() {
 }
 
 #[test]
-fn test_preview_with_solarized_light() {
-    // Solarized Light (light theme, minimal extras)
+fn test_preview_with_gruvbox_light() {
+    // Gruvbox Light (light theme in the registered 18-theme set, stands in
+    // for the earlier Solarized Light fixture which is not registered).
     let registry = ThemeRegistry::new().expect("Registry init");
     let theme = registry
-        .get("solarized_light")
-        .expect("solarized_light exists");
+        .get("gruvbox-light")
+        .expect("gruvbox-light exists");
 
     let output = render_preview(&theme.palette);
 
@@ -146,7 +147,7 @@ fn test_preview_output_multiline_format() {
     // Verify preview output includes multiple lines (sample tokens + ANSI matrix)
     let registry = ThemeRegistry::new().expect("Registry init");
     let theme = registry
-        .get("catppuccin_mocha")
+        .get("catppuccin-mocha")
         .expect("catppuccin_mocha exists");
 
     let output = render_preview(&theme.palette);
@@ -161,7 +162,7 @@ fn test_preview_contains_ansi_reset() {
     // Verify preview includes ANSI reset codes (proper cleanup)
     let registry = ThemeRegistry::new().expect("Registry init");
     let theme = registry
-        .get("catppuccin_mocha")
+        .get("catppuccin-mocha")
         .expect("catppuccin_mocha exists");
 
     let output = render_preview(&theme.palette);
@@ -175,7 +176,7 @@ fn test_palette_resolve_semantic_colors() {
     // Verify Palette::resolve() maps all semantic colors correctly
     let registry = ThemeRegistry::new().expect("Registry init");
     let theme = registry
-        .get("catppuccin_mocha")
+        .get("catppuccin-mocha")
         .expect("catppuccin_mocha exists");
 
     // Test sample semantic color mappings

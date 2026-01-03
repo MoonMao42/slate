@@ -134,20 +134,35 @@ pub const SAMPLE_TOKENS: &[PreviewSpan] = &[
 
 /// Render preview panel showing sample tokens and ANSI color matrices.
 /// Per , Output sample token lines, 16 ANSI matrix, and optional extras matrix.
-/// Returns formatted string with ANSI escape codes embedded.
+/// Returns formatted string with ANSI 24-bit escape codes embedded so the output
+/// renders in color when written to a real terminal.
 pub fn render_preview(palette: &crate::theme::Palette) -> String {
+    use crate::adapter::palette_renderer::PaletteRenderer;
+
+    const RESET: &str = "\x1b[0m";
+    let fg = |hex: &str| -> String {
+        let (r, g, b) = PaletteRenderer::hex_to_rgb(hex).unwrap_or((200, 200, 200));
+        format!("\x1b[38;2;{};{};{}m", r, g, b)
+    };
+    let bg = |hex: &str| -> String {
+        let (r, g, b) = PaletteRenderer::hex_to_rgb(hex).unwrap_or((200, 200, 200));
+        format!("\x1b[48;2;{};{};{}m", r, g, b)
+    };
+
     let mut output = String::new();
 
-    // Render sample tokens with semantic colors
+    // Render sample tokens with semantic colors 
     for span in SAMPLE_TOKENS {
         let color_hex = palette.resolve(span.role);
-        // For now, just append text (rendering is minimal; caller will apply colors via crossterm)
+        output.push_str(&fg(&color_hex));
         output.push_str(span.text);
+        output.push_str(RESET);
     }
 
     output.push_str("\n\n");
 
-    // Render 16 ANSI color matrix
+    // Render 16 ANSI color matrix using background blocks so every cell
+    // carries an explicit \x1b[48;2;R;G;Bm sequence.
     // Normal (0-7)
     output.push_str("Normal: ");
     let ansi_normal = [
@@ -161,9 +176,12 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
         &palette.white,
     ];
     for (idx, color) in ansi_normal.iter().enumerate() {
-        output.push_str(&format!("██ {} ", idx));
+        output.push_str(&bg(color));
+        output.push_str(&format!(" {} ", idx));
+        output.push_str(RESET);
+        output.push(' ');
     }
-    output.push_str("\n");
+    output.push('\n');
 
     // Bright (8-15)
     output.push_str("Bright: ");
@@ -178,16 +196,22 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
         &palette.bright_white,
     ];
     for (idx, color) in ansi_bright.iter().enumerate() {
-        output.push_str(&format!("██ {} ", idx + 8));
+        output.push_str(&bg(color));
+        output.push_str(&format!(" {} ", idx + 8));
+        output.push_str(RESET);
+        output.push(' ');
     }
-    output.push_str("\n");
+    output.push('\n');
 
     // Render extras matrix if present (conditional)
     if !palette.extras.is_empty() {
         output.push_str("Extras: ");
         let mut extra_count = 0;
-        for (name, _color) in &palette.extras {
-            output.push_str(&format!("██ {} ", name));
+        for (name, color) in &palette.extras {
+            output.push_str(&bg(color));
+            output.push_str(&format!(" {} ", name));
+            output.push_str(RESET);
+            output.push(' ');
             extra_count += 1;
             if extra_count >= 8 && extra_count % 8 == 0 {
                 output.push_str("\n        ");
