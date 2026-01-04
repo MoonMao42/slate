@@ -53,7 +53,7 @@ once it ships in  Safety Net.",
 fn is_agent_loaded() -> Result<bool> {
     use std::process::Command;
     let status = Command::new("launchctl")
-        .args(&["list", "sh.slate.auto-theme"])
+        .args(["list", "sh.slate.auto-theme"])
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false);
@@ -63,9 +63,9 @@ fn is_agent_loaded() -> Result<bool> {
 /// Uninstall the auto-theme launchd agent
 fn uninstall_agent() -> Result<()> {
     use std::process::Command;
-    let uid = std::process::id();
+    let uid = unsafe { libc::getuid() };
     let _output = Command::new("launchctl")
-        .args(&["bootout", &format!("gui/{}", uid), "sh.slate.auto-theme"])
+        .args(["bootout", &format!("gui/{}", uid), "sh.slate.auto-theme"])
         .output();
     Ok(())
 }
@@ -93,12 +93,11 @@ fn remove_marker_block_from_zshrc(home: &Path) -> Result<()> {
                 in_block = true;
                 block_start = i;
             }
-        } else if line.trim().starts_with("# slate:end") {
-            if in_block {
+        } else if line.trim().starts_with("# slate:end")
+            && in_block {
                 indices_to_remove.push(block_start..=i);
                 in_block = false;
             }
-        }
     }
 
     if indices_to_remove.is_empty() {
@@ -109,8 +108,21 @@ fn remove_marker_block_from_zshrc(home: &Path) -> Result<()> {
     // Remove blocks in reverse order (to maintain indices)
     let mut cleaned_lines = lines.clone();
     for range in indices_to_remove.iter().rev() {
-        for _ in 0..=(*range.end() - *range.start()) {
-            cleaned_lines.remove(*range.start());
+        let start = *range.start();
+        let count = *range.end() - start + 1;
+        for _ in 0..count {
+            if start < cleaned_lines.len() {
+                cleaned_lines.remove(start);
+            }
+        }
+    }
+
+    // Verify no orphaned markers remain after removal
+    for line in &cleaned_lines {
+        if line.trim().starts_with("# slate:start") || line.trim().starts_with("# slate:end") {
+            return Err(crate::error::SlateError::Internal(
+                "Orphaned marker block detected in .zshrc after cleanup — manual review needed".to_string()
+            ));
         }
     }
 
@@ -213,27 +225,17 @@ mod tests {
 
 
     #[test]
-    fn test_remove_marker_block_nested_markers_not_supported() {
-        // Nested markers are not supported - only first level blocks are removed
+    fn test_remove_marker_block_nested_markers_returns_error() {
+        // Nested markers leave orphans after first-level removal.
+        // The orphan detection now catches this and returns Err
+        // instead of silently leaving a broken .zshrc.
         let tempdir = TempDir::new().unwrap();
         let zshrc_path = tempdir.path().join(".zshrc");
-        let content = "# slate:start
-outer
-# slate:start
-inner
-# slate:end
-# slate:end
-";
+        let content = "# slate:start\nouter\n# slate:start\ninner\n# slate:end\n# slate:end\n";
         fs::write(&zshrc_path, content).unwrap();
 
-        remove_marker_block_from_zshrc(tempdir.path()).unwrap();
-
-        let result = fs::read_to_string(&zshrc_path).unwrap();
-        // First slate:start to first slate:end should be removed
-        assert!(!result.contains("outer"));
-        // But the second pair should remain (only processes first start-end pair per depth)
-        // Actually with current implementation, this will remove outer -> first end
-        assert_eq!(result.trim().lines().count(), 1);
+        let result = remove_marker_block_from_zshrc(tempdir.path());
+        assert!(result.is_err(), "Nested markers should trigger orphan detection error");
     }
 
     #[test]

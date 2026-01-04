@@ -87,7 +87,7 @@ impl ThemeJson {
     pub fn validate(&self, filename: &str) -> anyhow::Result<()> {
         // Check filename matches id
         let expected_filename = format!("{}.json", self.id);
-        if filename != &expected_filename {
+        if filename != expected_filename {
             return Err(anyhow::anyhow!(
                 "Theme id '{}' does not match filename '{}' (expected '{}')",
                 self.id,
@@ -211,8 +211,9 @@ fn decode_hex(s: &str) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     for chunk in s.chars().collect::<Vec<_>>().chunks(2) {
         let hex_str: String = chunk.iter().collect();
-        u8::from_str_radix(&hex_str, 16).map_err(|_| format!("invalid hex digit"))?;
-        bytes.push(u8::from_str_radix(&hex_str, 16).unwrap());
+        let byte = u8::from_str_radix(&hex_str, 16)
+            .map_err(|_| format!("invalid hex digit in '{}'", hex_str))?;
+        bytes.push(byte);
     }
     Ok(bytes)
 }

@@ -1,8 +1,9 @@
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
+use atomic_write_file::AtomicWriteFile;
 use plist::{Dictionary, Value};
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -90,8 +91,7 @@ pub fn install_agent() -> Result<()> {
     let path = agent_path()?;
     let binary = resolve_binary_path()?;
     let plist_content = generate_plist(&binary)?;
-    
-    // Create directory if it doesn't exist
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| SlateError::LaunchdError(format!(
@@ -99,17 +99,28 @@ pub fn install_agent() -> Result<()> {
                 e
             )))?;
     }
-    
-    // Write plist file
-    fs::write(&path, plist_content)
+
+    // Atomic write: temp file → fsync → rename. Prevents launchctl from
+    // seeing a half-written plist if it races with the bootstrap call.
+    let mut file = AtomicWriteFile::open(&path)
         .map_err(|e| SlateError::LaunchdError(format!(
-            "Failed to write plist file: {}",
-            e
+            "Failed to open plist for atomic write: {}", e
         )))?;
-    
-    // Load agent via launchctl
-    launchctl_load(AGENT_LABEL)?;
-    
+    file.write_all(plist_content.as_bytes())
+        .map_err(|e| SlateError::LaunchdError(format!(
+            "Failed to write plist: {}", e
+        )))?;
+    file.commit()
+        .map_err(|e| SlateError::LaunchdError(format!(
+            "Failed to commit plist: {}", e
+        )))?;
+
+    // Load agent; clean up plist on failure so retries start fresh.
+    if let Err(e) = launchctl_load(AGENT_LABEL) {
+        let _ = fs::remove_file(&path);
+        return Err(e);
+    }
+
     Ok(())
 }
 
@@ -130,7 +141,7 @@ pub fn uninstall_agent() -> Result<()> {
 /// Check if the agent is currently loaded
 pub fn check_agent_loaded() -> Result<bool> {
     let output = Command::new("launchctl")
-        .args(&["list", AGENT_LABEL])
+        .args(["list", AGENT_LABEL])
         .output()
         .map_err(|e| SlateError::LaunchdError(format!(
             "Failed to run launchctl list: {}",
@@ -147,7 +158,7 @@ fn launchctl_load(_label: &str) -> Result<()> {
     let plist_path_str = plist_path.to_string_lossy().to_string();
     
     let output = Command::new("launchctl")
-        .args(&["bootstrap", &format!("gui/{}", uid), &plist_path_str])
+        .args(["bootstrap", &format!("gui/{}", uid), &plist_path_str])
         .output()
         .map_err(|e| SlateError::LaunchdError(format!(
             "Failed to run launchctl bootstrap: {}",
@@ -169,7 +180,7 @@ fn launchctl_load(_label: &str) -> Result<()> {
 fn launchctl_unload(label: &str) -> Result<()> {
     let uid = unsafe { libc::getuid() };
     Command::new("launchctl")
-        .args(&["bootout", &format!("gui/{}", uid), label])
+        .args(["bootout", &format!("gui/{}", uid), label])
         .output()
         .map_err(|e| SlateError::LaunchdError(format!(
             "Failed to run launchctl bootout: {}",
