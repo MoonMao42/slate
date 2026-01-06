@@ -9,7 +9,7 @@ fn test_renders_seven_tmux_elements_for_all_themes() {
     let registry = ThemeRegistry::new().expect("ThemeRegistry init failed");
 
     for variant in registry.all() {
-        let output = TmuxAdapter::render_tmux_colors(&variant);
+        let output = TmuxAdapter::render_tmux_colors(variant);
 
         // Count set -g occurrences (should be exactly 7)
         let set_count = output.matches("set -g").count();
@@ -195,7 +195,7 @@ fn test_palette_fields_mapped_correctly_per_d17() {
 
         // window-status-current-style should use blue accent
         assert!(
-            output.contains(&format!("window-status-current-style \"bg=",)),
+            output.contains(&"window-status-current-style \"bg=".to_string()),
             "window-status-current-style missing"
         );
         assert!(

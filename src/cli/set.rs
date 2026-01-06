@@ -2,7 +2,6 @@ use crate::design::typography::Typography;
 use crate::env::SlateEnv;
 use crate::error::Result;
 
-use crate::brand::Language;
 /// Handle `slate set <theme>` command
 /// Thin dispatcher that routes to new noun-driven subcommands:
 /// 1. `slate set <theme>` — Delegate to `slate theme <theme>` + show dim tip

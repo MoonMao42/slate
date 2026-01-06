@@ -100,7 +100,7 @@ impl AlacrittyAdapter {
         // Idempotent: check if managed path already present
         let already_present = import_array
             .iter()
-            .any(|v| v.as_str().map_or(false, |s| s == managed_str));
+            .any(|v| v.as_str().is_some_and(|s| s == managed_str));
 
         if already_present {
             return Ok(());

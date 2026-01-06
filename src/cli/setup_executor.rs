@@ -41,7 +41,7 @@ pub fn execute_setup_with_env(
 
             spinner.start(format!("Installing {}...", tool.label));
 
-            match install_tool(&tool.brew_package, tool.brew_kind) {
+            match install_tool(tool.brew_package, tool.brew_kind) {
                 Ok(_) => {
                     summary.add_tool_result(ToolInstallResult {
                         tool_id: tool_id.clone(),

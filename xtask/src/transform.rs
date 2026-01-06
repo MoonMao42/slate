@@ -40,7 +40,7 @@ pub fn codegen_theme(theme: &ThemeJson) -> anyhow::Result<String> {
     code.push_str("        selection_fg: None,\n");
 
     // Add ANSI colors (check and adjust for danger zones)
-    let (adjusted_colors, adjustments) = adjust_danger_zones(&theme)?;
+    let (adjusted_colors, adjustments) = adjust_danger_zones(theme)?;
     code.push_str(&format!("        black: \"{}\".to_string(),\n", adjusted_colors["black"]));
     code.push_str(&format!("        red: \"{}\".to_string(),\n", adjusted_colors["red"]));
     code.push_str(&format!("        green: \"{}\".to_string(),\n", adjusted_colors["green"]));

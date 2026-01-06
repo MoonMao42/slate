@@ -34,7 +34,7 @@ pub fn generate_mod_rs(output_dir: &Path) -> anyhow::Result<()> {
         let entry = entry?;
         let path = entry.path();
 
-        if path.extension().map_or(false, |ext| ext == "rs") {
+        if path.extension().is_some_and(|ext| ext == "rs") {
             if let Some(stem) = path.file_stem() {
                 let name = stem.to_string_lossy().to_string();
                 if name != "mod" {

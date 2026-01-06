@@ -52,7 +52,7 @@ fn regen_themes() -> Result<()> {
         let entry = entry?;
         let path = entry.path();
 
-        if path.extension().map_or(false, |ext| ext == "json") {
+        if path.extension().is_some_and(|ext| ext == "json") {
             let filename = path
                 .file_name()
                 .unwrap_or_default()

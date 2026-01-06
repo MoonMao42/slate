@@ -55,36 +55,35 @@ pub fn render() -> Result<()> {
 
     // Rounded panel header
     println!(
-        "{}╭─ {} slate status ─────────────────────────────────────────╮",
-        " ",
+        " ╭─ {} slate status ─────────────────────────────────────────╮",
         Symbols::BRAND
     );
 
     // Section 1 - Core Vibe
-    println!("{}│", " ");
-    println!("{}│  {} Core Vibe", " ", Symbols::DIAMOND);
-    print!("{}│    ", " ");
+    println!(" │");
+    println!(" │  {} Core Vibe", Symbols::DIAMOND);
+    print!(" │    ");
     print_color_blocks(&current_theme.palette);
     println!(" {}", current_theme.name);
-    println!("{}│    {}", " ", current_theme.family);
+    println!(" │    {}", current_theme.family);
 
     // Section 2 - Typography
-    println!("{}│", " ");
-    println!("{}│  {} Typography", " ", Symbols::DIAMOND);
-    println!("{}│    {}", " ", current_font);
+    println!(" │");
+    println!(" │  {} Typography", Symbols::DIAMOND);
+    println!(" │    {}", current_font);
 
     // Section 3 - Background
-    println!("{}│", " ");
-    println!("{}│  {} Background", " ", Symbols::DIAMOND);
-    println!("{}│    {}  {}", " ", "Terminal", terminal);
-    println!("{}│    {}  {}", " ", "Opacity", current_opacity);
+    println!(" │");
+    println!(" │  {} Background", Symbols::DIAMOND);
+    println!(" │    Terminal  {}", terminal);
+    println!(" │    Opacity  {}", current_opacity);
 
     // Section 4 - Toolkit (3-column grid)
-    println!("{}│", " ");
-    println!("{}│  {} Toolkit", " ", Symbols::DIAMOND);
+    println!(" │");
+    println!(" │  {} Toolkit", Symbols::DIAMOND);
     let adapter_status = get_adapter_statuses()?;
     for chunk in adapter_status.chunks(3) {
-        print!("{}│    ", " ");
+        print!(" │    ");
         for (tool, status) in chunk {
             let symbol = match status {
                 ToolStatus::Themed => Symbols::SUCCESS,
@@ -97,15 +96,14 @@ pub fn render() -> Result<()> {
     }
 
     // Section 5 - Auto Theme Agent
-    println!("{}│", " ");
+    println!(" │");
     let agent_status = get_agent_status();
-    println!("{}│  {} Auto Theme Agent", " ", Symbols::DIAMOND);
-    println!("{}│    {}", " ", agent_status);
+    println!(" │  {} Auto Theme Agent", Symbols::DIAMOND);
+    println!(" │    {}", agent_status);
 
     // Panel footer
     println!(
-        "{}╰─────────────────────────────────────────────────────────────╯",
-        " "
+        " ╰─────────────────────────────────────────────────────────────╯"
     );
 
     // Print blank line below 

@@ -18,7 +18,7 @@ pub fn handle(_args: &[&str]) -> Result<()> {
     for theme in registry.all() {
         families
             .entry(theme.family.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(theme);
     }
 

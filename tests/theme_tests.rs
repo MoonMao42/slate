@@ -206,7 +206,7 @@ fn test_catppuccin_extras_mapping() {
     ] {
         let theme = registry
             .get(theme_id)
-            .expect(&format!("Theme {} not found", theme_id));
+            .unwrap_or_else(|| panic!("Theme {} not found", theme_id));
 
         // All Catppuccin themes should have extras populated
         assert!(

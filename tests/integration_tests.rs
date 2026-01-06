@@ -1,5 +1,4 @@
 use assert_cmd::Command;
-use slate_cli::brand::language::Language;
 
 #[test]
 fn test_cli_help_shows_commands() {
@@ -19,7 +18,7 @@ fn test_cli_help_shows_commands() {
 fn test_setup_subcommand_help() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(&["setup", "--help"]).output().unwrap();
+    let output = cmd.args(["setup", "--help"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(stdout.contains("setup"));
@@ -30,7 +29,7 @@ fn test_setup_subcommand_help() {
 fn test_set_subcommand_help() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(&["set", "--help"]).output().unwrap();
+    let output = cmd.args(["set", "--help"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(stdout.contains("set"));
@@ -40,7 +39,7 @@ fn test_set_subcommand_help() {
 fn test_status_subcommand_help() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(&["status", "--help"]).output().unwrap();
+    let output = cmd.args(["status", "--help"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(stdout.contains("status"));
@@ -50,7 +49,7 @@ fn test_status_subcommand_help() {
 fn test_list_subcommand_help() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(&["list", "--help"]).output().unwrap();
+    let output = cmd.args(["list", "--help"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(stdout.contains("list"));
@@ -60,7 +59,7 @@ fn test_list_subcommand_help() {
 fn test_reset_subcommand_help() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(&["reset", "--help"]).output().unwrap();
+    let output = cmd.args(["reset", "--help"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(stdout.contains("reset"));
@@ -70,7 +69,7 @@ fn test_reset_subcommand_help() {
 fn test_setup_quick_flag() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(&["setup", "--quick"]).output().unwrap();
+    let output = cmd.args(["setup", "--quick"]).output().unwrap();
     // In quick mode, wizard runs successfully
     assert!(output.status.success());
 }
@@ -79,7 +78,7 @@ fn test_setup_quick_flag() {
 fn test_set_with_theme_argument() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(&["set", "catppuccin-mocha"]).output().unwrap();
+    let output = cmd.args(["set", "catppuccin-mocha"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     // set command now switches theme and confirms
@@ -119,7 +118,7 @@ fn test_list_command_runs() {
 fn test_reset_with_backup_id() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(&["reset", "backup123"]).output().unwrap();
+    let output = cmd.args(["reset", "backup123"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(stdout.contains("backup123"));

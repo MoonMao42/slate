@@ -82,7 +82,7 @@ impl ToolAdapter for StarshipAdapter {
             SlateError::ConfigReadError(config_path.display().to_string(), e.to_string())
         })?;
 
-        let mut doc: DocumentMut = content.parse().map_err(|e| SlateError::TomlParseError(e))?;
+        let mut doc: DocumentMut = content.parse().map_err(SlateError::TomlParseError)?;
 
         // Step 2: Set palette = "slate" at root level
         doc["palette"] = toml_edit::value("slate");

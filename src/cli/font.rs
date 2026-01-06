@@ -125,7 +125,7 @@ fn show_font_picker() -> Result<()> {
 
     // Find the selected item by key
     for (key, display_label, _, is_system, is_header) in &picker_items {
-        if key == &selected {
+        if key == selected {
             // Skip group headers
             if *is_header {
                 return Ok(());

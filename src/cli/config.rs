@@ -8,7 +8,7 @@ use crate::platform;
 /// Handle `slate config set <key> <value>` command
 pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
     let env = SlateEnv::from_process()?;
-    let mut config = ConfigManager::with_env(&env)?;
+    let config = ConfigManager::with_env(&env)?;
 
     match key {
         "opacity" => {

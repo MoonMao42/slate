@@ -200,7 +200,7 @@ impl PaletteRenderer {
                     let key = parts[1].to_string();
                     styles
                         .entry(style)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push((key, color.clone()));
                 }
             }
@@ -251,7 +251,7 @@ impl PaletteRenderer {
 
                     prefixes
                         .entry(prefix)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push((field, ansi_24bit));
                 }
             }

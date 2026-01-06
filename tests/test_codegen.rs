@@ -91,7 +91,7 @@ fn test_all_generated_theme_rs_files_exist() {
 
         // Verify file contains @generated marker
         let content = std::fs::read_to_string(&path)
-            .expect(&format!("Failed to read {}", path));
+            .unwrap_or_else(|_| panic!("Failed to read {}", path));
         assert!(
             content.contains("@generated"),
             "Generated file {} missing @generated marker",
@@ -118,7 +118,7 @@ fn test_generated_mod_rs_structure() {
 fn test_xtask_compiles() {
     // Verify xtask workspace member compiles
     let output = std::process::Command::new("cargo")
-        .args(&["build", "--manifest-path", "xtask/Cargo.toml"])
+        .args(["build", "--manifest-path", "xtask/Cargo.toml"])
         .output()
         .expect("Failed to run cargo build for xtask");
 

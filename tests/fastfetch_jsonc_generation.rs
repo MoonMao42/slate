@@ -15,11 +15,11 @@ fn test_generates_valid_json_for_all_themes() {
     for theme in all_themes {
         let jsonc = adapter
             .generate_jsonc_config(theme)
-            .expect(&format!("Failed to generate JSONC for theme {}", theme.id));
+            .unwrap_or_else(|_| panic!("Failed to generate JSONC for theme {}", theme.id));
 
         // Verify it's valid JSON (can be parsed)
         let parsed: serde_json::Value =
-            serde_json::from_str(&jsonc).expect(&format!("Invalid JSON for theme {}", theme.id));
+            serde_json::from_str(&jsonc).unwrap_or_else(|_| panic!("Invalid JSON for theme {}", theme.id));
 
         // Verify it's a valid object
         assert!(
@@ -38,17 +38,17 @@ fn test_apple_logo_preserved_in_all_themes() {
     for theme in registry.all() {
         let jsonc = adapter
             .generate_jsonc_config(theme)
-            .expect(&format!("Failed to generate JSONC for theme {}", theme.id));
+            .unwrap_or_else(|_| panic!("Failed to generate JSONC for theme {}", theme.id));
 
         let parsed: serde_json::Value =
-            serde_json::from_str(&jsonc).expect(&format!("Failed to parse JSON for {}", theme.id));
+            serde_json::from_str(&jsonc).unwrap_or_else(|_| panic!("Failed to parse JSON for {}", theme.id));
 
         // Per fastfetch 2.x schema: `logo` is a top-level field with `source`
         // (not `display.logo.name` — that is the old schema that fastfetch
         // silently rejected with `JsonConfig Error: Unknown display property`).
         let logo = parsed
             .get("logo")
-            .expect(&format!("Missing top-level logo for theme {}", theme.id));
+            .unwrap_or_else(|| panic!("Missing top-level logo for theme {}", theme.id));
 
         assert_eq!(
             logo.get("type").and_then(|v| v.as_str()),
@@ -112,7 +112,7 @@ fn test_color_codes_are_ansi_24bit_format() {
     for (key, value) in color_obj.as_object().expect("color should be an object") {
         let color_str = value
             .as_str()
-            .expect(&format!("Color value for '{}' should be a string", key));
+            .unwrap_or_else(|| panic!("Color value for '{}' should be a string", key));
 
         assert!(
             ansi_24bit_regex.is_match(color_str),
@@ -131,19 +131,17 @@ fn test_modules_array_contains_at_least_6_items() {
     for theme in registry.all() {
         let jsonc = adapter
             .generate_jsonc_config(theme)
-            .expect(&format!("Failed to generate JSONC for theme {}", theme.id));
+            .unwrap_or_else(|_| panic!("Failed to generate JSONC for theme {}", theme.id));
 
         let parsed: serde_json::Value =
-            serde_json::from_str(&jsonc).expect(&format!("Failed to parse JSON for {}", theme.id));
+            serde_json::from_str(&jsonc).unwrap_or_else(|_| panic!("Failed to parse JSON for {}", theme.id));
 
         let modules = parsed
             .get("modules")
-            .expect(&format!("Missing modules array for theme {}", theme.id))
+            .unwrap_or_else(|| panic!("Missing modules array for theme {}", theme.id))
             .as_array()
-            .expect(&format!(
-                "modules should be an array for theme {}",
-                theme.id
-            ));
+            .unwrap_or_else(|| panic!("modules should be an array for theme {}",
+                theme.id));
 
         assert!(
             modules.len() >= 6 && modules.len() <= 8,

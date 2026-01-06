@@ -34,11 +34,11 @@ struct TerminalGuard;
 impl TerminalGuard {
     fn enter() -> Result<Self> {
         terminal::enable_raw_mode().map_err(|e| {
-            crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e))
+            crate::error::SlateError::IOError(io::Error::other(e))
         })?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, Hide).map_err(|e| {
-            crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e))
+            crate::error::SlateError::IOError(io::Error::other(e))
         })?;
         Ok(Self)
     }
@@ -125,13 +125,13 @@ fn event_loop(env: &SlateEnv, state: &mut PickerState) -> Result<ExitAction> {
 
         // Poll with a short timeout so flashes can expire and repaint.
         if !event::poll(Duration::from_millis(150)).map_err(|e| {
-            crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e))
+            crate::error::SlateError::IOError(io::Error::other(e))
         })? {
             continue;
         }
 
         match event::read().map_err(|e| {
-            crate::error::SlateError::IOError(io::Error::new(io::ErrorKind::Other, e))
+            crate::error::SlateError::IOError(io::Error::other(e))
         })? {
             Event::Key(key) => match handle_key(key, state, env, &mut flash)? {
                 KeyOutcome::Continue => {
@@ -569,7 +569,7 @@ pub fn render_afterglow_receipt(state: &super::state::PickerState, _env: &SlateE
     output.push_str("\x1b[?25h"); // Show cursor
 
     // Output newline to separate from alternate screen
-    output.push_str("\n");
+    output.push('\n');
 
     // Build receipt lines with theme colors
     // Theme line: ✦ Theme {theme_name}

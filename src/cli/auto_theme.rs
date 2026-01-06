@@ -13,7 +13,7 @@ pub fn detect_system_appearance() -> Result<ThemeAppearance> {
     // Output: "Dark" if dark mode, missing/error otherwise
 
     match Command::new("defaults")
-        .args(&["read", "-g", "AppleInterfaceStyle"])
+        .args(["read", "-g", "AppleInterfaceStyle"])
         .output()
     {
         Ok(output) => {
@@ -71,7 +71,7 @@ pub fn resolve_auto_theme(_env: &SlateEnv, config: &ConfigManager) -> Result<Str
     let current_theme_id = config.get_current_theme()?;
 
     if let Some(ref current_id) = current_theme_id {
-        if let Some(current_theme) = registry.get(&current_id) {
+        if let Some(current_theme) = registry.get(current_id) {
             // 4b: Check if current theme appearance matches system
             if current_theme.appearance == system_appearance {
                 return Ok(current_id.clone());

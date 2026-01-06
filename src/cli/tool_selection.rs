@@ -198,6 +198,12 @@ pub struct TerminalSettings {
     pub padding_y: u32,
 }
 
+impl Default for ReviewReceipt {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReviewReceipt {
     pub fn new() -> Self {
         Self {
@@ -230,7 +236,7 @@ impl ReviewReceipt {
                 };
                 output.push_str(&format!(
                     "{}\n",
-                    Typography::list_item('•', &action.tool_label, &kind_str)
+                    Typography::list_item('•', &action.tool_label, kind_str)
                 ));
             }
             output.push('\n');

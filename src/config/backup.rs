@@ -1,7 +1,6 @@
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use atomic_write_file::AtomicWriteFile;
-use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -312,7 +311,7 @@ pub fn create_backup(tool: &str, theme_name: &str, config_path: &Path) -> Result
 
     // Generate backup filename: {tool}--{theme_name}--{timestamp}.backup
     // Replace spaces and colons with dashes for filesystem safety
-    let safe_theme = theme_name.replace(' ', "-").replace(':', "-");
+    let safe_theme = theme_name.replace([' ', ':'], "-");
     let backup_filename = format!("{}--{}--{}.backup", tool, safe_theme, timestamp);
     let backup_path = backup_dir.join(&backup_filename);
 
@@ -405,7 +404,7 @@ pub fn timestamp_from_string(ts_str: &str) -> Result<SystemTime> {
 
 /// Calculate days since Unix epoch (1970-01-01) for a given date
 fn days_from_unix_epoch(year: u64, month: u64, day: u64) -> Option<u64> {
-    if month < 1 || month > 12 || day < 1 {
+    if !(1..=12).contains(&month) || day < 1 {
         return None;
     }
 
@@ -430,7 +429,7 @@ fn days_from_unix_epoch(year: u64, month: u64, day: u64) -> Option<u64> {
 
     // Count days for complete months in this year
     for m in 1..month {
-        days += days_in_month[m as usize - 1] as u64;
+        days += days_in_month[m as usize - 1];
     }
 
     // Add remaining days
@@ -577,6 +576,148 @@ fn calculate_date(mut days: u64) -> (u64, u64, u64) {
 /// Check if a year is a leap year
 fn is_leap_year(year: u64) -> bool {
     (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+/// Create a baseline restore point before any slate mutations
+/// Special variant of begin_restore_point that marks the restore point as baseline
+/// This should be called BEFORE first setup to capture pre-slate state
+pub fn begin_restore_point_baseline(_home: &Path) -> Result<RestorePoint> {
+    let _env = SlateEnv::from_process()?;
+    let created_at = SystemTime::now();
+
+    for _ in 0..32 {
+        let restore_point_id = generate_restore_point_id(created_at);
+        let restore_point_dir = restore_point_directory(&restore_point_id)?;
+
+        match fs::create_dir(&restore_point_dir) {
+            Ok(()) => {
+                let session = BackupSession {
+                    restore_point_id,
+                    theme_name: "baseline-pre-slate".to_string(),
+                    restore_point_dir,
+                };
+                let manifest = RestoreManifest {
+                    metadata: RestoreManifestMetadata {
+                        id: session.restore_point_id.clone(),
+                        theme_name: session.theme_name.clone(),
+                        created_at: format_iso8601_timestamp(created_at),
+                        is_baseline: true,
+                    },
+                    entries: Vec::new(),
+                };
+                write_manifest_raw(&manifest_path(&session.restore_point_dir), &manifest)?;
+                return manifest_to_restore_point(manifest);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return Err(SlateError::BackupFailed(format!("Failed to create baseline restore point directory: {}", e),));
+            }
+        }
+    }
+
+    Err(SlateError::BackupFailed("Failed to allocate a unique baseline restore point ID".to_string(),))
+}
+
+/// Check if a restore point is the baseline restore point
+/// Used by reset to protect baseline from accidental overwrite
+pub fn is_baseline_restore_point(restore_point: &RestorePoint) -> bool {
+    restore_point.is_baseline
+}
+
+
+/// Get a specific restore point by ID
+pub fn get_restore_point(restore_point_id: &str) -> Result<RestorePoint> {
+    let restore_point_dir = restore_point_directory(restore_point_id)?;
+    let manifest_path = manifest_path(&restore_point_dir);
+
+    if !manifest_path.exists() {
+        return Err(SlateError::BackupFailed(format!("Restore point not found: {}", restore_point_id),));
+    }
+
+    let restore_point = read_manifest(&manifest_path)?;
+    if restore_point.id != restore_point_id {
+        return Err(SlateError::BackupFailed(format!(
+                "Restore point metadata mismatch: expected {}, found {}",
+                restore_point_id, restore_point.id
+            ),));
+    }
+
+    Ok(restore_point)
+}
+
+/// Restore a specific restore point by writing backed-up files back to their original paths
+/// Helper to restore a single entry to its persisted original_path
+fn restore_entry(original_path: &Path, content: &str) -> Result<()> {
+    // Write content atomically
+    let mut file = AtomicWriteFile::open(original_path).map_err(|e| SlateError::BackupFailed(format!(
+            "Failed to open config for writing {}: {}",
+            original_path.display(),
+            e
+        ),))?;
+
+    file.write_all(content.as_bytes())
+        .map_err(|e| SlateError::BackupFailed(format!(
+                "Failed to write restored content to {}: {}",
+                original_path.display(),
+                e
+            ),))?;
+
+    file.commit().map_err(|e| SlateError::BackupFailed(format!(
+            "Failed to commit restored file {}: {}",
+            original_path.display(),
+            e
+        ),))
+}
+
+/// Delete a specific restore point by ID (removes entire restore_point_id directory)
+pub fn delete_restore_point(restore_point_id: &str) -> Result<usize> {
+    let restore_point_dir = restore_point_directory(restore_point_id)?;
+
+    if !restore_point_dir.exists() {
+        return Err(SlateError::BackupFailed(format!("Restore point directory not found: {}", restore_point_id),));
+    }
+
+    // Count files before deletion
+    let entries = fs::read_dir(&restore_point_dir).map_err(|e| SlateError::BackupFailed(format!("Failed to read restore point directory: {}", e),))?;
+
+    let file_count: usize = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .count();
+
+    // Remove entire directory
+    fs::remove_dir_all(&restore_point_dir).map_err(|e| SlateError::BackupFailed(format!("Failed to delete restore point {}: {}", restore_point_id, e),))?;
+
+    Ok(file_count)
+}
+
+/// Delete all restore points (removes all restore_point_id directories)
+pub fn clear_all_restore_points() -> Result<usize> {
+    let backup_dir = backup_directory()?;
+    if !backup_dir.exists() {
+        return Ok(0);
+    }
+
+    let entries = fs::read_dir(&backup_dir).map_err(|e| SlateError::BackupFailed(format!("Failed to read backup directory: {}", e),))?;
+
+    let mut deleted_items = 0;
+    for entry in entries {
+        let entry = entry.map_err(|e| SlateError::BackupFailed(format!("Failed to read backup directory entry: {}", e),))?;
+        let path = entry.path();
+        if path.is_dir() {
+            fs::remove_dir_all(&path).map_err(|e| SlateError::BackupFailed(format!(
+                    "Failed to delete backup directory {}: {}",
+                    path.display(),
+                    e
+                ),))?;
+            deleted_items += 1;
+        } else if path.is_file() {
+            fs::remove_file(&path).map_err(|e| SlateError::BackupFailed(format!("Failed to delete backup file {}: {}", path.display(), e),))?;
+            deleted_items += 1;
+        }
+    }
+
+    Ok(deleted_items)
 }
 
 #[cfg(test)]
@@ -760,146 +901,4 @@ mod tests {
             .to_string()
             .contains("Delta restore point is incomplete"));
     }
-}
-
-/// Create a baseline restore point before any slate mutations
-/// Special variant of begin_restore_point that marks the restore point as baseline
-/// This should be called BEFORE first setup to capture pre-slate state
-pub fn begin_restore_point_baseline(_home: &Path) -> Result<RestorePoint> {
-    let _env = SlateEnv::from_process()?;
-    let created_at = SystemTime::now();
-
-    for _ in 0..32 {
-        let restore_point_id = generate_restore_point_id(created_at);
-        let restore_point_dir = restore_point_directory(&restore_point_id)?;
-
-        match fs::create_dir(&restore_point_dir) {
-            Ok(()) => {
-                let session = BackupSession {
-                    restore_point_id,
-                    theme_name: "baseline-pre-slate".to_string(),
-                    restore_point_dir,
-                };
-                let manifest = RestoreManifest {
-                    metadata: RestoreManifestMetadata {
-                        id: session.restore_point_id.clone(),
-                        theme_name: session.theme_name.clone(),
-                        created_at: format_iso8601_timestamp(created_at),
-                        is_baseline: true,
-                    },
-                    entries: Vec::new(),
-                };
-                write_manifest_raw(&manifest_path(&session.restore_point_dir), &manifest)?;
-                return manifest_to_restore_point(manifest);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => {
-                return Err(SlateError::BackupFailed(format!("Failed to create baseline restore point directory: {}", e),));
-            }
-        }
-    }
-
-    Err(SlateError::BackupFailed("Failed to allocate a unique baseline restore point ID".to_string(),))
-}
-
-/// Check if a restore point is the baseline restore point
-/// Used by reset to protect baseline from accidental overwrite
-pub fn is_baseline_restore_point(restore_point: &RestorePoint) -> bool {
-    restore_point.is_baseline
-}
-
-
-/// Get a specific restore point by ID
-pub fn get_restore_point(restore_point_id: &str) -> Result<RestorePoint> {
-    let restore_point_dir = restore_point_directory(restore_point_id)?;
-    let manifest_path = manifest_path(&restore_point_dir);
-
-    if !manifest_path.exists() {
-        return Err(SlateError::BackupFailed(format!("Restore point not found: {}", restore_point_id),));
-    }
-
-    let restore_point = read_manifest(&manifest_path)?;
-    if restore_point.id != restore_point_id {
-        return Err(SlateError::BackupFailed(format!(
-                "Restore point metadata mismatch: expected {}, found {}",
-                restore_point_id, restore_point.id
-            ),));
-    }
-
-    Ok(restore_point)
-}
-
-/// Restore a specific restore point by writing backed-up files back to their original paths
-/// Helper to restore a single entry to its persisted original_path
-fn restore_entry(original_path: &Path, content: &str) -> Result<()> {
-    // Write content atomically
-    let mut file = AtomicWriteFile::open(original_path).map_err(|e| SlateError::BackupFailed(format!(
-            "Failed to open config for writing {}: {}",
-            original_path.display(),
-            e
-        ),))?;
-
-    file.write_all(content.as_bytes())
-        .map_err(|e| SlateError::BackupFailed(format!(
-                "Failed to write restored content to {}: {}",
-                original_path.display(),
-                e
-            ),))?;
-
-    file.commit().map_err(|e| SlateError::BackupFailed(format!(
-            "Failed to commit restored file {}: {}",
-            original_path.display(),
-            e
-        ),))
-}
-
-/// Delete a specific restore point by ID (removes entire restore_point_id directory)
-pub fn delete_restore_point(restore_point_id: &str) -> Result<usize> {
-    let restore_point_dir = restore_point_directory(restore_point_id)?;
-
-    if !restore_point_dir.exists() {
-        return Err(SlateError::BackupFailed(format!("Restore point directory not found: {}", restore_point_id),));
-    }
-
-    // Count files before deletion
-    let entries = fs::read_dir(&restore_point_dir).map_err(|e| SlateError::BackupFailed(format!("Failed to read restore point directory: {}", e),))?;
-
-    let file_count: usize = entries
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_file())
-        .count();
-
-    // Remove entire directory
-    fs::remove_dir_all(&restore_point_dir).map_err(|e| SlateError::BackupFailed(format!("Failed to delete restore point {}: {}", restore_point_id, e),))?;
-
-    Ok(file_count)
-}
-
-/// Delete all restore points (removes all restore_point_id directories)
-pub fn clear_all_restore_points() -> Result<usize> {
-    let backup_dir = backup_directory()?;
-    if !backup_dir.exists() {
-        return Ok(0);
-    }
-
-    let entries = fs::read_dir(&backup_dir).map_err(|e| SlateError::BackupFailed(format!("Failed to read backup directory: {}", e),))?;
-
-    let mut deleted_items = 0;
-    for entry in entries {
-        let entry = entry.map_err(|e| SlateError::BackupFailed(format!("Failed to read backup directory entry: {}", e),))?;
-        let path = entry.path();
-        if path.is_dir() {
-            fs::remove_dir_all(&path).map_err(|e| SlateError::BackupFailed(format!(
-                    "Failed to delete backup directory {}: {}",
-                    path.display(),
-                    e
-                ),))?;
-            deleted_items += 1;
-        } else if path.is_file() {
-            fs::remove_file(&path).map_err(|e| SlateError::BackupFailed(format!("Failed to delete backup file {}: {}", path.display(), e),))?;
-            deleted_items += 1;
-        }
-    }
-
-    Ok(deleted_items)
 }

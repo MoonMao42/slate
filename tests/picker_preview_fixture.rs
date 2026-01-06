@@ -3,7 +3,7 @@
 //! Tests cover: dark, light, extras-heavy, extras-empty scenarios.
 
 use slate_cli::cli::picker::preview_panel::{render_preview, SemanticColor};
-use slate_cli::theme::{Palette, ThemeRegistry};
+use slate_cli::theme::ThemeRegistry;
 
 #[test]
 fn test_preview_renders_catppuccin_mocha_dark() {
