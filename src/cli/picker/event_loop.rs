@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers},
     execute, queue,
     style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor},
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
@@ -33,13 +33,11 @@ struct TerminalGuard;
 
 impl TerminalGuard {
     fn enter() -> Result<Self> {
-        terminal::enable_raw_mode().map_err(|e| {
-            crate::error::SlateError::IOError(io::Error::other(e))
-        })?;
+        terminal::enable_raw_mode()
+            .map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, Hide).map_err(|e| {
-            crate::error::SlateError::IOError(io::Error::other(e))
-        })?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture, Hide)
+            .map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))?;
         Ok(Self)
     }
 }
@@ -47,7 +45,7 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let mut stdout = io::stdout();
-        let _ = execute!(stdout, Show, LeaveAlternateScreen);
+        let _ = execute!(stdout, Show, DisableMouseCapture, LeaveAlternateScreen);
         let _ = terminal::disable_raw_mode();
     }
 }
@@ -112,29 +110,68 @@ enum ExitAction {
 
 fn event_loop(env: &SlateEnv, state: &mut PickerState) -> Result<ExitAction> {
     let mut flash: Option<Flash> = None;
+    let mut dirty = true; // Paint on first iteration
 
     loop {
-        render(state, flash.as_ref())?;
+        if dirty {
+            render(state, flash.as_ref())?;
+            dirty = false;
+        }
 
         // Auto-expire flashes.
         if let Some(f) = &flash {
             if Instant::now() >= f.until {
                 flash = None;
+                dirty = true;
             }
         }
 
         // Poll with a short timeout so flashes can expire and repaint.
-        if !event::poll(Duration::from_millis(150)).map_err(|e| {
-            crate::error::SlateError::IOError(io::Error::other(e))
-        })? {
+        if !event::poll(Duration::from_millis(150))
+            .map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))?
+        {
             continue;
         }
 
-        match event::read().map_err(|e| {
-            crate::error::SlateError::IOError(io::Error::other(e))
-        })? {
-            Event::Key(key) => match handle_key(key, state, env, &mut flash)? {
+        // Read the first event, then drain any queued events to skip to the
+        // latest input. This prevents "sliding" when keys are held down.
+        let first = event::read().map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))?;
+        let mut last_key_event = match &first {
+            Event::Key(k) => Some(*k),
+            _ => None,
+        };
+        let mut had_resize = matches!(&first, Event::Resize(_, _));
+
+        // Drain remaining queued events with zero-timeout poll
+        while event::poll(Duration::ZERO)
+            .map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))?
+        {
+            match event::read().map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))? {
+                Event::Key(k) => {
+                    // For navigation keys, keep only the latest one
+                    // For action keys (Enter/Esc/Ctrl+C), process immediately
+                    match k.code {
+                        KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
+                            last_key_event = Some(k);
+                            break; // Don't skip action keys
+                        }
+                        KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                            last_key_event = Some(k);
+                            break;
+                        }
+                        _ => { last_key_event = Some(k); }
+                    }
+                }
+                Event::Resize(_, _) => { had_resize = true; }
+                _ => {}
+            }
+        }
+
+        // Process the final key event
+        if let Some(key) = last_key_event {
+            match handle_key(key, state, env, &mut flash)? {
                 KeyOutcome::Continue => {
+                    dirty = true;
                     let effective = get_effective_opacity_for_rendering(state);
                     let _ = crate::cli::set::silent_preview_apply(
                         env,
@@ -145,11 +182,11 @@ fn event_loop(env: &SlateEnv, state: &mut PickerState) -> Result<ExitAction> {
                 KeyOutcome::Inert => {}
                 KeyOutcome::Commit => return Ok(ExitAction::Commit),
                 KeyOutcome::Cancel => return Ok(ExitAction::Cancel),
-            },
-            Event::Resize(_, _) => {
-                // Repaint on next iteration
             }
-            _ => {}
+        }
+
+        if had_resize {
+            dirty = true;
         }
     }
 }
@@ -312,10 +349,13 @@ fn render(state: &PickerState, flash: Option<&Flash>) -> Result<()> {
         Print("   theme + opacity picker\r\n\r\n"),
     ))?;
 
-    // Scroll window
+    // Scroll window — reserve lines for chrome (header=3, counter=2, opacity=3, help=3, padding=2)
     let (_cols, rows) = terminal::size().map_err(io_err)?;
-    let chrome_lines: usize = 10;
-    let max_visible = (rows as usize).saturating_sub(chrome_lines).max(5);
+    let total_rows = rows as usize;
+    // Preview takes ~4 lines (Normal + Bright + Extras + blank); only show if enough room
+    let show_preview = total_rows > 20;
+    let chrome_lines: usize = if show_preview { 16 } else { 11 };
+    let max_visible = total_rows.saturating_sub(chrome_lines).max(3);
     let total = state.theme_ids().len();
     let cursor = state.selected_theme_index();
     let visible = max_visible.min(total);
@@ -383,13 +423,15 @@ fn render(state: &PickerState, flash: Option<&Flash>) -> Result<()> {
         ResetColor,
     ))?;
 
-    // Preview panel (positioning)
-    queue_io(queue!(stdout, Print("\r\n")))?;
+    // ANSI color preview — only show when terminal has enough vertical space
     let current_theme = state.get_current_theme()?;
-    let preview_output = super::preview_panel::render_preview(&current_theme.palette);
-    queue_io(queue!(stdout, Print("  ")))?;
-    queue_io(queue!(stdout, Print(preview_output)))?;
-    queue_io(queue!(stdout, Print("\r\n")))?;
+    if show_preview {
+        let preview_raw = super::preview_panel::render_preview(&current_theme.palette);
+        let preview_output = preview_raw.replace('\n', "\r\n  ");
+        queue_io(queue!(stdout, Print("  ")))?;
+        queue_io(queue!(stdout, Print(preview_output)))?;
+        queue_io(queue!(stdout, Print("\r\n")))?;
+    }
 
     // Opacity indicator — apply guardrail to the rendered selection
     let effective = get_effective_opacity_for_rendering(state);
@@ -409,16 +451,6 @@ fn render(state: &PickerState, flash: Option<&Flash>) -> Result<()> {
         Print("  s save-auto · r resume-auto\r\n"),
         ResetColor,
     ))?;
-
-    // Guardrail hint
-    if should_guard_light_theme_opacity(state) {
-        queue_io(queue!(
-            stdout,
-            SetForegroundColor(Color::Yellow),
-            Print("\r\n  (i) Light theme — press ←→ to unlock non-Solid opacity\r\n"),
-            ResetColor,
-        ))?;
-    }
 
     // Flash
     if let Some(f) = flash {

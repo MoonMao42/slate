@@ -13,16 +13,16 @@ pub enum SemanticColor {
     GitUntracked, // Red (git status ?? files)
 
     // File system
-    Directory,  // Directory paths
-    FileExec,   // Executable files
+    Directory,   // Directory paths
+    FileExec,    // Executable files
     FileSymlink, // Symbolic links
-    FileDir,    // Directory in listing
+    FileDir,     // Directory in listing
 
     // Prompt & interaction
-    Prompt,  // $ / % prompt character
-    Accent,  // Highlight color (e.g., starship module)
-    Error,   // Error messages
-    Muted,   // Dimmed text (comments, helpers)
+    Prompt, // $ / % prompt character
+    Accent, // Highlight color (e.g., starship module)
+    Error,  // Error messages
+    Muted,  // Dimmed text (comments, helpers)
 
     // Starship/shell specific
     Success, // Command exit success (green star, etc.)
@@ -151,16 +151,6 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
 
     let mut output = String::new();
 
-    // Render sample tokens with semantic colors 
-    for span in SAMPLE_TOKENS {
-        let color_hex = palette.resolve(span.role);
-        output.push_str(&fg(&color_hex));
-        output.push_str(span.text);
-        output.push_str(RESET);
-    }
-
-    output.push_str("\n\n");
-
     // Render 16 ANSI color matrix using background blocks so every cell
     // carries an explicit \x1b[48;2;R;G;Bm sequence.
     // Normal (0-7)
@@ -206,8 +196,10 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
     // Render extras matrix if present (conditional)
     if !palette.extras.is_empty() {
         output.push_str("Extras: ");
+        let mut sorted_extras: Vec<_> = palette.extras.iter().collect();
+        sorted_extras.sort_by_key(|(name, _)| name.clone());
         let mut extra_count = 0;
-        for (name, color) in &palette.extras {
+        for (name, color) in &sorted_extras {
             output.push_str(&bg(color));
             output.push_str(&format!(" {} ", name));
             output.push_str(RESET);
@@ -271,9 +263,18 @@ mod tests {
         }
 
         assert!(has_directory, "Sample tokens should include Directory role");
-        assert!(has_git_branch, "Sample tokens should include GitBranch role");
-        assert!(has_git_modified, "Sample tokens should include GitModified role");
-        assert!(has_git_untracked, "Sample tokens should include GitUntracked role");
+        assert!(
+            has_git_branch,
+            "Sample tokens should include GitBranch role"
+        );
+        assert!(
+            has_git_modified,
+            "Sample tokens should include GitModified role"
+        );
+        assert!(
+            has_git_untracked,
+            "Sample tokens should include GitUntracked role"
+        );
         assert!(has_prompt, "Sample tokens should include Prompt role");
         assert!(has_muted, "Sample tokens should include Muted role");
     }
