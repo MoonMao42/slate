@@ -93,58 +93,89 @@ impl ToolAdapter for StarshipAdapter {
         }
 
         if let Some(palettes) = doc["palettes"].as_table_mut() {
-            // Create or get [palettes.slate]
-            let mut slate_palette = toml_edit::Table::new();
+            let mut sp = toml_edit::Table::new();
+            let p = &theme.palette;
 
-            // Use PaletteRenderer to get TOML-formatted colors
-            let mut semantic_map = std::collections::HashMap::new();
-            semantic_map.insert("rosewater", "rosewater");
-            semantic_map.insert("flamingo", "flamingo");
-            semantic_map.insert("pink", "pink");
-            semantic_map.insert("mauve", "mauve");
-            semantic_map.insert("red", "red");
-            semantic_map.insert("yellow", "yellow");
-            semantic_map.insert("green", "green");
-            semantic_map.insert("blue", "blue");
-            semantic_map.insert("cyan", "teal");
-            semantic_map.insert("magenta", "maroon");
-            semantic_map.insert("bright_cyan", "sky");
-            semantic_map.insert("bright_blue", "sapphire");
-            semantic_map.insert("bright_red", "peach");
-            semantic_map.insert("lavender", "lavender");
-            semantic_map.insert("text", "text");
-            semantic_map.insert("subtext1", "subtext1");
-            semantic_map.insert("subtext0", "subtext0");
-            semantic_map.insert("overlay2", "overlay2");
-            semantic_map.insert("overlay1", "overlay1");
-            semantic_map.insert("overlay0", "overlay0");
-            semantic_map.insert("surface2", "surface2");
-            semantic_map.insert("surface1", "surface1");
-            semantic_map.insert("surface0", "surface0");
-            semantic_map.insert("foreground", "foreground");
-            semantic_map.insert("background", "background");
-            semantic_map.insert("black", "crust");
-            semantic_map.insert("white", "white");
-
-            let palette_colors = crate::adapter::palette_renderer::PaletteRenderer::to_toml(
-                &theme.palette,
-                &semantic_map,
-            )?;
-
-            // Parse the rendered TOML colors and add them to slate_palette
-            for line in palette_colors.lines() {
-                if let Some((key, value)) = line.split_once('=') {
-                    let key = key.trim();
-                    let value = value.trim();
-                    slate_palette[key] = toml_edit::value(value.trim_matches('"'));
-                }
+            // Helper: pick first available Option<String>, or fallback
+            fn pick(opts: &[&Option<String>], fallback: &str) -> String {
+                opts.iter()
+                    .filter_map(|o| o.as_ref())
+                    .next()
+                    .cloned()
+                    .unwrap_or_else(|| fallback.to_string())
             }
 
-            palettes["slate"] = toml_edit::Item::Table(slate_palette);
+            // Core ANSI — always available
+            sp["red"] = toml_edit::value(p.red.as_str());
+            sp["yellow"] = toml_edit::value(p.yellow.as_str());
+            sp["green"] = toml_edit::value(p.green.as_str());
+            sp["blue"] = toml_edit::value(p.blue.as_str());
+            sp["white"] = toml_edit::value(p.white.as_str());
+            sp["foreground"] = toml_edit::value(p.foreground.as_str());
+            sp["background"] = toml_edit::value(p.background.as_str());
+            sp["text"] = toml_edit::value(p.text.as_deref().unwrap_or(&p.foreground));
+
+            // Starship segment colors — must be 6 visually distinct values.
+            // peach (warm accent between red and yellow segments): must differ from both.
+            let peach_candidates: Vec<&str> = [
+                p.extras.get("peach"),
+                p.extras.get("orange"),
+                p.extras.get("rose"),
+            ].iter().filter_map(|o| o.map(|s| s.as_str())).collect();
+
+            let peach = peach_candidates.iter()
+                .find(|c| **c != p.red && **c != p.yellow)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| {
+                    if p.bright_red != p.red && p.bright_red != p.yellow { p.bright_red.clone() }
+                    else if p.bright_yellow != p.yellow && p.bright_yellow != p.red { p.bright_yellow.clone() }
+                    else { p.magenta.clone() }
+                });
+            sp["peach"] = toml_edit::value(peach.as_str());
+
+            // sapphire (cool accent): sapphire → foam → bright_blue (if ≠ blue) → cyan
+            let sapphire = p.extras.get("sapphire")
+                .or(p.extras.get("foam"))
+                .cloned()
+                .unwrap_or_else(|| {
+                    if p.bright_blue != p.blue { p.bright_blue.clone() }
+                    else { p.cyan.clone() }
+                });
+            sp["sapphire"] = toml_edit::value(sapphire.as_str());
+
+            // lavender (purple accent): lavender → iris → mauve → bright_magenta → magenta
+            let lavender = p.lavender.clone()
+                .or_else(|| p.extras.get("lavender").cloned())
+                .or_else(|| p.extras.get("iris").cloned())
+                .unwrap_or_else(|| pick(&[&p.mauve, &Some(p.bright_magenta.clone())], &p.magenta));
+            sp["lavender"] = toml_edit::value(lavender.as_str());
+
+            // Secondary palette names used by some starship configs
+            sp["teal"] = toml_edit::value(p.cyan.as_str());
+            sp["maroon"] = toml_edit::value(p.extras.get("maroon")
+                .unwrap_or(&p.bright_red).as_str());
+            sp["sky"] = toml_edit::value(p.bright_cyan.as_str());
+            sp["pink"] = toml_edit::value(p.pink.as_deref()
+                .or(p.extras.get("pink").map(|s| s.as_str()))
+                .unwrap_or(&p.bright_magenta));
+
+            // crust: semantic darkest background
+            sp["crust"] = toml_edit::value(p.bg_darkest.as_deref().unwrap_or(&p.black));
+
+            // powerline_fg: adaptive high-contrast foreground for segment text
+            let powerline_fg = if theme.appearance == crate::theme::ThemeAppearance::Light {
+                &p.foreground
+            } else {
+                p.bg_darkest.as_ref().unwrap_or(&p.black)
+            };
+            sp["powerline_fg"] = toml_edit::value(powerline_fg.as_str());
+
+            palettes["slate"] = toml_edit::Item::Table(sp);
         }
 
-        // Step 4: Write back to config file (atomic)
-        let new_content = doc.to_string();
+        // Step 3b: Replace fg:crust with fg:powerline_fg in format strings
+        // so powerline segments use the adaptive contrast color.
+        let new_content = doc.to_string().replace("fg:crust", "fg:powerline_fg");
         use atomic_write_file::AtomicWriteFile;
         use std::io::Write;
 
