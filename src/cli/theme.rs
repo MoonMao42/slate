@@ -11,7 +11,7 @@ use crate::theme::ThemeRegistry;
 /// 1. `slate theme <name>` — Apply explicit theme directly
 /// 2. `slate theme --auto` — Apply auto-resolved theme based on system appearance
 /// 3. `slate theme` (no args) — Launch interactive picker
-pub fn handle_theme(theme_name: Option<String>, auto: bool) -> Result<()> {
+pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Result<()> {
     if auto {
         // Auto path: resolve theme based on system appearance
         let env = SlateEnv::from_process()?;
@@ -27,13 +27,31 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool) -> Result<()> {
             ))
         })?;
 
-        apply_theme_selection(theme)?;
-
-        println!(
-            "{} Theme auto-switched to '{}' (system appearance)",
-            Symbols::SUCCESS,
-            theme.name
-        );
+        // In quiet mode, suppress all stderr output from apply_theme_selection
+        if quiet {
+            // Redirect stderr to /dev/null for the duration of apply
+            use std::fs::File;
+            use std::os::unix::io::AsRawFd;
+            let devnull = File::open("/dev/null").ok();
+            let saved_stderr = unsafe { libc::dup(2) };
+            if let Some(ref f) = devnull {
+                unsafe { libc::dup2(f.as_raw_fd(), 2) };
+            }
+            let result = apply_theme_selection(theme);
+            // Restore stderr
+            if saved_stderr >= 0 {
+                unsafe { libc::dup2(saved_stderr, 2) };
+                unsafe { libc::close(saved_stderr) };
+            }
+            result?;
+        } else {
+            apply_theme_selection(theme)?;
+            println!(
+                "{} Theme auto-switched to '{}' (system appearance)",
+                Symbols::SUCCESS,
+                theme.name
+            );
+        }
         Ok(())
     } else if let Some(name) = theme_name {
         // Direct apply path: theme_name is canonical kebab-case

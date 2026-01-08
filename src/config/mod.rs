@@ -9,8 +9,8 @@ use toml_edit::DocumentMut;
 
 mod backup;
 pub use backup::{
-    BackupInfo, RestoreEntry, RestorePoint, BackupSession,
-    list_restore_points, begin_restore_point_baseline, is_baseline_restore_point,
+    begin_restore_point_baseline, is_baseline_restore_point, list_restore_points, BackupInfo,
+    BackupSession, RestoreEntry, RestorePoint,
 };
 
 /// Three-tier configuration manager.
@@ -51,7 +51,7 @@ impl ConfigManager {
 
     /// Path to managed directory for a tool
     /// Example: ~/.config/slate/managed/ghostty
-    fn managed_dir(&self, tool: &str) -> PathBuf {
+    pub fn managed_dir(&self, tool: &str) -> PathBuf {
         self.base_path.join("managed").join(tool)
     }
 
@@ -144,19 +144,105 @@ impl ConfigManager {
 fi
 ",
         );
+        // Gate features behind supported terminal check.
+        // Ghostty, Alacritty, iTerm2, WezTerm, Kitty all render Nerd Fonts properly.
+        // Terminal.app and others fall back to a plain starship config.
+        // Alacritty doesn't set TERM_PROGRAM, but sets TERM=alacritty
+        content.push_str("\nif [[ \"$TERM_PROGRAM\" == \"Ghostty\" || \"$TERM_PROGRAM\" == \"Alacritty\" || \"$TERM_PROGRAM\" == \"iTerm.app\" || \"$TERM_PROGRAM\" == \"WezTerm\" || \"$TERM\" == \"xterm-kitty\" || \"$TERM\" == \"alacritty\" ]]; then\n");
+
         // Conditionally run fastfetch on terminal open if auto-run enabled
-        // Check for marker file presence
         if self.has_fastfetch_autorun()? {
-            content.push_str("\nif command -v fastfetch &> /dev/null; then\n");
-            content.push_str("  fastfetch\n");
-            content.push_str("fi\n");
+            content.push_str("  if command -v fastfetch &> /dev/null; then\n");
+            content.push_str("    fastfetch\n");
+            content.push_str("  fi\n");
         }
+
+        // Auto-theme watcher: Ghostty-only. Other terminals don't need it,
+        // and the Swift NSApplication binary triggers macOS permission prompts
+        // (automation/accessibility) in non-Ghostty terminals.
+        if self.is_auto_theme_enabled()? {
+            let notify_bin = self.managed_dir("bin").join("slate-dark-mode-notify");
+            let notify_path = notify_bin.to_string_lossy();
+            content.push_str(&format!(
+                r#"  if [[ "$TERM_PROGRAM" == "Ghostty" ]] && [[ -z "$_SLATE_AUTO_WATCHER" ]] && [[ -x "{path}" ]]; then
+    export _SLATE_AUTO_WATCHER=1
+    "{path}" slate theme --auto --quiet &!
+  fi
+"#,
+                path = notify_path
+            ));
+        }
+
+        content.push_str("else\n");
+        // Non-Ghostty terminals: use a plain starship config without Nerd Font glyphs
+        let plain_starship = self.managed_dir("starship").join("plain.toml");
+        content.push_str(&format!(
+            "  export STARSHIP_CONFIG=\"{}\"\n",
+            plain_starship.to_string_lossy()
+        ));
+        content.push_str("fi\n");
+
+        // Write plain starship config for non-Ghostty terminals
+        let plain_content = r#"format = "$username$directory$git_branch$git_status$cmd_duration$line_break$character"
+
+[username]
+show_always = true
+format = "[$user]($style) "
+style_user = "bold green"
+
+[directory]
+format = "[$path]($style) "
+style = "bold cyan"
+truncation_length = 3
+
+[git_branch]
+format = "[$symbol$branch]($style) "
+symbol = ""
+style = "bold purple"
+
+[git_status]
+format = "([$all_status$ahead_behind]($style) )"
+style = "bold red"
+
+[cmd_duration]
+format = "[$duration]($style) "
+style = "bold yellow"
+
+[character]
+success_symbol = "[>](bold green)"
+error_symbol = "[>](bold red)"
+"#;
+        self.write_managed_file("starship", "plain.toml", plain_content)?;
 
         // Write atomically to ~/.config/slate/managed/shell/env.zsh
         self.write_managed_file("shell", "env.zsh", &content)?;
 
         Ok(())
     }
+
+    /// Rebuild shell integration using the current theme tracking file.
+    /// Falls back to the default theme when no current theme is recorded or
+    /// when the tracked theme ID no longer exists in the registry.
+    pub fn refresh_shell_integration(&self) -> Result<()> {
+        let registry = crate::theme::ThemeRegistry::new()?;
+        let tracked_theme_id = self
+            .get_current_theme()?
+            .unwrap_or_else(|| crate::theme::DEFAULT_THEME_ID.to_string());
+
+        let theme = registry
+            .get(&tracked_theme_id)
+            .or_else(|| registry.get(crate::theme::DEFAULT_THEME_ID))
+            .cloned()
+            .ok_or_else(|| {
+                SlateError::InvalidThemeData(format!(
+                    "Unable to resolve shell integration theme from tracked id '{}'",
+                    tracked_theme_id
+                ))
+            })?;
+
+        self.write_shell_integration_file(&theme)
+    }
+
     /// Update current theme tracking file.
     /// plain text file with theme ID.
     pub fn set_current_theme(&self, theme_id: &str) -> Result<()> {
@@ -349,7 +435,8 @@ fi
         let doc = content.parse::<DocumentMut>()?;
 
         // Read [auto_theme].enabled; default to false if missing
-        let enabled = doc.get("auto_theme")
+        let enabled = doc
+            .get("auto_theme")
             .and_then(|table| table.get("enabled"))
             .and_then(|value| value.as_bool())
             .unwrap_or(false);
@@ -822,5 +909,39 @@ format = "..."
         // Verify fastfetch conditional is NOT present
         assert!(!content.contains("if command -v fastfetch &> /dev/null; then"));
         assert!(!content.contains("  fastfetch\nfi"));
+    }
+
+    #[test]
+    fn test_refresh_shell_integration_uses_current_theme() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+
+        config_manager
+            .set_current_theme("tokyo-night-dark")
+            .unwrap();
+        config_manager.refresh_shell_integration().unwrap();
+
+        let env_zsh_path = temp.path().join("managed/shell/env.zsh");
+        let content = std::fs::read_to_string(&env_zsh_path).unwrap();
+
+        assert!(content.contains("BAT_THEME=\"Tokyo Night\""));
+    }
+
+    #[test]
+    fn test_refresh_shell_integration_falls_back_to_default_theme() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+
+        config_manager.set_current_theme("missing-theme").unwrap();
+        config_manager.refresh_shell_integration().unwrap();
+
+        let env_zsh_path = temp.path().join("managed/shell/env.zsh");
+        let content = std::fs::read_to_string(&env_zsh_path).unwrap();
+
+        assert!(content.contains("BAT_THEME=\"Catppuccin Mocha\""));
     }
 }

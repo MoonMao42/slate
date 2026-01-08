@@ -1,6 +1,7 @@
 use crate::brand::Language;
 use crate::config::ConfigManager;
 use crate::error::Result;
+use crate::platform;
 use crate::theme::ThemeRegistry;
 
 /// Handle bare `slate` invocation 
@@ -24,6 +25,63 @@ pub fn handle() -> Result<()> {
 
 fn has_current_theme(config: &ConfigManager) -> Result<bool> {
     Ok(config.get_current_theme()?.is_some())
+}
+
+fn sync_auto_theme_toggle(config: &ConfigManager, enabled: bool) -> Result<()> {
+    sync_auto_theme_toggle_with(
+        config,
+        enabled,
+        platform::launchd::install_agent,
+        platform::launchd::uninstall_agent,
+    )
+}
+
+fn sync_auto_theme_toggle_with<Install, Uninstall>(
+    config: &ConfigManager,
+    enabled: bool,
+    install_agent: Install,
+    uninstall_agent: Uninstall,
+) -> Result<()>
+where
+    Install: Fn() -> Result<()>,
+    Uninstall: Fn() -> Result<()>,
+{
+    if enabled {
+        install_agent()?;
+        if let Err(err) = config.set_auto_theme_enabled(true) {
+            let _ = uninstall_agent();
+            return Err(err);
+        }
+    } else {
+        uninstall_agent()?;
+        if let Err(err) = config.set_auto_theme_enabled(false) {
+            let _ = install_agent();
+            return Err(err);
+        }
+    }
+
+    Ok(())
+}
+
+fn toggle_fastfetch_from_preferences(config: &ConfigManager) -> Result<()> {
+    let was_enabled = config.has_fastfetch_autorun()?;
+
+    if was_enabled {
+        config.disable_fastfetch_autorun()?;
+    } else {
+        config.enable_fastfetch_autorun()?;
+    }
+
+    if let Err(err) = config.refresh_shell_integration() {
+        if was_enabled {
+            let _ = config.enable_fastfetch_autorun();
+        } else {
+            let _ = config.disable_fastfetch_autorun();
+        }
+        return Err(err);
+    }
+
+    Ok(())
 }
 
 fn show_hub_menu(config: &ConfigManager) -> Result<()> {
@@ -53,10 +111,7 @@ fn show_hub_menu(config: &ConfigManager) -> Result<()> {
         .unwrap_or_else(|| "Solid".to_string());
 
     // Dashboard rendering with color hierarchy
-    cliclack::log::info(format!(
-        "[1m{}[0m    {}",
-        "Theme", current_theme.name
-    ))?;
+    cliclack::log::info(format!("[1m{}[0m    {}", "Theme", current_theme.name))?;
     cliclack::log::info(format!("[1m{}[0m  {}", "Opacity", current_opacity))?;
     cliclack::log::info(format!(
         "[1m{}[0m    {}",
@@ -69,7 +124,7 @@ fn show_hub_menu(config: &ConfigManager) -> Result<()> {
     // Compute Hub state machine (A/B/C)
     let auto_enabled = config.is_auto_theme_enabled()?;
     let current_theme_id = config.get_current_theme()?;
-    
+
     let hub_state = if auto_enabled {
         // Auto is enabled; check if current matches auto-resolved
         let should_be_theme = crate::cli::auto_theme::resolve_auto_theme(&env, config)?;
@@ -151,7 +206,7 @@ fn show_hub_menu(config: &ConfigManager) -> Result<()> {
         "toggle-auto" => {
             // Toggle auto theme and re-render menu (loop)
             let new_state = !auto_enabled;
-            config.set_auto_theme_enabled(new_state)?;
+            sync_auto_theme_toggle(config, new_state)?;
             show_hub_menu(config)
         }
         "status" => {
@@ -161,7 +216,7 @@ fn show_hub_menu(config: &ConfigManager) -> Result<()> {
         "resume-auto" => {
             // Resume auto theme (apply the should-be theme)
             if let HubState::B(ref destination) = hub_state {
-                crate::cli::theme::handle_theme(Some(destination.clone()), false)
+                crate::cli::theme::handle_theme(Some(destination.clone()), false, false)
             } else {
                 Ok(())
             }
@@ -186,12 +241,11 @@ enum HubState {
     C,
 }
 
-
 fn handle_preferences() -> Result<()> {
     // Preferences submenu reduced to 2 items + Back (no Reset, no auto, no font)
     // Font and auto are now top-level in the main menu 
     let config = ConfigManager::new()?;
-    
+
     let selection = cliclack::select("Preferences")
         .item(
             "fastfetch",
@@ -215,12 +269,7 @@ fn handle_preferences() -> Result<()> {
 
     match selection {
         "fastfetch" => {
-            // Toggle fastfetch autorun marker file
-            if config.has_fastfetch_autorun()? {
-                config.disable_fastfetch_autorun()?;
-            } else {
-                config.enable_fastfetch_autorun()?;
-            }
+            toggle_fastfetch_from_preferences(&config)?;
             // Re-render preferences menu with updated toggle state
             handle_preferences()
         }
@@ -236,3 +285,90 @@ fn handle_preferences() -> Result<()> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::env::SlateEnv;
+    use std::fs;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_sync_auto_theme_toggle_enables_agent_and_config() {
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let config = ConfigManager::with_env(&env).unwrap();
+        let install_calls = AtomicUsize::new(0);
+        let uninstall_calls = AtomicUsize::new(0);
+
+        sync_auto_theme_toggle_with(
+            &config,
+            true,
+            || {
+                install_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+            || {
+                uninstall_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(config.is_auto_theme_enabled().unwrap());
+        assert_eq!(install_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(uninstall_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_sync_auto_theme_toggle_disables_agent_and_config() {
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let config = ConfigManager::with_env(&env).unwrap();
+        let install_calls = AtomicUsize::new(0);
+        let uninstall_calls = AtomicUsize::new(0);
+
+        config.set_auto_theme_enabled(true).unwrap();
+
+        sync_auto_theme_toggle_with(
+            &config,
+            false,
+            || {
+                install_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+            || {
+                uninstall_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(!config.is_auto_theme_enabled().unwrap());
+        assert_eq!(install_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(uninstall_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_toggle_fastfetch_from_preferences_rewrites_shell_integration() {
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let config = ConfigManager::with_env(&env).unwrap();
+        let shell_path = env.config_dir().join("managed/shell/env.zsh");
+
+        config.set_current_theme("catppuccin-mocha").unwrap();
+
+        toggle_fastfetch_from_preferences(&config).unwrap();
+
+        let enabled_content = fs::read_to_string(&shell_path).unwrap();
+        assert!(config.has_fastfetch_autorun().unwrap());
+        assert!(enabled_content.contains("if command -v fastfetch &> /dev/null; then"));
+        assert!(enabled_content.contains("  fastfetch\n"));
+
+        toggle_fastfetch_from_preferences(&config).unwrap();
+
+        let disabled_content = fs::read_to_string(&shell_path).unwrap();
+        assert!(!config.has_fastfetch_autorun().unwrap());
+        assert!(!disabled_content.contains("if command -v fastfetch &> /dev/null; then"));
+    }
+}

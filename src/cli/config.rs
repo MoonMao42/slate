@@ -18,9 +18,10 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
                 "frosted" => OpacityPreset::Frosted,
                 "clear" => OpacityPreset::Clear,
                 _ => {
-                    return Err(crate::error::SlateError::InvalidConfig(
-                        format!("Invalid opacity preset: '{}'. Must be one of: solid, frosted, clear", value)
-                    ))
+                    return Err(crate::error::SlateError::InvalidConfig(format!(
+                        "Invalid opacity preset: '{}'. Must be one of: solid, frosted, clear",
+                        value
+                    )))
                 }
             };
 
@@ -33,23 +34,23 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
         "auto-theme" => {
             match value {
                 "enable" => {
-                    // Install launchd agent
-                    platform::launchd::install_agent()?;
+                    // Compile the Swift dark mode notifier binary
+                    platform::dark_mode_notify::ensure_binary(&config)?;
 
-                    // Write [auto_theme].enabled = true
                     config.set_auto_theme_enabled(true)?;
+                    config.refresh_shell_integration()?;
 
                     println!("{} Auto theme enabled", Symbols::SUCCESS);
-                    println!("  macOS appearance changes will automatically switch your terminal theme");
+                    println!(
+                        "  New shell sessions will auto-switch theme on macOS appearance change"
+                    );
                     println!("  Run 'slate config set auto-theme configure' to customize dark/light pairing");
                     Ok(())
                 }
                 "disable" => {
-                    // Unload launchd agent
-                    platform::launchd::uninstall_agent()?;
-
-                    // Write [auto_theme].enabled = false
                     config.set_auto_theme_enabled(false)?;
+                    config.refresh_shell_integration()?;
+                    platform::dark_mode_notify::remove_binary(&config)?;
 
                     println!("{} Auto theme disabled", Symbols::SUCCESS);
                     Ok(())
@@ -58,24 +59,42 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
                     // Launch Configure Auto Theme two-step cliclack flow (reuse from)
                     crate::cli::auto_theme::configure_auto_theme()?;
 
-                    // If auto-theme is now enabled, make sure agent is installed
+                    // If auto-theme is now enabled, regenerate shell integration
                     if config.is_auto_theme_enabled()? {
-                        platform::launchd::install_agent()?;
+                        config.refresh_shell_integration()?;
                     }
 
                     Ok(())
                 }
-                _ => {
-                    Err(crate::error::SlateError::InvalidConfig(
-                        format!("Invalid auto-theme action: '{}'. Must be one of: enable, disable, configure", value)
-                    ))
-                }
+                _ => Err(crate::error::SlateError::InvalidConfig(format!(
+                    "Invalid auto-theme action: '{}'. Must be one of: enable, disable, configure",
+                    value
+                ))),
             }
         }
-        _ => {
-            Err(crate::error::SlateError::InvalidConfig(
-                format!("Unknown config key: '{}'. Known keys: opacity, auto-theme", key)
-            ))
+        "fastfetch" => {
+            match value {
+                "enable" => {
+                    config.enable_fastfetch_autorun()?;
+                    config.refresh_shell_integration()?;
+                    println!("{} Fastfetch auto-run enabled", Symbols::SUCCESS);
+                    Ok(())
+                }
+                "disable" => {
+                    config.disable_fastfetch_autorun()?;
+                    config.refresh_shell_integration()?;
+                    println!("{} Fastfetch auto-run disabled", Symbols::SUCCESS);
+                    Ok(())
+                }
+                _ => Err(crate::error::SlateError::InvalidConfig(format!(
+                    "Invalid fastfetch action: '{}'. Must be one of: enable, disable",
+                    value
+                ))),
+            }
         }
+        _ => Err(crate::error::SlateError::InvalidConfig(format!(
+            "Unknown config key: '{}'. Known keys: opacity, auto-theme, fastfetch",
+            key
+        ))),
     }
 }

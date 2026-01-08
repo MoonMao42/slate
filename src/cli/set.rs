@@ -1,3 +1,4 @@
+use crate::brand::Language;
 use crate::design::typography::Typography;
 use crate::env::SlateEnv;
 use crate::error::Result;
@@ -10,7 +11,7 @@ use crate::error::Result;
 pub fn handle(args: &[&str]) -> Result<()> {
     // Check for --auto flag (auto path delegates to theme --auto)
     if args.contains(&"--auto") {
-        crate::cli::theme::handle_theme(None, true)?;
+        crate::cli::theme::handle_theme(None, true, false)?;
         // No dim tip for auto path — it's already using the new surface
         return Ok(());
     }
@@ -18,7 +19,7 @@ pub fn handle(args: &[&str]) -> Result<()> {
     // Explicit theme or picker path
     if let Some(theme_arg) = args.first() {
         // Direct theme apply with dispatcher
-        crate::cli::theme::handle_theme(Some(theme_arg.to_string()), false)?;
+        crate::cli::theme::handle_theme(Some(theme_arg.to_string()), false, false)?;
 
         // Show dim tip for legacy usage
         print_dim_tip();
@@ -36,9 +37,11 @@ pub fn handle(args: &[&str]) -> Result<()> {
 
 /// Print a dim tip teaching users about the new `slate theme` surface
 fn print_dim_tip() {
-    let tip = "Language::SLATE_SET_DEPRECATION_TIP";
     println!();
-    println!("{}", Typography::explanation(tip));
+    println!(
+        "{}",
+        Typography::explanation(Language::SLATE_SET_DEPRECATION_TIP)
+    );
 }
 
 /// Silent preview apply: updates only the live preview path without persisting theme/opacity state.
@@ -50,7 +53,11 @@ fn print_dim_tip() {
 /// 3. Applies theme palette to adapters for visual preview
 /// 4. Sends SIGUSR2 to Ghostty for hot-reload (best-effort)
 /// 5. Produces NO stdout output (silent)
-pub fn silent_preview_apply(env: &SlateEnv, theme_id: &str, opacity: crate::opacity::OpacityPreset) -> Result<()> {
+pub fn silent_preview_apply(
+    env: &SlateEnv,
+    theme_id: &str,
+    opacity: crate::opacity::OpacityPreset,
+) -> Result<()> {
     let registry = crate::theme::ThemeRegistry::new()?;
     let theme = registry.get(theme_id).ok_or_else(|| {
         crate::error::SlateError::InvalidThemeData(format!("Theme '{}' not found", theme_id))
@@ -89,7 +96,11 @@ pub fn silent_preview_apply(env: &SlateEnv, theme_id: &str, opacity: crate::opac
 /// 4. Updates opacity/blur configs
 /// 5. Sends SIGUSR2 to Ghostty for hot-reload
 /// 6. Produces NO stdout output (silent, Afterglow receipt printed by caller)
-pub fn silent_commit_apply(env: &SlateEnv, theme_id: &str, opacity: crate::opacity::OpacityPreset) -> Result<()> {
+pub fn silent_commit_apply(
+    env: &SlateEnv,
+    theme_id: &str,
+    opacity: crate::opacity::OpacityPreset,
+) -> Result<()> {
     let config = crate::config::ConfigManager::with_env(env)?;
     let registry = crate::theme::ThemeRegistry::new()?;
 

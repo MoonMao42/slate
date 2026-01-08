@@ -40,6 +40,9 @@ enum Commands {
         /// Apply currently auto-resolved theme based on system appearance
         #[arg(long, conflicts_with = "name")]
         auto: bool,
+        /// Suppress output (for shell hook usage)
+        #[arg(long)]
+        quiet: bool,
     },
     /// Set or pick font
     Font {
@@ -116,19 +119,17 @@ fn main() -> Result<()> {
             }
             cli::set::handle(&args)?;
         }
-        Some(Commands::Theme { name, auto }) => {
-            cli::theme::handle_theme(name, auto)?;
+        Some(Commands::Theme { name, auto, quiet }) => {
+            cli::theme::handle_theme(name, auto, quiet)?;
         }
         Some(Commands::Font { name }) => {
             cli::font::handle_font(name.as_deref())?;
         }
-        Some(Commands::Config { subcommand }) => {
-            match subcommand {
-                ConfigSubcommand::Set { key, value } => {
-                    cli::config::handle_config_set(&key, &value)?;
-                }
+        Some(Commands::Config { subcommand }) => match subcommand {
+            ConfigSubcommand::Set { key, value } => {
+                cli::config::handle_config_set(&key, &value)?;
             }
-        }
+        },
         Some(Commands::Status) => {
             cli::status::handle(&[])?;
         }
