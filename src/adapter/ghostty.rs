@@ -418,20 +418,54 @@ impl ToolAdapter for GhosttyAdapter {
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
-        // Step 1: Extract theme name from tool_refs
-        let ghostty_theme = theme
-            .tool_refs
-            .get("ghostty")
-            .ok_or_else(|| {
-                SlateError::InvalidThemeData(format!(
-                    "Theme '{}' missing ghostty tool reference",
-                    theme.id
-                ))
-            })?
-            .to_string();
-
-        // Step 2: Render managed config as theme-only line
-        let managed_content = format!("theme = \"{}\"\n", ghostty_theme);
+        // Write palette colors directly — no Ghostty built-in theme names.
+        // This ensures terminal colors exactly match our palette (used by
+        // starship, bat, etc.), eliminating cross-tool color drift.
+        let p = &theme.palette;
+        let managed_content = format!(
+            "background = {bg}\n\
+             foreground = {fg}\n\
+             cursor-color = {cursor}\n\
+             selection-background = {sel_bg}\n\
+             selection-foreground = {sel_fg}\n\
+             palette = 0={black}\n\
+             palette = 1={red}\n\
+             palette = 2={green}\n\
+             palette = 3={yellow}\n\
+             palette = 4={blue}\n\
+             palette = 5={magenta}\n\
+             palette = 6={cyan}\n\
+             palette = 7={white}\n\
+             palette = 8={br_black}\n\
+             palette = 9={br_red}\n\
+             palette = 10={br_green}\n\
+             palette = 11={br_yellow}\n\
+             palette = 12={br_blue}\n\
+             palette = 13={br_magenta}\n\
+             palette = 14={br_cyan}\n\
+             palette = 15={br_white}\n",
+            bg = p.background,
+            fg = p.foreground,
+            cursor = p.cursor.as_deref().unwrap_or(&p.foreground),
+            sel_bg = p.selection_bg.as_deref().unwrap_or(&p.bright_black),
+            sel_fg = p.selection_fg.as_deref().unwrap_or(&p.foreground),
+            black = p.black,
+            red = p.red,
+            green = p.green,
+            yellow = p.yellow,
+            blue = p.blue,
+            magenta = p.magenta,
+            cyan = p.cyan,
+            white = p.white,
+            br_black = p.bright_black,
+            br_red = p.bright_red,
+            br_green = p.bright_green,
+            br_yellow = p.bright_yellow,
+            br_blue = p.bright_blue,
+            br_magenta = p.bright_magenta,
+            br_cyan = p.bright_cyan,
+            br_white = p.bright_white,
+        );
 
         // Step 3: Write managed theme config
         let config_manager = ConfigManager::new()?;
@@ -451,10 +485,12 @@ impl ToolAdapter for GhosttyAdapter {
             }
         }
 
-        // Include all three managed files
+        // Include all managed files
+        let font_path = managed_base.join("font.conf");
         Self::ensure_integration_includes_managed(&integration_path, &theme_path)?;
         Self::ensure_integration_includes_managed(&integration_path, &opacity_path)?;
         Self::ensure_integration_includes_managed(&integration_path, &blur_path)?;
+        Self::ensure_integration_includes_managed(&integration_path, &font_path)?;
 
         // Note: Font updates are handled by the FontAdapter (applied in plan 06-06).
         // Theme switches should only affect colors, not fonts.
