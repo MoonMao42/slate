@@ -19,7 +19,10 @@ fn test_agent_invocation_path_calls_slate_theme_auto() {
     if let Ok(plist::Value::Dictionary(dict)) = parsed {
         // Verify ProgramArguments contains the theme --auto invocation
         if let Some(plist::Value::Array(args)) = dict.get("ProgramArguments") {
-            assert!(args.len() >= 3, "Should have at least 3 arguments: [binary, theme, --auto]");
+            assert!(
+                args.len() >= 3,
+                "Should have at least 3 arguments: [binary, theme, --auto]"
+            );
 
             // Extract string values
             let arg_strings: Vec<String> = args
@@ -33,7 +36,10 @@ fn test_agent_invocation_path_calls_slate_theme_auto() {
             // Last two arguments should be "theme" and "--auto"
             assert!(arg_strings.len() >= 3, "Should have string arguments");
             assert_eq!(arg_strings[1], "theme", "Second argument should be 'theme'");
-            assert_eq!(arg_strings[2], "--auto", "Third argument should be '--auto'");
+            assert_eq!(
+                arg_strings[2], "--auto",
+                "Third argument should be '--auto'"
+            );
         } else {
             panic!("ProgramArguments should be an array");
         }
@@ -46,7 +52,9 @@ fn test_agent_invocation_path_calls_slate_theme_auto() {
             );
 
             // Verify the notification is configured
-            if let Some(plist::Value::Dictionary(notifyd)) = launch_events.get("com.apple.notifyd.matching") {
+            if let Some(plist::Value::Dictionary(notifyd)) =
+                launch_events.get("com.apple.notifyd.matching")
+            {
                 assert!(
                     notifyd.contains_key("AppleInterfaceThemeChangedNotification"),
                     "Should listen to AppleInterfaceThemeChangedNotification"

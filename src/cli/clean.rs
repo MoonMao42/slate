@@ -93,11 +93,10 @@ fn remove_marker_block_from_zshrc(home: &Path) -> Result<()> {
                 in_block = true;
                 block_start = i;
             }
-        } else if line.trim().starts_with("# slate:end")
-            && in_block {
-                indices_to_remove.push(block_start..=i);
-                in_block = false;
-            }
+        } else if line.trim().starts_with("# slate:end") && in_block {
+            indices_to_remove.push(block_start..=i);
+            in_block = false;
+        }
     }
 
     if indices_to_remove.is_empty() {
@@ -121,7 +120,8 @@ fn remove_marker_block_from_zshrc(home: &Path) -> Result<()> {
     for line in &cleaned_lines {
         if line.trim().starts_with("# slate:start") || line.trim().starts_with("# slate:end") {
             return Err(crate::error::SlateError::Internal(
-                "Orphaned marker block detected in .zshrc after cleanup — manual review needed".to_string()
+                "Orphaned marker block detected in .zshrc after cleanup — manual review needed"
+                    .to_string(),
             ));
         }
     }
@@ -223,7 +223,6 @@ mod tests {
         assert!(result.ends_with('\n'));
     }
 
-
     #[test]
     fn test_remove_marker_block_nested_markers_returns_error() {
         // Nested markers leave orphans after first-level removal.
@@ -235,7 +234,10 @@ mod tests {
         fs::write(&zshrc_path, content).unwrap();
 
         let result = remove_marker_block_from_zshrc(tempdir.path());
-        assert!(result.is_err(), "Nested markers should trigger orphan detection error");
+        assert!(
+            result.is_err(),
+            "Nested markers should trigger orphan detection error"
+        );
     }
 
     #[test]
@@ -253,10 +255,12 @@ echo after
         remove_marker_block_from_zshrc(tempdir.path()).unwrap();
 
         let result = fs::read_to_string(&zshrc_path).unwrap();
-        assert_eq!(result, "echo before
+        assert_eq!(
+            result,
+            "echo before
 echo after
-");
+"
+        );
         assert!(!result.contains("slate:start"));
     }
-
 }

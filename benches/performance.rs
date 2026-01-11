@@ -12,9 +12,11 @@ fn create_test_env() -> (TempDir, PathBuf) {
 
 fn bench_apply_theme(c: &mut Criterion) {
     let registry = ThemeRegistry::new().expect("Failed to create theme registry");
-    let theme = registry.get("catppuccin-mocha").expect("Catppuccin Mocha not found");
+    let theme = registry
+        .get("catppuccin-mocha")
+        .expect("Catppuccin Mocha not found");
     let (_tempdir, _home) = create_test_env();
-    
+
     c.bench_function("apply_theme_all_adapters", |b| {
         b.iter(|| {
             let adapter_registry = ToolRegistry::default();

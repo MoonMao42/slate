@@ -5,7 +5,10 @@
 fn test_generated_themes_exist() {
     // Verify the generated directory and mod.rs exist
     let generated_path = std::path::Path::new("src/theme/generated");
-    assert!(generated_path.exists(), "src/theme/generated directory not found");
+    assert!(
+        generated_path.exists(),
+        "src/theme/generated directory not found"
+    );
 
     let mod_rs_path = generated_path.join("mod.rs");
     assert!(mod_rs_path.exists(), "src/theme/generated/mod.rs not found");
@@ -15,10 +18,13 @@ fn test_generated_themes_exist() {
 fn test_catppuccin_mocha_theme_json() {
     // Verify catppuccin_mocha.json exists and is valid
     let theme_path = std::path::Path::new("themes/catppuccin_mocha.json");
-    assert!(theme_path.exists(), "themes/catppuccin_mocha.json not found");
+    assert!(
+        theme_path.exists(),
+        "themes/catppuccin_mocha.json not found"
+    );
 
-    let content = std::fs::read_to_string(theme_path)
-        .expect("Failed to read catppuccin_mocha.json");
+    let content =
+        std::fs::read_to_string(theme_path).expect("Failed to read catppuccin_mocha.json");
 
     // Should be valid JSON
     let _json: serde_json::Value =
@@ -90,8 +96,8 @@ fn test_all_generated_theme_rs_files_exist() {
         );
 
         // Verify file contains @generated marker
-        let content = std::fs::read_to_string(&path)
-            .unwrap_or_else(|_| panic!("Failed to read {}", path));
+        let content =
+            std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("Failed to read {}", path));
         assert!(
             content.contains("@generated"),
             "Generated file {} missing @generated marker",
@@ -106,12 +112,24 @@ fn test_generated_mod_rs_structure() {
     let content = std::fs::read_to_string(mod_path).expect("Failed to read mod.rs");
 
     // Should contain module declarations
-    assert!(content.contains("mod base16_ocean;"), "mod.rs missing base16_ocean module");
-    assert!(content.contains("mod catppuccin_mocha;"), "mod.rs missing catppuccin_mocha module");
+    assert!(
+        content.contains("mod base16_ocean;"),
+        "mod.rs missing base16_ocean module"
+    );
+    assert!(
+        content.contains("mod catppuccin_mocha;"),
+        "mod.rs missing catppuccin_mocha module"
+    );
 
     // Should contain re-exports
-    assert!(content.contains("pub use base16_ocean::*;"), "mod.rs missing re-export for base16_ocean");
-    assert!(content.contains("pub use catppuccin_mocha::*;"), "mod.rs missing re-export for catppuccin_mocha");
+    assert!(
+        content.contains("pub use base16_ocean::*;"),
+        "mod.rs missing re-export for base16_ocean"
+    );
+    assert!(
+        content.contains("pub use catppuccin_mocha::*;"),
+        "mod.rs missing re-export for catppuccin_mocha"
+    );
 }
 
 #[test]
@@ -133,5 +151,8 @@ fn test_xtask_compiles() {
 fn test_regen_themes_command_exists() {
     // Verify xtask binary exists and can be invoked
     let xtask_binary = std::path::Path::new("target/debug/xtask");
-    assert!(xtask_binary.exists(), "xtask binary not found at target/debug/xtask");
+    assert!(
+        xtask_binary.exists(),
+        "xtask binary not found at target/debug/xtask"
+    );
 }

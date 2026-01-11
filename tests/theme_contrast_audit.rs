@@ -96,9 +96,7 @@ fn test_wcag_audit_structure_validation() {
         .into_iter()
         .next()
         .expect("Registry should have at least one theme");
-    let theme = registry
-        .get(&first_id)
-        .expect("Registry contains first_id");
+    let theme = registry.get(&first_id).expect("Registry contains first_id");
 
     let audit_results = audit_palette(&theme.palette);
 

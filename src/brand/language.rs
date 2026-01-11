@@ -146,7 +146,7 @@ impl Language {
 
     // CLI surface (07-01)
     pub const SLATE_SET_DEPRECATION_TIP: &str = "(i) Tip: 'slate set' is transitioning to 'slate theme'. Try 'slate theme <name>' next time.";
-    
+
     // Hub menu labels (07-01, to)
     pub const HUB_SWITCH_THEME: &str = "✦ Switch Theme";
     pub const HUB_PAUSE_AUTO_PICK: &str = "✦ Pause Auto & Pick Theme";
@@ -157,13 +157,13 @@ impl Language {
     pub const HUB_PREFERENCES: &str = "⚙ Preferences…";
     pub const HUB_QUIT: &str = "⏊ Quit";
     pub const HUB_RESUME_AUTO: &str = "⟲ Resume Auto";
-    
+
     // Hub preferences submenu (07-01)
     pub const HUB_TOGGLE_FASTFETCH_ON: &str = "Toggle Fastfetch · on";
     pub const HUB_TOGGLE_FASTFETCH_OFF: &str = "Toggle Fastfetch · off";
     pub const HUB_RUN_SETUP: &str = "Run Setup Wizard";
     pub const HUB_BACK: &str = "← Back";
-    
+
     // Status line labels (07-01)
     pub const STATUS_AUTO_AGENT_LOADED: &str = "[loaded]";
     pub const STATUS_AUTO_AGENT_NOT_INSTALLED: &str = "[not installed]";

@@ -70,7 +70,8 @@ mod tests {
     #[test]
     fn test_symbol_distinctiveness() {
         // Verify each symbol is different from others
-        let symbols = [Symbols::BRAND,
+        let symbols = [
+            Symbols::BRAND,
             Symbols::SUCCESS,
             Symbols::FAILURE,
             Symbols::PENDING,
@@ -79,7 +80,8 @@ mod tests {
             Symbols::DIAMOND,
             Symbols::PREFERENCES,
             Symbols::QUIT,
-            Symbols::BACK];
+            Symbols::BACK,
+        ];
 
         for (i, &sym1) in symbols.iter().enumerate() {
             for &sym2 in symbols.iter().skip(i + 1) {

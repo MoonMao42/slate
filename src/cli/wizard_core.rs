@@ -467,9 +467,11 @@ impl Wizard {
         }
 
         eprintln!("Background style — opacity and visual effects:");
-        let options = [("solid", "● Solid", "Opaque, best for light themes"),
+        let options = [
+            ("solid", "● Solid", "Opaque, best for light themes"),
             ("frosted", "○ Frosted", "macOS-style blur, recommended"),
-            ("clear", "○ Clear", "Highly transparent")];
+            ("clear", "○ Clear", "Highly transparent"),
+        ];
 
         let selected_opacity_str = if recommended == crate::opacity::OpacityPreset::Frosted {
             // Default to frosted

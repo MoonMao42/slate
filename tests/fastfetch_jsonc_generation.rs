@@ -18,8 +18,8 @@ fn test_generates_valid_json_for_all_themes() {
             .unwrap_or_else(|_| panic!("Failed to generate JSONC for theme {}", theme.id));
 
         // Verify it's valid JSON (can be parsed)
-        let parsed: serde_json::Value =
-            serde_json::from_str(&jsonc).unwrap_or_else(|_| panic!("Invalid JSON for theme {}", theme.id));
+        let parsed: serde_json::Value = serde_json::from_str(&jsonc)
+            .unwrap_or_else(|_| panic!("Invalid JSON for theme {}", theme.id));
 
         // Verify it's a valid object
         assert!(
@@ -40,8 +40,8 @@ fn test_apple_logo_preserved_in_all_themes() {
             .generate_jsonc_config(theme)
             .unwrap_or_else(|_| panic!("Failed to generate JSONC for theme {}", theme.id));
 
-        let parsed: serde_json::Value =
-            serde_json::from_str(&jsonc).unwrap_or_else(|_| panic!("Failed to parse JSON for {}", theme.id));
+        let parsed: serde_json::Value = serde_json::from_str(&jsonc)
+            .unwrap_or_else(|_| panic!("Failed to parse JSON for {}", theme.id));
 
         // Per fastfetch 2.x schema: `logo` is a top-level field with `source`
         // (not `display.logo.name` — that is the old schema that fastfetch
@@ -133,15 +133,14 @@ fn test_modules_array_contains_at_least_6_items() {
             .generate_jsonc_config(theme)
             .unwrap_or_else(|_| panic!("Failed to generate JSONC for theme {}", theme.id));
 
-        let parsed: serde_json::Value =
-            serde_json::from_str(&jsonc).unwrap_or_else(|_| panic!("Failed to parse JSON for {}", theme.id));
+        let parsed: serde_json::Value = serde_json::from_str(&jsonc)
+            .unwrap_or_else(|_| panic!("Failed to parse JSON for {}", theme.id));
 
         let modules = parsed
             .get("modules")
             .unwrap_or_else(|| panic!("Missing modules array for theme {}", theme.id))
             .as_array()
-            .unwrap_or_else(|| panic!("modules should be an array for theme {}",
-                theme.id));
+            .unwrap_or_else(|| panic!("modules should be an array for theme {}", theme.id));
 
         assert!(
             modules.len() >= 6 && modules.len() <= 8,

@@ -33,17 +33,32 @@ pub fn codegen_theme(theme: &ThemeJson) -> anyhow::Result<String> {
     ));
 
     // Add semantic colors
-    code.push_str(&format!("        foreground: \"{}\".to_string(),\n", foreground));
-    code.push_str(&format!("        background: \"{}\".to_string(),\n", background));
+    code.push_str(&format!(
+        "        foreground: \"{}\".to_string(),\n",
+        foreground
+    ));
+    code.push_str(&format!(
+        "        background: \"{}\".to_string(),\n",
+        background
+    ));
     code.push_str("        cursor: None,\n");
     code.push_str("        selection_bg: None,\n");
     code.push_str("        selection_fg: None,\n");
 
     // Add ANSI colors (check and adjust for danger zones)
     let (adjusted_colors, adjustments) = adjust_danger_zones(theme)?;
-    code.push_str(&format!("        black: \"{}\".to_string(),\n", adjusted_colors["black"]));
-    code.push_str(&format!("        red: \"{}\".to_string(),\n", adjusted_colors["red"]));
-    code.push_str(&format!("        green: \"{}\".to_string(),\n", adjusted_colors["green"]));
+    code.push_str(&format!(
+        "        black: \"{}\".to_string(),\n",
+        adjusted_colors["black"]
+    ));
+    code.push_str(&format!(
+        "        red: \"{}\".to_string(),\n",
+        adjusted_colors["red"]
+    ));
+    code.push_str(&format!(
+        "        green: \"{}\".to_string(),\n",
+        adjusted_colors["green"]
+    ));
 
     // Annotate adjusted colors
     if let Some(original) = adjustments.get("yellow") {
@@ -52,13 +67,28 @@ pub fn codegen_theme(theme: &ThemeJson) -> anyhow::Result<String> {
             adjusted_colors["yellow"], original
         ));
     } else {
-        code.push_str(&format!("        yellow: \"{}\".to_string(),\n", adjusted_colors["yellow"]));
+        code.push_str(&format!(
+            "        yellow: \"{}\".to_string(),\n",
+            adjusted_colors["yellow"]
+        ));
     }
 
-    code.push_str(&format!("        blue: \"{}\".to_string(),\n", adjusted_colors["blue"]));
-    code.push_str(&format!("        magenta: \"{}\".to_string(),\n", adjusted_colors["magenta"]));
-    code.push_str(&format!("        cyan: \"{}\".to_string(),\n", adjusted_colors["cyan"]));
-    code.push_str(&format!("        white: \"{}\".to_string(),\n", adjusted_colors["white"]));
+    code.push_str(&format!(
+        "        blue: \"{}\".to_string(),\n",
+        adjusted_colors["blue"]
+    ));
+    code.push_str(&format!(
+        "        magenta: \"{}\".to_string(),\n",
+        adjusted_colors["magenta"]
+    ));
+    code.push_str(&format!(
+        "        cyan: \"{}\".to_string(),\n",
+        adjusted_colors["cyan"]
+    ));
+    code.push_str(&format!(
+        "        white: \"{}\".to_string(),\n",
+        adjusted_colors["white"]
+    ));
 
     // Bright colors
     if let Some(original) = adjustments.get("bright_black") {
@@ -103,7 +133,10 @@ pub fn codegen_theme(theme: &ThemeJson) -> anyhow::Result<String> {
     ));
 
     // Add semantic backgrounds
-    code.push_str(&format!("        bg_dim: Some(\"{}\".to_string()),\n", theme.semantic.bg_dim));
+    code.push_str(&format!(
+        "        bg_dim: Some(\"{}\".to_string()),\n",
+        theme.semantic.bg_dim
+    ));
     code.push_str(&format!(
         "        bg_darker: Some(\"{}\".to_string()),\n",
         theme.semantic.bg_darker
@@ -188,14 +221,29 @@ fn adjust_danger_zones(
     adjusted.insert("magenta".to_string(), theme.colors.magenta.clone());
     adjusted.insert("cyan".to_string(), theme.colors.cyan.clone());
     adjusted.insert("white".to_string(), theme.colors.white.clone());
-    adjusted.insert("bright_black".to_string(), theme.colors.bright_black.clone());
+    adjusted.insert(
+        "bright_black".to_string(),
+        theme.colors.bright_black.clone(),
+    );
     adjusted.insert("bright_red".to_string(), theme.colors.bright_red.clone());
-    adjusted.insert("bright_green".to_string(), theme.colors.bright_green.clone());
-    adjusted.insert("bright_yellow".to_string(), theme.colors.bright_yellow.clone());
+    adjusted.insert(
+        "bright_green".to_string(),
+        theme.colors.bright_green.clone(),
+    );
+    adjusted.insert(
+        "bright_yellow".to_string(),
+        theme.colors.bright_yellow.clone(),
+    );
     adjusted.insert("bright_blue".to_string(), theme.colors.bright_blue.clone());
-    adjusted.insert("bright_magenta".to_string(), theme.colors.bright_magenta.clone());
+    adjusted.insert(
+        "bright_magenta".to_string(),
+        theme.colors.bright_magenta.clone(),
+    );
     adjusted.insert("bright_cyan".to_string(), theme.colors.bright_cyan.clone());
-    adjusted.insert("bright_white".to_string(), theme.colors.bright_white.clone());
+    adjusted.insert(
+        "bright_white".to_string(),
+        theme.colors.bright_white.clone(),
+    );
 
     Ok((adjusted, original_values))
 }

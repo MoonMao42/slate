@@ -12,6 +12,10 @@ fn test_cli_help_shows_commands() {
     assert!(stdout.contains("status"));
     assert!(stdout.contains("list"));
     assert!(stdout.contains("reset"));
+    assert!(stdout.contains("theme"));
+    assert!(stdout.contains("font"));
+    assert!(stdout.contains("config"));
+    assert!(stdout.contains("clean"));
 }
 
 #[test]
@@ -83,9 +87,9 @@ fn test_set_with_theme_argument() {
 
     // set command now switches theme and confirms
     assert!(stdout.contains("Catppuccin Mocha"));
+    assert!(stdout.contains("slate set' is transitioning to 'slate theme"));
 }
 
-#[test]
 #[test]
 fn test_status_command_runs() {
     let mut cmd = Command::cargo_bin("slate").unwrap();

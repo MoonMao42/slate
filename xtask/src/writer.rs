@@ -12,10 +12,7 @@ pub fn write_generated_file(path: &Path, content: &str) -> anyhow::Result<()> {
     fs::write(&temp_path, content)?;
 
     // Format with rustfmt
-    Command::new("rustfmt")
-        .arg(&temp_path)
-        .output()
-        .ok(); // Ignore rustfmt errors for now
+    Command::new("rustfmt").arg(&temp_path).output().ok(); // Ignore rustfmt errors for now
 
     // Atomic move to final location
     fs::rename(&temp_path, path)?;

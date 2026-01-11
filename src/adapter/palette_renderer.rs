@@ -198,10 +198,7 @@ impl PaletteRenderer {
                 if parts.len() >= 2 {
                     let style = parts[0].to_string();
                     let key = parts[1].to_string();
-                    styles
-                        .entry(style)
-                        .or_default()
-                        .push((key, color.clone()));
+                    styles.entry(style).or_default().push((key, color.clone()));
                 }
             }
         }

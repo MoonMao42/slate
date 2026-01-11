@@ -159,8 +159,9 @@ impl ColorsJson {
             .map_err(|_| anyhow::anyhow!("Invalid bright_yellow color: {}", self.bright_yellow))?;
         validate_hex_color(&self.bright_blue)
             .map_err(|_| anyhow::anyhow!("Invalid bright_blue color: {}", self.bright_blue))?;
-        validate_hex_color(&self.bright_magenta)
-            .map_err(|_| anyhow::anyhow!("Invalid bright_magenta color: {}", self.bright_magenta))?;
+        validate_hex_color(&self.bright_magenta).map_err(|_| {
+            anyhow::anyhow!("Invalid bright_magenta color: {}", self.bright_magenta)
+        })?;
         validate_hex_color(&self.bright_cyan)
             .map_err(|_| anyhow::anyhow!("Invalid bright_cyan color: {}", self.bright_cyan))?;
         validate_hex_color(&self.bright_white)

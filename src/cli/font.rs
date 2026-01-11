@@ -14,10 +14,18 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
 
         // Validate font exists in either nerd or system lists (picker assembles display)
         let discovery = FontAdapter::discover_all_fonts()?;
-        let all_fonts: Vec<&String> = discovery.nerd_fonts.iter().chain(discovery.system_fonts.iter()).collect();
+        let all_fonts: Vec<&String> = discovery
+            .nerd_fonts
+            .iter()
+            .chain(discovery.system_fonts.iter())
+            .collect();
 
         if !all_fonts.contains(&&name.to_string()) {
-            eprintln!("{} Font '{}' not found. Run 'slate font' to see available options.", Symbols::FAILURE, name);
+            eprintln!(
+                "{} Font '{}' not found. Run 'slate font' to see available options.",
+                Symbols::FAILURE,
+                name
+            );
             return Ok(());
         }
 
@@ -39,8 +47,10 @@ fn show_font_picker() -> Result<()> {
 
     // Fail loud only if BOTH lists empty
     if discovery.nerd_fonts.is_empty() && discovery.system_fonts.is_empty() {
-        eprintln!("{} No supported fonts found. Run 'slate setup' to install the recommended Nerd Fonts.",
-                 Symbols::FAILURE);
+        eprintln!(
+            "{} No supported fonts found. Run 'slate setup' to install the recommended Nerd Fonts.",
+            Symbols::FAILURE
+        );
         return Ok(());
     }
 

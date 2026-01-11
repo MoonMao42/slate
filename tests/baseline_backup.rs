@@ -1,6 +1,4 @@
-use slate_cli::config::{
-    begin_restore_point_baseline, is_baseline_restore_point,
-};
+use slate_cli::config::{begin_restore_point_baseline, is_baseline_restore_point};
 use tempfile::TempDir;
 
 /// Test that baseline creation marks restore point correctly
@@ -10,8 +8,7 @@ fn test_baseline_created_before_first_setup() {
     let home = temp_home.path();
 
     // Create a baseline snapshot
-    let baseline = begin_restore_point_baseline(home)
-        .expect("Failed to create baseline");
+    let baseline = begin_restore_point_baseline(home).expect("Failed to create baseline");
 
     // Verify baseline was created and marked with is_baseline=true
     assert!(
@@ -26,8 +23,7 @@ fn test_baseline_has_correct_metadata() {
     let temp_home = TempDir::new().expect("Failed to create temp home");
     let home = temp_home.path();
 
-    let baseline = begin_restore_point_baseline(home)
-        .expect("Failed to create baseline");
+    let baseline = begin_restore_point_baseline(home).expect("Failed to create baseline");
 
     // Baseline should have empty entries (no state captured yet)
     assert_eq!(
@@ -53,8 +49,7 @@ fn test_baseline_protection_flag() {
     let temp_home = TempDir::new().expect("Failed to create temp home");
     let home = temp_home.path();
 
-    let baseline = begin_restore_point_baseline(home)
-        .expect("Failed to create baseline");
+    let baseline = begin_restore_point_baseline(home).expect("Failed to create baseline");
 
     // This baseline should be protected by reset logic
     assert!(
@@ -70,12 +65,10 @@ fn test_baseline_multiple_creation() {
     let home = temp_home.path();
 
     // Create baseline first time
-    let baseline_1 = begin_restore_point_baseline(home)
-        .expect("Failed to create baseline (1st)");
+    let baseline_1 = begin_restore_point_baseline(home).expect("Failed to create baseline (1st)");
 
     // Try to create baseline again
-    let baseline_2 = begin_restore_point_baseline(home)
-        .expect("Failed to create baseline (2nd)");
+    let baseline_2 = begin_restore_point_baseline(home).expect("Failed to create baseline (2nd)");
 
     // Both should be valid baselines
     assert!(is_baseline_restore_point(&baseline_1));

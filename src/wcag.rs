@@ -2,7 +2,6 @@
 /// Reference: https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html
 /// Implements relative_luminance and contrast_ratio calculations
 /// for verification and warning generation during theme application.
-
 use crate::theme::Palette;
 
 /// Contrast audit result for a single color pair.
@@ -124,12 +123,12 @@ fn hex_to_rgb(hex: &str) -> Result<(u8, u8, u8), String> {
         return Err(format!("Invalid hex color format: {}", hex));
     }
 
-    let r = u8::from_str_radix(&hex[1..3], 16)
-        .map_err(|_| format!("Invalid hex color: {}", hex))?;
-    let g = u8::from_str_radix(&hex[3..5], 16)
-        .map_err(|_| format!("Invalid hex color: {}", hex))?;
-    let b = u8::from_str_radix(&hex[5..7], 16)
-        .map_err(|_| format!("Invalid hex color: {}", hex))?;
+    let r =
+        u8::from_str_radix(&hex[1..3], 16).map_err(|_| format!("Invalid hex color: {}", hex))?;
+    let g =
+        u8::from_str_radix(&hex[3..5], 16).map_err(|_| format!("Invalid hex color: {}", hex))?;
+    let b =
+        u8::from_str_radix(&hex[5..7], 16).map_err(|_| format!("Invalid hex color: {}", hex))?;
 
     Ok((r, g, b))
 }

@@ -449,9 +449,8 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn test_ghostty_tool_refs_exist_in_installed_ghostty() {
-        let themes_dir = std::path::PathBuf::from(
-            "/Applications/Ghostty.app/Contents/Resources/ghostty/themes",
-        );
+        let themes_dir =
+            std::path::PathBuf::from("/Applications/Ghostty.app/Contents/Resources/ghostty/themes");
         if !themes_dir.exists() {
             eprintln!("skipping: Ghostty not installed at /Applications/Ghostty.app");
             return;

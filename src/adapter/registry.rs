@@ -53,15 +53,14 @@ impl ToolRegistry {
     /// Per research: partial failure pattern (apply to others even if one fails).
     /// Detect-and-install adapters are not theme targets and are skipped.
     pub fn apply_theme_to_all(&self, theme: &ThemeVariant) -> HashMap<String, Result<()>> {
-        let results: HashMap<String, Result<()>> = self.adapters
+        let results: HashMap<String, Result<()>> = self
+            .adapters
             .par_iter()
             .filter(|adapter| {
                 adapter.apply_strategy() != ApplyStrategy::DetectAndInstall
                     && adapter.is_installed().unwrap_or(false)
             })
-            .map(|adapter| {
-                (adapter.tool_name().to_string(), adapter.apply_theme(theme))
-            })
+            .map(|adapter| (adapter.tool_name().to_string(), adapter.apply_theme(theme)))
             .collect();
 
         results

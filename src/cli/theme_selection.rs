@@ -207,7 +207,16 @@ mod tests {
 
     #[test]
     fn test_family_descriptions_exist() {
-        let families = vec!["Catppuccin", "Tokyo Night", "Rosé Pine", "Kanagawa", "Everforest", "Dracula", "Nord", "Gruvbox"];
+        let families = vec![
+            "Catppuccin",
+            "Tokyo Night",
+            "Rosé Pine",
+            "Kanagawa",
+            "Everforest",
+            "Dracula",
+            "Nord",
+            "Gruvbox",
+        ];
         for family in families {
             let desc = ThemeSelector::family_description(family);
             assert!(

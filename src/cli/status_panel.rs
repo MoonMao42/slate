@@ -1,19 +1,32 @@
 use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::adapter::registry::ToolRegistry;
+use crate::brand::Language;
 use crate::config::ConfigManager;
 use crate::design::symbols::Symbols;
 use crate::error::Result;
-use crate::theme::{Palette, ThemeRegistry};
-use crate::brand::Language;
 use crate::platform;
+use crate::theme::{Palette, ThemeRegistry};
 
 /// Tool installation status 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolStatus {
     Themed,       // ✓ Themed
-    Paused,       // ○ Paused ()
     NotInstalled, // ✗ Not installed
 }
+
+const TOOL_STATUS_ITEMS: [(&str, &str); 11] = [
+    ("ghostty", "ghostty"),
+    ("alacritty", "alacritty"),
+    ("starship", "starship"),
+    ("bat", "bat"),
+    ("delta", "delta"),
+    ("eza", "eza"),
+    ("lazygit", "lazygit"),
+    ("fastfetch", "fastfetch"),
+    ("zsh-syntax-highlighting", "zsh-highlight"),
+    ("tmux", "tmux"),
+    ("nerd-font", "nerd-font"),
+];
 
 /// Check if auto-theme launchd agent is loaded 
 /// Run `launchctl list sh.slate.auto-theme` and check exit code
@@ -87,7 +100,6 @@ pub fn render() -> Result<()> {
         for (tool, status) in chunk {
             let symbol = match status {
                 ToolStatus::Themed => Symbols::SUCCESS,
-                ToolStatus::Paused => Symbols::PENDING,
                 ToolStatus::NotInstalled => Symbols::FAILURE,
             };
             print!("{} {:<16}  ", symbol, tool);
@@ -102,9 +114,7 @@ pub fn render() -> Result<()> {
     println!(" │    {}", agent_status);
 
     // Panel footer
-    println!(
-        " ╰─────────────────────────────────────────────────────────────╯"
-    );
+    println!(" ╰─────────────────────────────────────────────────────────────╯");
 
     // Print blank line below 
     println!();
@@ -134,22 +144,8 @@ fn get_adapter_statuses() -> Result<Vec<(String, ToolStatus)>> {
     let registry = ToolRegistry::default();
     let mut statuses = vec![];
 
-    let tools = vec![
-        "ghostty",
-        "alacritty",
-        "starship",
-        "bat",
-        "delta",
-        "eza",
-        "lazygit",
-        "fastfetch",
-        "zsh-highlight",
-        "tmux",
-        "nerd-font",
-    ];
-
-    for tool in tools {
-        let status = if let Some(adapter) = registry.get_adapter(tool) {
+    for (tool_key, display_name) in TOOL_STATUS_ITEMS {
+        let status = if let Some(adapter) = registry.get_adapter(tool_key) {
             if adapter.is_installed().unwrap_or(false) {
                 ToolStatus::Themed
             } else {
@@ -158,7 +154,7 @@ fn get_adapter_statuses() -> Result<Vec<(String, ToolStatus)>> {
         } else {
             ToolStatus::NotInstalled
         };
-        statuses.push((tool.to_string(), status));
+        statuses.push((display_name.to_string(), status));
     }
 
     Ok(statuses)
@@ -172,5 +168,17 @@ fn detect_terminal() -> String {
         term
     } else {
         "Unknown".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TOOL_STATUS_ITEMS;
+
+    #[test]
+    fn test_tool_status_items_use_registered_zsh_key() {
+        assert!(TOOL_STATUS_ITEMS
+            .iter()
+            .any(|(key, label)| *key == "zsh-syntax-highlighting" && *label == "zsh-highlight"));
     }
 }

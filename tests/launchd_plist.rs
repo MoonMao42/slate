@@ -23,9 +23,18 @@ fn test_plist_contains_required_keys() {
 
     // Required keys for launchd plist
     assert!(xml.contains("<key>Label</key>"), "Should contain Label key");
-    assert!(xml.contains("<key>ProgramArguments</key>"), "Should contain ProgramArguments key");
-    assert!(xml.contains("<key>LaunchEvents</key>"), "Should contain LaunchEvents key");
-    assert!(xml.contains("sh.slate.auto-theme"), "Should contain agent label");
+    assert!(
+        xml.contains("<key>ProgramArguments</key>"),
+        "Should contain ProgramArguments key"
+    );
+    assert!(
+        xml.contains("<key>LaunchEvents</key>"),
+        "Should contain LaunchEvents key"
+    );
+    assert!(
+        xml.contains("sh.slate.auto-theme"),
+        "Should contain agent label"
+    );
 }
 
 #[test]
@@ -37,9 +46,18 @@ fn test_plist_program_arguments_contains_binary() {
     let xml = result.unwrap();
 
     // Binary path should appear in ProgramArguments array
-    assert!(xml.contains("/opt/homebrew/bin/slate"), "Should contain binary path");
-    assert!(xml.contains("<string>theme</string>"), "Should contain theme argument");
-    assert!(xml.contains("<string>--auto</string>"), "Should contain --auto argument");
+    assert!(
+        xml.contains("/opt/homebrew/bin/slate"),
+        "Should contain binary path"
+    );
+    assert!(
+        xml.contains("<string>theme</string>"),
+        "Should contain theme argument"
+    );
+    assert!(
+        xml.contains("<string>--auto</string>"),
+        "Should contain --auto argument"
+    );
 }
 
 #[test]
@@ -72,13 +90,22 @@ fn test_plist_is_valid_dictionary_structure() {
     let cursor = Cursor::new(xml.as_bytes());
     let parsed: Result<plist::Value, _> = plist::from_reader(cursor);
 
-    assert!(parsed.is_ok(), "Generated plist should be parseable by plist crate");
+    assert!(
+        parsed.is_ok(),
+        "Generated plist should be parseable by plist crate"
+    );
 
     if let Ok(plist::Value::Dictionary(dict)) = parsed {
         // Verify required top-level keys exist
         assert!(dict.contains_key("Label"), "Should have Label key");
-        assert!(dict.contains_key("ProgramArguments"), "Should have ProgramArguments key");
-        assert!(dict.contains_key("LaunchEvents"), "Should have LaunchEvents key");
+        assert!(
+            dict.contains_key("ProgramArguments"),
+            "Should have ProgramArguments key"
+        );
+        assert!(
+            dict.contains_key("LaunchEvents"),
+            "Should have LaunchEvents key"
+        );
     } else {
         panic!("Plist should parse to a Dictionary");
     }
@@ -92,7 +119,10 @@ fn test_plist_launch_events_structure() {
     let xml = result.unwrap();
 
     // LaunchEvents should be an array or dict with event configurations
-    assert!(xml.contains("<key>LaunchEvents</key>"), "Should have LaunchEvents");
+    assert!(
+        xml.contains("<key>LaunchEvents</key>"),
+        "Should have LaunchEvents"
+    );
 
     // Check for proper notification matching structure
     let has_matching = xml.contains("com.apple.notifyd.matching");
