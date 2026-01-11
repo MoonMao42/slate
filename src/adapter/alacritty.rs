@@ -87,14 +87,51 @@ impl AlacrittyAdapter {
             SlateError::InvalidConfig(format!("Failed to parse Alacritty TOML: {}", e))
         })?;
 
-        // Get or create the import array
-        if doc.get("import").is_none() {
-            doc["import"] =
-                toml_edit::Item::Value(toml_edit::Value::Array(toml_edit::Array::new()));
+        // Remove [font.normal] from main config if present,
+        // since slate manages fonts via the imported colors.toml.
+        // Alacritty's main file always overrides imports, so leftover
+        // font settings here would shadow our managed values.
+        let mut needs_write = false;
+        if let Some(font_table) = doc.get_mut("font") {
+            if let Some(tbl) = font_table.as_table_mut() {
+                if tbl.contains_key("normal") {
+                    tbl.remove("normal");
+                    needs_write = true;
+                }
+            }
+        }
+        // Remove empty [font] table after clearing children
+        if doc.get("font").and_then(|f| f.as_table()).is_some_and(|t| t.is_empty()) {
+            doc.remove("font");
         }
 
-        let import_array = doc["import"].as_array_mut().ok_or_else(|| {
-            SlateError::InvalidConfig("Alacritty 'import' field is not an array".to_string())
+        // Migrate deprecated top-level `import` to `[general] import`
+        if doc.get("import").is_some() {
+            let old_import = doc.remove("import").unwrap();
+            if doc.get("general").is_none() {
+                doc["general"] = toml_edit::Item::Table(toml_edit::Table::new());
+            }
+            if let Some(general) = doc["general"].as_table_mut() {
+                general.insert("import", old_import);
+            }
+            needs_write = true;
+        }
+
+        // Get or create [general].import array
+        if doc.get("general").is_none() {
+            doc["general"] = toml_edit::Item::Table(toml_edit::Table::new());
+        }
+        if let Some(general) = doc["general"].as_table_mut() {
+            if general.get("import").is_none() {
+                general.insert(
+                    "import",
+                    toml_edit::Item::Value(toml_edit::Value::Array(toml_edit::Array::new())),
+                );
+            }
+        }
+
+        let import_array = doc["general"]["import"].as_array_mut().ok_or_else(|| {
+            SlateError::InvalidConfig("Alacritty 'general.import' field is not an array".to_string())
         })?;
 
         // Idempotent: check if managed path already present
@@ -102,12 +139,14 @@ impl AlacrittyAdapter {
             .iter()
             .any(|v| v.as_str().is_some_and(|s| s == managed_str));
 
-        if already_present {
-            return Ok(());
+        if !already_present {
+            import_array.push(managed_str);
+            needs_write = true;
         }
 
-        // Append managed path to import array
-        import_array.push(managed_str);
+        if !needs_write {
+            return Ok(());
+        }
 
         // Atomic write back to file (per)
         use atomic_write_file::AtomicWriteFile;
@@ -191,6 +230,14 @@ impl ToolAdapter for AlacrittyAdapter {
         let managed_colors_path = self.managed_config_path().join("colors.toml");
 
         Self::ensure_integration_includes_managed(&integration_path, &managed_colors_path)?;
+
+        // Touch the main config to trigger Alacritty's live_config_reload,
+        // which only watches the main file, not imported files.
+        if integration_path.exists() {
+            let _ = fs::OpenOptions::new()
+                .append(true)
+                .open(&integration_path);
+        }
 
         Ok(())
     }

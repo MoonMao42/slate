@@ -204,7 +204,9 @@ impl FontAdapter {
                             let family = Self::normalize_font_family(&name);
                             // Match against whitelist using canonical key
                             for candidate in &whitelist {
-                                if Self::family_match_key(&family) == Self::family_match_key(candidate) {
+                                if Self::family_match_key(&family)
+                                    == Self::family_match_key(candidate)
+                                {
                                     fonts.insert(family);
                                     break;
                                 }
@@ -241,19 +243,20 @@ impl FontAdapter {
         // Persist to current-font file
         config.set_current_font(font_name)?;
 
-        // Apply to Ghostty managed config
-        // Write to managed/ghostty/font.conf
+        // Write to Ghostty managed config
         let font_conf_content = format!("font-family = \"{}\"\n", font_name);
         config.write_managed_file("ghostty", "font.conf", &font_conf_content)?;
 
-        // Apply to Alacritty managed config
-        // Write to managed/alacritty/font.toml
-        let alacritty_font_content = format!("[font.normal]\nfamily = \"{}\"\n", font_name);
-        config.write_managed_file("alacritty", "font.toml", &alacritty_font_content)?;
-
-        // B1 fix: Signal Ghostty to reload config via SIGUSR2 
-        let ghostty_adapter = crate::adapter::ghostty::GhosttyAdapter;
-        ghostty_adapter.reload()?;
+        // Re-apply current theme so all adapters (Alacritty, etc.) pick up
+        // the new font from current-font when they regenerate their configs.
+        config.refresh_shell_integration()?;
+        let current_theme_id = config
+            .get_current_theme()?
+            .unwrap_or_else(|| "catppuccin-mocha".to_string());
+        let registry = crate::theme::ThemeRegistry::new()?;
+        if let Some(theme) = registry.get(&current_theme_id) {
+            crate::cli::setup_executor::apply_theme_selection(theme)?;
+        }
 
         Ok(())
     }
