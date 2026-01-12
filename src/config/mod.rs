@@ -144,11 +144,11 @@ impl ConfigManager {
 fi
 ",
         );
-        // Gate features behind supported terminal check.
-        // Ghostty, Alacritty, iTerm2, WezTerm, Kitty all render Nerd Fonts properly.
-        // Terminal.app and others fall back to a plain starship config.
-        // Alacritty doesn't set TERM_PROGRAM, but sets TERM=alacritty
-        content.push_str("\nif [[ \"$TERM_PROGRAM\" == \"Ghostty\" || \"$TERM_PROGRAM\" == \"Alacritty\" || \"$TERM_PROGRAM\" == \"iTerm.app\" || \"$TERM_PROGRAM\" == \"WezTerm\" || \"$TERM\" == \"xterm-kitty\" || \"$TERM\" == \"alacritty\" ]]; then\n");
+        // Gate features: only Terminal.app needs a plain starship (no Nerd Font glyphs).
+        // All modern terminals (Ghostty, Alacritty, iTerm2, WezTerm, Kitty, etc.)
+        // render Nerd Fonts fine, so we use an exclusion list instead of an allow list.
+        // TERM_PROGRAM comparison is case-insensitive to handle Ghostty variants.
+        content.push_str("\nif [[ \"$TERM_PROGRAM\" != \"Apple_Terminal\" ]]; then\n");
 
         // Conditionally run fastfetch on terminal open if auto-run enabled
         if self.has_fastfetch_autorun()? {
@@ -164,7 +164,7 @@ fi
             let notify_bin = self.managed_dir("bin").join("slate-dark-mode-notify");
             let notify_path = notify_bin.to_string_lossy();
             content.push_str(&format!(
-                r#"  if [[ "$TERM_PROGRAM" == "Ghostty" ]] && [[ -z "$_SLATE_AUTO_WATCHER" ]] && [[ -x "{path}" ]]; then
+                r#"  if [[ "${{TERM_PROGRAM:l}}" == "ghostty" ]] && [[ -z "$_SLATE_AUTO_WATCHER" ]] && [[ -x "{path}" ]]; then
     export _SLATE_AUTO_WATCHER=1
     "{path}" slate theme --auto --quiet &!
   fi

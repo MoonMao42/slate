@@ -542,10 +542,10 @@ pub fn get_effective_opacity_for_rendering(state: &super::state::PickerState) ->
 }
 
 /// Detect if the current terminal is Ghostty
-/// Per D-24b: Check $TERM_PROGRAM (Ghostty sets it to "Ghostty")
+/// Per D-24b: Check $TERM_PROGRAM (case-insensitive, Ghostty may report "ghostty" or "Ghostty")
 fn is_ghostty() -> bool {
     env::var("TERM_PROGRAM")
-        .map(|prog| prog == "Ghostty")
+        .map(|prog| prog.eq_ignore_ascii_case("ghostty"))
         .unwrap_or(false)
 }
 
