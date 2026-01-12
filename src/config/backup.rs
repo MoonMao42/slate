@@ -90,13 +90,62 @@ pub fn backup_directory_with_env(env: &SlateEnv) -> Result<PathBuf> {
 /// Get a specific restore point directory path
 fn restore_point_directory(restore_point_id: &str) -> Result<PathBuf> {
     let backup_dir = backup_directory()?;
-    Ok(backup_dir.join(restore_point_id))
+    resolve_restore_point_directory(&backup_dir, restore_point_id)
 }
 
 /// Get a specific restore point directory path with injected SlateEnv
 fn restore_point_directory_with_env(env: &SlateEnv, restore_point_id: &str) -> Result<PathBuf> {
     let backup_dir = backup_directory_with_env(env)?;
-    Ok(backup_dir.join(restore_point_id))
+    resolve_restore_point_directory(&backup_dir, restore_point_id)
+}
+
+fn validate_restore_point_id(restore_point_id: &str) -> Result<()> {
+    if restore_point_id.is_empty()
+        || restore_point_id.contains("..")
+        || restore_point_id.contains('/')
+        || restore_point_id.contains('\\')
+    {
+        return Err(SlateError::BackupFailed(format!(
+            "Invalid restore point id: {}",
+            restore_point_id
+        )));
+    }
+
+    Ok(())
+}
+
+fn resolve_restore_point_directory(backup_dir: &Path, restore_point_id: &str) -> Result<PathBuf> {
+    validate_restore_point_id(restore_point_id)?;
+
+    let canonical_backup_dir = fs::canonicalize(backup_dir).map_err(|e| {
+        SlateError::BackupFailed(format!(
+            "Failed to canonicalize backup directory {}: {}",
+            backup_dir.display(),
+            e
+        ))
+    })?;
+
+    let restore_point_dir = backup_dir.join(restore_point_id);
+    if restore_point_dir.exists() {
+        let canonical_restore_point = fs::canonicalize(&restore_point_dir).map_err(|e| {
+            SlateError::BackupFailed(format!(
+                "Failed to canonicalize restore point {}: {}",
+                restore_point_dir.display(),
+                e
+            ))
+        })?;
+
+        if !canonical_restore_point.starts_with(&canonical_backup_dir) {
+            return Err(SlateError::BackupFailed(format!(
+                "Restore point escapes backup directory: {}",
+                restore_point_id
+            )));
+        }
+
+        Ok(canonical_restore_point)
+    } else {
+        Ok(restore_point_dir)
+    }
 }
 
 fn manifest_path(restore_point_dir: &Path) -> PathBuf {
@@ -985,5 +1034,32 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Delta restore point is incomplete"));
+    }
+
+    #[test]
+    fn test_restore_point_directory_rejects_path_traversal_ids() {
+        let temp = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+
+        assert!(restore_point_directory_with_env(&env, "../escape").is_err());
+        assert!(restore_point_directory_with_env(&env, "nested/path").is_err());
+        assert!(restore_point_directory_with_env(&env, r"..\\escape").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_restore_point_directory_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let backup_dir = backup_directory_with_env(&env).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let link_path = backup_dir.join("linked-restore-point");
+
+        symlink(outside.path(), &link_path).unwrap();
+
+        let result = restore_point_directory_with_env(&env, "linked-restore-point");
+        assert!(result.is_err());
     }
 }

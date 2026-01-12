@@ -185,7 +185,6 @@ mod tests {
         assert!(plist_content.contains(AGENT_LABEL));
         assert!(plist_content.contains("theme"));
         assert!(plist_content.contains("--auto"));
-        assert!(plist_content.contains(NOTIFICATION_KEY));
     }
 
     #[test]
@@ -198,12 +197,12 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_plist_contains_launch_events() {
+    fn test_generate_plist_contains_watch_paths() {
         let binary_path = "/usr/local/bin/slate";
         let plist_content = generate_plist(binary_path).unwrap();
 
-        assert!(plist_content.contains("LaunchEvents"));
-        assert!(plist_content.contains("com.apple.notifyd.matching"));
+        assert!(plist_content.contains("WatchPaths"));
+        assert!(plist_content.contains(".GlobalPreferences.plist"));
     }
 
     #[test]

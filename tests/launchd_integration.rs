@@ -44,24 +44,26 @@ fn test_agent_invocation_path_calls_slate_theme_auto() {
             panic!("ProgramArguments should be an array");
         }
 
-        // Verify the agent listens to AppleInterfaceThemeChangedNotification
-        if let Some(plist::Value::Dictionary(launch_events)) = dict.get("LaunchEvents") {
-            assert!(
-                launch_events.contains_key("com.apple.notifyd.matching"),
-                "Should have notifyd matching configuration"
-            );
+        // Verify the agent uses WatchPaths to detect appearance changes
+        if let Some(plist::Value::Array(watch_paths)) = dict.get("WatchPaths") {
+            assert!(!watch_paths.is_empty(), "WatchPaths should not be empty");
 
-            // Verify the notification is configured
-            if let Some(plist::Value::Dictionary(notifyd)) =
-                launch_events.get("com.apple.notifyd.matching")
-            {
-                assert!(
-                    notifyd.contains_key("AppleInterfaceThemeChangedNotification"),
-                    "Should listen to AppleInterfaceThemeChangedNotification"
-                );
-            }
+            let path_strings: Vec<String> = watch_paths
+                .iter()
+                .filter_map(|v| match v {
+                    plist::Value::String(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .collect();
+
+            assert!(
+                path_strings
+                    .iter()
+                    .any(|p| p.contains(".GlobalPreferences.plist")),
+                "Should watch GlobalPreferences.plist for appearance changes"
+            );
         } else {
-            panic!("LaunchEvents should be configured");
+            panic!("WatchPaths should be configured");
         }
     } else {
         panic!("Plist should parse to a Dictionary");

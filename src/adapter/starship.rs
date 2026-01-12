@@ -10,11 +10,54 @@ use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::fs;
 use std::path::PathBuf;
-use toml_edit::DocumentMut;
+use toml_edit::{DocumentMut, Item, Value};
 use which::which;
 
 /// Starship adapter implementing v2 ToolAdapter trait.
 pub struct StarshipAdapter;
+
+fn replace_fg_crust_in_value(value: &mut Value) {
+    match value {
+        Value::String(formatted) => {
+            if formatted.value().contains("fg:crust") {
+                let decor = formatted.decor().clone();
+                let replaced = formatted.value().replace("fg:crust", "fg:powerline_fg");
+                *formatted = toml_edit::Formatted::new(replaced);
+                *formatted.decor_mut() = decor;
+            }
+        }
+        Value::Array(array) => {
+            for child in array.iter_mut() {
+                replace_fg_crust_in_value(child);
+            }
+        }
+        Value::InlineTable(table) => {
+            for (_, child) in table.iter_mut() {
+                replace_fg_crust_in_value(child);
+            }
+        }
+        Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::Datetime(_) => {}
+    }
+}
+
+fn replace_fg_crust_in_item(item: &mut Item) {
+    match item {
+        Item::Value(value) => replace_fg_crust_in_value(value),
+        Item::Table(table) => {
+            for (_, child) in table.iter_mut() {
+                replace_fg_crust_in_item(child);
+            }
+        }
+        Item::ArrayOfTables(array_of_tables) => {
+            for table in array_of_tables.iter_mut() {
+                for (_, child) in table.iter_mut() {
+                    replace_fg_crust_in_item(child);
+                }
+            }
+        }
+        Item::None => {}
+    }
+}
 
 impl StarshipAdapter {
     /// Pure path resolution: env override → XDG default (no global state)
@@ -121,30 +164,45 @@ impl ToolAdapter for StarshipAdapter {
                 p.extras.get("peach"),
                 p.extras.get("orange"),
                 p.extras.get("rose"),
-            ].iter().filter_map(|o| o.map(|s| s.as_str())).collect();
+            ]
+            .iter()
+            .filter_map(|o| o.map(|s| s.as_str()))
+            .collect();
 
-            let peach = peach_candidates.iter()
+            let peach = peach_candidates
+                .iter()
                 .find(|c| **c != p.red && **c != p.yellow)
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| {
-                    if p.bright_red != p.red && p.bright_red != p.yellow { p.bright_red.clone() }
-                    else if p.bright_yellow != p.yellow && p.bright_yellow != p.red { p.bright_yellow.clone() }
-                    else { p.magenta.clone() }
+                    if p.bright_red != p.red && p.bright_red != p.yellow {
+                        p.bright_red.clone()
+                    } else if p.bright_yellow != p.yellow && p.bright_yellow != p.red {
+                        p.bright_yellow.clone()
+                    } else {
+                        p.magenta.clone()
+                    }
                 });
             sp["peach"] = toml_edit::value(peach.as_str());
 
             // sapphire (cool accent): sapphire → foam → bright_blue (if ≠ blue) → cyan
-            let sapphire = p.extras.get("sapphire")
+            let sapphire = p
+                .extras
+                .get("sapphire")
                 .or(p.extras.get("foam"))
                 .cloned()
                 .unwrap_or_else(|| {
-                    if p.bright_blue != p.blue { p.bright_blue.clone() }
-                    else { p.cyan.clone() }
+                    if p.bright_blue != p.blue {
+                        p.bright_blue.clone()
+                    } else {
+                        p.cyan.clone()
+                    }
                 });
             sp["sapphire"] = toml_edit::value(sapphire.as_str());
 
             // lavender (purple accent): lavender → iris → mauve → bright_magenta → magenta
-            let lavender = p.lavender.clone()
+            let lavender = p
+                .lavender
+                .clone()
                 .or_else(|| p.extras.get("lavender").cloned())
                 .or_else(|| p.extras.get("iris").cloned())
                 .unwrap_or_else(|| pick(&[&p.mauve, &Some(p.bright_magenta.clone())], &p.magenta));
@@ -152,12 +210,15 @@ impl ToolAdapter for StarshipAdapter {
 
             // Secondary palette names used by some starship configs
             sp["teal"] = toml_edit::value(p.cyan.as_str());
-            sp["maroon"] = toml_edit::value(p.extras.get("maroon")
-                .unwrap_or(&p.bright_red).as_str());
+            sp["maroon"] =
+                toml_edit::value(p.extras.get("maroon").unwrap_or(&p.bright_red).as_str());
             sp["sky"] = toml_edit::value(p.bright_cyan.as_str());
-            sp["pink"] = toml_edit::value(p.pink.as_deref()
-                .or(p.extras.get("pink").map(|s| s.as_str()))
-                .unwrap_or(&p.bright_magenta));
+            sp["pink"] = toml_edit::value(
+                p.pink
+                    .as_deref()
+                    .or(p.extras.get("pink").map(|s| s.as_str()))
+                    .unwrap_or(&p.bright_magenta),
+            );
 
             // crust: semantic darkest background
             sp["crust"] = toml_edit::value(p.bg_darkest.as_deref().unwrap_or(&p.black));
@@ -173,9 +234,11 @@ impl ToolAdapter for StarshipAdapter {
             palettes["slate"] = toml_edit::Item::Table(sp);
         }
 
-        // Step 3b: Replace fg:crust with fg:powerline_fg in format strings
-        // so powerline segments use the adaptive contrast color.
-        let new_content = doc.to_string().replace("fg:crust", "fg:powerline_fg");
+        // Step 3b: Replace fg:crust with fg:powerline_fg only inside TOML string values
+        // so comments and unrelated raw text remain untouched.
+        for (_, item) in doc.iter_mut() {
+            replace_fg_crust_in_item(item);
+        }
         use atomic_write_file::AtomicWriteFile;
         use std::io::Write;
 
@@ -183,7 +246,7 @@ impl ToolAdapter for StarshipAdapter {
             SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string())
         })?;
 
-        file.write_all(new_content.as_bytes()).map_err(|e| {
+        file.write_all(doc.to_string().as_bytes()).map_err(|e| {
             SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string())
         })?;
 
@@ -244,6 +307,27 @@ mod tests {
         let config_home = PathBuf::from("/home/user/.config");
         let path = StarshipAdapter::resolve_path(None, &config_home);
         assert_eq!(path, PathBuf::from("/home/user/.config/starship.toml"));
+    }
+
+    #[test]
+    fn test_replace_fg_crust_only_updates_toml_strings() {
+        let mut doc = r##"
+# keep fg:crust in comments
+format = "[x](fg:crust)"
+[palettes.slate]
+crust = "#111111"
+"##
+        .parse::<DocumentMut>()
+        .unwrap();
+
+        for (_, item) in doc.iter_mut() {
+            replace_fg_crust_in_item(item);
+        }
+
+        let rendered = doc.to_string();
+        assert!(rendered.contains("# keep fg:crust in comments"));
+        assert!(rendered.contains("format = \"[x](fg:powerline_fg)\""));
+        assert!(rendered.contains("crust = \"#111111\""));
     }
 
     #[test]

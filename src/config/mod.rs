@@ -29,6 +29,27 @@ pub struct ConfigManager {
 }
 
 impl ConfigManager {
+    fn parse_toml_document(content: &str) -> Result<DocumentMut> {
+        if content.trim().is_empty() {
+            Ok(DocumentMut::new())
+        } else {
+            Ok(content.parse::<DocumentMut>()?)
+        }
+    }
+
+    fn read_auto_theme_value(doc: &DocumentMut, key: &str) -> Result<Option<String>> {
+        match doc.get(key) {
+            Some(item) => item
+                .as_str()
+                .map(|value| value.to_string())
+                .map(Some)
+                .ok_or_else(|| {
+                    SlateError::InvalidConfig(format!("auto.toml field '{}' must be a string", key))
+                }),
+            None => Ok(None),
+        }
+    }
+
     /// Create ConfigManager with injected SlateEnv.
     /// All path resolution goes through SlateEnv for testability.
     /// Prefer this method over new() for new code.
@@ -164,9 +185,10 @@ fi
             let notify_bin = self.managed_dir("bin").join("slate-dark-mode-notify");
             let notify_path = notify_bin.to_string_lossy();
             content.push_str(&format!(
-                r#"  if [[ "${{TERM_PROGRAM:l}}" == "ghostty" ]] && [[ -z "$_SLATE_AUTO_WATCHER" ]] && [[ -x "{path}" ]]; then
-    export _SLATE_AUTO_WATCHER=1
-    "{path}" slate theme --auto --quiet &!
+                r#"  if [[ "${{TERM_PROGRAM:l}}" == "ghostty" ]] && [[ -x "{path}" ]]; then
+    if ! pgrep -qf slate-dark-mode-notify; then
+      "{path}" slate theme --auto --quiet &!
+    fi
   fi
 "#,
                 path = notify_path
@@ -360,23 +382,9 @@ error_symbol = "[>](bold red)"
         }
 
         let content = fs::read_to_string(&path)?;
-
-        // Parse simple TOML with two optional fields
-        let mut dark_theme = None;
-        let mut light_theme = None;
-
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-
-            if let Some(value) = line.strip_prefix("dark_theme = ") {
-                dark_theme = Some(value.trim_matches('"').to_string());
-            } else if let Some(value) = line.strip_prefix("light_theme = ") {
-                light_theme = Some(value.trim_matches('"').to_string());
-            }
-        }
+        let doc = Self::parse_toml_document(&content)?;
+        let dark_theme = Self::read_auto_theme_value(&doc, "dark_theme")?;
+        let light_theme = Self::read_auto_theme_value(&doc, "light_theme")?;
 
         Ok(Some(AutoConfig {
             dark_theme,
@@ -393,8 +401,13 @@ error_symbol = "[>](bold red)"
         dark_theme: Option<&str>,
         light_theme: Option<&str>,
     ) -> Result<()> {
-        // Read current config if it exists
         let current = self.read_auto_config()?;
+        let path = self.base_path.join("auto.toml");
+        let mut doc = if path.exists() {
+            Self::parse_toml_document(&fs::read_to_string(&path)?)?
+        } else {
+            DocumentMut::new()
+        };
 
         // Merge with new values (new values take precedence)
         let final_dark = dark_theme
@@ -404,19 +417,20 @@ error_symbol = "[>](bold red)"
             .map(String::from)
             .or(current.as_ref().and_then(|c| c.light_theme.clone()));
 
-        // Build TOML content
-        let mut content = String::new();
         if let Some(dark) = final_dark {
-            content.push_str(&format!("dark_theme = \"{}\"\n", dark));
+            doc["dark_theme"] = toml_edit::value(dark);
+        } else {
+            doc.remove("dark_theme");
         }
         if let Some(light) = final_light {
-            content.push_str(&format!("light_theme = \"{}\"\n", light));
+            doc["light_theme"] = toml_edit::value(light);
+        } else {
+            doc.remove("light_theme");
         }
 
         // Write atomically
-        let path = self.base_path.join("auto.toml");
         let mut file = AtomicWriteFile::open(&path)?;
-        file.write_all(content.as_bytes())?;
+        file.write_all(doc.to_string().as_bytes())?;
         file.commit()?;
 
         Ok(())
@@ -534,10 +548,11 @@ error_symbol = "[>](bold red)"
     /// Best-effort deletion; no error if file doesn't exist.
     pub fn disable_fastfetch_autorun(&self) -> Result<()> {
         let path = self.base_path.join("autorun-fastfetch");
-        if path.exists() {
-            fs::remove_file(&path).ok();
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
         }
-        Ok(())
     }
     pub fn edit_config_field(&self, config_path: &Path, keys: &[&str], value: &str) -> Result<()> {
         if !config_path.exists() {
@@ -715,6 +730,52 @@ mod tests {
     }
 
     #[test]
+    fn test_shell_integration_uses_single_watcher_guard() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+
+        config_manager.set_auto_theme_enabled(true).unwrap();
+        config_manager.write_shell_integration_file(&theme).unwrap();
+
+        let shell_file = config_manager.managed_dir("shell").join("env.zsh");
+        let content = fs::read_to_string(shell_file).unwrap();
+        assert!(content.contains("if ! pgrep -qf slate-dark-mode-notify; then"));
+        assert!(content.contains("slate theme --auto --quiet &!"));
+        assert!(!content.contains("_SLATE_AUTO_WATCHER"));
+    }
+
+    #[test]
+    fn test_auto_config_uses_toml_parser_and_writer() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+        let auto_path = temp.path().join("auto.toml");
+
+        fs::write(
+            &auto_path,
+            "# comment\ndark_theme = \"catppuccin-mocha\"\nlight_theme = \"catppuccin-latte\"\n",
+        )
+        .unwrap();
+
+        let auto_config = config_manager.read_auto_config().unwrap().unwrap();
+        assert_eq!(auto_config.dark_theme.as_deref(), Some("catppuccin-mocha"));
+        assert_eq!(auto_config.light_theme.as_deref(), Some("catppuccin-latte"));
+
+        let injected = "theme\"\nlight_theme = \"pwned";
+        config_manager
+            .write_auto_config(Some(injected), Some("catppuccin-latte"))
+            .unwrap();
+
+        let round_trip = config_manager.read_auto_config().unwrap().unwrap();
+        assert_eq!(round_trip.dark_theme.as_deref(), Some(injected));
+        assert_eq!(round_trip.light_theme.as_deref(), Some("catppuccin-latte"));
+    }
+
+    #[test]
     fn test_edit_config_field_single_level() {
         let temp = TempDir::new().unwrap();
         let config_path = temp.path().join("config.toml");
@@ -853,6 +914,19 @@ format = "..."
         // Disable again should also work
         let result = config_manager.disable_fastfetch_autorun();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_fastfetch_disable_propagates_non_not_found_errors() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = ConfigManager {
+            base_path: temp.path().to_path_buf(),
+        };
+        let marker_path = temp.path().join("autorun-fastfetch");
+        fs::create_dir(&marker_path).unwrap();
+
+        let result = config_manager.disable_fastfetch_autorun();
+        assert!(matches!(result, Err(SlateError::IOError(_))));
     }
 
     #[test]

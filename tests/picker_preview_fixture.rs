@@ -159,11 +159,11 @@ fn test_preview_output_multiline_format() {
 
     let output = render_preview(&theme.palette);
 
-    // Should contain multiple lines (sample section + ANSI section)
+    // Should contain multiple lines (ANSI normal + bright rows, plus optional extras)
     let line_count = output.lines().count();
     assert!(
-        line_count >= 5,
-        "Preview should have multiple lines (samples + ANSI matrix)"
+        line_count >= 2,
+        "Preview should have at least normal + bright ANSI rows"
     );
 }
 

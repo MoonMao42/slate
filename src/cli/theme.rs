@@ -5,6 +5,39 @@ use crate::design::symbols::Symbols;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeRegistry;
+use std::os::fd::{AsRawFd, RawFd};
+
+struct StderrRedirectGuard {
+    saved_stderr: RawFd,
+}
+
+impl StderrRedirectGuard {
+    fn silence() -> Option<Self> {
+        let devnull = std::fs::File::open("/dev/null").ok()?;
+        let saved_stderr = unsafe { libc::dup(libc::STDERR_FILENO) };
+        if saved_stderr < 0 {
+            return None;
+        }
+
+        if unsafe { libc::dup2(devnull.as_raw_fd(), libc::STDERR_FILENO) } < 0 {
+            unsafe { libc::close(saved_stderr) };
+            return None;
+        }
+
+        Some(Self { saved_stderr })
+    }
+}
+
+impl Drop for StderrRedirectGuard {
+    fn drop(&mut self) {
+        if self.saved_stderr >= 0 {
+            unsafe {
+                libc::dup2(self.saved_stderr, libc::STDERR_FILENO);
+                libc::close(self.saved_stderr);
+            }
+        }
+    }
+}
 
 /// Handle `slate theme` command
 /// Supports three modes:
@@ -29,20 +62,8 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
 
         // In quiet mode, suppress all stderr output from apply_theme_selection
         if quiet {
-            // Redirect stderr to /dev/null for the duration of apply
-            use std::fs::File;
-            use std::os::unix::io::AsRawFd;
-            let devnull = File::open("/dev/null").ok();
-            let saved_stderr = unsafe { libc::dup(2) };
-            if let Some(ref f) = devnull {
-                unsafe { libc::dup2(f.as_raw_fd(), 2) };
-            }
+            let _stderr_guard = StderrRedirectGuard::silence();
             let result = apply_theme_selection(theme);
-            // Restore stderr
-            if saved_stderr >= 0 {
-                unsafe { libc::dup2(saved_stderr, 2) };
-                unsafe { libc::close(saved_stderr) };
-            }
             result?;
         } else {
             apply_theme_selection(theme)?;

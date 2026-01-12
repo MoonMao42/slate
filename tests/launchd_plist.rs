@@ -28,8 +28,8 @@ fn test_plist_contains_required_keys() {
         "Should contain ProgramArguments key"
     );
     assert!(
-        xml.contains("<key>LaunchEvents</key>"),
-        "Should contain LaunchEvents key"
+        xml.contains("<key>WatchPaths</key>"),
+        "Should contain WatchPaths key"
     );
     assert!(
         xml.contains("sh.slate.auto-theme"),
@@ -61,20 +61,16 @@ fn test_plist_program_arguments_contains_binary() {
 }
 
 #[test]
-fn test_plist_notification_key_configured() {
+fn test_plist_watch_paths_configured() {
     let result = generate_plist("/usr/local/bin/slate");
     assert!(result.is_ok());
 
     let xml = result.unwrap();
 
-    // AppleInterfaceThemeChangedNotification should be in LaunchEvents
+    // WatchPaths should monitor GlobalPreferences for appearance changes
     assert!(
-        xml.contains("AppleInterfaceThemeChangedNotification"),
-        "Should listen to appearance change notification"
-    );
-    assert!(
-        xml.contains("com.apple.notifyd.matching"),
-        "Should use notifyd matching for events"
+        xml.contains(".GlobalPreferences.plist"),
+        "Should watch GlobalPreferences.plist for appearance changes"
     );
 }
 
@@ -103,8 +99,8 @@ fn test_plist_is_valid_dictionary_structure() {
             "Should have ProgramArguments key"
         );
         assert!(
-            dict.contains_key("LaunchEvents"),
-            "Should have LaunchEvents key"
+            dict.contains_key("WatchPaths"),
+            "Should have WatchPaths key"
         );
     } else {
         panic!("Plist should parse to a Dictionary");
@@ -112,19 +108,26 @@ fn test_plist_is_valid_dictionary_structure() {
 }
 
 #[test]
-fn test_plist_launch_events_structure() {
+fn test_plist_watch_paths_structure() {
     let result = generate_plist("/usr/local/bin/slate");
     assert!(result.is_ok());
 
     let xml = result.unwrap();
 
-    // LaunchEvents should be an array or dict with event configurations
-    assert!(
-        xml.contains("<key>LaunchEvents</key>"),
-        "Should have LaunchEvents"
-    );
+    // Parse and verify WatchPaths is an array
+    let cursor = Cursor::new(xml.as_bytes());
+    let parsed: Result<plist::Value, _> = plist::from_reader(cursor);
 
-    // Check for proper notification matching structure
-    let has_matching = xml.contains("com.apple.notifyd.matching");
-    assert!(has_matching, "Should have notifyd matching configuration");
+    if let Ok(plist::Value::Dictionary(dict)) = parsed {
+        if let Some(plist::Value::Array(paths)) = dict.get("WatchPaths") {
+            assert!(
+                !paths.is_empty(),
+                "WatchPaths should have at least one entry"
+            );
+        } else {
+            panic!("WatchPaths should be an array");
+        }
+    } else {
+        panic!("Plist should parse to a Dictionary");
+    }
 }
