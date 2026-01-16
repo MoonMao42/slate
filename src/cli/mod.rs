@@ -17,6 +17,7 @@ pub mod setup_executor;
 pub mod status;
 pub mod status_panel;
 pub mod theme;
+pub mod theme_apply;
 pub mod theme_selection;
 pub mod tool_selection;
 pub mod wizard_core;
@@ -30,7 +31,6 @@ pub fn dispatch(command: &str, args: &[&str]) -> Result<()> {
         "set" => set::handle(args),
         "status" => status::handle(args),
         "list" => list::handle(args),
-        "restore" => restore::handle(args),
         _ => Err(crate::error::SlateError::Internal(format!(
             "Unknown command: {}",
             command

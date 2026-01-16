@@ -2,7 +2,7 @@
 //! Per through Detects installed Nerd Fonts on macOS and provides
 //! installation command mapping. Scope: detect + install mapping only (no config writing).
 
-use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::Result;
@@ -255,7 +255,7 @@ impl FontAdapter {
             .unwrap_or_else(|| "catppuccin-mocha".to_string());
         let registry = crate::theme::ThemeRegistry::new()?;
         if let Some(theme) = registry.get(&current_theme_id) {
-            crate::cli::setup_executor::apply_theme_selection(theme)?;
+            crate::cli::theme_apply::apply_theme_selection(theme)?;
         }
 
         Ok(())
@@ -318,10 +318,10 @@ impl ToolAdapter for FontAdapter {
         ApplyStrategy::DetectAndInstall
     }
 
-    fn apply_theme(&self, _theme: &ThemeVariant) -> Result<()> {
+    fn apply_theme(&self, _theme: &ThemeVariant) -> Result<ApplyOutcome> {
         // Per design: Nerd Font adapter only handles detection and installation
         // No theme application needed (fonts are tool-independent)
-        Ok(())
+        Ok(ApplyOutcome::Applied)
     }
 
     fn reload(&self) -> Result<()> {

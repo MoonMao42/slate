@@ -1,8 +1,8 @@
 /// Setup execution: actually runs the brew installations and applies configurations
 /// Handles partial failures and tracks results
-use crate::adapter::ToolRegistry;
 use crate::cli::failure_handler::{ExecutionSummary, InstallStatus, ToolInstallResult};
 use crate::cli::font_selection::FontCatalog;
+use crate::cli::theme_apply;
 use crate::cli::tool_selection::{BrewKind, ToolCatalog};
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
@@ -124,62 +124,8 @@ pub fn execute_setup(
     execute_setup_with_env(tools_to_install, font, theme, &env)
 }
 
-/// Resolve the selected theme, persist it, regenerate shell integration, and
-/// apply adapter outputs that live outside env.zsh.
-/// Per , Use registry loop instead of hardcoded adapter calls
-pub(crate) fn apply_theme_selection(theme: &ThemeVariant) -> Result<()> {
-    theme.validate()?;
-
-    let config_mgr = ConfigManager::new()?;
-    // ConfigManager calls BEFORE registry loop
-    config_mgr.set_current_theme(&theme.id)?;
-    config_mgr.write_shell_integration_file(theme)?;
-
-    // Use registry loop instead of hardcoded calls
-    let registry = ToolRegistry::default();
-    let results = registry.apply_theme_to_all(theme);
-    let ghostty_applied = matches!(results.get("ghostty"), Some(Ok(())));
-
-    // Visual error report per adapter
-    let mut success_count = 0;
-    let mut failure_count = 0;
-
-    for (tool_name, result) in &results {
-        match result {
-            Ok(()) => {
-                eprintln!("✓ {}", tool_name);
-                success_count += 1;
-            }
-            Err(e) => {
-                eprintln!("❌ {}: {}", tool_name, e);
-                failure_count += 1;
-            }
-        }
-    }
-
-    // Hot-reload Ghostty via SIGUSR2 (no restart needed)
-    if ghostty_applied {
-        if let Some(adapter) = registry.get_adapter("ghostty") {
-            match adapter.reload() {
-                Ok(()) => eprintln!("✓ Ghostty reloaded"),
-                Err(_) => eprintln!("Ghostty: restart to apply theme"),
-            }
-        }
-    }
-
-    // Partial success = Ok(0); all failures = Err
-    if failure_count > 0 && success_count == 0 {
-        return Err(crate::error::SlateError::ApplyThemeFailed(
-            "all".to_string(),
-            "No adapters were successfully configured".to_string(),
-        ));
-    }
-
-    Ok(())
-}
-
-fn resolve_selected_theme(theme: Option<&str>) -> Result<ThemeVariant> {
-    let config_mgr = ConfigManager::new()?;
+fn resolve_selected_theme(theme: Option<&str>, env: &SlateEnv) -> Result<ThemeVariant> {
+    let config_mgr = ConfigManager::with_env(env)?;
     let theme_id = if let Some(theme_name) = theme {
         theme_name.to_string()
     } else if let Some(current_theme) = config_mgr.get_current_theme()? {
@@ -213,8 +159,9 @@ fn setup_shell_integration_with_env(theme: Option<&str>, env: &SlateEnv) -> Resu
 
     // Create marker block with source line
     let marker_content = format!(
-        "{}\nsource ~/.config/slate/managed/shell/env.zsh\n{}\n",
+        "{}\nsource \"{}\"\n{}\n",
         marker_block::START,
+        env.config_dir().join("managed/shell/env.zsh").display(),
         marker_block::END
     );
 
@@ -226,8 +173,8 @@ fn setup_shell_integration_with_env(theme: Option<&str>, env: &SlateEnv) -> Resu
     file.write_all(updated.as_bytes())?;
     file.commit()?;
 
-    let selected_theme = resolve_selected_theme(theme)?;
-    apply_theme_selection(&selected_theme)?;
+    let selected_theme = resolve_selected_theme(theme, env)?;
+    theme_apply::apply_theme_selection_with_env(&selected_theme, env)?;
 
     Ok(selected_theme)
 }

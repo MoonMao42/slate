@@ -3,7 +3,7 @@
 //! Managed config path is created for future use; apply_theme() returns Ok()
 //! because actual export happens in shell init.
 
-use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeVariant;
@@ -40,7 +40,7 @@ impl BatAdapter {
 
     /// Get config home directory with injected SlateEnv
     fn config_home_with_env(env: &SlateEnv) -> Result<PathBuf> {
-        Ok(env.home().join(".config"))
+        Ok(env.xdg_config_home().to_path_buf())
     }
 }
 
@@ -79,18 +79,18 @@ impl ToolAdapter for BatAdapter {
         ApplyStrategy::EnvironmentVariable
     }
 
-    fn apply_theme(&self, _theme: &ThemeVariant) -> Result<()> {
+    fn apply_theme(&self, _theme: &ThemeVariant) -> Result<ApplyOutcome> {
         // bat uses BAT_THEME env var, not file writes.
         // env.zsh exports this during shell init.
         // This method is no-op; write happens in shell integration.
-        Ok(())
+        Ok(ApplyOutcome::Applied)
     }
 }
 
 /// Helper methods using injected SlateEnv (for testing)
 impl BatAdapter {
     pub fn integration_config_path_with_env(&self, env: &SlateEnv) -> Result<PathBuf> {
-        let config_home = env.home().join(".config");
+        let config_home = env.xdg_config_home().to_path_buf();
         let config_path = std::env::var("BAT_CONFIG_PATH").ok();
         let config_dir = std::env::var("BAT_CONFIG_DIR").ok();
 

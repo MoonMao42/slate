@@ -1,7 +1,7 @@
 use crate::env::SlateEnv;
 use crate::error::Result;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Detect current terminal font from Ghostty or Alacritty config
 pub fn detect_current_font() -> Result<Option<String>> {
@@ -47,7 +47,7 @@ fn read_ghostty_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
 
 /// Parse Alacritty TOML config for font setting
 fn read_alacritty_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
-    let config_path = env.home().join(".config/alacritty/alacritty.toml");
+    let config_path = env.xdg_config_home().join("alacritty/alacritty.toml");
 
     if !config_path.exists() {
         return Ok(None);
@@ -75,19 +75,11 @@ fn read_alacritty_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
 }
 
 fn ghostty_config_paths_with_env(env: &SlateEnv) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        let xdg_path = Path::new(&xdg);
-        paths.push(xdg_path.join("ghostty/config.ghostty"));
-        paths.push(xdg_path.join("ghostty/config"));
-    } else {
-        let config_base = env.home().join(".config");
-        paths.push(config_base.join("ghostty/config.ghostty"));
-        paths.push(config_base.join("ghostty/config"));
-    }
-
-    paths
+    let config_base = env.xdg_config_home();
+    vec![
+        config_base.join("ghostty/config.ghostty"),
+        config_base.join("ghostty/config"),
+    ]
 }
 
 fn parse_ghostty_font_config(content: &str) -> Option<String> {

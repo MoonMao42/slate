@@ -1,4 +1,8 @@
-use slate_cli::config::{begin_restore_point_baseline, is_baseline_restore_point};
+use slate_cli::config::{
+    begin_restore_point_baseline, is_baseline_restore_point, list_restore_points_with_env,
+    OriginalFileState,
+};
+use slate_cli::env::SlateEnv;
 use tempfile::TempDir;
 
 /// Test that baseline creation marks restore point correctly
@@ -25,11 +29,18 @@ fn test_baseline_has_correct_metadata() {
 
     let baseline = begin_restore_point_baseline(home).expect("Failed to create baseline");
 
-    // Baseline should have empty entries (no state captured yet)
+    // Baseline should snapshot the fixed target list, including absent files.
     assert_eq!(
         baseline.entries.len(),
-        0,
-        "Baseline should have no entries (pre-slate state)"
+        12,
+        "Baseline should capture the full pre-slate target set"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| matches!(entry.original_state, OriginalFileState::Absent)),
+        "Fresh baseline should record missing files as absent entries"
     );
 
     // Baseline theme name should indicate pre-slate
@@ -74,7 +85,19 @@ fn test_baseline_multiple_creation() {
     assert!(is_baseline_restore_point(&baseline_1));
     assert!(is_baseline_restore_point(&baseline_2));
 
-    // Both have valid IDs (may be same or different depending on implementation)
+    // Both have valid unique IDs
     assert!(!baseline_1.id.is_empty());
     assert!(!baseline_2.id.is_empty());
+    assert_ne!(baseline_1.id, baseline_2.id);
+}
+
+#[test]
+fn test_baseline_is_listed_via_injected_env() {
+    let temp_home = TempDir::new().expect("Failed to create temp home");
+    let env = SlateEnv::with_home(temp_home.path().to_path_buf());
+
+    let baseline = begin_restore_point_baseline(temp_home.path()).expect("Failed to create baseline");
+    let restore_points = list_restore_points_with_env(&env).expect("Failed to list restore points");
+
+    assert!(restore_points.iter().any(|point| point.id == baseline.id && point.is_baseline));
 }

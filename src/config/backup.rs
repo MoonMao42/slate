@@ -18,12 +18,29 @@ pub struct BackupInfo {
 }
 
 /// Represents a single backup file with persisted metadata
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OriginalFileState {
+    Present,
+    Absent,
+}
+
+impl Default for OriginalFileState {
+    fn default() -> Self {
+        Self::Present
+    }
+}
+
+/// Represents a single backup file with persisted metadata
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RestoreEntry {
     pub tool_key: String, // e.g., "ghostty", "starship", "bat", "delta", "delta-gitconfig", "lazygit"
     pub display_tool: String, // e.g., "Ghostty", "Starship", "bat", "Delta", "Delta (.gitconfig)", "lazygit"
     pub original_path: PathBuf, // e.g., ~/.config/ghostty/config
-    pub backup_path: PathBuf, // e.g., ~/.cache/slate/backups/restore_point_id/ghostty.backup
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_path: Option<PathBuf>, // e.g., ~/.cache/slate/backups/restore_point_id/ghostty.backup
+    #[serde(default)]
+    pub original_state: OriginalFileState,
 }
 
 /// Represents a manifest-backed restore point with explicit directory structure
@@ -76,8 +93,7 @@ pub fn backup_directory() -> Result<PathBuf> {
 
 /// Get the backup directory path with injected SlateEnv (preferred for testing)
 pub fn backup_directory_with_env(env: &SlateEnv) -> Result<PathBuf> {
-    let cache_dir = env.cache_dir();
-    let backup_dir = cache_dir.join("slate").join("backups");
+    let backup_dir = env.slate_cache_dir().join("backups");
 
     // Create directory if missing
     fs::create_dir_all(&backup_dir).map_err(|e| {
@@ -197,6 +213,11 @@ fn manifest_to_restore_point(manifest: RestoreManifest) -> Result<RestorePoint> 
     })
 }
 
+fn record_absent_entry(session: &BackupSession, entry: RestoreEntry) -> Result<RestoreEntry> {
+    append_manifest_entry(session, &entry)?;
+    Ok(entry)
+}
+
 fn append_manifest_entry(session: &BackupSession, entry: &RestoreEntry) -> Result<()> {
     let manifest_path = manifest_path(&session.restore_point_dir);
     let mut manifest = read_manifest_raw(&manifest_path)?;
@@ -234,6 +255,9 @@ pub fn display_tools(entries: &[RestoreEntry]) -> Vec<String> {
 
 fn validate_restore_point_data(restore_point: &RestorePoint) -> Result<()> {
     if restore_point.entries.is_empty() {
+        if restore_point.is_baseline {
+            return Ok(());
+        }
         return Err(SlateError::BackupFailed(format!(
             "No entries in restore point: {}",
             restore_point.id
@@ -251,23 +275,35 @@ fn validate_restore_point_data(restore_point: &RestorePoint) -> Result<()> {
             )));
         }
 
-        let path = &entry.backup_path;
-        if !path.exists() {
-            return Err(SlateError::BackupFailed(format!(
-                "Backup file not found: {}",
-                path.display()
-            )));
-        }
+        if entry.original_state == OriginalFileState::Present {
+            let Some(path) = entry.backup_path.as_ref() else {
+                return Err(SlateError::BackupFailed(format!(
+                    "Restore entry '{}' is missing backup_path metadata",
+                    entry.tool_key
+                )));
+            };
 
-        let metadata = fs::metadata(path).map_err(|e| {
-            SlateError::BackupFailed(format!("Cannot read backup file {}: {}", path.display(), e))
-        })?;
+            if !path.exists() {
+                return Err(SlateError::BackupFailed(format!(
+                    "Backup file not found: {}",
+                    path.display()
+                )));
+            }
 
-        if metadata.len() == 0 {
-            return Err(SlateError::BackupFailed(format!(
-                "Backup file is empty: {}",
-                path.display()
-            )));
+            let metadata = fs::metadata(path).map_err(|e| {
+                SlateError::BackupFailed(format!(
+                    "Cannot read backup file {}: {}",
+                    path.display(),
+                    e
+                ))
+            })?;
+
+            if metadata.len() == 0 {
+                return Err(SlateError::BackupFailed(format!(
+                    "Backup file is empty: {}",
+                    path.display()
+                )));
+            }
         }
 
         if entry.tool_key == "delta" {
@@ -365,7 +401,8 @@ pub fn create_backup_with_session(
         tool_key: tool_key.to_string(),
         display_tool: display_tool.to_string(),
         original_path: config_path.to_path_buf(),
-        backup_path,
+        backup_path: Some(backup_path),
+        original_state: OriginalFileState::Present,
     };
 
     append_manifest_entry(session, &restore_entry)?;
@@ -538,7 +575,15 @@ fn days_from_unix_epoch(year: u64, month: u64, day: u64) -> Option<u64> {
 /// Scans ~/.cache/slate/backups/ for restore_point_id directories with manifest.toml
 /// Returns Vec<RestorePoint> sorted by creation time descending (newest first)
 pub fn list_restore_points() -> Result<Vec<RestorePoint>> {
-    let backup_dir = backup_directory()?;
+    let env = SlateEnv::from_process().map_err(|_| {
+        SlateError::Internal("Cannot initialize SlateEnv to list restore points".to_string())
+    })?;
+    list_restore_points_with_env(&env)
+}
+
+/// List all restore points using an injected SlateEnv.
+pub fn list_restore_points_with_env(env: &SlateEnv) -> Result<Vec<RestorePoint>> {
+    let backup_dir = backup_directory_with_env(env)?;
 
     if !backup_dir.exists() {
         return Ok(Vec::new());
@@ -597,7 +642,7 @@ pub fn list_restore_points() -> Result<Vec<RestorePoint>> {
 /// Read and parse a manifest.toml file
 fn read_manifest(manifest_path: &Path) -> Result<RestorePoint> {
     let restore_point = manifest_to_restore_point(read_manifest_raw(manifest_path)?)?;
-    if restore_point.entries.is_empty() {
+    if restore_point.entries.is_empty() && !restore_point.is_baseline {
         return Err(SlateError::BackupFailed(
             "manifest.toml has empty entries array".to_string(),
         ));
@@ -679,16 +724,102 @@ fn is_leap_year(year: u64) -> bool {
     (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
+struct SnapshotTarget {
+    tool_key: &'static str,
+    display_tool: &'static str,
+    path: PathBuf,
+}
+
+fn baseline_snapshot_targets(env: &SlateEnv) -> Vec<SnapshotTarget> {
+    let ghostty_path = crate::adapter::GhosttyAdapter
+        .integration_config_path_with_env(env)
+        .unwrap_or_else(|_| env.xdg_config_home().join("ghostty/config.ghostty"));
+    let alacritty_path = env.xdg_config_home().join("alacritty/alacritty.toml");
+    let starship_path = std::env::var("STARSHIP_CONFIG")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| env.xdg_config_home().join("starship.toml"));
+
+    vec![
+        SnapshotTarget {
+            tool_key: "zshrc",
+            display_tool: "Zsh",
+            path: env.zshrc_path(),
+        },
+        SnapshotTarget {
+            tool_key: "gitconfig",
+            display_tool: "Git",
+            path: env.home().join(".gitconfig"),
+        },
+        SnapshotTarget {
+            tool_key: "tmux",
+            display_tool: "tmux",
+            path: env.home().join(".tmux.conf"),
+        },
+        SnapshotTarget {
+            tool_key: "ghostty",
+            display_tool: "Ghostty",
+            path: ghostty_path,
+        },
+        SnapshotTarget {
+            tool_key: "alacritty",
+            display_tool: "Alacritty",
+            path: alacritty_path,
+        },
+        SnapshotTarget {
+            tool_key: "starship",
+            display_tool: "Starship",
+            path: starship_path,
+        },
+        SnapshotTarget {
+            tool_key: "slate-current",
+            display_tool: "Slate current theme",
+            path: env.managed_file("current"),
+        },
+        SnapshotTarget {
+            tool_key: "slate-current-font",
+            display_tool: "Slate current font",
+            path: env.managed_file("current-font"),
+        },
+        SnapshotTarget {
+            tool_key: "slate-current-opacity",
+            display_tool: "Slate current opacity",
+            path: env.managed_file("current-opacity"),
+        },
+        SnapshotTarget {
+            tool_key: "slate-config",
+            display_tool: "Slate config",
+            path: env.managed_file("config.toml"),
+        },
+        SnapshotTarget {
+            tool_key: "slate-auto",
+            display_tool: "Slate auto theme",
+            path: env.managed_file("auto.toml"),
+        },
+        SnapshotTarget {
+            tool_key: "slate-fastfetch",
+            display_tool: "Slate fastfetch autorun",
+            path: env.managed_file("autorun-fastfetch"),
+        },
+    ]
+}
+
 /// Create a baseline restore point before any slate mutations
 /// Special variant of begin_restore_point that marks the restore point as baseline
 /// This should be called BEFORE first setup to capture pre-slate state
-pub fn begin_restore_point_baseline(_home: &Path) -> Result<RestorePoint> {
-    let _env = SlateEnv::from_process()?;
+pub fn begin_restore_point_baseline(home: &Path) -> Result<RestorePoint> {
+    let env = SlateEnv::with_home(home.to_path_buf());
+    begin_restore_point_baseline_with_env(&env)
+}
+
+pub fn begin_restore_point_baseline_with_env(env: &SlateEnv) -> Result<RestorePoint> {
     let created_at = SystemTime::now();
+    let backup_dir = backup_directory_with_env(env)?;
 
     for _ in 0..32 {
         let restore_point_id = generate_restore_point_id(created_at);
-        let restore_point_dir = restore_point_directory(&restore_point_id)?;
+        let restore_point_dir = resolve_restore_point_directory(&backup_dir, &restore_point_id)?;
 
         match fs::create_dir(&restore_point_dir) {
             Ok(()) => {
@@ -707,7 +838,28 @@ pub fn begin_restore_point_baseline(_home: &Path) -> Result<RestorePoint> {
                     entries: Vec::new(),
                 };
                 write_manifest_raw(&manifest_path(&session.restore_point_dir), &manifest)?;
-                return manifest_to_restore_point(manifest);
+
+                for target in baseline_snapshot_targets(env) {
+                    if target.path.exists() {
+                        let _ = create_backup_with_session(
+                            target.tool_key,
+                            target.display_tool,
+                            &session,
+                            &target.path,
+                        )?;
+                    } else {
+                        let absent_entry = RestoreEntry {
+                            tool_key: target.tool_key.to_string(),
+                            display_tool: target.display_tool.to_string(),
+                            original_path: target.path,
+                            backup_path: None,
+                            original_state: OriginalFileState::Absent,
+                        };
+                        let _ = record_absent_entry(&session, absent_entry)?;
+                    }
+                }
+
+                return get_restore_point_with_env(env, &session.restore_point_id);
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => {
@@ -732,7 +884,15 @@ pub fn is_baseline_restore_point(restore_point: &RestorePoint) -> bool {
 
 /// Get a specific restore point by ID
 pub fn get_restore_point(restore_point_id: &str) -> Result<RestorePoint> {
-    let restore_point_dir = restore_point_directory(restore_point_id)?;
+    let env = SlateEnv::from_process().map_err(|_| {
+        SlateError::Internal("Cannot initialize SlateEnv to load restore point".to_string())
+    })?;
+    get_restore_point_with_env(&env, restore_point_id)
+}
+
+/// Get a specific restore point by ID using an injected SlateEnv.
+pub fn get_restore_point_with_env(env: &SlateEnv, restore_point_id: &str) -> Result<RestorePoint> {
+    let restore_point_dir = restore_point_directory_with_env(env, restore_point_id)?;
     let manifest_path = manifest_path(&restore_point_dir);
 
     if !manifest_path.exists() {
@@ -753,9 +913,26 @@ pub fn get_restore_point(restore_point_id: &str) -> Result<RestorePoint> {
     Ok(restore_point)
 }
 
-/// Restore a specific restore point by writing backed-up files back to their original paths
-/// Helper to restore a single entry to its persisted original_path
-fn restore_entry(original_path: &Path, content: &str) -> Result<()> {
+/// Restore a specific restore point by writing backed-up files back to their original paths.
+/// If the original file was absent when snapshotted, remove any slate-created file instead.
+fn restore_entry(entry: &RestoreEntry, content: Option<&str>) -> Result<()> {
+    if entry.original_state == OriginalFileState::Absent {
+        match fs::remove_file(&entry.original_path) {
+            Ok(()) => return Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(err) => {
+                return Err(SlateError::BackupFailed(format!(
+                    "Failed to remove restored file {}: {}",
+                    entry.original_path.display(),
+                    err
+                )))
+            }
+        }
+    }
+
+    let original_path = &entry.original_path;
+    let content = content.unwrap_or_default();
+
     // Write content atomically
     let mut file = AtomicWriteFile::open(original_path).map_err(|e| {
         SlateError::BackupFailed(format!(
@@ -965,9 +1142,10 @@ mod tests {
             tool_key: "ghostty".to_string(),
             display_tool: "Ghostty".to_string(),
             original_path: PathBuf::from("~/.config/ghostty/config"),
-            backup_path: PathBuf::from(
+            backup_path: Some(PathBuf::from(
                 "~/.cache/slate/backups/2026-04-09T10-00-00Z/ghostty.backup",
-            ),
+            )),
+            original_state: OriginalFileState::Present,
         };
         let serialized = toml::to_string(&entry);
         assert!(serialized.is_ok());
@@ -994,13 +1172,15 @@ mod tests {
                 tool_key: "delta".to_string(),
                 display_tool: "Delta".to_string(),
                 original_path: PathBuf::from("/tmp/delta"),
-                backup_path: PathBuf::from("/tmp/delta.backup"),
+                backup_path: Some(PathBuf::from("/tmp/delta.backup")),
+                original_state: OriginalFileState::Present,
             },
             RestoreEntry {
                 tool_key: "delta-gitconfig".to_string(),
                 display_tool: "Delta (.gitconfig)".to_string(),
                 original_path: PathBuf::from("/tmp/gitconfig"),
-                backup_path: PathBuf::from("/tmp/delta-gitconfig.backup"),
+                backup_path: Some(PathBuf::from("/tmp/delta-gitconfig.backup")),
+                original_state: OriginalFileState::Present,
             },
         ];
 
@@ -1025,7 +1205,8 @@ mod tests {
                 tool_key: "delta-gitconfig".to_string(),
                 display_tool: "Delta".to_string(),
                 original_path: PathBuf::from("/tmp/gitconfig"),
-                backup_path,
+                backup_path: Some(backup_path),
+                original_state: OriginalFileState::Present,
             }],
             is_baseline: false,
         };

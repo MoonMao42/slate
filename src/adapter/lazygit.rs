@@ -3,7 +3,7 @@
 //! Per , Fixes macOS path resolution to check LG_CONFIG_FILE first.
 //! Preserves pager sync logic (bat/delta themes) as competitive advantage.
 
-use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
@@ -42,6 +42,11 @@ impl LazygitAdapter {
     /// 2. XDG_CONFIG_HOME/lazygit/config.yml
     /// 3. ~/Library/Application Support/lazygit/ (macOS)
     fn resolve_config_path() -> Result<PathBuf> {
+        let env = SlateEnv::from_process()?;
+        Self::resolve_config_path_with_env(&env)
+    }
+
+    fn resolve_config_path_with_env(env: &SlateEnv) -> Result<PathBuf> {
         // Step 1: Check LG_CONFIG_FILE env var first
         if let Ok(path_str) = std::env::var("LG_CONFIG_FILE") {
             if let Some(first_path) = Self::parse_config_paths(&path_str) {
@@ -49,15 +54,13 @@ impl LazygitAdapter {
             }
         }
 
-        // Step 2: Check XDG_CONFIG_HOME
-        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-            if !xdg.is_empty() {
-                return Ok(PathBuf::from(xdg).join("lazygit/config.yml"));
-            }
+        // Step 2: Check XDG config root from SlateEnv
+        let xdg = env.xdg_config_home();
+        if !xdg.as_os_str().is_empty() {
+            return Ok(xdg.join("lazygit/config.yml"));
         }
 
         // Step 3: Default to macOS location
-        let env = SlateEnv::from_process()?;
         let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
 
         if cfg!(target_os = "macos") {
@@ -84,11 +87,8 @@ impl ToolAdapter for LazygitAdapter {
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-        let home = env
-            .as_ref()
-            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
-        if let Some(h) = home {
-            PathBuf::from(h).join(".config/slate/managed/lazygit")
+        if let Some(env) = env.as_ref() {
+            env.config_dir().join("managed").join("lazygit")
         } else {
             PathBuf::from(".config/slate/managed/lazygit")
         }
@@ -98,7 +98,7 @@ impl ToolAdapter for LazygitAdapter {
         ApplyStrategy::EnvironmentVariable
     }
 
-    fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
         // Step 1: Extract theme name from tool_refs
         theme.tool_refs.get("lazygit").ok_or_else(|| {
             SlateError::InvalidThemeData(format!(
@@ -116,7 +116,7 @@ impl ToolAdapter for LazygitAdapter {
 
         // Step 4: Pager sync is handled at generation time via generate_yaml_config
 
-        Ok(())
+        Ok(ApplyOutcome::Applied)
     }
 
     fn get_current_theme(&self) -> Result<Option<String>> {

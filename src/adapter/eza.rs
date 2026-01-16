@@ -3,7 +3,7 @@
 //! a managed theme.yml to ~/.config/slate/managed/eza/ and expects EZA_CONFIG_DIR
 //! environment variable to be exported by shell init.
 
-use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
@@ -17,8 +17,7 @@ impl EzaAdapter {
     /// Get config home directory (XDG default)
     fn config_home() -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
-        Ok(PathBuf::from(home).join(".config"))
+        Ok(env.xdg_config_home().to_path_buf())
     }
 
     /// Render Palette into eza YAML theme structure.
@@ -81,11 +80,8 @@ impl ToolAdapter for EzaAdapter {
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-        let home = env
-            .as_ref()
-            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
-        if let Some(h) = home {
-            PathBuf::from(h).join(".config/slate/managed/eza")
+        if let Some(env) = env.as_ref() {
+            env.config_dir().join("managed").join("eza")
         } else {
             PathBuf::from(".config/slate/managed/eza")
         }
@@ -95,7 +91,7 @@ impl ToolAdapter for EzaAdapter {
         ApplyStrategy::EnvironmentVariable
     }
 
-    fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
         // Validate theme has palette data
         theme.palette.validate()?;
 
@@ -106,7 +102,7 @@ impl ToolAdapter for EzaAdapter {
         let config_manager = ConfigManager::new()?;
         config_manager.write_managed_file("eza", "theme.yml", &yaml_content)?;
 
-        Ok(())
+        Ok(ApplyOutcome::Applied)
     }
 
     fn reload(&self) -> Result<()> {

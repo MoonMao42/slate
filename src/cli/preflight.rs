@@ -40,6 +40,12 @@ impl PreflightResult {
 
 /// Run preflight checks
 pub fn run_checks() -> Result<PreflightResult> {
+    let env = SlateEnv::from_process()?;
+    run_checks_with_env(&env)
+}
+
+/// Run preflight checks with injected SlateEnv.
+pub fn run_checks_with_env(env: &SlateEnv) -> Result<PreflightResult> {
     let mut checks = Vec::new();
 
     // Check 1: Homebrew is installed
@@ -78,12 +84,12 @@ pub fn run_checks() -> Result<PreflightResult> {
     // Check 4: Write permissions
     checks.push(PreflightCheck {
         name: "Write Permissions".to_string(),
-        description: if check_write_permissions() {
+        description: if check_write_permissions_with_env(env) {
             "can write to ~/.config".to_string()
         } else {
             "cannot write to ~/.config (required)".to_string()
         },
-        passed: check_write_permissions(),
+        passed: check_write_permissions_with_env(env),
     });
 
     // Check 5: Tools available
@@ -134,16 +140,12 @@ fn check_network_reachable() -> bool {
 }
 
 /// Check if we can write to config directory
-fn check_write_permissions() -> bool {
+fn check_write_permissions_with_env(env: &SlateEnv) -> bool {
     // Try to write to ~/.config directory
-    let config_dir = match SlateEnv::from_process() {
-        Ok(env) => {
-            let path = env.home().join(".config");
-            // Create if doesn't exist
-            let _ = std::fs::create_dir_all(&path);
-            path
-        }
-        Err(_) => return false,
+    let config_dir = {
+        let path = env.xdg_config_home().to_path_buf();
+        let _ = std::fs::create_dir_all(&path);
+        path
     };
 
     // Try to create a temp file to verify write access

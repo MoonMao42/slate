@@ -59,11 +59,6 @@ enum Commands {
     Status,
     /// List available themes
     List,
-    /// Reset to previous configuration
-    Reset {
-        /// Backup point ID (optional; if omitted, shows list)
-        backup_id: Option<String>,
-    },
     /// Clean up slate-managed configuration
     Clean,
 }
@@ -135,13 +130,6 @@ fn main() -> Result<()> {
         }
         Some(Commands::List) => {
             cli::list::handle(&[])?;
-        }
-        Some(Commands::Reset { backup_id }) => {
-            let args: Vec<&str> = backup_id
-                .as_ref()
-                .map(|id| vec![id.as_str()])
-                .unwrap_or_default();
-            cli::restore::handle(&args)?;
         }
         Some(Commands::Clean) => {
             cli::clean::handle_clean()?;

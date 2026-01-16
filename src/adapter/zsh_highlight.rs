@@ -4,7 +4,7 @@
 //! blocks inside `.zshrc`.
 
 use crate::adapter::palette_renderer::PaletteRenderer;
-use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -81,11 +81,8 @@ impl ToolAdapter for ZshHighlightAdapter {
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-        let home = env
-            .as_ref()
-            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
-        if let Some(h) = home {
-            PathBuf::from(h).join(".config/slate/managed/zsh")
+        if let Some(env) = env.as_ref() {
+            env.config_dir().join("managed").join("zsh")
         } else {
             PathBuf::from(".config/slate/managed/zsh")
         }
@@ -95,7 +92,7 @@ impl ToolAdapter for ZshHighlightAdapter {
         ApplyStrategy::SourceScript
     }
 
-    fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
         // Step 1: Build semantic map for ZSH_HIGHLIGHT_STYLES
         let highlight_styles = Self::render_highlight_styles(theme)?;
 
@@ -109,7 +106,7 @@ impl ToolAdapter for ZshHighlightAdapter {
         file.write_all(highlight_styles.as_bytes())?;
         file.commit()?;
 
-        Ok(())
+        Ok(ApplyOutcome::Applied)
     }
 
     fn reload(&self) -> Result<()> {

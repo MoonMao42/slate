@@ -1,7 +1,7 @@
 use crate::brand::Language;
+use crate::cli::config::{disable_auto_theme, enable_auto_theme};
 use crate::config::ConfigManager;
 use crate::error::Result;
-use crate::platform;
 use crate::theme::ThemeRegistry;
 
 /// Handle bare `slate` invocation 
@@ -31,33 +31,25 @@ fn sync_auto_theme_toggle(config: &ConfigManager, enabled: bool) -> Result<()> {
     sync_auto_theme_toggle_with(
         config,
         enabled,
-        platform::launchd::install_agent,
-        platform::launchd::uninstall_agent,
+        enable_auto_theme,
+        disable_auto_theme,
     )
 }
 
-fn sync_auto_theme_toggle_with<Install, Uninstall>(
+fn sync_auto_theme_toggle_with<Enable, Disable>(
     config: &ConfigManager,
     enabled: bool,
-    install_agent: Install,
-    uninstall_agent: Uninstall,
+    enable_auto_theme: Enable,
+    disable_auto_theme: Disable,
 ) -> Result<()>
 where
-    Install: Fn() -> Result<()>,
-    Uninstall: Fn() -> Result<()>,
+    Enable: Fn(&ConfigManager) -> Result<()>,
+    Disable: Fn(&ConfigManager) -> Result<()>,
 {
     if enabled {
-        install_agent()?;
-        if let Err(err) = config.set_auto_theme_enabled(true) {
-            let _ = uninstall_agent();
-            return Err(err);
-        }
+        enable_auto_theme(config)?;
     } else {
-        uninstall_agent()?;
-        if let Err(err) = config.set_auto_theme_enabled(false) {
-            let _ = install_agent();
-            return Err(err);
-        }
+        disable_auto_theme(config)?;
     }
 
     Ok(())
@@ -299,7 +291,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_sync_auto_theme_toggle_enables_agent_and_config() {
+    fn test_sync_auto_theme_toggle_enables_watcher_and_config() {
         let temp = TempDir::new().unwrap();
         let env = SlateEnv::with_home(temp.path().to_path_buf());
         let config = ConfigManager::with_env(&env).unwrap();
@@ -309,13 +301,13 @@ mod tests {
         sync_auto_theme_toggle_with(
             &config,
             true,
-            || {
+            |config| {
                 install_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+                config.set_auto_theme_enabled(true)
             },
-            || {
+            |config| {
                 uninstall_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+                config.set_auto_theme_enabled(false)
             },
         )
         .unwrap();
@@ -326,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_auto_theme_toggle_disables_agent_and_config() {
+    fn test_sync_auto_theme_toggle_disables_watcher_and_config() {
         let temp = TempDir::new().unwrap();
         let env = SlateEnv::with_home(temp.path().to_path_buf());
         let config = ConfigManager::with_env(&env).unwrap();
@@ -338,13 +330,13 @@ mod tests {
         sync_auto_theme_toggle_with(
             &config,
             false,
-            || {
+            |config| {
                 install_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+                config.set_auto_theme_enabled(true)
             },
-            || {
+            |config| {
                 uninstall_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+                config.set_auto_theme_enabled(false)
             },
         )
         .unwrap();

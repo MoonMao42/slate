@@ -3,7 +3,7 @@
 //! This adapter uses the MarkerBlock module from for safe, validated editing.
 //! Preserves pager sync logic: synchronizes bat --theme and delta --syntax-theme.
 
-use crate::adapter::{marker_block, ApplyStrategy, ToolAdapter};
+use crate::adapter::{marker_block, ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
@@ -77,11 +77,8 @@ impl ToolAdapter for DeltaAdapter {
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-        let home = env
-            .as_ref()
-            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
-        if let Some(h) = home {
-            PathBuf::from(h).join(".config/slate/managed/delta")
+        if let Some(env) = env.as_ref() {
+            env.config_dir().join("managed").join("delta")
         } else {
             PathBuf::from(".config/slate/managed/delta")
         }
@@ -91,7 +88,7 @@ impl ToolAdapter for DeltaAdapter {
         ApplyStrategy::WriteAndInclude
     }
 
-    fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
         // Validate theme has palette data
         theme.palette.validate()?;
 
@@ -127,7 +124,7 @@ impl ToolAdapter for DeltaAdapter {
         file.write_all(updated_content.as_bytes())?;
         file.commit()?;
 
-        Ok(())
+        Ok(ApplyOutcome::Applied)
     }
 
     fn reload(&self) -> Result<()> {

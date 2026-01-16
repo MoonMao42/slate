@@ -4,7 +4,6 @@ use crate::brand::Language;
 use crate::config::ConfigManager;
 use crate::design::symbols::Symbols;
 use crate::error::Result;
-use crate::platform;
 use crate::theme::{Palette, ThemeRegistry};
 
 /// Tool installation status 
@@ -28,19 +27,15 @@ const TOOL_STATUS_ITEMS: [(&str, &str); 11] = [
     ("nerd-font", "nerd-font"),
 ];
 
-/// Check if auto-theme launchd agent is loaded 
-/// Run `launchctl list sh.slate.auto-theme` and check exit code
-/// Return format: "[loaded]" (exit 0) or "[not installed]" (non-zero)
-fn get_agent_status() -> String {
-    match platform::launchd::check_agent_loaded() {
-        Ok(loaded) => {
-            if loaded {
-                Language::STATUS_AUTO_AGENT_LOADED.to_string()
-            } else {
-                Language::STATUS_AUTO_AGENT_NOT_INSTALLED.to_string()
-            }
-        }
-        Err(_) => Language::STATUS_AUTO_AGENT_NOT_INSTALLED.to_string(),
+fn get_auto_theme_status(config: &ConfigManager) -> String {
+    let enabled = config.is_auto_theme_enabled().unwrap_or(false);
+    let running = crate::platform::dark_mode_notify::is_running().unwrap_or(false);
+
+    match (enabled, running) {
+        (true, true) => Language::STATUS_AUTO_WATCHER_RUNNING.to_string(),
+        (true, false) => Language::STATUS_AUTO_WATCHER_IDLE.to_string(),
+        (false, true) => Language::STATUS_AUTO_WATCHER_DRIFT.to_string(),
+        (false, false) => Language::STATUS_AUTO_WATCHER_DISABLED.to_string(),
     }
 }
 
@@ -107,11 +102,11 @@ pub fn render() -> Result<()> {
         println!();
     }
 
-    // Section 5 - Auto Theme Agent
+    // Section 5 - Auto Theme Watcher
     println!(" │");
-    let agent_status = get_agent_status();
-    println!(" │  {} Auto Theme Agent", Symbols::DIAMOND);
-    println!(" │    {}", agent_status);
+    let auto_theme_status = get_auto_theme_status(&config);
+    println!(" │  {} Auto Theme Watcher", Symbols::DIAMOND);
+    println!(" │    {}", auto_theme_status);
 
     // Panel footer
     println!(" ╰─────────────────────────────────────────────────────────────╯");

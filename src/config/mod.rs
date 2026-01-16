@@ -9,8 +9,9 @@ use toml_edit::DocumentMut;
 
 mod backup;
 pub use backup::{
-    begin_restore_point_baseline, is_baseline_restore_point, list_restore_points, BackupInfo,
-    BackupSession, RestoreEntry, RestorePoint,
+    begin_restore_point_baseline, begin_restore_point_baseline_with_env,
+    is_baseline_restore_point, list_restore_points, list_restore_points_with_env, BackupInfo,
+    BackupSession, OriginalFileState, RestoreEntry, RestorePoint,
 };
 
 /// Three-tier configuration manager.
@@ -26,9 +27,14 @@ pub struct AutoConfig {
 
 pub struct ConfigManager {
     base_path: PathBuf, // ~/.config/slate
+    backup_root: PathBuf, // ~/.cache/slate/backups
 }
 
 impl ConfigManager {
+    fn xdg_config_root(&self) -> &Path {
+        self.base_path.parent().unwrap_or(self.base_path.as_path())
+    }
+
     fn parse_toml_document(content: &str) -> Result<DocumentMut> {
         if content.trim().is_empty() {
             Ok(DocumentMut::new())
@@ -55,11 +61,16 @@ impl ConfigManager {
     /// Prefer this method over new() for new code.
     pub fn with_env(env: &SlateEnv) -> Result<Self> {
         let base_path = env.config_dir().to_path_buf();
+        let backup_root = env.slate_cache_dir().join("backups");
 
         // Ensure base directory exists
         fs::create_dir_all(&base_path)?;
+        fs::create_dir_all(&backup_root)?;
 
-        Ok(Self { base_path })
+        Ok(Self {
+            base_path,
+            backup_root,
+        })
     }
 
     /// Create ConfigManager from process environment (backward compatibility).
@@ -84,9 +95,9 @@ impl ConfigManager {
     }
 
     /// Path to backup directory for a tool
-    /// Example: ~/.config/slate/backups/starship
+    /// Example: ~/.cache/slate/backups/starship
     fn backups_dir(&self, tool: &str) -> PathBuf {
-        self.base_path.join("backups").join(tool)
+        self.backup_root.join(tool)
     }
 
     /// Path to current theme tracking file
@@ -131,6 +142,17 @@ impl ConfigManager {
     /// Called both during setup (to initialize) and on `slate set` (to update).
     pub fn write_shell_integration_file(&self, theme: &crate::theme::ThemeVariant) -> Result<()> {
         let mut content = String::new();
+        let managed_root = self.base_path.join("managed");
+        let managed_root = managed_root.to_string_lossy();
+        let user_config_root = self.xdg_config_root().to_string_lossy();
+        let plain_starship_path = self.managed_dir("starship").join("plain.toml");
+        let plain_starship_path = plain_starship_path.to_string_lossy();
+        let notify_bin = self.managed_dir("bin").join("slate-dark-mode-notify");
+        let notify_path = notify_bin.to_string_lossy();
+        let slate_bin = std::env::current_exe()
+            .ok()
+            .map(|path| format!("\"{}\"", path.to_string_lossy()))
+            .unwrap_or_else(|| "slate".to_string());
 
         // Export BAT_THEME
         content.push_str(&format!(
@@ -144,27 +166,30 @@ impl ConfigManager {
         ));
 
         // Export EZA_CONFIG_DIR
-        content.push_str(
-            "export EZA_CONFIG_DIR=\"$HOME/.config/slate/managed/eza\"
-",
-        );
+        content.push_str(&format!(
+            "export EZA_CONFIG_DIR=\"{}/eza\"\n",
+            managed_root
+        ));
 
         // Export LG_CONFIG_FILE
-        content.push_str("export LG_CONFIG_FILE=\"$HOME/.config/slate/managed/lazygit/config.yml:$HOME/.config/lazygit/config.yml\"
-");
+        content.push_str(&format!(
+            "export LG_CONFIG_FILE=\"{managed}/lazygit/config.yml:{xdg}/lazygit/config.yml\"\n",
+            managed = managed_root,
+            xdg = user_config_root
+        ));
 
         // Add fastfetch wrapper function
-        content.push_str("fastfetch() { command fastfetch -c ~/.config/slate/managed/fastfetch/config.jsonc \"$@\"; }
-");
+        content.push_str(&format!(
+            "fastfetch() {{ command fastfetch -c \"{}/fastfetch/config.jsonc\" \"$@\"; }}\n",
+            managed_root
+        ));
 
         // Guard optional zsh-syntax-highlighting styles so fresh shells do not
         // fail when the plugin has not been installed yet.
-        content.push_str(
-            "if [ -f \"$HOME/.config/slate/managed/zsh/highlight-styles.sh\" ]; then
-  source \"$HOME/.config/slate/managed/zsh/highlight-styles.sh\"
-fi
-",
-        );
+        content.push_str(&format!(
+            "if [ -f \"{managed}/zsh/highlight-styles.sh\" ]; then\n  source \"{managed}/zsh/highlight-styles.sh\"\nfi\n",
+            managed = managed_root
+        ));
         // Gate features: only Terminal.app needs a plain starship (no Nerd Font glyphs).
         // All modern terminals (Ghostty, Alacritty, iTerm2, WezTerm, Kitty, etc.)
         // render Nerd Fonts fine, so we use an exclusion list instead of an allow list.
@@ -182,25 +207,23 @@ fi
         // and the Swift NSApplication binary triggers macOS permission prompts
         // (automation/accessibility) in non-Ghostty terminals.
         if self.is_auto_theme_enabled()? {
-            let notify_bin = self.managed_dir("bin").join("slate-dark-mode-notify");
-            let notify_path = notify_bin.to_string_lossy();
             content.push_str(&format!(
                 r#"  if [[ "${{TERM_PROGRAM:l}}" == "ghostty" ]] && [[ -x "{path}" ]]; then
-    if ! pgrep -qf slate-dark-mode-notify; then
-      "{path}" slate theme --auto --quiet &!
+    if ! pgrep -qf "slate-dark-mode-notify"; then
+      "{path}" {slate_bin} theme --auto --quiet &!
     fi
   fi
 "#,
-                path = notify_path
+                path = notify_path,
+                slate_bin = slate_bin
             ));
         }
 
         content.push_str("else\n");
         // Non-Ghostty terminals: use a plain starship config without Nerd Font glyphs
-        let plain_starship = self.managed_dir("starship").join("plain.toml");
         content.push_str(&format!(
             "  export STARSHIP_CONFIG=\"{}\"\n",
-            plain_starship.to_string_lossy()
+            plain_starship_path
         ));
         content.push_str("fi\n");
 
@@ -646,6 +669,13 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn test_config_manager(base_path: &Path) -> ConfigManager {
+        ConfigManager {
+            base_path: base_path.to_path_buf(),
+            backup_root: base_path.join(".cache/slate/backups"),
+        }
+    }
+
     #[test]
     fn test_config_manager_with_env() {
         let temp = TempDir::new().unwrap();
@@ -659,9 +689,7 @@ mod tests {
     #[test]
     fn test_managed_file_write() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         let result = config_manager.write_managed_file(
             "ghostty",
@@ -681,9 +709,7 @@ mod tests {
     #[test]
     fn test_user_dir_path() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         assert_eq!(
             config_manager.user_dir("ghostty"),
@@ -694,9 +720,7 @@ mod tests {
     #[test]
     fn test_current_theme_tracking() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         // Initially no theme set
         let current = config_manager.get_current_theme().unwrap();
@@ -715,26 +739,54 @@ mod tests {
     #[test]
     fn test_shell_integration_file_guards_optional_zsh_source() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
 
         config_manager.write_shell_integration_file(&theme).unwrap();
 
         let shell_file = config_manager.managed_dir("shell").join("env.zsh");
         let content = fs::read_to_string(shell_file).unwrap();
-        assert!(content
-            .contains("if [ -f \"$HOME/.config/slate/managed/zsh/highlight-styles.sh\" ]; then"));
-        assert!(content.contains("source \"$HOME/.config/slate/managed/zsh/highlight-styles.sh\""));
+        let expected = config_manager
+            .managed_dir("zsh")
+            .join("highlight-styles.sh")
+            .to_string_lossy()
+            .to_string();
+        assert!(content.contains(&format!("if [ -f \"{}\" ]; then", expected)));
+        assert!(content.contains(&format!("source \"{}\"", expected)));
+    }
+
+    #[test]
+    fn test_shell_integration_file_uses_injected_managed_and_xdg_paths() {
+        let temp = TempDir::new().unwrap();
+        let base_path = temp.path().join("custom-xdg/slate");
+        let config_manager = test_config_manager(&base_path);
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+
+        config_manager.write_shell_integration_file(&theme).unwrap();
+
+        let shell_file = config_manager.managed_dir("shell").join("env.zsh");
+        let content = fs::read_to_string(shell_file).unwrap();
+
+        let managed_root = base_path.join("managed").to_string_lossy().to_string();
+        let xdg_root = base_path
+            .parent()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        assert!(content.contains(&format!("export EZA_CONFIG_DIR=\"{}/eza\"", managed_root)));
+        assert!(content.contains(&format!(
+            "export LG_CONFIG_FILE=\"{managed}/lazygit/config.yml:{xdg}/lazygit/config.yml\"",
+            managed = managed_root,
+            xdg = xdg_root
+        )));
+        assert!(!content.contains("$HOME/.config/slate"));
     }
 
     #[test]
     fn test_shell_integration_uses_single_watcher_guard() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
 
         config_manager.set_auto_theme_enabled(true).unwrap();
@@ -742,17 +794,15 @@ mod tests {
 
         let shell_file = config_manager.managed_dir("shell").join("env.zsh");
         let content = fs::read_to_string(shell_file).unwrap();
-        assert!(content.contains("if ! pgrep -qf slate-dark-mode-notify; then"));
-        assert!(content.contains("slate theme --auto --quiet &!"));
+        assert!(content.contains("if ! pgrep -qf \"slate-dark-mode-notify\"; then"));
+        assert!(content.contains("theme --auto --quiet &!"));
         assert!(!content.contains("_SLATE_AUTO_WATCHER"));
     }
 
     #[test]
     fn test_auto_config_uses_toml_parser_and_writer() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
         let auto_path = temp.path().join("auto.toml");
 
         fs::write(
@@ -787,9 +837,7 @@ format = "..."
 "#;
         fs::write(&config_path, initial).unwrap();
 
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         // Edit the palette key
         let result = config_manager.edit_config_field(&config_path, &["palette"], "new-palette");
@@ -811,9 +859,7 @@ format = "..."
         let config_path = temp.path().join("starship.toml");
         fs::write(&config_path, "palette = \"catppuccin-mocha\"\n").unwrap();
 
-        let config_manager = ConfigManager {
-            base_path: temp.path().join(".config/slate"),
-        };
+        let config_manager = test_config_manager(&temp.path().join(".config/slate"));
         fs::create_dir_all(config_manager.base_path()).unwrap();
 
         let backup_path = config_manager.backup_file(&config_path).unwrap();
@@ -825,9 +871,7 @@ format = "..."
     #[test]
     fn test_opacity_persistence_missing_file_defaults_to_solid() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         // When file missing, should default to Solid
         let preset = config_manager.get_current_opacity_preset().unwrap();
@@ -837,9 +881,7 @@ format = "..."
     #[test]
     fn test_opacity_persistence_round_trip() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         // Set opacity
         config_manager
@@ -859,9 +901,7 @@ format = "..."
     #[test]
     fn test_opacity_persistence_all_presets() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         for preset in &[
             crate::opacity::OpacityPreset::Solid,
@@ -877,9 +917,7 @@ format = "..."
     #[test]
     fn test_fastfetch_autorun_marker_toggle() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         // Initially not enabled
         let enabled = config_manager.has_fastfetch_autorun().unwrap();
@@ -903,9 +941,7 @@ format = "..."
     #[test]
     fn test_fastfetch_disable_is_idempotent() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         // Disable when not enabled should not error
         let result = config_manager.disable_fastfetch_autorun();
@@ -919,9 +955,7 @@ format = "..."
     #[test]
     fn test_fastfetch_disable_propagates_non_not_found_errors() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
         let marker_path = temp.path().join("autorun-fastfetch");
         fs::create_dir(&marker_path).unwrap();
 
@@ -934,9 +968,7 @@ format = "..."
         use tempfile::TempDir;
 
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         // Create marker file
         config_manager.enable_fastfetch_autorun().unwrap();
@@ -963,9 +995,7 @@ format = "..."
         use tempfile::TempDir;
 
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         // Do NOT create marker file (fastfetch disabled by default)
 
@@ -988,9 +1018,7 @@ format = "..."
     #[test]
     fn test_refresh_shell_integration_uses_current_theme() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         config_manager
             .set_current_theme("tokyo-night-dark")
@@ -1006,9 +1034,7 @@ format = "..."
     #[test]
     fn test_refresh_shell_integration_falls_back_to_default_theme() {
         let temp = TempDir::new().unwrap();
-        let config_manager = ConfigManager {
-            base_path: temp.path().to_path_buf(),
-        };
+        let config_manager = test_config_manager(temp.path());
 
         config_manager.set_current_theme("missing-theme").unwrap();
         config_manager.refresh_shell_integration().unwrap();

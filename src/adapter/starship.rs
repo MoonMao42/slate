@@ -3,13 +3,13 @@
 //! include/import mechanism, so uses EditInPlace strategy to modify user's
 //! starship.toml in-place with careful scoping to [palettes.slate] section.
 
-use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, Value};
 use which::which;
 
@@ -61,7 +61,7 @@ fn replace_fg_crust_in_item(item: &mut Item) {
 
 impl StarshipAdapter {
     /// Pure path resolution: env override → XDG default (no global state)
-    fn resolve_path(starship_config: Option<&str>, config_home: &PathBuf) -> PathBuf {
+    fn resolve_path(starship_config: Option<&str>, config_home: &Path) -> PathBuf {
         if let Some(val) = starship_config {
             if !val.is_empty() {
                 return PathBuf::from(val);
@@ -89,21 +89,16 @@ impl ToolAdapter for StarshipAdapter {
 
     fn integration_config_path(&self) -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
-        let config_home = PathBuf::from(home).join(".config");
         Ok(Self::resolve_path(
             std::env::var("STARSHIP_CONFIG").ok().as_deref(),
-            &config_home,
+            env.xdg_config_home(),
         ))
     }
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-        let home = env
-            .as_ref()
-            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
-        if let Some(h) = home {
-            PathBuf::from(h).join(".config/slate/managed/starship")
+        if let Some(env) = env.as_ref() {
+            env.config_dir().join("managed").join("starship")
         } else {
             PathBuf::from(".config/slate/managed/starship")
         }
@@ -113,8 +108,11 @@ impl ToolAdapter for StarshipAdapter {
         ApplyStrategy::EditInPlace
     }
 
-    fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
         let config_path = self.integration_config_path()?;
+        if !config_path.exists() {
+            return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
+        }
 
         // Step 0: Backup before any modification
         let config_manager = ConfigManager::new()?;
@@ -254,7 +252,7 @@ impl ToolAdapter for StarshipAdapter {
             SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string())
         })?;
 
-        Ok(())
+        Ok(ApplyOutcome::Applied)
     }
 
     fn get_current_theme(&self) -> Result<Option<String>> {

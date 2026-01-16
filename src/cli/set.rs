@@ -101,33 +101,21 @@ pub fn silent_commit_apply(
     theme_id: &str,
     opacity: crate::opacity::OpacityPreset,
 ) -> Result<()> {
-    let config = crate::config::ConfigManager::with_env(env)?;
     let registry = crate::theme::ThemeRegistry::new()?;
 
     let theme = registry.get(theme_id).ok_or_else(|| {
         crate::error::SlateError::InvalidThemeData(format!("Theme '{}' not found", theme_id))
     })?;
 
-    // Persist state files
-    config.set_current_theme(&theme.id)?;
+    crate::cli::theme_apply::ThemeApplyCoordinator::new(env).apply(theme)?;
+
+    let config = crate::config::ConfigManager::with_env(env)?;
     config.set_current_opacity_preset(opacity)?;
-
-    // Write shell integration
-    config.write_shell_integration_file(theme)?;
-
-    // Apply theme to all adapters
-    let adapter_registry = crate::adapter::ToolRegistry::default();
-    let _results = adapter_registry.apply_theme_to_all(theme);
 
     // Update opacity/blur for terminal adapters
     let _ = crate::adapter::ghostty::write_opacity_config(env, opacity);
     let _ = crate::adapter::ghostty::write_blur_radius(env, opacity);
     let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
-
-    // Hot-reload Ghostty
-    if let Some(ghostty_adapter) = adapter_registry.get_adapter("ghostty") {
-        let _ = ghostty_adapter.reload();
-    }
 
     Ok(())
 }

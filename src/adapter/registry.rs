@@ -1,8 +1,23 @@
-use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::error::Result;
 use crate::theme::ThemeVariant;
 use rayon::prelude::*;
 use std::collections::HashMap;
+
+/// Aggregated status for one adapter after a coordinated theme apply run.
+#[derive(Debug)]
+pub enum ToolApplyStatus {
+    Applied,
+    Skipped(SkipReason),
+    Failed(crate::error::SlateError),
+}
+
+/// Structured adapter result emitted by ToolRegistry.
+#[derive(Debug)]
+pub struct ToolApplyResult {
+    pub tool_name: String,
+    pub status: ToolApplyStatus,
+}
 
 /// Registry for all tool adapters.
 /// Manages adapter instances and coordinates theme application across tools.
@@ -48,22 +63,29 @@ impl ToolRegistry {
         result
     }
 
-    /// Apply theme to all registered tools (ignores if tool not installed).
-    /// Returns results for each tool: Ok or Err.
+    /// Apply theme to all registered tools.
+    /// Returns structured results for each themeable adapter.
     /// Per research: partial failure pattern (apply to others even if one fails).
     /// Detect-and-install adapters are not theme targets and are skipped.
-    pub fn apply_theme_to_all(&self, theme: &ThemeVariant) -> HashMap<String, Result<()>> {
-        let results: HashMap<String, Result<()>> = self
-            .adapters
+    pub fn apply_theme_to_all(&self, theme: &ThemeVariant) -> Vec<ToolApplyResult> {
+        self.adapters
             .par_iter()
-            .filter(|adapter| {
-                adapter.apply_strategy() != ApplyStrategy::DetectAndInstall
-                    && adapter.is_installed().unwrap_or(false)
-            })
-            .map(|adapter| (adapter.tool_name().to_string(), adapter.apply_theme(theme)))
-            .collect();
+            .filter(|adapter| adapter.apply_strategy() != ApplyStrategy::DetectAndInstall)
+            .map(|adapter| {
+                let tool_name = adapter.tool_name().to_string();
+                let status = match adapter.is_installed() {
+                    Ok(false) => ToolApplyStatus::Skipped(SkipReason::NotInstalled),
+                    Ok(true) => match adapter.apply_theme(theme) {
+                        Ok(ApplyOutcome::Applied) => ToolApplyStatus::Applied,
+                        Ok(ApplyOutcome::Skipped(reason)) => ToolApplyStatus::Skipped(reason),
+                        Err(err) => ToolApplyStatus::Failed(err),
+                    },
+                    Err(err) => ToolApplyStatus::Failed(err),
+                };
 
-        results
+                ToolApplyResult { tool_name, status }
+            })
+            .collect()
     }
 
     /// Reload all adapters that support hot-reload
@@ -105,6 +127,7 @@ mod tests {
     struct MockAdapter {
         name: &'static str,
         strategy: crate::adapter::ApplyStrategy,
+        installed: bool,
     }
 
     impl ToolAdapter for MockAdapter {
@@ -113,7 +136,7 @@ mod tests {
         }
 
         fn is_installed(&self) -> Result<bool> {
-            Ok(true)
+            Ok(self.installed)
         }
 
         fn integration_config_path(&self) -> Result<std::path::PathBuf> {
@@ -128,8 +151,8 @@ mod tests {
             self.strategy
         }
 
-        fn apply_theme(&self, _theme: &ThemeVariant) -> Result<()> {
-            Ok(())
+        fn apply_theme(&self, _theme: &ThemeVariant) -> Result<ApplyOutcome> {
+            Ok(ApplyOutcome::Applied)
         }
     }
 
@@ -139,6 +162,7 @@ mod tests {
         let adapter = Box::new(MockAdapter {
             name: "test_tool",
             strategy: crate::adapter::ApplyStrategy::WriteAndInclude,
+            installed: true,
         });
         registry.register(adapter);
 
@@ -153,6 +177,7 @@ mod tests {
         let adapter = Box::new(MockAdapter {
             name: "test_tool",
             strategy: crate::adapter::ApplyStrategy::WriteAndInclude,
+            installed: true,
         });
         registry.register(adapter);
 
@@ -172,17 +197,19 @@ mod tests {
         registry.register(Box::new(MockAdapter {
             name: "themeable",
             strategy: crate::adapter::ApplyStrategy::WriteAndInclude,
+            installed: true,
         }));
         registry.register(Box::new(MockAdapter {
             name: "detector",
             strategy: crate::adapter::ApplyStrategy::DetectAndInstall,
+            installed: true,
         }));
 
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
         let results = registry.apply_theme_to_all(&theme);
 
-        assert!(results.contains_key("themeable"));
-        assert!(!results.contains_key("detector"));
+        assert!(results.iter().any(|result| result.tool_name == "themeable"));
+        assert!(!results.iter().any(|result| result.tool_name == "detector"));
     }
 }
 

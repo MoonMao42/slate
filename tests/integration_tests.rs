@@ -11,7 +11,7 @@ fn test_cli_help_shows_commands() {
     assert!(stdout.contains("set"));
     assert!(stdout.contains("status"));
     assert!(stdout.contains("list"));
-    assert!(stdout.contains("reset"));
+    assert!(!stdout.contains("reset"));
     assert!(stdout.contains("theme"));
     assert!(stdout.contains("font"));
     assert!(stdout.contains("config"));
@@ -57,16 +57,6 @@ fn test_list_subcommand_help() {
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(stdout.contains("list"));
-}
-
-#[test]
-fn test_reset_subcommand_help() {
-    let mut cmd = Command::cargo_bin("slate").unwrap();
-
-    let output = cmd.args(["reset", "--help"]).output().unwrap();
-    let stdout = String::from_utf8(output.stdout).unwrap();
-
-    assert!(stdout.contains("reset"));
 }
 
 #[test]
@@ -119,13 +109,15 @@ fn test_list_command_runs() {
 }
 
 #[test]
-fn test_reset_with_backup_id() {
+fn test_reset_subcommand_is_not_exposed() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(["reset", "backup123"]).output().unwrap();
-    let stdout = String::from_utf8(output.stdout).unwrap();
+    let output = cmd.args(["reset", "--help"]).output().unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
 
-    assert!(stdout.contains("backup123"));
+    assert!(!output.status.success());
+    assert!(stderr.contains("unrecognized subcommand"));
+    assert!(stderr.contains("reset"));
 }
 
 // Setup wizard tests 

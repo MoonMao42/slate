@@ -5,6 +5,35 @@ use crate::error::Result;
 use crate::opacity::OpacityPreset;
 use crate::platform;
 
+pub(crate) fn enable_auto_theme(config: &ConfigManager) -> Result<()> {
+    platform::dark_mode_notify::ensure_binary(config)?;
+    config.set_auto_theme_enabled(true)?;
+
+    if let Err(err) = config.refresh_shell_integration() {
+        let _ = config.set_auto_theme_enabled(false);
+        return Err(err);
+    }
+
+    Ok(())
+}
+
+pub(crate) fn disable_auto_theme(config: &ConfigManager) -> Result<()> {
+    let was_enabled = config.is_auto_theme_enabled()?;
+
+    config.set_auto_theme_enabled(false)?;
+    if let Err(err) = config.refresh_shell_integration() {
+        if was_enabled {
+            let _ = config.set_auto_theme_enabled(true);
+            let _ = config.refresh_shell_integration();
+        }
+        return Err(err);
+    }
+
+    platform::dark_mode_notify::stop()?;
+    platform::dark_mode_notify::remove_binary(config)?;
+    Ok(())
+}
+
 /// Handle `slate config set <key> <value>` command
 pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
     let env = SlateEnv::from_process()?;
@@ -34,23 +63,15 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
         "auto-theme" => {
             match value {
                 "enable" => {
-                    // Compile the Swift dark mode notifier binary
-                    platform::dark_mode_notify::ensure_binary(&config)?;
-
-                    config.set_auto_theme_enabled(true)?;
-                    config.refresh_shell_integration()?;
+                    enable_auto_theme(&config)?;
 
                     println!("{} Auto theme enabled", Symbols::SUCCESS);
-                    println!(
-                        "  New shell sessions will auto-switch theme on macOS appearance change"
-                    );
+                    println!("  New Ghostty shell sessions will auto-switch on macOS appearance change");
                     println!("  Run 'slate config set auto-theme configure' to customize dark/light pairing");
                     Ok(())
                 }
                 "disable" => {
-                    config.set_auto_theme_enabled(false)?;
-                    config.refresh_shell_integration()?;
-                    platform::dark_mode_notify::remove_binary(&config)?;
+                    disable_auto_theme(&config)?;
 
                     println!("{} Auto theme disabled", Symbols::SUCCESS);
                     Ok(())
@@ -61,6 +82,7 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
 
                     // If auto-theme is now enabled, regenerate shell integration
                     if config.is_auto_theme_enabled()? {
+                        platform::dark_mode_notify::ensure_binary(&config)?;
                         config.refresh_shell_integration()?;
                     }
 

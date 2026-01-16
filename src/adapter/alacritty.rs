@@ -3,7 +3,7 @@
 //! This adapter edits the import field idempotently using toml_edit::DocumentMut
 //! (AST-aware, not regex-based) to ensure safe, structured modifications.
 
-use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
@@ -18,8 +18,7 @@ impl AlacrittyAdapter {
     /// Get config home directory (XDG default)
     fn config_home() -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
-        Ok(PathBuf::from(home).join(".config"))
+        Ok(env.xdg_config_home().to_path_buf())
     }
 
     /// Resolve Alacritty config path, respecting ALACRITTY_SOCKET_PATH and XDG_CONFIG_HOME.
@@ -186,11 +185,8 @@ impl ToolAdapter for AlacrittyAdapter {
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-        let home = env
-            .as_ref()
-            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
-        if let Some(h) = home {
-            PathBuf::from(h).join(".config/slate/managed/alacritty")
+        if let Some(env) = env.as_ref() {
+            env.config_dir().join("managed").join("alacritty")
         } else {
             PathBuf::from(".config/slate/managed/alacritty")
         }
@@ -200,7 +196,13 @@ impl ToolAdapter for AlacrittyAdapter {
         ApplyStrategy::WriteAndInclude
     }
 
-    fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
+        let env = SlateEnv::from_process()?;
+        let integration_path = self.integration_config_path()?;
+        if !integration_path.exists() {
+            return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
+        }
+
         // Validate theme has palette data
         theme.palette.validate()?;
 
@@ -209,9 +211,8 @@ impl ToolAdapter for AlacrittyAdapter {
 
         // Step 2b: Add font-family — prefer user's saved choice, fallback to detection
         let mut final_colors_content = colors_content;
-        let chosen_font = crate::config::ConfigManager::new()
-            .ok()
-            .and_then(|cm| cm.get_current_font().ok().flatten());
+        let config_mgr = ConfigManager::with_env(&env)?;
+        let chosen_font = config_mgr.get_current_font().ok().flatten();
         let font_family = chosen_font.or_else(|| {
             crate::adapter::font::FontAdapter::detect_installed_fonts()
                 .ok()
@@ -222,14 +223,16 @@ impl ToolAdapter for AlacrittyAdapter {
             final_colors_content = font_section + &final_colors_content;
         }
         // Write managed colors file
-        let config_mgr = ConfigManager::new()?;
         config_mgr.write_managed_file("alacritty", "colors.toml", &final_colors_content)?;
+        let current_opacity = config_mgr.get_current_opacity_preset()?;
+        write_opacity_config(&env, current_opacity)?;
 
         // Ensure integration file includes managed colors path
-        let integration_path = self.integration_config_path()?;
-        let managed_colors_path = self.managed_config_path().join("colors.toml");
+        let managed_colors_path = config_mgr.managed_dir("alacritty").join("colors.toml");
+        let managed_opacity_path = config_mgr.managed_dir("alacritty").join("opacity.toml");
 
         Self::ensure_integration_includes_managed(&integration_path, &managed_colors_path)?;
+        Self::ensure_integration_includes_managed(&integration_path, &managed_opacity_path)?;
 
         // Touch the main config to trigger Alacritty's live_config_reload,
         // which only watches the main file, not imported files.
@@ -239,7 +242,7 @@ impl ToolAdapter for AlacrittyAdapter {
                 .open(&integration_path);
         }
 
-        Ok(())
+        Ok(ApplyOutcome::Applied)
     }
 
     fn reload(&self) -> Result<()> {

@@ -1,18 +1,29 @@
 use crate::env::SlateEnv;
 use crate::error::Result;
+use crate::{config::ConfigManager, platform};
 use std::fs;
 use std::path::Path;
 
 /// Handle `slate clean` command
-/// Removes managed files, unloads launchd agent, and removes .zshrc marker block
+/// Removes managed files, stops the auto-theme watcher, and removes .zshrc marker block
 pub fn handle_clean() -> Result<()> {
     use cliclack::{intro, log};
 
     intro("✦ Clean Up Slate")?;
 
     let env = SlateEnv::from_process()?;
+    let config = ConfigManager::with_env(&env)?;
 
-    // Step 1: Delete managed directory
+    // Step 1: Stop watcher + clear config flag
+    log::step("Stopping auto-theme watcher...")?;
+    if let Err(err) = config.set_auto_theme_enabled(false) {
+        log::remark(format!("  (couldn't update auto-theme flag: {})", err))?;
+    }
+    platform::dark_mode_notify::stop()?;
+    platform::dark_mode_notify::remove_binary(&config)?;
+    log::success("✓ Watcher stopped")?;
+
+    // Step 2: Delete managed directory
     log::step("Removing managed files...")?;
     let managed_dir = env.config_dir().join("managed");
     if managed_dir.exists() {
@@ -22,16 +33,6 @@ pub fn handle_clean() -> Result<()> {
         log::remark("  (managed/ already removed)")?;
     }
 
-    // Step 2: Unload agent (soft-fail if not loaded)
-    log::step("Unloading auto-theme agent...")?;
-    // Call launchd uninstall if the module exists
-    if let Ok(agent_status) = is_agent_loaded() {
-        if agent_status {
-            let _ = uninstall_agent();
-        }
-    }
-    log::success("✓ Agent unloaded")?;
-
     // Step 3: Remove marker block from .zshrc
     log::step("Removing shell integration...")?;
     remove_marker_block_from_zshrc(env.home())?;
@@ -40,33 +41,12 @@ pub fn handle_clean() -> Result<()> {
     // Exit message (brand text)
     log::remark("")?;
     log::info(
-        "slate clean removed slate's managed files and agent. \
-Your original dotfiles were NOT restored — use 'slate reset' \
-once it ships in  Safety Net.",
+        "slate clean removed slate's managed files and watcher. \
+Your original dotfiles were NOT restored. Backups remain under \
+~/.cache/slate/backups, but the restore CLI is not exposed yet.",
     )?;
     log::remark("")?;
 
-    Ok(())
-}
-
-/// Check if the auto-theme launchd agent is loaded
-fn is_agent_loaded() -> Result<bool> {
-    use std::process::Command;
-    let status = Command::new("launchctl")
-        .args(["list", "sh.slate.auto-theme"])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false);
-    Ok(status)
-}
-
-/// Uninstall the auto-theme launchd agent
-fn uninstall_agent() -> Result<()> {
-    use std::process::Command;
-    let uid = unsafe { libc::getuid() };
-    let _output = Command::new("launchctl")
-        .args(["bootout", &format!("gui/{}", uid), "sh.slate.auto-theme"])
-        .output();
     Ok(())
 }
 

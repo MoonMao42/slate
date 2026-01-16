@@ -28,7 +28,7 @@ pub fn handle_with_env(
 
     // Run pre-flight checks
     eprintln!("\n");
-    let preflight_result = preflight::run_checks()?;
+    let preflight_result = preflight::run_checks_with_env(env)?;
     eprintln!("{}", preflight_result.format_for_display());
 
     if !preflight_result.is_ready() {
@@ -69,8 +69,8 @@ pub fn handle_with_env(
     // Create baseline backup BEFORE any mutations (per)
     // Check if baseline already exists (idempotent on subsequent runs)
     {
-        use crate::config::{begin_restore_point_baseline, list_restore_points};
-        let backups = list_restore_points().ok();
+        use crate::config::{begin_restore_point_baseline_with_env, list_restore_points_with_env};
+        let backups = list_restore_points_with_env(env).ok();
         let has_baseline = if let Some(backups) = backups {
             backups.iter().any(|rp| rp.is_baseline)
         } else {
@@ -78,7 +78,7 @@ pub fn handle_with_env(
         };
 
         if !has_baseline {
-            if let Ok(baseline_point) = begin_restore_point_baseline(env.home()) {
+            if let Ok(baseline_point) = begin_restore_point_baseline_with_env(env) {
                 eprintln!("✓ Baseline snapshot created ({})", baseline_point.id);
             }
         }

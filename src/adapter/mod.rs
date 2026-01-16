@@ -26,7 +26,7 @@ pub use fastfetch::FastfetchAdapter;
 pub use font::FontAdapter;
 pub use ghostty::GhosttyAdapter;
 pub use lazygit::LazygitAdapter;
-pub use registry::ToolRegistry;
+pub use registry::{ToolApplyResult, ToolApplyStatus, ToolRegistry};
 pub use starship::StarshipAdapter;
 pub use tmux::TmuxAdapter;
 pub use zsh_highlight::ZshHighlightAdapter;
@@ -54,6 +54,31 @@ pub enum ApplyStrategy {
     /// Detect and install tool (no config file modification)
     /// Tools: Nerd Font (detection + brew install mapping only)
     DetectAndInstall,
+}
+
+/// Structured outcome for a single adapter theme application attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApplyOutcome {
+    Applied,
+    Skipped(SkipReason),
+}
+
+/// Reason an adapter intentionally skipped theme application.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkipReason {
+    MissingIntegrationConfig,
+    NotInstalled,
+}
+
+impl std::fmt::Display for SkipReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SkipReason::MissingIntegrationConfig => {
+                write!(f, "missing integration config")
+            }
+            SkipReason::NotInstalled => write!(f, "tool not installed"),
+        }
+    }
 }
 
 /// Trait all tool adapters must implement.
@@ -92,7 +117,7 @@ pub trait ToolAdapter: Send + Sync {
     /// 2. Ensure integration file includes/references managed path (per apply_strategy)
     /// 3. Never modify user/ directory 
     /// 4. Be idempotent (running twice produces same result)
-    fn apply_theme(&self, theme: &ThemeVariant) -> Result<()>;
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome>;
 
     /// Hot-reload mechanism for this tool.
     /// Allows theme changes to take effect without closing terminal.

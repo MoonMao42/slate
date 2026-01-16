@@ -3,7 +3,7 @@
 //! This adapter uses the MarkerBlock module for safe, validated editing.
 //! Detects tmux installation but doesn't require it (optional tool).
 
-use crate::adapter::{marker_block, ApplyStrategy, ToolAdapter};
+use crate::adapter::{marker_block, ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
@@ -88,11 +88,8 @@ impl ToolAdapter for TmuxAdapter {
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-        let home = env
-            .as_ref()
-            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
-        if let Some(h) = home {
-            PathBuf::from(h).join(".config/slate/managed/tmux")
+        if let Some(env) = env.as_ref() {
+            env.config_dir().join("managed").join("tmux")
         } else {
             PathBuf::from(".config/slate/managed/tmux")
         }
@@ -102,7 +99,7 @@ impl ToolAdapter for TmuxAdapter {
         ApplyStrategy::WriteAndInclude
     }
 
-    fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
         // Validate theme has palette data
         theme.palette.validate()?;
 
@@ -138,7 +135,7 @@ impl ToolAdapter for TmuxAdapter {
         file.write_all(updated_content.as_bytes())?;
         file.commit()?;
 
-        Ok(())
+        Ok(ApplyOutcome::Applied)
     }
 
     fn reload(&self) -> Result<()> {

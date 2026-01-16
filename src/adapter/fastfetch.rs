@@ -2,7 +2,7 @@
 //! Per , Implements EnvironmentVariable strategy.
 //! Generates managed JSONC config with themed colors while preserving Apple logo.
 
-use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
@@ -17,8 +17,7 @@ impl FastfetchAdapter {
     /// Get config home directory (XDG default)
     fn config_home() -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
-        Ok(PathBuf::from(home).join(".config"))
+        Ok(env.xdg_config_home().to_path_buf())
     }
 }
 
@@ -44,11 +43,8 @@ impl ToolAdapter for FastfetchAdapter {
 
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
-        let home = env
-            .as_ref()
-            .and_then(|e| e.home().to_str().map(|s| s.to_string()));
-        if let Some(h) = home {
-            PathBuf::from(h).join(".config/slate/managed/fastfetch")
+        if let Some(env) = env.as_ref() {
+            env.config_dir().join("managed").join("fastfetch")
         } else {
             PathBuf::from(".config/slate/managed/fastfetch")
         }
@@ -58,7 +54,7 @@ impl ToolAdapter for FastfetchAdapter {
         ApplyStrategy::EnvironmentVariable
     }
 
-    fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
         // Step 1: Extract theme name from tool_refs
         let _fastfetch_theme = theme
             .tool_refs
@@ -78,7 +74,7 @@ impl ToolAdapter for FastfetchAdapter {
         let config_manager = ConfigManager::new()?;
         config_manager.write_managed_file("fastfetch", "config.jsonc", &managed_content)?;
 
-        Ok(())
+        Ok(ApplyOutcome::Applied)
     }
 
     fn get_current_theme(&self) -> Result<Option<String>> {

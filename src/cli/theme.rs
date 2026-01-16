@@ -1,5 +1,5 @@
 use crate::cli::auto_theme;
-use crate::cli::setup_executor::apply_theme_selection;
+use crate::cli::theme_apply::apply_theme_selection;
 use crate::config::ConfigManager;
 use crate::design::symbols::Symbols;
 use crate::env::SlateEnv;

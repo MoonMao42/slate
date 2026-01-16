@@ -106,6 +106,7 @@ pub fn configure_auto_theme() -> Result<()> {
 
     cliclack::intro("✦ Configure Auto Theme")?;
     log::info("Match themes to your system appearance .")?;
+    log::remark("Watcher runtime currently launches from Ghostty shell sessions.")?;
 
     let env = SlateEnv::from_process()?;
     let config = ConfigManager::with_env(&env)?;

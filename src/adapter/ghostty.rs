@@ -5,7 +5,7 @@
 //! D-05b: Idempotent config-file directive insertion ensures running twice
 //! produces the same result (no duplicate include lines).
 
-use crate::adapter::{ApplyStrategy, ToolAdapter};
+use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
@@ -128,59 +128,6 @@ impl GhosttyAdapter {
         Ok(())
     }
 
-    /// Update font-family in integration config.
-    /// Modifies user's integration file (not managed) because Ghostty main config
-    /// takes precedence over config-file includes for font-family.
-    fn update_font_in_config(integration_path: &Path, font_family: &str) -> Result<()> {
-        if !integration_path.exists() {
-            // Config file doesn't exist, file will be created by Ghostty on first run.
-            // Skip font update — Ghostty will use system defaults until explicitly set.
-            return Ok(());
-        }
-
-        let mut content = fs::read_to_string(integration_path)?;
-        let had_trailing_newline = content.ends_with('\n');
-        let mut replaced = false;
-        let mut rewritten_lines = Vec::new();
-
-        for line in content.lines() {
-            let trimmed = line.trim_start();
-
-            if trimmed.starts_with('#') {
-                rewritten_lines.push(line.to_string());
-                continue;
-            }
-
-            if let Some(rest) = trimmed.strip_prefix("font-family") {
-                if rest.trim_start().starts_with('=') {
-                    let indent_len = line.len() - trimmed.len();
-                    let indent = &line[..indent_len];
-                    rewritten_lines.push(format!("{indent}font-family = \"{}\"", font_family));
-                    replaced = true;
-                    continue;
-                }
-            }
-
-            rewritten_lines.push(line.to_string());
-        }
-
-        content = rewritten_lines.join("\n");
-        if replaced {
-            if had_trailing_newline {
-                content.push('\n');
-            }
-        } else {
-            if !content.is_empty() {
-                content.push('\n');
-            }
-            content.push_str(&format!("font-family = \"{}\"\n", font_family));
-        }
-
-        fs::write(integration_path, content)?;
-
-        Ok(())
-    }
-
     /// Reload Ghostty config via its own AppleScript API.
     /// This triggers macOS Automation permission (not Accessibility),
     /// and works even without the user granting the permission.
@@ -261,7 +208,13 @@ impl ToolAdapter for GhosttyAdapter {
         ApplyStrategy::WriteAndInclude
     }
 
-    fn apply_theme(&self, theme: &ThemeVariant) -> Result<()> {
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
+        let env = SlateEnv::from_process()?;
+        let integration_path = self.integration_config_path_with_env(&env)?;
+        if !integration_path.exists() {
+            return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
+        }
+
         // Write palette colors directly — no Ghostty built-in theme names.
         // This ensures terminal colors exactly match our palette (used by
         // starship, bat, etc.), eliminating cross-tool color drift.
@@ -312,35 +265,39 @@ impl ToolAdapter for GhosttyAdapter {
         );
 
         // Step 3: Write managed theme config
-        let config_manager = ConfigManager::new()?;
+        let config_manager = ConfigManager::with_env(&env)?;
         config_manager.write_managed_file("ghostty", "theme.conf", &managed_content)?;
 
+        let current_opacity = config_manager.get_current_opacity_preset()?;
+        write_opacity_config(&env, current_opacity)?;
+        write_blur_radius(&env, current_opacity)?;
+
+        let current_font = config_manager.get_current_font()?;
+        if let Some(ref font_family) = current_font {
+            let font_conf_content = format!("font-family = \"{}\"\n", font_family);
+            config_manager.write_managed_file("ghostty", "font.conf", &font_conf_content)?;
+        }
+
         // Step 4: Ensure integration file includes all managed paths idempotently
-        let integration_path = self.integration_config_path()?;
-        let managed_base = self.managed_config_path();
+        let managed_base = self.managed_config_path_with_env(Some(&env));
         let theme_path = managed_base.join("theme.conf");
         let opacity_path = managed_base.join("opacity.conf");
         let blur_path = managed_base.join("blur.conf");
 
-        // Ensure parent directory exists for integration file
-        if let Some(parent) = integration_path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)?;
-            }
-        }
-
         // Include all managed files
-        let font_path = managed_base.join("font.conf");
         Self::ensure_integration_includes_managed(&integration_path, &theme_path)?;
         Self::ensure_integration_includes_managed(&integration_path, &opacity_path)?;
         Self::ensure_integration_includes_managed(&integration_path, &blur_path)?;
-        Self::ensure_integration_includes_managed(&integration_path, &font_path)?;
+        if current_font.is_some() {
+            let font_path = managed_base.join("font.conf");
+            Self::ensure_integration_includes_managed(&integration_path, &font_path)?;
+        }
 
         // Note: Font updates are handled by the FontAdapter (applied in plan 06-06).
         // Theme switches should only affect colors, not fonts.
         // Font changes are an orthogonal concern managed separately.
 
-        Ok(())
+        Ok(ApplyOutcome::Applied)
     }
 
     fn reload(&self) -> Result<()> {
@@ -362,7 +319,7 @@ impl ToolAdapter for GhosttyAdapter {
 impl GhosttyAdapter {
     pub fn integration_config_path_with_env(&self, env: &SlateEnv) -> Result<PathBuf> {
         let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
-        let xdg_dir = env.home().join(".config").join("ghostty");
+        let xdg_dir = env.xdg_config_home().join("ghostty");
 
         let candidates = Self::candidate_paths(&xdg_dir, Some(home));
 

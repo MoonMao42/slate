@@ -165,8 +165,10 @@ impl Language {
     pub const HUB_BACK: &str = "← Back";
 
     // Status line labels (07-01)
-    pub const STATUS_AUTO_AGENT_LOADED: &str = "[loaded]";
-    pub const STATUS_AUTO_AGENT_NOT_INSTALLED: &str = "[not installed]";
+    pub const STATUS_AUTO_WATCHER_RUNNING: &str = "[running]";
+    pub const STATUS_AUTO_WATCHER_IDLE: &str = "[enabled, not running]";
+    pub const STATUS_AUTO_WATCHER_DISABLED: &str = "[disabled]";
+    pub const STATUS_AUTO_WATCHER_DRIFT: &str = "[disabled, still running]";
 }
 
 #[cfg(test)]

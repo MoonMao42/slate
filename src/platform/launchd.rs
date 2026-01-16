@@ -1,3 +1,7 @@
+//! Legacy launchd implementation kept only as migration/reference code.
+//! Slate's supported auto-theme runtime is the Swift watcher in
+//! `platform::dark_mode_notify`; this module is no longer wired into the CLI.
+
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use atomic_write_file::AtomicWriteFile;
@@ -65,17 +69,17 @@ pub fn generate_plist(binary_path: &str) -> Result<String> {
     // Serialize to XML using a buffer
     let mut buffer = Cursor::new(Vec::new());
     plist::to_writer_xml(&mut buffer, &plist_dict)
-        .map_err(|e| SlateError::LaunchdError(format!("Failed to serialize plist: {}", e)))?;
+        .map_err(|e| SlateError::PlatformError(format!("Failed to serialize plist: {}", e)))?;
 
     let plist_bytes = buffer.into_inner();
-    let plist_content = String::from_utf8(plist_bytes).map_err(|e| {
-        SlateError::LaunchdError(format!("Failed to convert plist to UTF-8: {}", e))
-    })?;
+    let plist_content = String::from_utf8(plist_bytes)
+        .map_err(|e| SlateError::PlatformError(format!("Failed to convert plist to UTF-8: {}", e)))?;
 
     Ok(plist_content)
 }
 
-/// Install the launchd agent
+/// Install the launchd agent.
+/// Legacy-only: not used by the current watcher-based runtime.
 pub fn install_agent() -> Result<()> {
     let path = agent_path()?;
     let binary = resolve_binary_path()?;
@@ -83,19 +87,19 @@ pub fn install_agent() -> Result<()> {
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
-            SlateError::LaunchdError(format!("Failed to create LaunchAgents directory: {}", e))
+            SlateError::PlatformError(format!("Failed to create LaunchAgents directory: {}", e))
         })?;
     }
 
     // Atomic write: temp file → fsync → rename. Prevents launchctl from
     // seeing a half-written plist if it races with the bootstrap call.
     let mut file = AtomicWriteFile::open(&path).map_err(|e| {
-        SlateError::LaunchdError(format!("Failed to open plist for atomic write: {}", e))
+        SlateError::PlatformError(format!("Failed to open plist for atomic write: {}", e))
     })?;
     file.write_all(plist_content.as_bytes())
-        .map_err(|e| SlateError::LaunchdError(format!("Failed to write plist: {}", e)))?;
+        .map_err(|e| SlateError::PlatformError(format!("Failed to write plist: {}", e)))?;
     file.commit()
-        .map_err(|e| SlateError::LaunchdError(format!("Failed to commit plist: {}", e)))?;
+        .map_err(|e| SlateError::PlatformError(format!("Failed to commit plist: {}", e)))?;
 
     // Unload any previously loaded instance before bootstrapping.
     launchctl_unload(AGENT_LABEL).ok();
@@ -109,7 +113,8 @@ pub fn install_agent() -> Result<()> {
     Ok(())
 }
 
-/// Uninstall the launchd agent
+/// Uninstall the launchd agent.
+/// Legacy-only: not used by the current watcher-based runtime.
 pub fn uninstall_agent() -> Result<()> {
     // Unload agent (soft fail if not loaded)
     launchctl_unload(AGENT_LABEL).ok();
@@ -123,12 +128,13 @@ pub fn uninstall_agent() -> Result<()> {
     Ok(())
 }
 
-/// Check if the agent is currently loaded
+/// Check if the agent is currently loaded.
+/// Legacy-only: not used by the current watcher-based runtime.
 pub fn check_agent_loaded() -> Result<bool> {
     let output = Command::new("launchctl")
         .args(["list", AGENT_LABEL])
         .output()
-        .map_err(|e| SlateError::LaunchdError(format!("Failed to run launchctl list: {}", e)))?;
+        .map_err(|e| SlateError::PlatformError(format!("Failed to run launchctl list: {}", e)))?;
 
     Ok(output.status.success())
 }
@@ -143,12 +149,12 @@ fn launchctl_load(_label: &str) -> Result<()> {
         .args(["bootstrap", &format!("gui/{}", uid), &plist_path_str])
         .output()
         .map_err(|e| {
-            SlateError::LaunchdError(format!("Failed to run launchctl bootstrap: {}", e))
+            SlateError::PlatformError(format!("Failed to run launchctl bootstrap: {}", e))
         })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(SlateError::LaunchdError(format!(
+        return Err(SlateError::PlatformError(format!(
             "launchctl bootstrap failed: {}",
             stderr
         )));
@@ -163,7 +169,7 @@ fn launchctl_unload(label: &str) -> Result<()> {
     Command::new("launchctl")
         .args(["bootout", &format!("gui/{}/{}", uid, label)])
         .output()
-        .map_err(|e| SlateError::LaunchdError(format!("Failed to run launchctl bootout: {}", e)))?;
+        .map_err(|e| SlateError::PlatformError(format!("Failed to run launchctl bootout: {}", e)))?;
 
     Ok(())
 }
