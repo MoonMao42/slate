@@ -128,6 +128,28 @@ impl GhosttyAdapter {
         Ok(())
     }
 
+    /// Apply font-only update to Ghostty without triggering full theme reapply.
+    /// Writes only font.conf and ensures it's included.
+    /// Does not call reload or touch the theme.
+    pub fn apply_font_only(env: &SlateEnv, font_name: &str) -> Result<()> {
+        let config_manager = ConfigManager::with_env(env)?;
+
+        // Write only the font-family to managed font.conf
+        let font_conf_content = format!("font-family = \"{}\"
+", font_name);
+        config_manager.write_managed_file("ghostty", "font.conf", &font_conf_content)?;
+
+        // Ensure integration file includes the font.conf file
+        let adapter = GhosttyAdapter;
+        let integration_path = adapter.integration_config_path()?;
+        if integration_path.exists() {
+            let managed_font_path = config_manager.managed_dir("ghostty").join("font.conf");
+            Self::ensure_integration_includes_managed(&integration_path, &managed_font_path)?;
+        }
+
+        Ok(())
+    }
+
     /// Reload Ghostty config via its own AppleScript API.
     /// This triggers macOS Automation permission (not Accessibility),
     /// and works even without the user granting the permission.

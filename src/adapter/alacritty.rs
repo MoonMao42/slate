@@ -156,6 +156,28 @@ impl AlacrittyAdapter {
 
         Ok(())
     }
+
+    /// Apply font-only update to Alacritty without triggering full theme reapply.
+    /// Writes only to dedicated font.toml file (not colors.toml).
+    /// Does not touch colors or call theme apply.
+    pub fn apply_font_only(env: &SlateEnv, font_name: &str) -> Result<()> {
+        let config_manager = ConfigManager::with_env(env)?;
+        let integration_path = Self::resolve_config_path()?;
+
+        // Write only the font section to dedicated font.toml
+        let font_content = format!("[font.normal]
+family = \"{}\"
+", font_name);
+        config_manager.write_managed_file("alacritty", "font.toml", &font_content)?;
+
+        // Ensure integration file includes the font.toml file
+        if integration_path.exists() {
+            let managed_font_path = config_manager.managed_dir("alacritty").join("font.toml");
+            Self::ensure_integration_includes_managed(&integration_path, &managed_font_path)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl ToolAdapter for AlacrittyAdapter {
