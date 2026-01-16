@@ -32,7 +32,7 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
         // Apply font
         FontAdapter::apply_font(&env, name)?;
 
-        println!("{} Font changed to '{}'", Symbols::SUCCESS, name);
+        println!("{} Updated font to {} in Ghostty and Alacritty.", Symbols::SUCCESS, name);
         Ok(())
     } else {
         // Picker path: show font picker UI per 
@@ -155,8 +155,12 @@ fn show_font_picker() -> Result<()> {
             // Apply font
             FontAdapter::apply_font(&env, &bare_name)?;
 
-            println!("{} Font changed to '{}'", Symbols::SUCCESS, bare_name);
-            println!("Font will be used on next terminal session.");
+            println!("{} Updated font to {} in Ghostty and Alacritty.", Symbols::SUCCESS, bare_name);
+            
+            // Show warning if system font selected (soft warning)
+            if !*is_system {
+                println!("Font updated and will take effect immediately if live reload is enabled.");
+            }
             break;
         }
     }
