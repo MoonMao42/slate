@@ -14,16 +14,6 @@ pub struct ContrastAudit {
     pub is_accessible: bool,
 }
 
-/// Detailed audit failure entry for reporting.
-#[derive(Debug, Clone)]
-pub struct AuditFailure {
-    pub theme_id: String,
-    pub color_name: String,
-    pub foreground: String,
-    pub background: String,
-    pub ratio: f64,
-}
-
 /// Audit all colors in a palette for WCAG accessibility.
 /// Returns list of audit results with warnings for colors below 4.5:1 contrast.
 /// Warning mode: all issues reported but non-blocking.
@@ -79,30 +69,6 @@ pub fn audit_palette(palette: &Palette) -> Vec<ContrastAudit> {
     }
 
     audits
-}
-
-/// Generate detailed WCAG audit report for all themes.
-/// Returns all failures with theme ID and color information.
-pub fn generate_full_audit_report(registry: &crate::theme::ThemeRegistry) -> Vec<AuditFailure> {
-    let mut all_failures = Vec::new();
-    
-    for theme in registry.all() {
-        let audits = audit_palette(&theme.palette);
-        
-        for audit in audits {
-            if !audit.is_accessible {
-                all_failures.push(AuditFailure {
-                    theme_id: theme.id.clone(),
-                    color_name: audit.color_name,
-                    foreground: audit.foreground,
-                    background: audit.background,
-                    ratio: audit.ratio,
-                });
-            }
-        }
-    }
-    
-    all_failures
 }
 
 /// Log WCAG audit results (warnings only, non-blocking).
