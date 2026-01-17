@@ -235,28 +235,20 @@ impl FontAdapter {
         })
     }
 
-    /// Persist chosen font to config and apply to terminal adapters.
-    /// Updates current-font, Ghostty font-family, and Alacritty [font.normal] family.
+    /// Apply font to terminal adapters (Ghostty, Alacritty) with localized refresh.
+    /// Updates current-font, then calls font-only helpers in each adapter.
+    /// Does not trigger full theme reapply or shell integration refresh.
     pub fn apply_font(env: &SlateEnv, font_name: &str) -> Result<()> {
         let config = ConfigManager::with_env(env)?;
 
         // Persist to current-font file
         config.set_current_font(font_name)?;
 
-        // Write to Ghostty managed config
-        let font_conf_content = format!("font-family = \"{}\"\n", font_name);
-        config.write_managed_file("ghostty", "font.conf", &font_conf_content)?;
+        // Apply font to Ghostty (font-only path)
+        crate::adapter::ghostty::GhosttyAdapter::apply_font_only(env, font_name)?;
 
-        // Re-apply current theme so all adapters (Alacritty, etc.) pick up
-        // the new font from current-font when they regenerate their configs.
-        config.refresh_shell_integration()?;
-        let current_theme_id = config
-            .get_current_theme()?
-            .unwrap_or_else(|| "catppuccin-mocha".to_string());
-        let registry = crate::theme::ThemeRegistry::new()?;
-        if let Some(theme) = registry.get(&current_theme_id) {
-            crate::cli::theme_apply::apply_theme_selection(theme)?;
-        }
+        // Apply font to Alacritty (font-only path)
+        crate::adapter::alacritty::AlacrittyAdapter::apply_font_only(env, font_name)?;
 
         Ok(())
     }
