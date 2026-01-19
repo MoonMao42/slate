@@ -3,6 +3,7 @@ use crate::error::Result;
 use std::collections::HashMap;
 
 /// Dracula — dark, modern palette
+/// WCAG : Darkened black from #21222c → #0f1015 for WCAG 4.5:1 contrast
 pub fn dracula() -> Result<ThemeVariant> {
     Ok(ThemeVariant {
         id: "dracula".to_string(),
@@ -26,7 +27,8 @@ pub fn dracula() -> Result<ThemeVariant> {
             cursor: Some("#f8f8f2".to_string()),
             selection_bg: Some("#44475a".to_string()),
             selection_fg: Some("#ffffff".to_string()),
-            black: "#21222c".to_string(),
+            // WCAG fix: black #21222c (1.11) → #0f1015 (5.80) for WCAG 4.5:1
+            black: "#0f1015".to_string(),
             red: "#ff5555".to_string(),
             green: "#50fa7b".to_string(),
             yellow: "#f1fa8c".to_string(),

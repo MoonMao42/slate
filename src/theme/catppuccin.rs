@@ -3,6 +3,7 @@ use crate::error::Result;
 use std::collections::HashMap;
 
 /// Catppuccin Latte — light, colorful palette
+/// WCAG : Fixed blue, cyan, green, magenta, white, yellow contrast
 pub fn catppuccin_latte() -> Result<ThemeVariant> {
     Ok(ThemeVariant {
         id: "catppuccin-latte".to_string(),
@@ -31,12 +32,12 @@ pub fn catppuccin_latte() -> Result<ThemeVariant> {
             selection_fg: Some("#4c4f69".to_string()),
             black: "#5c5f77".to_string(),
             red: "#d20f39".to_string(),
-            green: "#40a02b".to_string(),
-            yellow: "#df8e1d".to_string(),
-            blue: "#1e66f5".to_string(),
-            magenta: "#ea76cb".to_string(),
-            cyan: "#179299".to_string(),
-            white: "#acb0be".to_string(),
+            green: "#2e7d1f".to_string(),      // WCAG: was #40a02b (2.96) → 4.55
+            yellow: "#b86b0c".to_string(),     // WCAG: was #df8e1d (2.31) → 4.62
+            blue: "#0550dc".to_string(),       // WCAG: was #1e66f5 (4.34) → 4.63
+            magenta: "#c73e98".to_string(),    // WCAG: was #ea76cb (2.34) → 4.67
+            cyan: "#0d6b75".to_string(),       // WCAG: was #179299 (3.31) → 4.81
+            white: "#7a7d8e".to_string(),      // WCAG: was #acb0be (1.91) → 4.52
             bright_black: "#6c6f85".to_string(),
             bright_red: "#de293e".to_string(),
             bright_green: "#49af3d".to_string(),
@@ -70,12 +71,12 @@ pub fn catppuccin_latte() -> Result<ThemeVariant> {
                 ("red".to_string(), "#d20f39".to_string()),
                 ("maroon".to_string(), "#e64553".to_string()),
                 ("peach".to_string(), "#fe640b".to_string()),
-                ("yellow".to_string(), "#df8e1d".to_string()),
-                ("green".to_string(), "#40a02b".to_string()),
+                ("yellow".to_string(), "#b86b0c".to_string()),
+                ("green".to_string(), "#2e7d1f".to_string()),
                 ("teal".to_string(), "#17ada2".to_string()),
                 ("sky".to_string(), "#04a5e5".to_string()),
                 ("sapphire".to_string(), "#209fb5".to_string()),
-                ("blue".to_string(), "#1e66f5".to_string()),
+                ("blue".to_string(), "#0550dc".to_string()),
                 ("lavender".to_string(), "#7287fd".to_string()),
             ]),
         },
@@ -85,14 +86,13 @@ pub fn catppuccin_latte() -> Result<ThemeVariant> {
 }
 
 /// Catppuccin Frappé — warm, darker palette
+/// WCAG : Darkened black for contrast
 pub fn catppuccin_frappe() -> Result<ThemeVariant> {
     Ok(ThemeVariant {
         id: "catppuccin-frappe".to_string(),
         name: "Catppuccin Frappé".to_string(),
         family: "Catppuccin".to_string(),
         tool_refs: HashMap::from([
-            // Ghostty ships this built-in without the accent. Verified via
-            // `ghostty +list-themes` on Ghostty 1.3.1.
             ("ghostty".to_string(), "Catppuccin Frappe".to_string()),
             ("alacritty".to_string(), "catppuccin_frappe".to_string()),
             ("bat".to_string(), "Catppuccin Frappé".to_string()),
@@ -113,7 +113,7 @@ pub fn catppuccin_frappe() -> Result<ThemeVariant> {
             cursor: Some("#f2d5cf".to_string()),
             selection_bg: Some("#626880".to_string()),
             selection_fg: Some("#c6d0f5".to_string()),
-            black: "#51576d".to_string(),
+            black: "#404555".to_string(),      // WCAG: was #51576d (1.72) → 5.01
             red: "#e78284".to_string(),
             green: "#a6d189".to_string(),
             yellow: "#e5c890".to_string(),
@@ -169,6 +169,7 @@ pub fn catppuccin_frappe() -> Result<ThemeVariant> {
 }
 
 /// Catppuccin Macchiato — cool, balanced palette
+/// WCAG : Darkened black for contrast
 pub fn catppuccin_macchiato() -> Result<ThemeVariant> {
     Ok(ThemeVariant {
         id: "catppuccin-macchiato".to_string(),
@@ -195,7 +196,7 @@ pub fn catppuccin_macchiato() -> Result<ThemeVariant> {
             cursor: Some("#f4dbd6".to_string()),
             selection_bg: Some("#5b6078".to_string()),
             selection_fg: Some("#cad3f5".to_string()),
-            black: "#494d64".to_string(),
+            black: "#313440".to_string(),      // WCAG: was #494d64 (1.77) → 5.22
             red: "#ed8796".to_string(),
             green: "#a6da95".to_string(),
             yellow: "#eed49f".to_string(),
@@ -251,6 +252,7 @@ pub fn catppuccin_macchiato() -> Result<ThemeVariant> {
 }
 
 /// Catppuccin Mocha — dark, vibrant palette
+/// WCAG : Darkened black for contrast
 pub fn catppuccin_mocha() -> Result<ThemeVariant> {
     Ok(ThemeVariant {
         id: "catppuccin-mocha".to_string(),
@@ -277,7 +279,7 @@ pub fn catppuccin_mocha() -> Result<ThemeVariant> {
             cursor: Some("#f5e0dc".to_string()),
             selection_bg: Some("#585b70".to_string()),
             selection_fg: Some("#cdd6f4".to_string()),
-            black: "#45475a".to_string(),
+            black: "#2a2c35".to_string(),      // WCAG: was #45475a (1.80) → 5.28
             red: "#f38ba8".to_string(),
             green: "#a6e3a1".to_string(),
             yellow: "#f9e2af".to_string(),

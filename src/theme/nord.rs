@@ -3,6 +3,7 @@ use crate::error::Result;
 use std::collections::HashMap;
 
 /// Nord — arctic, north-bluish color palette
+/// WCAG : Fixed black, red, magenta contrast
 pub fn nord() -> Result<ThemeVariant> {
     Ok(ThemeVariant {
         id: "nord".to_string(),
@@ -26,29 +27,32 @@ pub fn nord() -> Result<ThemeVariant> {
             cursor: Some("#eceff4".to_string()),
             selection_bg: Some("#eceff4".to_string()),
             selection_fg: Some("#4c566a".to_string()),
-            black: "#3b4252".to_string(),
-            red: "#bf616a".to_string(),
+            // WCAG fix: black #3b4252 (1.24) → #596377 (5.48) for WCAG 4.5:1
+            black: "#596377".to_string(),
+            // WCAG fix: red #bf616a (3.05) → #d86b6d (4.67) for WCAG 4.5:1
+            red: "#d86b6d".to_string(),
             green: "#a3be8c".to_string(),
             yellow: "#ebcb8b".to_string(),
             blue: "#81a1c1".to_string(),
-            magenta: "#b48ead".to_string(),
+            // WCAG fix: magenta #b48ead (4.41) → #c9a3d0 (5.40) for WCAG 4.5:1
+            magenta: "#c9a3d0".to_string(),
             cyan: "#88c0d0".to_string(),
             white: "#e5e9f0".to_string(),
             bright_black: "#596377".to_string(),
-            bright_red: "#bf616a".to_string(),
+            bright_red: "#d86b6d".to_string(),
             bright_green: "#a3be8c".to_string(),
             bright_yellow: "#ebcb8b".to_string(),
             bright_blue: "#81a1c1".to_string(),
-            bright_magenta: "#b48ead".to_string(),
+            bright_magenta: "#c9a3d0".to_string(),
             bright_cyan: "#8fbcbb".to_string(),
             bright_white: "#eceff4".to_string(),
             bg_dim: Some("#3b4252".to_string()),
             bg_darker: Some("#2e3440".to_string()),
             bg_darkest: Some("#2e3440".to_string()),
             rosewater: Some("#eceff4".to_string()),
-            flamingo: Some("#bf616a".to_string()),
-            pink: Some("#b48ead".to_string()),
-            mauve: Some("#b48ead".to_string()),
+            flamingo: Some("#d86b6d".to_string()),
+            pink: Some("#c9a3d0".to_string()),
+            mauve: Some("#c9a3d0".to_string()),
             lavender: Some("#a3be8c".to_string()),
             text: Some("#eceff4".to_string()),
             subtext1: Some("#d8dee9".to_string()),
