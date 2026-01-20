@@ -1,17 +1,13 @@
 //! WCAG 2.1 contrast audit test for all registered themes.
-//! Per and 07-04 Task 7: Run warning-mode contrast audit on every theme
-//! currently exposed by `ThemeRegistry`. Non-blocking — failures are logged
-//! to stderr, tests assert on structure, not on specific theme IDs.
-//! Data-driven: iterates `ThemeRegistry::all()` so the audit stays correct
-//! even as themes are added or renamed. Avoids baking hardcoded theme IDs
-//! into the test body (which caused the first 07-04 revision to break when
-//! the ThemeRegistry id naming differed from what 07-03 generated).
+//! Per 08-01: This test FAILS the build if any theme color fails to meet 4.5:1
+//! WCAG AA contrast ratio. Data-driven: iterates `ThemeRegistry::all()` so the
+//! audit stays correct even as themes are added or renamed.
 
 use slate_cli::theme::ThemeRegistry;
 use slate_cli::wcag::audit_palette;
 
 #[test]
-fn test_wcag_audit_every_registered_theme() {
+fn test_wcag_strict_audit_all_themes_pass() {
     let registry = ThemeRegistry::new().expect("Registry init");
     let ids = registry.list_ids();
 
@@ -22,6 +18,7 @@ fn test_wcag_audit_every_registered_theme() {
 
     let mut total_audited = 0usize;
     let mut total_failures = 0usize;
+    let mut failure_details = Vec::new();
 
     for id in &ids {
         let theme = registry
@@ -50,12 +47,18 @@ fn test_wcag_audit_every_registered_theme() {
                 "{id}: is_accessible must match 4.5:1 threshold (ratio {})",
                 audit.ratio
             );
+
+            // WCAG STRICT MODE: fail on any inaccessible color
+            if !audit.is_accessible {
+                total_failures += 1;
+                failure_details.push(format!(
+                    "  {} color '{}': {:.2}:1 (fg: {}, bg: {})",
+                    id, audit.color_name, audit.ratio, audit.foreground, audit.background
+                ));
+            }
         }
 
-        let failures = audits.iter().filter(|a| !a.is_accessible).count();
         total_audited += 1;
-        total_failures += failures;
-        eprintln!("{id}: {failures} failures out of {} checks", audits.len());
     }
 
     eprintln!("\nWCAG audit summary:");
@@ -67,6 +70,20 @@ fn test_wcag_audit_every_registered_theme() {
             total_failures as f64 / total_audited as f64
         );
     }
+
+    if total_failures > 0 {
+        eprintln!("\nFailing colors (strict mode enforcement):");
+        for failure in &failure_details {
+            eprintln!("{}", failure);
+        }
+    }
+
+    // WCAG STRICT: Fail the build if any color is inaccessible
+    assert_eq!(
+        total_failures, 0,
+        "WCAG compliance failed: {} color(s) below 4.5:1 threshold. All 18 themes must pass strict audit.",
+        total_failures
+    );
 }
 
 #[test]
