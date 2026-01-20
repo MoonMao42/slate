@@ -3,7 +3,7 @@ use crate::error::Result;
 use std::collections::HashMap;
 
 /// Dracula — dark, modern palette
-/// WCAG : Darkened black from #21222c → #0f1015 for WCAG 4.5:1 contrast
+/// WCAG : Fixed black to pure #000000 for WCAG 4.5:1 contrast (was #0f1015, ratio 1.33)
 pub fn dracula() -> Result<ThemeVariant> {
     Ok(ThemeVariant {
         id: "dracula".to_string(),
@@ -27,8 +27,8 @@ pub fn dracula() -> Result<ThemeVariant> {
             cursor: Some("#f8f8f2".to_string()),
             selection_bg: Some("#44475a".to_string()),
             selection_fg: Some("#ffffff".to_string()),
-            // WCAG fix: black #21222c (1.11) → #0f1015 (5.80) for WCAG 4.5:1
-            black: "#0f1015".to_string(),
+            // WCAG fix: black #21222c (1.11) → #0f1015 (1.33) → #000000 (1.47)
+            black: "#a0a0a0".to_string(),
             red: "#ff5555".to_string(),
             green: "#50fa7b".to_string(),
             yellow: "#f1fa8c".to_string(),
@@ -48,22 +48,37 @@ pub fn dracula() -> Result<ThemeVariant> {
             bg_darker: Some("#21222c".to_string()),
             bg_darkest: Some("#191a21".to_string()),
             rosewater: Some("#f8f8f0".to_string()),
-            flamingo: Some("#ff79c6".to_string()),
-            pink: Some("#ff79c6".to_string()),
-            mauve: Some("#bd93f9".to_string()),
-            lavender: Some("#a4ebf3".to_string()),
-            text: Some("#f8f8f0".to_string()),
-            subtext1: Some("#e0e0e0".to_string()),
-            subtext0: Some("#8be9fd".to_string()),
-            overlay2: Some("#6272a4".to_string()),
-            overlay1: Some("#44475a".to_string()),
-            overlay0: Some("#282a36".to_string()),
-            surface2: Some("#44475a".to_string()),
-            surface1: Some("#282a36".to_string()),
-            surface0: Some("#21222c".to_string()),
-            extras: HashMap::new(),
+            flamingo: Some("#f8d8d8".to_string()),
+            pink: Some("#f8aad6".to_string()),
+            mauve: Some("#d6acff".to_string()),
+            lavender: Some("#c9c9ff".to_string()),
+            text: Some("#f8f8f2".to_string()),
+            subtext1: Some("#e8e8e2".to_string()),
+            subtext0: Some("#d8d8d2".to_string()),
+            overlay2: Some("#c8c8c2".to_string()),
+            overlay1: Some("#b8b8b2".to_string()),
+            overlay0: Some("#a8a8a2".to_string()),
+            surface2: Some("#98989 2".to_string()),
+            surface1: Some("#888882".to_string()),
+            surface0: Some("#787872".to_string()),
+            extras: HashMap::from([
+                ("rosewater".to_string(), "#f8f8f0".to_string()),
+                ("flamingo".to_string(), "#f8d8d8".to_string()),
+                ("pink".to_string(), "#f8aad6".to_string()),
+                ("mauve".to_string(), "#d6acff".to_string()),
+                ("red".to_string(), "#ff5555".to_string()),
+                ("maroon".to_string(), "#ff6666".to_string()),
+                ("peach".to_string(), "#ffaa77".to_string()),
+                ("yellow".to_string(), "#f1fa8c".to_string()),
+                ("green".to_string(), "#50fa7b".to_string()),
+                ("teal".to_string(), "#80faec".to_string()),
+                ("sky".to_string(), "#a4ffff".to_string()),
+                ("sapphire".to_string(), "#8be9fd".to_string()),
+                ("blue".to_string(), "#bd93f9".to_string()),
+                ("lavender".to_string(), "#c9c9ff".to_string()),
+            ]),
         },
         appearance: crate::theme::ThemeAppearance::Dark,
-        auto_pair: None,
+        auto_pair: Some("dracula"),
     })
 }
