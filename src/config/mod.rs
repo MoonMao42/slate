@@ -9,9 +9,14 @@ use toml_edit::DocumentMut;
 
 mod backup;
 pub use backup::{
+    backup_directory, backup_directory_with_env, clear_all_restore_points,
+    create_backup, create_backup_with_session, create_pre_restore_snapshot,
+    create_pre_restore_snapshot_with_env, delete_restore_point, display_tools,
+    execute_restore, get_restore_point, get_restore_point_with_env,
     begin_restore_point_baseline, begin_restore_point_baseline_with_env,
     is_baseline_restore_point, list_restore_points, list_restore_points_with_env, BackupInfo,
     BackupSession, OriginalFileState, RestoreEntry, RestorePoint,
+    RestoreReceipt, RestoreFileResult,
 };
 
 /// Three-tier configuration manager.

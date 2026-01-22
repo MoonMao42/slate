@@ -61,6 +61,23 @@ enum Commands {
     List,
     /// Clean up slate-managed configuration
     Clean,
+    /// Restore from a previous configuration snapshot
+    Restore {
+        /// Restore point ID (optional; if omitted, shows picker)
+        id: Option<String>,
+        /// List restore points without restoring
+        #[arg(long)]
+        list: bool,
+        /// Delete a specific restore point
+        #[arg(long, value_name = "ID")]
+        delete: Option<String>,
+    },
+    /// Deprecated: use 'slate restore' instead
+    Reset {
+        /// Backup ID (for compatibility)
+        #[arg(value_name = "ID", hide = true)]
+        id: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -133,6 +150,37 @@ fn main() -> Result<()> {
         }
         Some(Commands::Clean) => {
             cli::clean::handle_clean()?;
+        }
+        Some(Commands::Restore {
+            id,
+            list,
+            delete,
+        }) => {
+            // Build arguments vector for restore handler
+            let mut args: Vec<&str> = Vec::new();
+
+            if list {
+                args.push("--list");
+            } else if let Some(del_id) = &delete {
+                args.push("--delete");
+                args.push(del_id.as_str());
+            } else if let Some(restore_id) = &id {
+                args.push(restore_id.as_str());
+            }
+
+            cli::restore::handle(&args)?;
+        }
+        Some(Commands::Reset { id }) => {
+            // reset is now a compatibility alias that routes to restore
+            println!("(i) Tip: 'slate reset' is transitioning to 'slate restore'. Use 'slate restore [id]' next time.");
+            println!();
+
+            let mut args: Vec<&str> = Vec::new();
+            if let Some(restore_id) = &id {
+                args.push(restore_id.as_str());
+            }
+
+            cli::restore::handle(&args)?;
         }
     }
 

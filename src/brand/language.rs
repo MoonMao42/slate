@@ -53,8 +53,6 @@ impl Language {
         "Interactive theme picker coming soon. For now, use: slate set <theme-name>";
     pub const STATUS_PENDING: &str = "Status display lands in .";
     pub const LIST_PENDING: &str = "Theme listing lands in .";
-    pub const RESTORE_PICKER_PENDING: &str =
-        "Restore point selection is planned for the Safety Net phase.";
 
     // Status indicators (per)
     pub const INSTALLED: &str = "✓ installed";
@@ -108,11 +106,35 @@ impl Language {
         format!("{} lands in .", theme)
     }
 
-    pub fn restore_pending_backup(backup_id: &str) -> String {
-        format!(
-            "Restoring backup: {} is planned for the Safety Net phase.",
-            backup_id
-        )
+    // Restore messages (- real restore UX)
+    pub const RESTORE_HEADER: &str = "Restore from a previous snapshot";
+    pub const RESTORE_LIST_HEADER: &str = "Available restore points:";
+    pub const RESTORE_NO_POINTS: &str = "No restore points found. Run 'slate setup' to create one.";
+    pub const RESTORE_CHOOSE_POINT: &str = "Choose restore point to restore to:";
+    pub const RESTORE_DELETED: &str = "✓ Restore point deleted";
+    pub const RESTORE_LISTED: &str = "Restore points:";
+
+    pub fn restore_point_summary(id: &str, theme: &str, count: usize) -> String {
+        format!("  {} — {} ({} files)", id, theme, count)
+    }
+
+    pub fn restore_receipt_header(theme: &str) -> String {
+        format!("✓ Restored to: {}", theme)
+    }
+
+    pub fn restore_receipt_detail(succeeded: usize, failed: usize) -> String {
+        if failed == 0 {
+            format!("{} file(s) restored successfully", succeeded)
+        } else {
+            format!(
+                "{} file(s) restored, {} failed",
+                succeeded, failed
+            )
+        }
+    }
+
+    pub fn restore_receipt_failures(display_tool: &str, error: &str) -> String {
+        format!("  ✗ {}: {}", display_tool, error)
     }
 
     // Polish-pass formatting helpers
@@ -211,7 +233,6 @@ mod tests {
     #[test]
     fn test_placeholder_formatters() {
         assert!(Language::set_pending_theme("catppuccin-mocha").contains("catppuccin-mocha"));
-        assert!(Language::restore_pending_backup("backup-1").contains("backup-1"));
     }
 
     #[test]
@@ -241,5 +262,20 @@ mod tests {
         let guidance = Language::activation_guidance("Ghostty colors", "new_window");
         assert!(guidance.contains("Ghostty colors"));
         assert!(guidance.contains("new_window"));
+    }
+
+    #[test]
+    fn test_restore_messages_exist() {
+        assert!(!Language::RESTORE_HEADER.is_empty());
+        assert!(!Language::RESTORE_LIST_HEADER.is_empty());
+        assert!(!Language::RESTORE_CHOOSE_POINT.is_empty());
+    }
+
+    #[test]
+    fn test_restore_receipt_format() {
+        let summary = Language::restore_point_summary("2026-04-09T10-00-00Z", "Catppuccin Mocha", 5);
+        assert!(summary.contains("2026-04-09T10-00-00Z"));
+        assert!(summary.contains("Catppuccin Mocha"));
+        assert!(summary.contains("5"));
     }
 }
