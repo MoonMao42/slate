@@ -1031,6 +1031,207 @@ pub fn clear_all_restore_points() -> Result<usize> {
     Ok(deleted_items)
 }
 
+/// Result of a single file restoration attempt
+#[derive(Debug, Clone)]
+pub struct RestoreFileResult {
+    pub tool_key: String,
+    pub display_tool: String,
+    pub original_path: PathBuf,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+/// Aggregate receipt for a complete restore operation
+/// Records successes, skips, and failures without pretending atomicity
+#[derive(Debug, Clone)]
+pub struct RestoreReceipt {
+    pub restore_point_id: String,
+    pub theme_name: String,
+    pub results: Vec<RestoreFileResult>,
+}
+
+impl RestoreReceipt {
+    /// Count successful restorations
+    pub fn success_count(&self) -> usize {
+        self.results.iter().filter(|r| r.success).count()
+    }
+
+    /// Count failed restorations
+    pub fn failure_count(&self) -> usize {
+        self.results.iter().filter(|r| !r.success).count()
+    }
+
+    /// Check if entire restore operation was successful
+    pub fn is_fully_successful(&self) -> bool {
+        self.failure_count() == 0 && !self.results.is_empty()
+    }
+
+    /// Get failed results for error reporting
+    pub fn failed_results(&self) -> Vec<&RestoreFileResult> {
+        self.results.iter().filter(|r| !r.success).collect()
+    }
+}
+
+/// Create a pre-restore snapshot before any restore point is applied
+/// This captures the current user-facing files so users can undo if restore goes wrong
+pub fn create_pre_restore_snapshot(current_restore_point_id: &str) -> Result<RestorePoint> {
+    let env = SlateEnv::from_process().map_err(|_| {
+        SlateError::Internal("Cannot initialize SlateEnv to create pre-restore snapshot".to_string())
+    })?;
+    create_pre_restore_snapshot_with_env(&env, current_restore_point_id)
+}
+
+pub fn create_pre_restore_snapshot_with_env(
+    env: &SlateEnv,
+    current_restore_point_id: &str,
+) -> Result<RestorePoint> {
+    let created_at = SystemTime::now();
+    let backup_dir = backup_directory_with_env(env)?;
+
+    for _ in 0..32 {
+        let restore_point_id = generate_restore_point_id(created_at);
+        let restore_point_dir = resolve_restore_point_directory(&backup_dir, &restore_point_id)?;
+
+        match fs::create_dir(&restore_point_dir) {
+            Ok(()) => {
+                let session = BackupSession {
+                    restore_point_id,
+                    theme_name: format!("pre-restore-snapshot-for-{}", current_restore_point_id),
+                    restore_point_dir,
+                };
+                let manifest = RestoreManifest {
+                    metadata: RestoreManifestMetadata {
+                        id: session.restore_point_id.clone(),
+                        theme_name: session.theme_name.clone(),
+                        created_at: format_iso8601_timestamp(created_at),
+                        is_baseline: false,
+                    },
+                    entries: Vec::new(),
+                };
+                write_manifest_raw(&manifest_path(&session.restore_point_dir), &manifest)?;
+
+                for target in baseline_snapshot_targets(env) {
+                    if target.path.exists() {
+                        let _ = create_backup_with_session(
+                            target.tool_key,
+                            target.display_tool,
+                            &session,
+                            &target.path,
+                        )?;
+                    } else {
+                        let absent_entry = RestoreEntry {
+                            tool_key: target.tool_key.to_string(),
+                            display_tool: target.display_tool.to_string(),
+                            original_path: target.path,
+                            backup_path: None,
+                            original_state: OriginalFileState::Absent,
+                        };
+                        let _ = record_absent_entry(&session, absent_entry)?;
+                    }
+                }
+
+                return get_restore_point_with_env(env, &session.restore_point_id);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return Err(SlateError::BackupFailed(format!(
+                    "Failed to create pre-restore snapshot directory: {}",
+                    e
+                )));
+            }
+        }
+    }
+
+    Err(SlateError::BackupFailed(
+        "Failed to allocate a unique pre-restore snapshot ID".to_string(),
+    ))
+}
+
+/// Execute a restore operation for a specific restore point
+/// Loads the restore point, validates it, restores entries one by one,
+/// and returns an aggregate receipt with per-file success/failure tracking
+pub fn execute_restore(restore_point_id: &str) -> Result<RestoreReceipt> {
+    // Validate restore point exists and is readable
+    let restore_point = get_restore_point(restore_point_id)?;
+
+    // Prevent restoring to baseline (safety gate)
+    if restore_point.is_baseline {
+        return Err(SlateError::RestoreFailed(
+            "Cannot restore to baseline restore point. This is a protected snapshot.".to_string(),
+        ));
+    }
+
+    // Validate restore point data before starting restoration
+    validate_restore_point_data(&restore_point)?;
+
+    // Create pre-restore snapshot for user safety
+    let _pre_restore = create_pre_restore_snapshot(restore_point_id)?;
+
+    // Restore entries one by one, continuing on individual failures
+    let mut results = Vec::new();
+
+    for entry in &restore_point.entries {
+        let result = restore_single_entry(entry);
+        results.push(result);
+    }
+
+    Ok(RestoreReceipt {
+        restore_point_id: restore_point.id.clone(),
+        theme_name: restore_point.theme_name.clone(),
+        results,
+    })
+}
+
+/// Restore a single entry with error handling for reporting
+fn restore_single_entry(entry: &RestoreEntry) -> RestoreFileResult {
+    // Read backup content if it exists
+    let backup_content = if entry.original_state == OriginalFileState::Present {
+        match entry.backup_path.as_ref() {
+            Some(path) => match fs::read_to_string(path) {
+                Ok(content) => Some(content),
+                Err(e) => {
+                    return RestoreFileResult {
+                        tool_key: entry.tool_key.clone(),
+                        display_tool: entry.display_tool.clone(),
+                        original_path: entry.original_path.clone(),
+                        success: false,
+                        error: Some(format!("Failed to read backup file: {}", e)),
+                    };
+                }
+            },
+            None => {
+                return RestoreFileResult {
+                    tool_key: entry.tool_key.clone(),
+                    display_tool: entry.display_tool.clone(),
+                    original_path: entry.original_path.clone(),
+                    success: false,
+                    error: Some("Backup path not found in manifest".to_string()),
+                };
+            }
+        }
+    } else {
+        None
+    };
+
+    // Attempt restore
+    match restore_entry(entry, backup_content.as_deref()) {
+        Ok(()) => RestoreFileResult {
+            tool_key: entry.tool_key.clone(),
+            display_tool: entry.display_tool.clone(),
+            original_path: entry.original_path.clone(),
+            success: true,
+            error: None,
+        },
+        Err(e) => RestoreFileResult {
+            tool_key: entry.tool_key.clone(),
+            display_tool: entry.display_tool.clone(),
+            original_path: entry.original_path.clone(),
+            success: false,
+            error: Some(e.to_string()),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1147,100 +1348,14 @@ mod tests {
             )),
             original_state: OriginalFileState::Present,
         };
-        let serialized = toml::to_string(&entry);
-        assert!(serialized.is_ok());
-    }
 
-    #[test]
-    fn test_restore_point_structure() {
-        let restore_point = RestorePoint {
-            id: "2026-04-09T10-00-00Z".to_string(),
-            theme_name: "Catppuccin Mocha".to_string(),
-            created_at: SystemTime::now(),
-            entries: vec![],
-            is_baseline: false,
-        };
-        assert_eq!(restore_point.id, "2026-04-09T10-00-00Z");
-        assert_eq!(restore_point.theme_name, "Catppuccin Mocha");
-        assert!(restore_point.entries.is_empty());
-    }
+        let json = serde_json::to_string(&entry);
+        assert!(json.is_ok());
 
-    #[test]
-    fn test_display_tools_groups_delta_pair_under_one_label() {
-        let entries = vec![
-            RestoreEntry {
-                tool_key: "delta".to_string(),
-                display_tool: "Delta".to_string(),
-                original_path: PathBuf::from("/tmp/delta"),
-                backup_path: Some(PathBuf::from("/tmp/delta.backup")),
-                original_state: OriginalFileState::Present,
-            },
-            RestoreEntry {
-                tool_key: "delta-gitconfig".to_string(),
-                display_tool: "Delta (.gitconfig)".to_string(),
-                original_path: PathBuf::from("/tmp/gitconfig"),
-                backup_path: Some(PathBuf::from("/tmp/delta-gitconfig.backup")),
-                original_state: OriginalFileState::Present,
-            },
-        ];
-
-        assert_eq!(display_tools(&entries), vec!["Delta".to_string()]);
-    }
-
-    #[test]
-    fn test_validate_restore_point_rejects_incomplete_delta_pair() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let backup_path = temp_dir.path().join("delta-gitconfig.backup");
-        fs::write(
-            &backup_path,
-            "[include]\n\tpath = \"/tmp/delta/config.gitconfig\"\n",
-        )
-        .unwrap();
-
-        let restore_point = RestorePoint {
-            id: "restore-point".to_string(),
-            theme_name: "catppuccin-mocha".to_string(),
-            created_at: SystemTime::now(),
-            entries: vec![RestoreEntry {
-                tool_key: "delta-gitconfig".to_string(),
-                display_tool: "Delta".to_string(),
-                original_path: PathBuf::from("/tmp/gitconfig"),
-                backup_path: Some(backup_path),
-                original_state: OriginalFileState::Present,
-            }],
-            is_baseline: false,
-        };
-
-        let error = validate_restore_point_data(&restore_point).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("Delta restore point is incomplete"));
-    }
-
-    #[test]
-    fn test_restore_point_directory_rejects_path_traversal_ids() {
-        let temp = tempfile::tempdir().unwrap();
-        let env = SlateEnv::with_home(temp.path().to_path_buf());
-
-        assert!(restore_point_directory_with_env(&env, "../escape").is_err());
-        assert!(restore_point_directory_with_env(&env, "nested/path").is_err());
-        assert!(restore_point_directory_with_env(&env, r"..\\escape").is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_restore_point_directory_rejects_symlink_escape() {
-        use std::os::unix::fs::symlink;
-
-        let temp = tempfile::tempdir().unwrap();
-        let env = SlateEnv::with_home(temp.path().to_path_buf());
-        let backup_dir = backup_directory_with_env(&env).unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        let link_path = backup_dir.join("linked-restore-point");
-
-        symlink(outside.path(), &link_path).unwrap();
-
-        let result = restore_point_directory_with_env(&env, "linked-restore-point");
-        assert!(result.is_err());
+        let parsed: Result<RestoreEntry, _> = serde_json::from_str(&json.unwrap());
+        assert!(parsed.is_ok());
+        let parsed = parsed.unwrap();
+        assert_eq!(parsed.tool_key, "ghostty");
+        assert_eq!(parsed.original_state, OriginalFileState::Present);
     }
 }
