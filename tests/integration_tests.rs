@@ -110,14 +110,22 @@ fn test_list_command_runs() {
 
 #[test]
 fn test_reset_subcommand_is_not_exposed() {
+    // Test that reset is hidden (not shown in help)
     let mut cmd = Command::cargo_bin("slate").unwrap();
 
-    let output = cmd.args(["reset", "--help"]).output().unwrap();
-    let stderr = String::from_utf8(output.stderr).unwrap();
+    let output = cmd.arg("--help").output().unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
 
-    assert!(!output.status.success());
-    assert!(stderr.contains("unrecognized subcommand"));
-    assert!(stderr.contains("reset"));
+    // reset should not appear in help (it's a hidden compatibility alias)
+    assert!(!stdout.contains("reset"), "reset should be hidden from help");
+    
+    // But reset command still works for backward compatibility
+    let mut cmd2 = Command::cargo_bin("slate").unwrap();
+    let output2 = cmd2.args(["reset", "--help"]).output().unwrap();
+    
+    // reset --help should work (it's hidden but functional)
+    assert!(output2.status.success(),
+        "reset command should still be recognized internally");
 }
 
 // Setup wizard tests 
