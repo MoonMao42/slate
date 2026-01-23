@@ -73,9 +73,10 @@ enum Commands {
         delete: Option<String>,
     },
     /// Deprecated: use 'slate restore' instead
+    #[command(hide = true)]
     Reset {
         /// Backup ID (for compatibility)
-        #[arg(value_name = "ID", hide = true)]
+        #[arg(value_name = "ID")]
         id: Option<String>,
     },
 }
