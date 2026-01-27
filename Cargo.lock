@@ -1388,6 +1388,7 @@ dependencies = [
  "rayon",
  "regex",
  "rstest",
+ "semver",
  "serde",
  "serde_json",
  "serde_yaml",
