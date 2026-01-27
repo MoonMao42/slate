@@ -4,7 +4,7 @@ use crate::config::ConfigManager;
 use crate::error::Result;
 use crate::theme::ThemeRegistry;
 
-/// Handle bare `slate` invocation 
+/// Handle bare `slate` invocation (single-entry guided flow)
 pub fn handle() -> Result<()> {
     let config = ConfigManager::new()?;
 
@@ -17,10 +17,10 @@ pub fn handle() -> Result<()> {
             None,
             &crate::env::SlateEnv::from_process()?,
         )?;
-        // Return to hub after setup
+        // After setup, show hub and exit
     }
 
-    show_hub_menu(&config)
+    show_hub_once(&config)
 }
 
 fn has_current_theme(config: &ConfigManager) -> Result<bool> {
@@ -76,188 +76,109 @@ fn toggle_fastfetch_from_preferences(config: &ConfigManager) -> Result<()> {
     Ok(())
 }
 
-fn show_hub_menu(config: &ConfigManager) -> Result<()> {
+/// Single-entry guided flow - show state, present one action menu, execute, exit
+fn show_hub_once(config: &ConfigManager) -> Result<()> {
     cliclack::intro("✦ slate")?;
 
-    loop {
-        // Render dashboard using cliclack info to preserve left border
-        let registry = ThemeRegistry::new()?;
-        let env = crate::env::SlateEnv::from_process()?;
+    // Render dashboard once using cliclack info to preserve left border
+    let registry = ThemeRegistry::new()?;
+    let env = crate::env::SlateEnv::from_process()?;
 
-        let current_theme = config
-            .get_current_theme()?
-            .and_then(|id| registry.get(&id).cloned())
-            .unwrap_or_else(|| {
-                registry
-                    .get("catppuccin-mocha")
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        // Fallback: get first theme from registry
-                        registry.all().first().map(|t| (*t).clone()).unwrap()
-                    })
-            });
+    let current_theme = config
+        .get_current_theme()?
+        .and_then(|id| registry.get(&id).cloned())
+        .unwrap_or_else(|| {
+            registry
+                .get("catppuccin-mocha")
+                .cloned()
+                .unwrap_or_else(|| {
+                    // Fallback: get first theme from registry
+                    registry.all().first().map(|t| (*t).clone()).unwrap()
+                })
+        });
 
-        let current_font = config.get_current_font()?;
-        let current_opacity = config
-            .get_current_opacity()?
-            .unwrap_or_else(|| "Solid".to_string());
+    let current_font = config.get_current_font()?;
+    let current_opacity = config
+        .get_current_opacity()?
+        .unwrap_or_else(|| "Solid".to_string());
 
-        // Dashboard rendering with color hierarchy
-        cliclack::log::info(format!("[1m{}[0m    {}", "Theme", current_theme.name))?;
-        cliclack::log::info(format!("[1m{}[0m  {}", "Opacity", current_opacity))?;
-        cliclack::log::info(format!(
-            "[1m{}[0m    {}",
-            "Font",
-            current_font.unwrap_or_else(|| "Not configured".to_string())
-        ))?;
+    // Dashboard rendering with color hierarchy
+    cliclack::log::info(format!("[1m{}[0m    {}", "Theme", current_theme.name))?;
+    cliclack::log::info(format!("[1m{}[0m  {}", "Opacity", current_opacity))?;
+    cliclack::log::info(format!(
+        "[1m{}[0m    {}",
+        "Font",
+        current_font.unwrap_or_else(|| "Not configured".to_string())
+    ))?;
 
-        cliclack::log::remark("")?;
+    cliclack::log::remark("")?;
 
-        // Compute Hub state machine (A/B/C)
-        let auto_enabled = config.is_auto_theme_enabled()?;
-        let current_theme_id = config.get_current_theme()?;
+    // /Build single menu with high-frequency actions
+    let mut menu_builder = cliclack::select("What would you like to do?");
 
-        let hub_state = if auto_enabled {
-            // Auto is enabled; check if current matches auto-resolved
-            let should_be_theme = crate::cli::auto_theme::resolve_auto_theme(&env, config)?;
-            if let Some(ref current_id) = current_theme_id {
-                if current_id == &should_be_theme {
-                    HubState::A
-                } else {
-                    HubState::B(should_be_theme)
-                }
-            } else {
-                HubState::B(should_be_theme)
-            }
+    // Item 1: Switch Theme
+    menu_builder = menu_builder.item("switch", "✦ Switch Theme", "");
+
+    // Item 2: Change Font
+    menu_builder = menu_builder.item("font", "✦ Change Font", "");
+
+    // Item 3: More options (includes auto-theme toggle, restore, setup wizard)
+    menu_builder = menu_builder.item("more", "◆ More options…", "");
+
+    // Item 4: Quit
+    menu_builder = menu_builder.item("quit", "○ Quit", "");
+
+    // Render and handle selection (execute one action and exit)
+    let selection = menu_builder.interact().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::Interrupted {
+            crate::error::SlateError::UserCancelled
         } else {
-            HubState::C
-        };
-
-        // Build menu items (6 base + 1 conditional)
-        let mut menu_builder = cliclack::select("What would you like to do?");
-
-        // Item 1: Theme action (varies by state)
-        let theme_label = match &hub_state {
-            HubState::A => Language::HUB_PAUSE_AUTO_PICK,
-            HubState::B(_) | HubState::C => Language::HUB_SWITCH_THEME,
-        };
-        menu_builder = menu_builder.item("switch", theme_label, "");
-
-        // Item 2: Change Font
-        menu_builder = menu_builder.item("font", Language::HUB_CHANGE_FONT, "");
-
-        // Item 3: Toggle Auto Theme
-        let auto_toggle_label = if auto_enabled {
-            Language::HUB_TOGGLE_AUTO_ON
-        } else {
-            Language::HUB_TOGGLE_AUTO_OFF
-        };
-        menu_builder = menu_builder.item("toggle-auto", auto_toggle_label, "");
-
-        // Item 4: View Status
-        menu_builder = menu_builder.item("status", Language::HUB_VIEW_STATUS, "");
-
-        // Conditional Item: Resume Auto (if State B)
-        if let HubState::B(ref destination) = hub_state {
-            let registry = ThemeRegistry::new()?;
-            let dest_display = registry
-                .get(destination)
-                .map(|t| t.name.clone())
-                .unwrap_or_else(|| destination.clone());
-            menu_builder = menu_builder.item(
-                "resume-auto",
-                format!("⟲ Resume Auto ({})", dest_display),
-                "",
-            );
+            crate::error::SlateError::IOError(e)
         }
+    })?;
 
-        // Item 5: Preferences
-        menu_builder = menu_builder.item("prefs", Language::HUB_PREFERENCES, "");
-
-        // Item 6: Quit
-        menu_builder = menu_builder.item("quit", Language::HUB_QUIT, "");
-
-        // Render and handle selection
-        let selection = menu_builder.interact().map_err(|e| {
-            if e.kind() == std::io::ErrorKind::Interrupted {
-                crate::error::SlateError::UserCancelled
-            } else {
-                crate::error::SlateError::IOError(e)
-            }
-        })?;
-
-        match selection {
-            "switch" => {
-                // Route to picker
-                return crate::cli::picker::launch_picker(&env);
-            }
-            "font" => {
-                // Delegate to font picker 
-                return crate::cli::font::handle_font(None);
-            }
-            "toggle-auto" => {
-                let new_state = !auto_enabled;
-                sync_auto_theme_toggle(config, new_state)?;
-            }
-            "status" => {
-                // View status
-                return crate::cli::status::handle(&[]);
-            }
-            "resume-auto" => {
-                // Resume auto theme (apply the should-be theme)
-                if let HubState::B(ref destination) = hub_state {
-                    return crate::cli::theme::handle_theme(
-                        Some(destination.clone()),
-                        false,
-                        false,
-                    );
-                }
-            }
-            "prefs" => match handle_preferences(config)? {
-                PreferencesOutcome::BackToHub => {}
-                PreferencesOutcome::ExitHub => return Ok(()),
-            },
-            "quit" => {
-                cliclack::outro("✦ Done")?;
-                return Ok(());
-            }
-            _ => return Ok(()),
+    match selection {
+        "switch" => {
+            // Route to picker
+            return crate::cli::picker::launch_picker(&env);
+        }
+        "font" => {
+            // Delegate to font picker
+            return crate::cli::font::handle_font(None);
+        }
+        "more" => {
+            // More options submenu
+            return handle_more_options(config);
+        }
+        "quit" => {
+            cliclack::outro("✦ Done")?;
+            return Ok(());
+        }
+        _ => {
+            cliclack::outro("✦ Done")?;
+            return Ok(());
         }
     }
 }
 
-/// Hub state machine : tracks auto-theme enabled state and theme sync status
-#[derive(Debug)]
-enum HubState {
-    /// A: Auto-on and current == auto-resolved (synced)
-    A,
-    /// B: Auto-on and current != auto-resolved (out of sync); contains should-be theme ID
-    B(String),
-    /// C: Auto-off
-    C,
-}
-
-enum PreferencesOutcome {
-    BackToHub,
-    ExitHub,
-}
-
-fn handle_preferences(config: &ConfigManager) -> Result<PreferencesOutcome> {
-    // Preferences submenu reduced to 2 items + Back (no Reset, no auto, no font)
-    // Font and auto are now top-level in the main menu 
+/// More options submenu (looping menu, back to main hub not supported)
+fn handle_more_options(config: &ConfigManager) -> Result<()> {
     loop {
-        let selection = cliclack::select("Preferences")
+        let auto_enabled = config.is_auto_theme_enabled()?;
+
+        let selection = cliclack::select("More options")
             .item(
-                "fastfetch",
-                if config.has_fastfetch_autorun()? {
-                    Language::HUB_TOGGLE_FASTFETCH_ON
+                "auto-theme",
+                if auto_enabled {
+                    "✦ Auto-Theme (enabled)"
                 } else {
-                    Language::HUB_TOGGLE_FASTFETCH_OFF
+                    "✦ Auto-Theme (disabled)"
                 },
                 "",
             )
-            .item("setup", Language::HUB_RUN_SETUP, "")
-            .item("back", Language::HUB_BACK, "")
+            .item("restore", "⏏ Restore from snapshot", "")
+            .item("setup", "⚙ Setup Wizard", "")
+            .item("quit", "○ Back", "")
             .interact()
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::Interrupted {
@@ -268,16 +189,26 @@ fn handle_preferences(config: &ConfigManager) -> Result<PreferencesOutcome> {
             })?;
 
         match selection {
-            "fastfetch" => {
-                toggle_fastfetch_from_preferences(config)?;
+            "auto-theme" => {
+                let new_state = !auto_enabled;
+                sync_auto_theme_toggle(config, new_state)?;
+                // After toggling, show updated state and menu again
+            }
+            "restore" => {
+                // Delegate to restore command
+                return crate::cli::restore::handle(&[]);
             }
             "setup" => {
                 let env = crate::env::SlateEnv::from_process()?;
                 crate::cli::setup::handle_with_env(false, false, None, &env)?;
-                return Ok(PreferencesOutcome::ExitHub);
+                // After setup, exit
+                cliclack::outro("✦ Done")?;
+                return Ok(());
             }
-            "back" => return Ok(PreferencesOutcome::BackToHub),
-            _ => return Ok(PreferencesOutcome::ExitHub),
+            "quit" | _ => {
+                cliclack::outro("✦ Done")?;
+                return Ok(());
+            }
         }
     }
 }
