@@ -1,4 +1,3 @@
-use crate::brand::Language;
 use crate::cli::config::{disable_auto_theme, enable_auto_theme};
 use crate::config::ConfigManager;
 use crate::error::Result;

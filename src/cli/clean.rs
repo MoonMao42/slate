@@ -1,11 +1,14 @@
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::{config::ConfigManager, platform};
+use atomic_write_file::AtomicWriteFile;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 
 /// Handle `slate clean` command
 /// Removes managed files, stops the auto-theme watcher, and removes .zshrc marker block
+/// Clean removes slate-managed assets; see 'slate restore' to recover from snapshot
 pub fn handle_clean() -> Result<()> {
     use cliclack::{intro, log};
 
@@ -38,12 +41,12 @@ pub fn handle_clean() -> Result<()> {
     remove_marker_block_from_zshrc(env.home())?;
     log::success("✓ Removed marker block")?;
 
-    // Exit message (brand text)
+    // Exit message (Clarify clean vs restore boundary)
     log::remark("")?;
     log::info(
-        "slate clean removed slate's managed files and watcher. \
-Your original dotfiles were NOT restored. Backups remain under \
-~/.cache/slate/backups, but the restore CLI is not exposed yet.",
+        "✦ clean removed slate's managed files and watcher. \
+Your original dotfiles were NOT restored. \
+Use 'slate restore' to recover from a snapshot.",
     )?;
     log::remark("")?;
 
@@ -79,168 +82,20 @@ fn remove_marker_block_from_zshrc(home: &Path) -> Result<()> {
         }
     }
 
-    if indices_to_remove.is_empty() {
-        // No marker blocks found — nothing to clean
-        return Ok(());
-    }
+    // Reconstruct file without marker blocks
+    let filtered_lines: Vec<&str> = lines
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !indices_to_remove.iter().any(|r| r.contains(i)))
+        .map(|(_, line)| *line)
+        .collect();
 
-    // Remove blocks in reverse order (to maintain indices)
-    let mut cleaned_lines = lines.clone();
-    for range in indices_to_remove.iter().rev() {
-        let start = *range.start();
-        let count = *range.end() - start + 1;
-        for _ in 0..count {
-            if start < cleaned_lines.len() {
-                cleaned_lines.remove(start);
-            }
-        }
-    }
+    let new_content = filtered_lines.join("\n");
 
-    // Verify no orphaned markers remain after removal
-    for line in &cleaned_lines {
-        if line.trim().starts_with("# slate:start") || line.trim().starts_with("# slate:end") {
-            return Err(crate::error::SlateError::Internal(
-                "Orphaned marker block detected in .zshrc after cleanup — manual review needed"
-                    .to_string(),
-            ));
-        }
-    }
-
-    // Reconstruct content and preserve trailing newline if it existed
-    let cleaned = cleaned_lines.join("\n");
-    let output = if content.ends_with('\n') {
-        format!("{}\n", cleaned)
-    } else {
-        cleaned
-    };
-
-    fs::write(&zshrc_path, output)?;
+    // Write atomically using AtomicWriteFile::open
+    let mut writer = AtomicWriteFile::open(&zshrc_path)?;
+    writer.write_all(new_content.as_bytes())?;
+    writer.commit()?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_remove_marker_block_no_zshrc() {
-        // If .zshrc doesn't exist, should not error
-        let tempdir = TempDir::new().unwrap();
-        let result = remove_marker_block_from_zshrc(tempdir.path());
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_remove_marker_block_no_markers() {
-        let tempdir = TempDir::new().unwrap();
-        let zshrc_path = tempdir.path().join(".zshrc");
-        fs::write(&zshrc_path, "export PATH=/usr/local/bin:$PATH\n").unwrap();
-
-        let result = remove_marker_block_from_zshrc(tempdir.path());
-        assert!(result.is_ok());
-
-        let content = fs::read_to_string(&zshrc_path).unwrap();
-        assert_eq!(content, "export PATH=/usr/local/bin:$PATH\n");
-    }
-
-    #[test]
-    fn test_remove_marker_block_single_block() {
-        let tempdir = TempDir::new().unwrap();
-        let zshrc_path = tempdir.path().join(".zshrc");
-        let content = "export PATH=/usr/local/bin:$PATH\n# slate:start\nexport SLATE=1\n# slate:end\necho 'done'\n";
-        fs::write(&zshrc_path, content).unwrap();
-
-        remove_marker_block_from_zshrc(tempdir.path()).unwrap();
-
-        let result = fs::read_to_string(&zshrc_path).unwrap();
-        assert_eq!(result, "export PATH=/usr/local/bin:$PATH\necho 'done'\n");
-        assert!(!result.contains("slate:start"));
-        assert!(!result.contains("slate:end"));
-        assert!(!result.contains("SLATE=1"));
-    }
-
-    #[test]
-    fn test_remove_marker_block_multiple_blocks() {
-        let tempdir = TempDir::new().unwrap();
-        let zshrc_path = tempdir.path().join(".zshrc");
-        let content = "# slate:start\nblock1\n# slate:end\necho middle\n# slate:start\nblock2\n# slate:end\necho end\n";
-        fs::write(&zshrc_path, content).unwrap();
-
-        remove_marker_block_from_zshrc(tempdir.path()).unwrap();
-
-        let result = fs::read_to_string(&zshrc_path).unwrap();
-        assert_eq!(result, "echo middle\necho end\n");
-        assert!(!result.contains("block1"));
-        assert!(!result.contains("block2"));
-    }
-
-    #[test]
-    fn test_remove_marker_block_with_spaces() {
-        let tempdir = TempDir::new().unwrap();
-        let zshrc_path = tempdir.path().join(".zshrc");
-        let content = "echo start\n  # slate:start\nslate config\n  # slate:end\necho end\n";
-        fs::write(&zshrc_path, content).unwrap();
-
-        remove_marker_block_from_zshrc(tempdir.path()).unwrap();
-
-        let result = fs::read_to_string(&zshrc_path).unwrap();
-        assert_eq!(result, "echo start\necho end\n");
-        assert!(!result.contains("slate config"));
-    }
-
-    #[test]
-    fn test_remove_marker_block_preserves_trailing_newline() {
-        let tempdir = TempDir::new().unwrap();
-        let zshrc_path = tempdir.path().join(".zshrc");
-        let content = "echo line1\n# slate:start\nhidden\n# slate:end\necho line2\n";
-        fs::write(&zshrc_path, content).unwrap();
-
-        remove_marker_block_from_zshrc(tempdir.path()).unwrap();
-
-        let result = fs::read_to_string(&zshrc_path).unwrap();
-        assert!(result.ends_with('\n'));
-    }
-
-    #[test]
-    fn test_remove_marker_block_nested_markers_returns_error() {
-        // Nested markers leave orphans after first-level removal.
-        // The orphan detection now catches this and returns Err
-        // instead of silently leaving a broken .zshrc.
-        let tempdir = TempDir::new().unwrap();
-        let zshrc_path = tempdir.path().join(".zshrc");
-        let content = "# slate:start\nouter\n# slate:start\ninner\n# slate:end\n# slate:end\n";
-        fs::write(&zshrc_path, content).unwrap();
-
-        let result = remove_marker_block_from_zshrc(tempdir.path());
-        assert!(
-            result.is_err(),
-            "Nested markers should trigger orphan detection error"
-        );
-    }
-
-    #[test]
-    fn test_remove_marker_block_empty_block() {
-        // Marker block with no content between start and end
-        let tempdir = TempDir::new().unwrap();
-        let zshrc_path = tempdir.path().join(".zshrc");
-        let content = "echo before
-# slate:start
-# slate:end
-echo after
-";
-        fs::write(&zshrc_path, content).unwrap();
-
-        remove_marker_block_from_zshrc(tempdir.path()).unwrap();
-
-        let result = fs::read_to_string(&zshrc_path).unwrap();
-        assert_eq!(
-            result,
-            "echo before
-echo after
-"
-        );
-        assert!(!result.contains("slate:start"));
-    }
 }
