@@ -3,18 +3,27 @@ use crate::error::{Result, SlateError};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tempfile::NamedTempFile;
 
-const SWIFT_SOURCE: &str = include_str!("../../resources/dark-mode-notify.swift");
 const PROCESS_PATTERN: &str = "slate-dark-mode-notify";
 
-/// Get the path to the compiled binary
+/// Get the path where the binary should be installed in the managed config directory.
 fn binary_path(config: &ConfigManager) -> Result<PathBuf> {
     let bin_dir = config.managed_dir("bin");
     Ok(bin_dir.join("slate-dark-mode-notify"))
 }
 
-fn binary_needs_rebuild(bin_path: &Path) -> bool {
+/// Get the path to the pre-compiled binary from the build output.
+fn build_time_binary_path() -> Result<PathBuf> {
+    let path = env!("WATCHER_BINARY");
+    if !Path::new(path).exists() {
+        return Err(SlateError::PlatformError(
+            "Pre-compiled watcher binary not found in build output".to_string(),
+        ));
+    }
+    Ok(PathBuf::from(path))
+}
+
+fn binary_needs_refresh(bin_path: &Path) -> bool {
     if !bin_path.exists() {
         return true;
     }
@@ -33,14 +42,18 @@ fn binary_needs_rebuild(bin_path: &Path) -> bool {
     }
 }
 
-/// Compile the Swift dark mode notifier binary.
-/// Recompiles when the watcher is missing or older than the current slate binary.
+/// Install the pre-compiled Swift dark mode notifier binary.
+/// Copies the build-time compiled binary to the managed directory.
+/// Refreshes when the installed binary is missing or older than the current slate binary.
 pub fn ensure_binary(config: &ConfigManager) -> Result<PathBuf> {
     let bin_path = binary_path(config)?;
 
-    if !binary_needs_rebuild(&bin_path) {
+    if !binary_needs_refresh(&bin_path) {
         return Ok(bin_path);
     }
+
+    // Get the pre-compiled binary from the build output
+    let source_binary = build_time_binary_path()?;
 
     // Ensure parent directory exists
     if let Some(parent) = bin_path.parent() {
@@ -49,44 +62,28 @@ pub fn ensure_binary(config: &ConfigManager) -> Result<PathBuf> {
         })?;
     }
 
-    let parent = bin_path.parent().ok_or_else(|| {
-        SlateError::PlatformError("Compiled notifier path is missing a parent directory".to_string())
-    })?;
-
-    // Compile via unique temp files, then atomically publish the finished binary.
-    let tmp_swift = NamedTempFile::new().map_err(|e| {
-        SlateError::PlatformError(format!("Failed to create Swift source temp file: {}", e))
-    })?;
-    fs::write(tmp_swift.path(), SWIFT_SOURCE)
-        .map_err(|e| SlateError::PlatformError(format!("Failed to write Swift source: {}", e)))?;
-
-    let tmp_bin = NamedTempFile::new_in(parent).map_err(|e| {
-        SlateError::PlatformError(format!("Failed to create binary temp file: {}", e))
-    })?;
-    let tmp_bin_path = tmp_bin.path().to_path_buf();
-
-    let output = Command::new("swiftc")
-        .arg(tmp_swift.path())
-        .arg("-o")
-        .arg(&tmp_bin_path)
-        .output()
-        .map_err(|e| SlateError::PlatformError(format!("Failed to run swiftc: {}", e)))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(SlateError::PlatformError(format!(
-            "swiftc compilation failed: {}",
-            stderr
-        )));
-    }
-
-    tmp_bin.persist(&bin_path).map_err(|e| {
+    // Copy the pre-compiled binary to the managed location
+    fs::copy(&source_binary, &bin_path).map_err(|e| {
         SlateError::PlatformError(format!(
-            "Failed to install compiled notifier {}: {}",
+            "Failed to install watcher binary from {} to {}: {}",
+            source_binary.display(),
             bin_path.display(),
             e
         ))
     })?;
+
+    // Ensure the binary is executable
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = fs::Permissions::from_mode(0o755);
+        fs::set_permissions(&bin_path, perms).map_err(|e| {
+            SlateError::PlatformError(format!(
+                "Failed to set executable permissions on watcher binary: {}",
+                e
+            ))
+        })?;
+    }
 
     Ok(bin_path)
 }
