@@ -667,7 +667,79 @@ error_symbol = "[>](bold red)"
                 .to_string()
         }
     }
+
+    /// Check if live preview is enabled for Ghostty reload in config.toml.
+    /// [live_preview] enabled = true/false (unset = not yet determined).
+    /// Returns Ok(true) only if explicitly set to enabled.
+    pub fn is_live_preview_enabled(&self) -> Result<bool> {
+        let config_path = self.base_path.join("config.toml");
+
+        if !config_path.exists() {
+            return Ok(false);
+        }
+
+        let content = fs::read_to_string(&config_path)?;
+        let doc = content.parse::<DocumentMut>()?;
+
+        // Read [live_preview].enabled; default to false if missing
+        let enabled = doc
+            .get("live_preview")
+            .and_then(|table| table.get("enabled"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+
+        Ok(enabled)
+    }
+
+    /// Check if live preview permission has been explicitly determined.
+    /// Returns true if [live_preview].enabled is set (either true or false).
+    /// Returns false if key is missing (permission state unknown).
+    pub fn is_live_preview_state_known(&self) -> Result<bool> {
+        let config_path = self.base_path.join("config.toml");
+
+        if !config_path.exists() {
+            return Ok(false);
+        }
+
+        let content = fs::read_to_string(&config_path)?;
+        let doc = content.parse::<DocumentMut>()?;
+
+        Ok(doc
+            .get("live_preview")
+            .and_then(|table| table.get("enabled"))
+            .and_then(|value| value.as_bool())
+            .is_some())
+    }
+
+    /// Write live preview permission state to config.toml.
+    /// Writes to [live_preview].enabled field.
+    pub fn set_live_preview_enabled(&self, enabled: bool) -> Result<()> {
+        let config_path = self.base_path.join("config.toml");
+
+        // Read existing config or start with empty
+        let mut doc = if config_path.exists() {
+            fs::read_to_string(&config_path)?.parse::<DocumentMut>()?
+        } else {
+            DocumentMut::new()
+        };
+
+        // Ensure [live_preview] table exists
+        if !doc.contains_key("live_preview") {
+            doc.insert("live_preview", toml_edit::table());
+        }
+
+        // Set the enabled field
+        doc["live_preview"]["enabled"] = toml_edit::value(enabled);
+
+        // Write atomically
+        let mut file = AtomicWriteFile::open(&config_path)?;
+        file.write_all(doc.to_string().as_bytes())?;
+        file.commit()?;
+
+        Ok(())
+    }
 }
+
 
 #[cfg(test)]
 mod tests {

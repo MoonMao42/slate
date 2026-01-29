@@ -44,6 +44,13 @@ fn print_dim_tip() {
     );
 }
 
+/// Check if running in Ghostty terminal.
+fn is_ghostty() -> bool {
+    std::env::var("TERM_PROGRAM")
+        .map(|t| t.to_lowercase() == "ghostty")
+        .unwrap_or(false)
+}
+
 /// Silent preview apply: updates only the live preview path without persisting theme/opacity state.
 /// Called on every keystroke during picker navigation. Updates visual appearance
 /// without committing the selection to ~/.config/slate/current and current-opacity.
@@ -51,7 +58,7 @@ fn print_dim_tip() {
 /// 1. Does NOT write current/current-opacity files
 /// 2. Updates terminal opacity/blur via adapters (Ghostty, Alacritty)
 /// 3. Applies theme palette to adapters for visual preview
-/// 4. Sends SIGUSR2 to Ghostty for hot-reload (best-effort)
+/// 4. Attempts Ghostty live reload with permission-aware behavior (per)
 /// 5. Produces NO stdout output (silent)
 pub fn silent_preview_apply(
     env: &SlateEnv,
@@ -67,7 +74,7 @@ pub fn silent_preview_apply(
     // Just apply visual changes for preview
 
     // Apply theme palette to adapters (visual preview)
-    let _config = crate::config::ConfigManager::with_env(env)?;
+    let config = crate::config::ConfigManager::with_env(env)?;
     let adapter_registry = crate::adapter::ToolRegistry::default();
     let _results = adapter_registry.apply_theme_to_all(theme);
 
@@ -78,9 +85,43 @@ pub fn silent_preview_apply(
     // Update opacity for Alacritty (best-effort)
     let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
 
-    // Attempt Ghostty hot-reload (best-effort, no error if fails)
+    // Attempt Ghostty live preview with permission-aware behavior (best-effort).
+    // Per , Check if Ghostty reload permission is already known.
+    // If permission state is unknown, try once and remember the result.
+    // If permission is known to be disabled, skip reload silently.
     if let Some(ghostty_adapter) = adapter_registry.get_adapter("ghostty") {
-        let _ = ghostty_adapter.reload();
+        // Only attempt reload if we're in Ghostty
+        if is_ghostty() {
+            match config.is_live_preview_state_known() {
+                Ok(true) => {
+                    // Permission state is known
+                    if let Ok(enabled) = config.is_live_preview_enabled() {
+                        if enabled {
+                            // Permission is known to be enabled, attempt reload
+                            let _ = ghostty_adapter.reload();
+                        }
+                        // If enabled is false, skip reload silently (user declined)
+                    }
+                }
+                Ok(false) => {
+                    // Permission state is unknown, attempt reload once and remember result
+                    match ghostty_adapter.reload() {
+                        Ok(()) => {
+                            // Success: remember permission as enabled
+                            let _ = config.set_live_preview_enabled(true);
+                        }
+                        Err(_) => {
+                            // Failed: remember permission as disabled
+                            let _ = config.set_live_preview_enabled(false);
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Error reading config, fall back to best-effort reload attempt
+                    let _ = ghostty_adapter.reload();
+                }
+            }
+        }
     }
 
     Ok(())
