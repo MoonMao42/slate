@@ -1352,9 +1352,7 @@ mod tests {
         let json = serde_json::to_string(&entry);
         assert!(json.is_ok());
 
-        let parsed: Result<RestoreEntry, _> = serde_json::from_str(&json.unwrap());
-        assert!(parsed.is_ok());
-        let parsed = parsed.unwrap();
+        let parsed: RestoreEntry = serde_json::from_str(&json.unwrap()).unwrap();
         assert_eq!(parsed.tool_key, "ghostty");
         assert_eq!(parsed.original_state, OriginalFileState::Present);
     }

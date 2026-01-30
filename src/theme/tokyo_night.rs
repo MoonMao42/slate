@@ -10,7 +10,7 @@ pub fn tokyo_night_dark() -> Result<ThemeVariant> {
         name: "Tokyo Night Dark".to_string(),
         family: "Tokyo Night".to_string(),
         tool_refs: HashMap::from([
-            ("ghostty".to_string(), "Tokyo Night".to_string()),
+            ("ghostty".to_string(), "TokyoNight".to_string()),
             ("alacritty".to_string(), "tokyo_night".to_string()),
             ("bat".to_string(), "Tokyo Night".to_string()),
             ("delta".to_string(), "tokyo_night".to_string()),
@@ -84,7 +84,7 @@ pub fn tokyo_night_light() -> Result<ThemeVariant> {
         name: "Tokyo Night Light".to_string(),
         family: "Tokyo Night".to_string(),
         tool_refs: HashMap::from([
-            ("ghostty".to_string(), "Tokyo Night Light".to_string()),
+            ("ghostty".to_string(), "TokyoNight Day".to_string()),
             ("alacritty".to_string(), "tokyo_night_light".to_string()),
             ("bat".to_string(), "Tokyo Night Light".to_string()),
             ("delta".to_string(), "tokyo_night_light".to_string()),

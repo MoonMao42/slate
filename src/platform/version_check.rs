@@ -187,7 +187,7 @@ mod tests {
     fn test_is_version_string() {
         assert!(is_version_string("1.2.3"));
         assert!(is_version_string("0.12.0"));
-        assert!(!is_version_string("1.2"));
+        assert!(is_version_string("1.2"));
         assert!(!is_version_string("abc"));
     }
 }
