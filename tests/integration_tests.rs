@@ -1,4 +1,13 @@
 use assert_cmd::Command;
+use tempfile::TempDir;
+
+/// Create a Command with SLATE_HOME pointing to an isolated temp directory.
+/// Prevents tests from polluting the real ~/.config and ~/.cache.
+fn slate_cmd_isolated(tempdir: &TempDir) -> Command {
+    let mut cmd = Command::cargo_bin("slate").unwrap();
+    cmd.env("SLATE_HOME", tempdir.path());
+    cmd
+}
 
 #[test]
 fn test_cli_help_shows_commands() {
@@ -61,7 +70,8 @@ fn test_list_subcommand_help() {
 
 #[test]
 fn test_setup_quick_flag() {
-    let mut cmd = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
 
     let output = cmd.args(["setup", "--quick"]).output().unwrap();
     // In quick mode, wizard runs successfully
@@ -70,7 +80,8 @@ fn test_setup_quick_flag() {
 
 #[test]
 fn test_set_with_theme_argument() {
-    let mut cmd = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
 
     let output = cmd.args(["set", "catppuccin-mocha"]).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -82,7 +93,8 @@ fn test_set_with_theme_argument() {
 
 #[test]
 fn test_status_command_runs() {
-    let mut cmd = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
 
     let output = cmd.arg("status").output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -97,7 +109,8 @@ fn test_status_command_runs() {
 
 #[test]
 fn test_list_command_runs() {
-    let mut cmd = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
 
     let output = cmd.arg("list").output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -120,7 +133,8 @@ fn test_reset_subcommand_is_not_exposed() {
     assert!(!stdout.contains("reset"), "reset should be hidden from help");
     
     // But reset command still works for backward compatibility
-    let mut cmd2 = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd2 = slate_cmd_isolated(&tempdir);
     let output2 = cmd2.args(["reset", "--help"]).output().unwrap();
     
     // reset --help should work (it's hidden but functional)
@@ -133,7 +147,8 @@ fn test_reset_subcommand_is_not_exposed() {
 #[test]
 fn test_setup_wizard_intro_displays() {
     // Verify wizard displays intro frame and completes successfully
-    let mut cmd = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
     cmd.arg("setup").arg("--quick");
 
     let output = cmd.output().unwrap();
@@ -147,7 +162,8 @@ fn test_setup_wizard_intro_displays() {
 #[test]
 fn test_setup_wizard_completion_message() {
     // Verify "Your terminal is now beautiful!" appears in output
-    let mut cmd = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
     cmd.arg("setup").arg("--quick");
 
     let output = cmd.output().unwrap();
@@ -157,7 +173,8 @@ fn test_setup_wizard_completion_message() {
 #[test]
 fn test_setup_wizard_step_counter_present() {
     // Verify step counter format "Step X of Y" is logged
-    let mut cmd = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
     cmd.arg("setup").arg("--quick");
 
     let output = cmd.output().unwrap();
@@ -170,7 +187,8 @@ fn test_setup_wizard_step_counter_present() {
 #[test]
 fn test_setup_quick_mode_minimal_interactions() {
     // Verify --quick flag skips mode selection
-    let mut cmd = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
     cmd.arg("setup").arg("--quick");
 
     let output = cmd.output().unwrap();

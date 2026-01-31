@@ -1,4 +1,11 @@
 use assert_cmd::Command;
+use tempfile::TempDir;
+
+fn slate_cmd_isolated(tempdir: &TempDir) -> Command {
+    let mut cmd = Command::cargo_bin("slate").unwrap();
+    cmd.env("SLATE_HOME", tempdir.path());
+    cmd
+}
 
 #[test]
 fn test_restore_appears_in_help() {
@@ -27,7 +34,8 @@ fn test_restore_help_shows_subcommand() {
 
 #[test]
 fn test_restore_with_invalid_id_fails_gracefully() {
-    let mut cmd = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
     let output = cmd.args(["restore", "nonexistent-restore-id"]).output().unwrap();
 
     // Command should fail
@@ -44,7 +52,8 @@ fn test_restore_with_invalid_id_fails_gracefully() {
 
 #[test]
 fn test_restore_list_command_runs() {
-    let mut cmd = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
     let output = cmd.args(["restore", "--list"]).output().unwrap();
 
     // Command should succeed (even if no restore points exist)
@@ -80,7 +89,8 @@ fn test_restore_not_hidden_but_reset_is() {
 
 #[test]
 fn test_restore_delete_command_fails_gracefully() {
-    let mut cmd = Command::cargo_bin("slate").unwrap();
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
     let output = cmd.args(["restore", "--delete", "nonexistent-id"]).output().unwrap();
 
     // Should fail gracefully

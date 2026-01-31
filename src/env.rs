@@ -20,7 +20,9 @@ impl SlateEnv {
     /// Prefers $XDG_CONFIG_HOME if set, otherwise uses $HOME/.config.
     /// Prefers $XDG_CACHE_HOME if set, otherwise uses $HOME/.cache.
     pub fn from_process() -> Result<Self> {
-        let home = std::env::var("HOME")
+        // SLATE_HOME overrides HOME for full isolation (used by integration tests)
+        let home = std::env::var("SLATE_HOME")
+            .or_else(|_| std::env::var("HOME"))
             .map(PathBuf::from)
             .map_err(|e| crate::error::SlateError::Internal(format!("HOME not set: {}", e)))?;
 
