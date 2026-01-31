@@ -141,7 +141,7 @@ impl GhosttyAdapter {
 
         // Ensure integration file includes the font.conf file
         let adapter = GhosttyAdapter;
-        let integration_path = adapter.integration_config_path()?;
+        let integration_path = adapter.integration_config_path_with_env(env)?;
         if integration_path.exists() {
             let managed_font_path = config_manager.managed_dir("ghostty").join("font.conf");
             Self::ensure_integration_includes_managed(&integration_path, &managed_font_path)?;
