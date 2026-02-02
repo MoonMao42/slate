@@ -79,16 +79,15 @@ fn handle_restore_direct(restore_id: &str) -> Result<()> {
     // Validate the restore point exists
     let restore_point = get_restore_point(restore_id)?;
 
-    // Prevent restoring to baseline
-    if is_baseline_restore_point(&restore_point) {
-        println!("✗ Cannot restore to baseline. This is a protected snapshot.");
-        return Ok(());
-    }
-
-    // Confirm restore
-    let confirmed =
+    // Baseline restore gets an extra warning
+    let confirmed = if is_baseline_restore_point(&restore_point) {
+        confirm("⚠ This will restore all config files to their state BEFORE slate was installed. Any manual changes you made since then will be lost. Continue?")
+            .initial_value(false)
+            .interact()?
+    } else {
         confirm(format!("Restore to {}? This will modify your configuration files.", restore_point.theme_name))
-            .interact()?;
+            .interact()?
+    };
 
     if !confirmed {
         println!("Restore cancelled.");

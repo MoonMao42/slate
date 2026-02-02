@@ -1154,13 +1154,6 @@ pub fn execute_restore(restore_point_id: &str) -> Result<RestoreReceipt> {
     // Validate restore point exists and is readable
     let restore_point = get_restore_point(restore_point_id)?;
 
-    // Prevent restoring to baseline (safety gate)
-    if restore_point.is_baseline {
-        return Err(SlateError::RestoreFailed(
-            "Cannot restore to baseline restore point. This is a protected snapshot.".to_string(),
-        ));
-    }
-
     // Validate restore point data before starting restoration
     validate_restore_point_data(&restore_point)?;
 
