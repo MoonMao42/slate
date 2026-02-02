@@ -66,20 +66,29 @@ pub fn handle_with_env(
         }
     }
 
-    // Create baseline backup BEFORE any mutations (per)
-    // Check if baseline already exists (idempotent on subsequent runs)
+    // Snapshot current state BEFORE any mutations
     {
-        use crate::config::{begin_restore_point_baseline_with_env, list_restore_points_with_env};
+        use crate::config::{begin_restore_point_baseline_with_env, list_restore_points_with_env, snapshot_current_state_with_env};
         let backups = list_restore_points_with_env(env).ok();
-        let has_baseline = if let Some(backups) = backups {
+        let has_baseline = if let Some(ref backups) = backups {
             backups.iter().any(|rp| rp.is_baseline)
         } else {
             false
         };
 
         if !has_baseline {
+            // First time: create baseline (pre-slate state)
             if let Ok(baseline_point) = begin_restore_point_baseline_with_env(env) {
                 eprintln!("✓ Baseline snapshot created ({})", baseline_point.id);
+            }
+        } else {
+            // Subsequent runs: snapshot current config so user can restore back
+            let config = crate::config::ConfigManager::with_env(env).ok();
+            let label = config
+                .and_then(|c| c.get_current_theme().ok().flatten())
+                .unwrap_or_else(|| "pre-setup".to_string());
+            if let Ok(snap) = snapshot_current_state_with_env(env, &label) {
+                eprintln!("✓ Snapshot created ({})", snap.id);
             }
         }
     }

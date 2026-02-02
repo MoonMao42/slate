@@ -124,6 +124,13 @@ pub fn apply_theme_selection(theme: &ThemeVariant) -> Result<()> {
 }
 
 pub fn apply_theme_selection_with_env(theme: &ThemeVariant, env: &SlateEnv) -> Result<()> {
+    // Snapshot current state before switching themes
+    let config = crate::config::ConfigManager::with_env(env)?;
+    let current_theme = config.get_current_theme()?.unwrap_or_default();
+    if !current_theme.is_empty() {
+        let _ = crate::config::snapshot_current_state_with_env(env, &current_theme);
+    }
+
     let report = ThemeApplyCoordinator::new(env).apply(theme)?;
     log_apply_report(&report);
     Ok(())

@@ -876,6 +876,69 @@ pub fn begin_restore_point_baseline_with_env(env: &SlateEnv) -> Result<RestorePo
     ))
 }
 
+/// Snapshot the current state of all managed config files before a mutation.
+/// Unlike baseline, this is labeled with the current theme name and is not protected.
+pub fn snapshot_current_state(theme_name: &str) -> Result<RestorePoint> {
+    let env = SlateEnv::from_process().map_err(|_| {
+        SlateError::Internal("Cannot initialize SlateEnv for snapshot".to_string())
+    })?;
+    snapshot_current_state_with_env(&env, theme_name)
+}
+
+pub fn snapshot_current_state_with_env(env: &SlateEnv, theme_name: &str) -> Result<RestorePoint> {
+    let created_at = SystemTime::now();
+    let backup_dir = backup_directory_with_env(env)?;
+
+    for _ in 0..32 {
+        let restore_point_id = generate_restore_point_id(created_at);
+        let restore_point_dir = resolve_restore_point_directory(&backup_dir, &restore_point_id)?;
+
+        match fs::create_dir(&restore_point_dir) {
+            Ok(()) => {
+                let session = BackupSession {
+                    restore_point_id,
+                    theme_name: theme_name.to_string(),
+                    restore_point_dir,
+                };
+                let manifest = RestoreManifest {
+                    metadata: RestoreManifestMetadata {
+                        id: session.restore_point_id.clone(),
+                        theme_name: session.theme_name.clone(),
+                        created_at: format_iso8601_timestamp(created_at),
+                        is_baseline: false,
+                    },
+                    entries: Vec::new(),
+                };
+                write_manifest_raw(&manifest_path(&session.restore_point_dir), &manifest)?;
+
+                for target in baseline_snapshot_targets(env) {
+                    if target.path.exists() {
+                        let _ = create_backup_with_session(
+                            target.tool_key,
+                            target.display_tool,
+                            &session,
+                            &target.path,
+                        )?;
+                    }
+                }
+
+                return get_restore_point_with_env(env, &session.restore_point_id);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return Err(SlateError::BackupFailed(format!(
+                    "Failed to create snapshot directory: {}",
+                    e
+                )));
+            }
+        }
+    }
+
+    Err(SlateError::BackupFailed(
+        "Failed to allocate a unique snapshot ID".to_string(),
+    ))
+}
+
 /// Check if a restore point is the baseline restore point
 /// Used by reset to protect baseline from accidental overwrite
 pub fn is_baseline_restore_point(restore_point: &RestorePoint) -> bool {

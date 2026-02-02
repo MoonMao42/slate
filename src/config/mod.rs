@@ -14,6 +14,7 @@ pub use backup::{
     create_pre_restore_snapshot_with_env, delete_restore_point, display_tools,
     execute_restore, get_restore_point, get_restore_point_with_env,
     begin_restore_point_baseline, begin_restore_point_baseline_with_env,
+    snapshot_current_state, snapshot_current_state_with_env,
     is_baseline_restore_point, list_restore_points, list_restore_points_with_env, BackupInfo,
     BackupSession, OriginalFileState, RestoreEntry, RestorePoint,
     RestoreReceipt, RestoreFileResult,
