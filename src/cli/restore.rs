@@ -2,6 +2,7 @@ use crate::brand::language::Language;
 use crate::config::{execute_restore, get_restore_point, is_baseline_restore_point, list_restore_points, delete_restore_point};
 use crate::error::Result;
 use cliclack::{confirm, select};
+use std::process::Command;
 
 /// Handle `slate restore [ID] [--list] [--delete ID]` command
 pub fn handle(args: &[&str]) -> Result<()> {
@@ -114,6 +115,15 @@ fn handle_restore_direct(restore_id: &str) -> Result<()> {
             }
         }
     }
+
+    // Reload Ghostty so changes are visible immediately
+    let _ = Command::new("osascript")
+        .arg("-e")
+        .arg(r#"tell application "Ghostty"
+    set target_terminal to focused terminal of selected tab of front window
+    perform action "reload_config" on target_terminal
+end tell"#)
+        .output();
 
     Ok(())
 }
