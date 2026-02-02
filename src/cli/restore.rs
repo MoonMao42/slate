@@ -116,6 +116,19 @@ fn handle_restore_direct(restore_id: &str) -> Result<()> {
         }
     }
 
+    // Re-apply the restored theme so managed files match the restored state
+    let env = crate::env::SlateEnv::from_process()?;
+    let config = crate::config::ConfigManager::with_env(&env)?;
+    if let Ok(Some(theme_id)) = config.get_current_theme() {
+        let registry = crate::theme::ThemeRegistry::new()?;
+        if let Some(theme) = registry.get(&theme_id) {
+            println!("✓ Re-applying theme: {}", theme.name);
+            // Apply without snapshotting again (we just restored)
+            let report = crate::cli::theme_apply::ThemeApplyCoordinator::new(&env).apply(theme)?;
+            crate::cli::theme_apply::log_apply_report(&report);
+        }
+    }
+
     // Reload Ghostty so changes are visible immediately
     let _ = Command::new("osascript")
         .arg("-e")

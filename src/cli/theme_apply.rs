@@ -105,7 +105,7 @@ impl<'a> ThemeApplyCoordinator<'a> {
     }
 }
 
-fn log_apply_report(report: &ThemeApplyReport) {
+pub fn log_apply_report(report: &ThemeApplyReport) {
     for result in &report.results {
         match &result.status {
             ToolApplyStatus::Applied => eprintln!("✓ {}", result.tool_name),
