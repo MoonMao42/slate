@@ -167,6 +167,7 @@ mod tests {
             current_step: 0,
             total_steps: 0,
             selected_tools: Vec::new(),
+            tools_to_configure: Vec::new(),
             selected_font: None,
             selected_theme: None,
             selected_opacity: None,

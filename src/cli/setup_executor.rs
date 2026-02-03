@@ -16,6 +16,7 @@ use std::process::Command;
 /// Execute the setup based on wizard selections with injected SlateEnv (preferred)
 pub fn execute_setup_with_env(
     tools_to_install: &[String],
+    tools_to_configure: &[String],
     font: Option<&str>,
     theme: Option<&str>,
     env: &SlateEnv,
@@ -165,7 +166,7 @@ pub fn execute_setup_with_env(
         .filter(|r| r.status == InstallStatus::Success)
         .map(|r| r.tool_id.clone())
         .collect();
-    for issue in ensure_tool_configs(env, &just_installed) {
+    for issue in ensure_tool_configs(env, tools_to_configure, &just_installed) {
         summary.add_issue(issue);
     }
 
@@ -208,7 +209,8 @@ pub fn execute_setup(
     theme: Option<&str>,
 ) -> Result<ExecutionSummary> {
     let env = SlateEnv::from_process()?;
-    execute_setup_with_env(tools_to_install, font, theme, &env)
+    // Backward compat: install = configure
+    execute_setup_with_env(tools_to_install, tools_to_install, font, theme, &env)
 }
 
 fn resolve_selected_theme(theme: Option<&str>, env: &SlateEnv) -> Result<ThemeVariant> {
@@ -266,7 +268,11 @@ fn setup_shell_integration(
 /// Ensure integration config files exist for detected tools so adapters can write to them.
 /// During `slate setup`, we create these files if missing. Regular `slate set` does not
 /// create them (to avoid clobbering existing GUI-level settings).
-fn ensure_tool_configs(env: &SlateEnv, just_installed: &[String]) -> Vec<String> {
+fn ensure_tool_configs(
+    env: &SlateEnv,
+    user_selected: &[String],
+    just_installed: &[String],
+) -> Vec<String> {
     use std::fs;
 
     fn touch_config(tool_id: &str, path: &Path, issues: &mut Vec<String>) {
@@ -341,11 +347,27 @@ fn ensure_tool_configs(env: &SlateEnv, just_installed: &[String]) -> Vec<String>
     }
     let mut issues = Vec::new();
 
-    // Helper: only configure Tier 1 (active / in PATH) tools.
-    // Tier 2 tools (only in fallback paths like /opt/homebrew on shared Macs)
-    // are skipped to avoid writing unwanted configs for other users' tools.
-    let should_configure =
-        |id: &str| -> bool { installed.get(id).map(|p| p.is_tier1()).unwrap_or(false) };
+    // Configure a tool if:
+    // 1. Terminal emulators (ghostty/alacritty): always configure if detected (detect-only)
+    // 2. CLI tools: only if user explicitly selected them OR just installed them
+    // This respects the user's wizard choices — unchecked tools don't get configs.
+    let user_set: std::collections::HashSet<&str> = user_selected
+        .iter()
+        .chain(just_installed.iter())
+        .map(|s| s.as_str())
+        .collect();
+    let should_configure = |id: &str| -> bool {
+        let is_detected = installed.get(id).map(|p| p.installed).unwrap_or(false);
+        if !is_detected {
+            return false;
+        }
+        // Terminal emulators: always configure if detected (they're detect-only, not selectable)
+        if id == "ghostty" || id == "alacritty" {
+            return true;
+        }
+        // CLI tools: only if user chose them
+        user_set.contains(id)
+    };
 
     if should_configure("ghostty") {
         let adapter = GhosttyAdapter;
@@ -910,7 +932,7 @@ mod tests {
     fn test_execute_setup_empty() {
         let tempdir = TempDir::new().unwrap();
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
-        let result = execute_setup_with_env(&[], None, None, &env);
+        let result = execute_setup_with_env(&[], &[], None, None, &env);
         assert!(result.is_ok());
         let summary = result.unwrap();
         assert!(summary.overall_success);
@@ -943,7 +965,7 @@ mod tests {
     fn test_theme_selection_marks_summary_as_applied() {
         let tempdir = TempDir::new().unwrap();
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
-        let summary = execute_setup_with_env(&[], None, Some("catppuccin-mocha"), &env).unwrap();
+        let summary = execute_setup_with_env(&[], &[], None, Some("catppuccin-mocha"), &env).unwrap();
         assert!(summary.theme_applied);
     }
 
@@ -1013,7 +1035,11 @@ error_symbol = "[>](bold red)"
         )
         .unwrap();
 
-        let issues = ensure_tool_configs(&env, &[]);
+        let issues = ensure_tool_configs(
+            &env,
+            &["starship".to_string()],
+            &["starship".to_string()],
+        );
         assert!(issues.is_empty());
 
         let content = std::fs::read_to_string(&config_path).unwrap();

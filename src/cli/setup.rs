@@ -62,6 +62,7 @@ pub fn handle_with_env(
     }
     let start_time = context.start_time;
     let selected_tools = context.selected_tools.clone();
+    let tools_to_configure = context.tools_to_configure.clone();
     let selected_font = context.selected_font.as_deref();
     let selected_theme = context.selected_theme.as_deref();
     let selected_opacity = context.selected_opacity;
@@ -112,6 +113,7 @@ pub fn handle_with_env(
     // Execute the setup (install tools, apply configurations)
     let summary = setup_executor::execute_setup_with_env(
         &selected_tools,
+        &tools_to_configure,
         selected_font,
         selected_theme,
         env,
@@ -240,8 +242,8 @@ mod tests {
 
     #[test]
     fn test_setup_only_valid_tool() {
-        // Verify valid tools are recognized without performing the install in test.
-        let result = validate_retry_tool("ghostty");
+        // Verify installable tools are recognized
+        let result = validate_retry_tool("starship");
         assert!(result.is_ok());
     }
 
@@ -249,7 +251,9 @@ mod tests {
     fn test_setup_only_detectable_tool() {
         // Verify detect-only tools are rejected for retry
         let result = handle_retry_only("tmux");
-        // tmux is detect-only, should fail
+        assert!(result.is_err());
+        // ghostty is now detect-only too
+        let result = handle_retry_only("ghostty");
         assert!(result.is_err());
     }
 

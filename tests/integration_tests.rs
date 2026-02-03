@@ -280,18 +280,19 @@ mod tool_selection_tests {
 
     #[test]
     fn test_filter_valid_selections_removes_invalid() {
-        // filter_valid_selections should remove non-installable tools
+        // filter_valid_selections should remove non-installable and detect-only tools
         let selected = vec![
-            "ghostty".to_string(),     // installable ✓
+            "starship".to_string(),    // installable ✓
+            "ghostty".to_string(),     // detect-only ✗
             "tmux".to_string(),        // detect-only ✗
             "nonexistent".to_string(), // unknown ✗
         ];
 
         let actions = filter_valid_selections(selected);
 
-        // Only ghostty should be included
+        // Only starship should be included
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].tool_id, "ghostty");
+        assert_eq!(actions[0].tool_id, "starship");
     }
 
     #[test]

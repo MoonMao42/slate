@@ -13,7 +13,7 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
         // Direct apply path: validate and apply font
         let env = SlateEnv::from_process()?;
 
-        // Validate font exists in either nerd or system lists (picker assembles display)
+        // Check if font is already installed (nerd or system)
         let discovery = FontAdapter::discover_all_fonts()?;
         let all_fonts: Vec<&String> = discovery
             .nerd_fonts
@@ -21,7 +21,36 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
             .chain(discovery.system_fonts.iter())
             .collect();
 
-        if !all_fonts.contains(&&name.to_string()) {
+        let is_installed = all_fonts.contains(&&name.to_string());
+
+        if !is_installed {
+            // Check if it's a catalog font available for download
+            let catalog_match = FontCatalog::all_fonts()
+                .into_iter()
+                .find(|f| f.name == name || f.id == name);
+
+            if let Some(cat_font) = catalog_match {
+                // Download and install the catalog font
+                eprintln!("Downloading {}...", cat_font.name);
+                match download_catalog_font(cat_font.name, &env) {
+                    Ok(_) => {
+                        eprintln!("{} {} downloaded", Symbols::SUCCESS, cat_font.name);
+                    }
+                    Err(e) => {
+                        eprintln!("{} Download failed: {}", Symbols::FAILURE, e);
+                        return Ok(());
+                    }
+                }
+                // Apply using the catalog display name
+                FontAdapter::apply_font(&env, cat_font.name)?;
+                println!(
+                    "{} Updated font to {} in Ghostty and Alacritty.",
+                    Symbols::SUCCESS,
+                    cat_font.name
+                );
+                return Ok(());
+            }
+
             eprintln!(
                 "{} Font '{}' not found. Run 'slate font' to see available options.",
                 Symbols::FAILURE,
@@ -30,7 +59,7 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
             return Ok(());
         }
 
-        // Apply font
+        // Apply already-installed font
         FontAdapter::apply_font(&env, name)?;
 
         println!(

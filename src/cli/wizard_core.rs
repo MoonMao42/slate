@@ -32,7 +32,10 @@ pub struct WizardContext {
     pub mode: WizardMode,
     pub current_step: usize,
     pub total_steps: usize,
+    /// Tools to install (missing tools user selected)
     pub selected_tools: Vec<String>,
+    /// Tools to configure (install targets + already-installed Tier 1 + user-opted Tier 2)
+    pub tools_to_configure: Vec<String>,
     pub selected_font: Option<String>,
     pub selected_theme: Option<String>,
     pub selected_opacity: Option<crate::opacity::OpacityPreset>,
@@ -68,6 +71,7 @@ impl Wizard {
                 current_step: 0,
                 total_steps: 6, // intro → mode/preset → tools → font → theme → opacity → action list → apply
                 selected_tools: Vec::new(),
+                tools_to_configure: Vec::new(),
                 selected_font: None,
                 selected_theme: None,
                 fastfetch_enabled: false,
@@ -96,47 +100,32 @@ impl Wizard {
             eprintln!("⚙ Force mode: ignoring current state\n");
         }
 
-        self.context.total_steps = if quick_mode { 5 } else { 6 };
-
         // Step 0: Intro
         self.show_intro()?;
 
         // Step 1: Mode or preset selection
         if quick_mode {
             self.context.mode = WizardMode::Quick;
-            self.sync_total_steps(false);
-            self.step_select_preset_quick()?;
         } else {
-            // Manual mode: ask for mode selection
             self.step_select_mode()?;
             if self.context.mode == WizardMode::Quick {
-                self.sync_total_steps(true);
-                self.step_select_preset_quick()?;
-            } else {
-                self.sync_total_steps(true);
+                // User chose Quick inside manual entry
             }
         }
 
-        // Step 2+: Tool detection and selection
-        self.step_detect_and_select_tools()?;
-
-        // Step 3+: Font selection (manual mode only)
-        if self.context.mode == WizardMode::Manual {
+        if self.context.mode == WizardMode::Quick {
+            // ── Quick mode: Pick a vibe → Review → Apply ──
+            self.step_select_preset_quick()?;
+            self.step_quick_auto_tools()?;
+            self.step_auto_opacity()?;
+        } else {
+            // ── Manual mode: Tools → Font → Theme → Fastfetch → Review ──
+            self.step_detect_and_select_tools()?;
             self.step_select_font()?;
-        }
-
-        // Step 4+: Theme selection (manual mode only)
-        if self.context.mode == WizardMode::Manual {
             self.step_select_theme()?;
+            self.step_auto_opacity()?;
+            self.step_select_fastfetch()?;
         }
-
-        // Step 5+: Opacity selection (manual mode only)
-        if self.context.mode == WizardMode::Manual {
-            self.step_select_opacity()?;
-        }
-
-        // Step 5+: Fastfetch auto-run (both modes with confirmation)
-        self.step_select_fastfetch()?;
 
         self.step_review_and_confirm()?;
 
@@ -171,7 +160,6 @@ impl Wizard {
             _ => WizardMode::Manual,
         };
 
-        self.sync_total_steps(true);
         self.context.current_step += 1;
         Ok(())
     }
@@ -214,30 +202,73 @@ impl Wizard {
         // Display full inventory with status using typography helpers
         self.display_tool_inventory(&installed)?;
 
-        // Get install candidates (missing + installable)
-        let candidates = compute_install_candidates(&installed);
+        // Build two groups for the multiselect:
+        // 1. Install candidates: missing + installable tools
+        // 2. Tier 2 candidates: installed but not in PATH (need user opt-in to configure)
+        let install_candidates = compute_install_candidates(&installed);
 
-        // If no candidates, skip selection
-        if candidates.is_empty() {
+        let tier2_candidates: Vec<&crate::cli::tool_selection::ToolMetadata> =
+            crate::cli::tool_selection::ToolCatalog::all_tools()
+                .iter()
+                .filter(|tool| {
+                    installed
+                        .get(tool.id)
+                        .map(|p| p.installed && !p.in_path)
+                        .unwrap_or(false)
+                        && !tool.detect_only
+                })
+                .collect();
+
+        // Tier 1 tools: always configure (they're in PATH, user actively uses them)
+        let tier1_ids: Vec<String> = installed
+            .iter()
+            .filter(|(_, p)| p.is_tier1())
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        // If nothing to show in multiselect, skip
+        if install_candidates.is_empty() && tier2_candidates.is_empty() {
+            self.context.tools_to_configure = tier1_ids;
             eprintln!("All tools are already installed.");
             self.context.current_step += 1;
             return Ok(());
         }
 
-        // Non-interactive quick mode: select all candidates by default
+        // Non-interactive mode: install candidates only, configure Tier 1
         if !wizard_support::is_interactive() {
-            self.context.selected_tools = candidates.iter().map(|c| c.id.to_string()).collect();
+            self.context.selected_tools =
+                install_candidates.iter().map(|c| c.id.to_string()).collect();
+            let mut to_configure = tier1_ids;
+            for id in &self.context.selected_tools {
+                if !to_configure.contains(id) {
+                    to_configure.push(id.clone());
+                }
+            }
+            self.context.tools_to_configure = to_configure;
             self.context.current_step += 1;
             return Ok(());
         }
 
-        // Build multiselect items: (id, label, pitch)
-        let items: Vec<(&str, String, String)> = candidates
-            .iter()
-            .map(|tool| (tool.id, tool.label.to_string(), tool.pitch.to_string()))
-            .collect();
+        // Build multiselect items
+        let mut items: Vec<(&str, String, String)> = Vec::new();
+        let install_ids: std::collections::HashSet<&str> =
+            install_candidates.iter().map(|t| t.id).collect();
 
-        eprintln!("Select tools to install:");
+        // Group 1: tools to install
+        for tool in &install_candidates {
+            items.push((tool.id, tool.label.to_string(), tool.pitch.to_string()));
+        }
+
+        // Group 2: Tier 2 tools (available but not in PATH)
+        for tool in &tier2_candidates {
+            items.push((
+                tool.id,
+                format!("{} (not in PATH)", tool.label),
+                "configure anyway".to_string(),
+            ));
+        }
+
+        eprintln!("Select tools to install or configure (Enter to skip):");
         let selected: Vec<&str> = multiselect("Tools:")
             .items(
                 &items
@@ -245,11 +276,24 @@ impl Wizard {
                     .map(|(id, label, pitch)| (*id, label.as_str(), pitch.as_str()))
                     .collect::<Vec<_>>(),
             )
+            .required(false)
             .interact()
             .map_err(handle_cliclack_error)?;
 
-        // Convert &str to String
-        self.context.selected_tools = selected.into_iter().map(|s| s.to_string()).collect();
+        // Split: install only missing tools, configure = user picks + Tier 1
+        self.context.selected_tools = selected
+            .iter()
+            .filter(|id| install_ids.contains(*id))
+            .map(|id| id.to_string())
+            .collect();
+
+        let mut to_configure = tier1_ids;
+        for id in &selected {
+            if !to_configure.contains(&id.to_string()) {
+                to_configure.push(id.to_string());
+            }
+        }
+        self.context.tools_to_configure = to_configure;
         self.context.current_step += 1;
         Ok(())
     }
@@ -343,11 +387,9 @@ impl Wizard {
         Ok(())
     }
 
-    fn log_step(&self, step_name: &str) {
-        eprintln!(
-            "Step {} of {} — {}",
-            self.context.current_step, self.context.total_steps, step_name
-        );
+    fn log_step(&self, _step_name: &str) {
+        // Intentionally minimal — no "Step X of Y" counter.
+        // cliclack's own frames provide enough visual progress.
     }
 
     pub fn get_context(&self) -> &WizardContext {
@@ -358,86 +400,51 @@ impl Wizard {
         &mut self.context
     }
 
-    fn step_select_opacity(&mut self) -> Result<()> {
-        self.log_step("Select Background Style");
+    /// Quick mode: auto-select core tools (starship + zsh-syntax-highlighting) if missing.
+    /// No multiselect — the preset decides what's essential.
+    fn step_quick_auto_tools(&mut self) -> Result<()> {
+        let installed = detect_installed_tools();
+        let core_tools = ["starship", "zsh-syntax-highlighting"];
 
-        // Get selected theme to make recommendation
+        self.context.selected_tools = core_tools
+            .iter()
+            .filter(|&&id| {
+                let is_missing = !installed
+                    .get(id)
+                    .map(|p| p.installed)
+                    .unwrap_or(false);
+                let is_installable = ToolCatalog::get_tool(id)
+                    .map(|t| t.installable)
+                    .unwrap_or(false);
+                is_missing && is_installable
+            })
+            .map(|id| id.to_string())
+            .collect();
+
+        self.context.current_step += 1;
+        Ok(())
+    }
+
+    /// Auto-select opacity based on theme (dark → Frosted, light → Solid).
+    /// No interactive prompt — users can fine-tune in the Picker later.
+    fn step_auto_opacity(&mut self) -> Result<()> {
         let selected_theme_id =
             wizard_support::resolve_theme_id_for_opacity(&self.context, &self.theme_selector)?;
 
-        // Load the theme and get recommendation
         let registry = crate::theme::ThemeRegistry::new()?;
-        let theme = registry.get(&selected_theme_id).ok_or_else(|| {
-            crate::error::SlateError::InvalidThemeData(format!(
-                "Theme not found: {}",
-                selected_theme_id
-            ))
-        })?;
-
-        let recommended = crate::opacity::recommended_opacity_for_theme(theme);
-
-        if !wizard_support::is_interactive() {
-            // Non-interactive: use recommended opacity
+        if let Some(theme) = registry.get(&selected_theme_id) {
+            let recommended = crate::opacity::recommended_opacity_for_theme(theme);
             self.context.selected_opacity = Some(recommended);
-            self.context.current_step += 1;
-            return Ok(());
-        }
-
-        eprintln!("Background style — opacity and visual effects:");
-        let options = [
-            ("solid", "● Solid", "Opaque, best for light themes"),
-            ("frosted", "○ Frosted", "macOS-style blur, recommended"),
-            ("clear", "○ Clear", "Highly transparent"),
-        ];
-
-        let selected_opacity_str = if recommended == crate::opacity::OpacityPreset::Frosted {
-            // Default to frosted
-            select("Background style:")
-                .items(
-                    &options
-                        .iter()
-                        .map(|(id, label, desc)| (*id, label, desc))
-                        .collect::<Vec<_>>(),
-                )
-                .interact()
-                .map_err(handle_cliclack_error)?
         } else {
-            // Default to solid (for light themes)
-            select("Background style:")
-                .items(
-                    &options
-                        .iter()
-                        .map(|(id, label, desc)| (*id, label, desc))
-                        .collect::<Vec<_>>(),
-                )
-                .interact()
-                .map_err(handle_cliclack_error)?
-        };
-
-        use std::str::FromStr;
-        let selected_opacity = crate::opacity::OpacityPreset::from_str(selected_opacity_str)
-            .map_err(|e| crate::error::SlateError::Internal(e.to_string()))?;
-
-        // Warn if translucent + light theme (D-26b)
-        if crate::opacity::should_warn_for_translucent_light_theme(theme, selected_opacity) {
-            eprintln!("⚠ Light themes with transparency may reduce text legibility. ");
-            let confirm_choice = confirm("Continue with this style?")
-                .interact()
-                .map_err(handle_cliclack_error)?;
-
-            if !confirm_choice {
-                // Re-prompt for opacity
-                return self.step_select_opacity();
-            }
+            // Fallback: frosted
+            self.context.selected_opacity = Some(crate::opacity::OpacityPreset::Frosted);
         }
 
-        self.context.selected_opacity = Some(selected_opacity);
         self.context.current_step += 1;
         Ok(())
     }
 
     fn step_select_fastfetch(&mut self) -> Result<()> {
-        // Default disabled (N), ask user in both modes
         self.log_step("Fastfetch Auto-Run");
 
         if !wizard_support::is_interactive() {
@@ -525,14 +532,7 @@ impl Wizard {
         receipt.format_for_display()
     }
 
-    fn sync_total_steps(&mut self, include_mode_step: bool) {
-        self.context.total_steps = match (self.context.mode, include_mode_step) {
-            (WizardMode::Quick, true) => 5,
-            (WizardMode::Quick, false) => 5,
-            (WizardMode::Manual, true) => 7,
-            (WizardMode::Manual, false) => 6,
-        };
-    }
+    // Step counting removed — cliclack frames provide visual progress.
 
     fn resolve_font_label(&self, font_id_or_name: &str) -> String {
         FontCatalog::get_font(font_id_or_name)

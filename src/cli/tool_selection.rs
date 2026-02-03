@@ -37,10 +37,10 @@ const ALL_TOOLS: [ToolMetadata; 10] = [
         id: "ghostty",
         label: "Ghostty",
         pitch: Language::PITCH_GHOSTTY,
-        installable: true,
+        installable: false,
         brew_package: "ghostty",
         brew_kind: BrewKind::Cask,
-        detect_only: false,
+        detect_only: true,
     },
     ToolMetadata {
         id: "starship",
@@ -109,10 +109,10 @@ const ALL_TOOLS: [ToolMetadata; 10] = [
         id: "alacritty",
         label: "Alacritty",
         pitch: Language::PITCH_ALACRITTY,
-        installable: true,
+        installable: false,
         brew_package: "alacritty",
         brew_kind: BrewKind::Cask,
-        detect_only: false,
+        detect_only: true,
     },
     ToolMetadata {
         id: "tmux",
@@ -389,14 +389,16 @@ mod tests {
     #[test]
     fn test_filter_valid_selections() {
         let selected = vec![
-            "ghostty".to_string(),
+            "starship".to_string(),
             "tmux".to_string(),
+            "ghostty".to_string(), // detect-only, should be excluded
             "unknown".to_string(),
         ];
         let actions = filter_valid_selections(selected);
 
-        assert!(actions.iter().any(|a| a.tool_id == "ghostty"));
+        assert!(actions.iter().any(|a| a.tool_id == "starship"));
         assert!(!actions.iter().any(|a| a.tool_id == "tmux"));
+        assert!(!actions.iter().any(|a| a.tool_id == "ghostty")); // detect-only
         assert!(!actions.iter().any(|a| a.tool_id == "unknown"));
     }
 
