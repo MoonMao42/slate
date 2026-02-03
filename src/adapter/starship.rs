@@ -71,10 +71,11 @@ impl StarshipAdapter {
     }
 
     pub(crate) fn integration_config_path_with_env(env: &SlateEnv) -> PathBuf {
-        Self::resolve_path(
-            std::env::var("STARSHIP_CONFIG").ok().as_deref(),
-            env.xdg_config_home(),
-        )
+        // Intentionally ignore STARSHIP_CONFIG env var here.
+        // In a Slate-managed shell, STARSHIP_CONFIG points to the managed
+        // fallback file — we always want to seed/upgrade the user's real
+        // config at ~/.config/starship.toml, not the managed copy.
+        Self::resolve_path(None, env.xdg_config_home())
     }
 }
 

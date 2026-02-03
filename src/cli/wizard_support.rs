@@ -155,6 +155,16 @@ pub(crate) fn print_tool_inventory(installed: &HashMap<String, crate::detection:
     eprintln!();
 }
 
+pub(crate) fn build_font_options() -> Vec<(&'static str, &'static str, String)> {
+    let mut font_options: Vec<(&str, &str, String)> = FontCatalog::all_fonts()
+        .iter()
+        .map(|font| (font.id, font.name, format!("— {}", font.label)))
+        .collect();
+    let (skip_id, skip_label) = FontCatalog::skip_option();
+    font_options.push((skip_id, skip_label, String::new()));
+    font_options
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,14 +205,4 @@ mod tests {
         assert_eq!(settings.background_opacity, OpacityPreset::Frosted.to_f32());
         assert!(settings.blur_enabled);
     }
-}
-
-pub(crate) fn build_font_options() -> Vec<(&'static str, &'static str, String)> {
-    let mut font_options: Vec<(&str, &str, String)> = FontCatalog::all_fonts()
-        .iter()
-        .map(|font| (font.id, font.name, format!("— {}", font.label)))
-        .collect();
-    let (skip_id, skip_label) = FontCatalog::skip_option();
-    font_options.push((skip_id, skip_label, String::new()));
-    font_options
 }

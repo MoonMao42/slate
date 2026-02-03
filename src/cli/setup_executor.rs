@@ -357,13 +357,15 @@ fn ensure_tool_configs(
         .map(|s| s.as_str())
         .collect();
     let should_configure = |id: &str| -> bool {
-        let is_detected = installed.get(id).map(|p| p.installed).unwrap_or(false);
+        let presence = installed.get(id);
+        let is_detected = presence.map(|p| p.installed).unwrap_or(false);
         if !is_detected {
             return false;
         }
-        // Terminal emulators: always configure if detected (they're detect-only, not selectable)
+        // Terminal emulators (detect-only): configure only if Tier 1 (user-local)
+        // On shared Macs, Tier 2 terminals in /opt/homebrew belong to another user.
         if id == "ghostty" || id == "alacritty" {
-            return true;
+            return presence.map(|p| p.is_tier1()).unwrap_or(false);
         }
         // CLI tools: only if user chose them
         user_set.contains(id)

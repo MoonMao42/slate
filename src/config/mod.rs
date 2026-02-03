@@ -429,13 +429,8 @@ mod tests {
 
         let shell_file = config_manager.managed_dir("shell").join("env.zsh");
         let content = fs::read_to_string(shell_file).unwrap();
-        let expected = crate::detection::shell_quote(
-            &config_manager
-                .base_path()
-                .join("managed")
-                .to_string_lossy()
-                .to_string(),
-        );
+        let managed_path = config_manager.base_path().join("managed");
+        let expected = crate::detection::shell_quote(&managed_path.to_string_lossy());
         assert!(content.contains(&format!(
             "if [ -f {}/zsh/highlight-styles.sh ]; then",
             expected
