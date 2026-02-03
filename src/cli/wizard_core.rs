@@ -335,7 +335,10 @@ impl Wizard {
         Ok(())
     }
 
-    fn display_tool_inventory(&self, installed: &HashMap<String, bool>) -> Result<()> {
+    fn display_tool_inventory(
+        &self,
+        installed: &HashMap<String, crate::detection::ToolPresence>,
+    ) -> Result<()> {
         wizard_support::print_tool_inventory(installed);
         Ok(())
     }

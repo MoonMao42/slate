@@ -95,7 +95,7 @@ pub fn run_checks_with_env(env: &SlateEnv) -> Result<PreflightResult> {
 
     // Check 5: Tools available
     let installed = detect_installed_tools_with_env(env);
-    let tool_count = installed.values().filter(|&&v| v).count();
+    let tool_count = installed.values().filter(|p| p.installed).count();
 
     checks.push(PreflightCheck {
         name: "Optional: Tools".to_string(),

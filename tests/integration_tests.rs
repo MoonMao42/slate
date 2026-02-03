@@ -215,6 +215,7 @@ mod tool_selection_tests {
     use slate_cli::cli::tool_selection::{
         compute_install_candidates, filter_valid_selections, BrewKind, ReviewReceipt, ToolCatalog,
     };
+    use slate_cli::detection::ToolPresence;
     use std::collections::HashMap;
 
     #[test]
@@ -239,7 +240,7 @@ mod tool_selection_tests {
     fn test_detect_only_tools_not_in_candidates() {
         // tmux is detect-only and should not appear in install candidates
         let mut installed = HashMap::new();
-        installed.insert("tmux".to_string(), false); // not installed
+        installed.insert("tmux".to_string(), ToolPresence::missing()); // not installed
 
         let candidates = compute_install_candidates(&installed);
 
@@ -250,9 +251,13 @@ mod tool_selection_tests {
     #[test]
     fn test_already_installed_tools_not_in_candidates() {
         // Tools that are already installed should not appear in install candidates
+        use slate_cli::detection::ToolEvidence;
         let mut installed = HashMap::new();
-        installed.insert("ghostty".to_string(), true);
-        installed.insert("starship".to_string(), false);
+        installed.insert(
+            "ghostty".to_string(),
+            ToolPresence::in_path_with(ToolEvidence::Executable("/usr/bin/ghostty".into())),
+        );
+        installed.insert("starship".to_string(), ToolPresence::missing());
 
         let candidates = compute_install_candidates(&installed);
 

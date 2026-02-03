@@ -15,6 +15,10 @@ pub enum ToolEvidence {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolPresence {
     pub installed: bool,
+    /// Whether the tool was found in the user's actual PATH (Tier 1) rather than
+    /// only in fallback locations like /opt/homebrew/bin (Tier 2).
+    /// AppBundle and Config evidence are always considered in-path (user-local).
+    pub in_path: bool,
     pub evidence: Option<ToolEvidence>,
 }
 
@@ -22,15 +26,44 @@ impl ToolPresence {
     pub fn missing() -> Self {
         Self {
             installed: false,
+            in_path: false,
             evidence: None,
         }
     }
 
     pub fn installed_with(evidence: ToolEvidence) -> Self {
+        let in_path = matches!(
+            evidence,
+            ToolEvidence::AppBundle(_) | ToolEvidence::Config(_) | ToolEvidence::Plugin(_)
+        );
         Self {
             installed: true,
+            in_path,
             evidence: Some(evidence),
         }
+    }
+
+    /// Executable found in user's actual PATH — Tier 1 (active).
+    pub fn in_path_with(evidence: ToolEvidence) -> Self {
+        Self {
+            installed: true,
+            in_path: true,
+            evidence: Some(evidence),
+        }
+    }
+
+    /// Executable found only in fallback paths (e.g. /opt/homebrew) — Tier 2 (available).
+    pub fn fallback_with(evidence: ToolEvidence) -> Self {
+        Self {
+            installed: true,
+            in_path: false,
+            evidence: Some(evidence),
+        }
+    }
+
+    /// Is this a Tier 1 (active, in PATH) tool?
+    pub fn is_tier1(&self) -> bool {
+        self.installed && self.in_path
     }
 }
 
@@ -178,13 +211,32 @@ pub fn detect_tool_presence(tool_id: &str) -> ToolPresence {
         .unwrap_or_else(|_| ToolPresence::missing())
 }
 
+/// Check if a command exists in the user's actual PATH (without fallback dirs).
+fn command_in_actual_path(command: &str) -> Option<PathBuf> {
+    search_paths(command, &current_path_dirs())
+}
+
+/// Detect a CLI tool with tier awareness: Tier 1 if in actual PATH, Tier 2 if only in fallback.
+fn detect_cli_tool_tiered(command: &str, env: &SlateEnv) -> ToolPresence {
+    if let Some(path) = command_in_actual_path(command) {
+        ToolPresence::in_path_with(ToolEvidence::Executable(path))
+    } else if let Some(path) = command_path_with_env(command, env) {
+        ToolPresence::fallback_with(ToolEvidence::Executable(path))
+    } else {
+        ToolPresence::missing()
+    }
+}
+
 pub fn detect_tool_presence_with_env(tool_id: &str, env: &SlateEnv) -> ToolPresence {
     match tool_id {
         "ghostty" => {
+            // AppBundle / Config evidence → always Tier 1 (user-local)
             if let Some(path) = macos_app_path("Ghostty", env.home()) {
                 ToolPresence::installed_with(ToolEvidence::AppBundle(path))
+            } else if let Some(path) = command_in_actual_path("ghostty") {
+                ToolPresence::in_path_with(ToolEvidence::Executable(path))
             } else if let Some(path) = command_path_with_env("ghostty", env) {
-                ToolPresence::installed_with(ToolEvidence::Executable(path))
+                ToolPresence::fallback_with(ToolEvidence::Executable(path))
             } else if let Some(path) = first_existing(ghostty_candidate_paths(env)) {
                 ToolPresence::installed_with(ToolEvidence::Config(path))
             } else {
@@ -194,8 +246,10 @@ pub fn detect_tool_presence_with_env(tool_id: &str, env: &SlateEnv) -> ToolPrese
         "alacritty" => {
             if let Some(path) = macos_app_path("Alacritty", env.home()) {
                 ToolPresence::installed_with(ToolEvidence::AppBundle(path))
+            } else if let Some(path) = command_in_actual_path("alacritty") {
+                ToolPresence::in_path_with(ToolEvidence::Executable(path))
             } else if let Some(path) = command_path_with_env("alacritty", env) {
-                ToolPresence::installed_with(ToolEvidence::Executable(path))
+                ToolPresence::fallback_with(ToolEvidence::Executable(path))
             } else {
                 let config = env
                     .xdg_config_home()
@@ -208,33 +262,11 @@ pub fn detect_tool_presence_with_env(tool_id: &str, env: &SlateEnv) -> ToolPrese
                 }
             }
         }
-        "starship" => command_path_with_env("starship", env)
-            .map(|path| ToolPresence::installed_with(ToolEvidence::Executable(path)))
-            .unwrap_or_else(ToolPresence::missing),
-        "bat" => command_path_with_env("bat", env)
-            .map(|path| ToolPresence::installed_with(ToolEvidence::Executable(path)))
-            .unwrap_or_else(ToolPresence::missing),
-        "delta" => command_path_with_env("delta", env)
-            .map(|path| ToolPresence::installed_with(ToolEvidence::Executable(path)))
-            .unwrap_or_else(ToolPresence::missing),
-        "eza" => command_path_with_env("eza", env)
-            .map(|path| ToolPresence::installed_with(ToolEvidence::Executable(path)))
-            .unwrap_or_else(ToolPresence::missing),
-        "lazygit" => command_path_with_env("lazygit", env)
-            .map(|path| ToolPresence::installed_with(ToolEvidence::Executable(path)))
-            .unwrap_or_else(ToolPresence::missing),
-        "fastfetch" => command_path_with_env("fastfetch", env)
-            .map(|path| ToolPresence::installed_with(ToolEvidence::Executable(path)))
-            .unwrap_or_else(ToolPresence::missing),
         "zsh-syntax-highlighting" => detect_zsh_syntax_highlighting_plugin_with_env(env)
             .map(|path| ToolPresence::installed_with(ToolEvidence::Plugin(path)))
             .unwrap_or_else(ToolPresence::missing),
-        "tmux" => command_path_with_env("tmux", env)
-            .map(|path| ToolPresence::installed_with(ToolEvidence::Executable(path)))
-            .unwrap_or_else(ToolPresence::missing),
-        other => command_path_with_env(other, env)
-            .map(|path| ToolPresence::installed_with(ToolEvidence::Executable(path)))
-            .unwrap_or_else(ToolPresence::missing),
+        // All other CLI tools: tiered detection
+        other => detect_cli_tool_tiered(other, env),
     }
 }
 

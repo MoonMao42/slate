@@ -328,40 +328,54 @@ fn ensure_tool_configs(env: &SlateEnv, just_installed: &[String]) -> Vec<String>
     let mut installed = detect_installed_tools_with_env(env);
     // Merge tools that were successfully installed THIS run — they may not be
     // on PATH yet (e.g. starship installed to ~/.local/bin via fallback).
+    // Mark them as Tier 1 (in_path) since the user explicitly chose to install them.
     for tool_id in just_installed {
-        installed.insert(tool_id.clone(), true);
+        installed.insert(
+            tool_id.clone(),
+            crate::detection::ToolPresence {
+                installed: true,
+                in_path: true,
+                evidence: None,
+            },
+        );
     }
     let mut issues = Vec::new();
 
-    if installed.get("ghostty").copied().unwrap_or(false) {
+    // Helper: only configure Tier 1 (active / in PATH) tools.
+    // Tier 2 tools (only in fallback paths like /opt/homebrew on shared Macs)
+    // are skipped to avoid writing unwanted configs for other users' tools.
+    let should_configure =
+        |id: &str| -> bool { installed.get(id).map(|p| p.is_tier1()).unwrap_or(false) };
+
+    if should_configure("ghostty") {
         let adapter = GhosttyAdapter;
         match adapter.integration_config_path_with_env(env) {
             Ok(path) => touch_config("ghostty", &path, &mut issues),
             Err(err) => issues.push(format!("Could not resolve ghostty config path: {}", err)),
         }
     }
-    if installed.get("starship").copied().unwrap_or(false) {
+    if should_configure("starship") {
         let path = StarshipAdapter::integration_config_path_with_env(env);
         touch_config("starship", &path, &mut issues);
         if path.exists() {
             seed_starship_config(&path, &mut issues);
         }
     }
-    if installed.get("alacritty").copied().unwrap_or(false) {
+    if should_configure("alacritty") {
         touch_config(
             "alacritty",
             &AlacrittyAdapter::integration_config_path_with_env(env),
             &mut issues,
         );
     }
-    if installed.get("bat").copied().unwrap_or(false) {
+    if should_configure("bat") {
         let adapter = BatAdapter;
         match adapter.integration_config_path_with_env(env) {
             Ok(path) => touch_config("bat", &path, &mut issues),
             Err(err) => issues.push(format!("Could not resolve bat config path: {}", err)),
         }
     }
-    if installed.get("delta").copied().unwrap_or(false) {
+    if should_configure("delta") {
         touch_config("delta", &env.home().join(".gitconfig"), &mut issues);
     }
 

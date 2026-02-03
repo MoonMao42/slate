@@ -2,7 +2,7 @@
 /// Single source of truth for tool metadata, installability, and selection logic.
 use crate::brand::language::Language;
 use crate::design::typography::Typography;
-use crate::detection;
+use crate::detection::{self, ToolPresence};
 use crate::env::SlateEnv;
 use std::collections::HashMap;
 
@@ -160,21 +160,21 @@ impl ToolCatalog {
 }
 
 /// Detect installation state for all wizard-managed tools using the shared presence resolver.
-pub fn detect_installed_tools() -> HashMap<String, bool> {
+pub fn detect_installed_tools() -> HashMap<String, ToolPresence> {
     SlateEnv::from_process()
         .map(|env| detect_installed_tools_with_env(&env))
         .unwrap_or_default()
 }
 
 /// Detect installation state for all wizard-managed tools with injected SlateEnv.
-pub fn detect_installed_tools_with_env(env: &SlateEnv) -> HashMap<String, bool> {
+pub fn detect_installed_tools_with_env(env: &SlateEnv) -> HashMap<String, ToolPresence> {
     ToolCatalog::all_tools()
         .iter()
         .copied()
         .map(|tool| {
             (
                 tool.id.to_string(),
-                detection::detect_tool_presence_with_env(tool.id, env).installed,
+                detection::detect_tool_presence_with_env(tool.id, env),
             )
         })
         .collect()
@@ -301,12 +301,15 @@ impl ReviewReceipt {
 }
 
 /// Install candidates: missing tools that are installable (used for multiselect)
-pub fn compute_install_candidates(installed: &HashMap<String, bool>) -> Vec<ToolMetadata> {
+pub fn compute_install_candidates(installed: &HashMap<String, ToolPresence>) -> Vec<ToolMetadata> {
     ToolCatalog::installable_tools()
         .into_iter()
         .filter(|tool| {
             // Include tool if NOT installed
-            !installed.get(tool.id).copied().unwrap_or(false)
+            !installed
+                .get(tool.id)
+                .map(|p| p.installed)
+                .unwrap_or(false)
         })
         .collect()
 }
@@ -360,8 +363,13 @@ mod tests {
     #[test]
     fn test_install_candidates_excludes_installed() {
         let mut installed = HashMap::new();
-        installed.insert("ghostty".to_string(), true);
-        installed.insert("starship".to_string(), false);
+        installed.insert(
+            "ghostty".to_string(),
+            ToolPresence::in_path_with(crate::detection::ToolEvidence::Executable(
+                "/usr/bin/ghostty".into(),
+            )),
+        );
+        installed.insert("starship".to_string(), ToolPresence::missing());
 
         let candidates = compute_install_candidates(&installed);
 
@@ -372,7 +380,7 @@ mod tests {
     #[test]
     fn test_install_candidates_excludes_detect_only() {
         let mut installed = HashMap::new();
-        installed.insert("tmux".to_string(), false);
+        installed.insert("tmux".to_string(), ToolPresence::missing());
 
         let candidates = compute_install_candidates(&installed);
         assert!(!candidates.iter().any(|t| t.id == "tmux"));

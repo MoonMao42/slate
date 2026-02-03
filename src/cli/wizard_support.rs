@@ -118,12 +118,17 @@ pub(crate) fn print_current_theme(theme_selector: &ThemeSelector, current_theme_
     eprintln!();
 }
 
-pub(crate) fn print_tool_inventory(installed: &HashMap<String, bool>) {
+pub(crate) fn print_tool_inventory(installed: &HashMap<String, crate::detection::ToolPresence>) {
     eprintln!("\n{}\n", Typography::section_header("Tool Inventory"));
 
     for tool in ToolCatalog::all_tools() {
-        let status_mark = if installed.get(tool.id).copied().unwrap_or(false) {
+        let presence = installed.get(tool.id);
+        let is_installed = presence.map(|p| p.installed).unwrap_or(false);
+        let is_in_path = presence.map(|p| p.in_path).unwrap_or(false);
+        let status_mark = if is_installed && is_in_path {
             "✓"
+        } else if is_installed {
+            "~" // Tier 2: available but not in PATH
         } else if tool.detect_only {
             "◆"
         } else {
