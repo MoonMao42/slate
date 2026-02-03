@@ -1,6 +1,7 @@
+use crate::adapter::{SkipReason, ToolApplyResult, ToolApplyStatus};
+
 /// Failure handling and result tracking for setup execution
 /// Tracks which tools installed successfully, which failed, and provides retry guidance
-
 /// Status of a tool installation attempt
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallStatus {
@@ -19,7 +20,7 @@ pub struct ToolInstallResult {
 }
 
 /// Summary of setup execution results
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ExecutionSummary {
     /// Per-tool results
     pub tool_results: Vec<ToolInstallResult>,
@@ -27,6 +28,12 @@ pub struct ExecutionSummary {
     pub font_applied: bool,
     /// Whether theme was successfully applied
     pub theme_applied: bool,
+    /// Per-adapter theme apply results
+    pub theme_results: Vec<ToolApplyResult>,
+    /// Non-fatal setup issues that still need user visibility
+    pub issues: Vec<String>,
+    /// Best-effort notes that should be visible but should not fail setup
+    pub notices: Vec<String>,
     /// Overall success flag
     pub overall_success: bool,
 }
@@ -37,6 +44,9 @@ impl ExecutionSummary {
             tool_results: Vec::new(),
             font_applied: false,
             theme_applied: false,
+            theme_results: Vec::new(),
+            issues: Vec::new(),
+            notices: Vec::new(),
             overall_success: false,
         }
     }
@@ -44,6 +54,18 @@ impl ExecutionSummary {
     /// Add a tool result
     pub fn add_tool_result(&mut self, result: ToolInstallResult) {
         self.tool_results.push(result);
+    }
+
+    pub fn set_theme_results(&mut self, results: Vec<ToolApplyResult>) {
+        self.theme_results = results;
+    }
+
+    pub fn add_issue(&mut self, issue: impl Into<String>) {
+        self.issues.push(issue.into());
+    }
+
+    pub fn add_notice(&mut self, notice: impl Into<String>) {
+        self.notices.push(notice.into());
     }
 
     /// Get count of successful installations
@@ -71,18 +93,42 @@ impl ExecutionSummary {
             .collect()
     }
 
+    pub fn theme_failure_count(&self) -> usize {
+        self.theme_results
+            .iter()
+            .filter(|result| matches!(result.status, ToolApplyStatus::Failed(_)))
+            .count()
+    }
+
+    pub fn missing_integration_skip_count(&self) -> usize {
+        self.theme_results
+            .iter()
+            .filter(|result| {
+                matches!(
+                    result.status,
+                    ToolApplyStatus::Skipped(SkipReason::MissingIntegrationConfig)
+                )
+            })
+            .count()
+    }
+
     /// Format completion message with visibility guidance
     pub fn format_completion_message(&self) -> String {
         let mut output = String::new();
-        output.push_str("✦ Setup Complete!\n\n");
 
         // Summary counts
         let total = self.tool_results.len();
         let success = self.success_count();
         let failed = self.failure_count();
 
+        if !self.overall_success {
+            output.push_str("✦ Setup finished with issues.\n\n");
+        } else {
+            output.push_str("✦ Setup Complete!\n\n");
+        }
+
         if total > 0 {
-            output.push_str("📦 Tool Installation:\n");
+            output.push_str("Tool Installation:\n");
             output.push_str(&format!("  ✓ {} installed\n", success));
             if failed > 0 {
                 output.push_str(&format!("  ✗ {} failed\n", failed));
@@ -90,8 +136,50 @@ impl ExecutionSummary {
             output.push('\n');
         }
 
+        if !self.theme_results.is_empty() {
+            let applied = self
+                .theme_results
+                .iter()
+                .filter(|result| matches!(result.status, ToolApplyStatus::Applied))
+                .count();
+            let failed_theme = self.theme_failure_count();
+            let missing_integration = self.missing_integration_skip_count();
+
+            output.push_str("Configuration Apply:\n");
+            output.push_str(&format!("  ✓ {} adapters updated\n", applied));
+            if missing_integration > 0 {
+                output.push_str(&format!(
+                    "  ⚠ {} adapters still need an integration file\n",
+                    missing_integration
+                ));
+            }
+            if failed_theme > 0 {
+                output.push_str(&format!(
+                    "  ✗ {} adapters failed during apply\n",
+                    failed_theme
+                ));
+            }
+            output.push('\n');
+        }
+
+        if !self.issues.is_empty() {
+            output.push_str("Issues To Check:\n");
+            for issue in &self.issues {
+                output.push_str(&format!("  • {}\n", issue));
+            }
+            output.push('\n');
+        }
+
+        if !self.notices.is_empty() {
+            output.push_str("Notes:\n");
+            for notice in &self.notices {
+                output.push_str(&format!("  • {}\n", notice));
+            }
+            output.push('\n');
+        }
+
         // Visibility guidance
-        output.push_str("📍 Visibility & Activation:\n\n");
+        output.push_str("Visibility & Activation:\n\n");
 
         output.push_str("→ Available Now:\n");
         output.push_str("  • Homebrew finished installing the selected tools/apps\n");
@@ -103,7 +191,7 @@ impl ExecutionSummary {
         output.push_str("  • PATH or environment updates that land on shell startup\n\n");
 
         output.push_str("→ New Terminal Window or Surface:\n");
-        output.push_str("  • Ghostty/Alacritty padding and similar window-level visuals\n");
+        output.push_str("  • Ghostty/Alacritty window-level visuals and opacity changes\n");
         output.push_str("  • New tabs/windows often pick up terminal chrome changes first\n\n");
 
         output.push_str("→ Full App Restart May Still Be Required:\n");
@@ -111,16 +199,20 @@ impl ExecutionSummary {
         output.push_str("  • Ghostty background opacity on macOS\n");
         output.push_str("  • Some terminal appearance settings depending on the app\n\n");
 
+        output.push_str("→ Manual Font Pick In Some Apps:\n");
+        output.push_str("  • Terminal.app and some other terminals do not let Slate switch the profile font automatically\n");
+        output.push_str("  • If icons or powerline shapes still look wrong, choose a Nerd Font in that terminal's settings\n\n");
+
         // Retry guidance if there were failures
         if failed > 0 {
-            output.push_str("🔄 Retry Failed Tools:\n\n");
+            output.push_str("Retry Failed Tools:\n\n");
             for tool_id in self.failed_tool_ids() {
                 output.push_str(&format!("  slate setup --only {}\n", tool_id));
             }
             output.push('\n');
         }
 
-        output.push_str("🎨 Open a fresh shell first, then restart the terminal app only if\n");
+        output.push_str("Open a fresh shell first, then restart the terminal app only if\n");
         output.push_str("   fonts or window visuals still look unchanged.\n");
 
         output
@@ -148,6 +240,16 @@ impl ExecutionSummary {
         output.push('\n');
         output.push_str(&format!("Font applied: {}\n", self.font_applied));
         output.push_str(&format!("Theme applied: {}\n", self.theme_applied));
+        output.push_str(&format!(
+            "Theme apply failures: {}\n",
+            self.theme_failure_count()
+        ));
+        output.push_str(&format!(
+            "Missing integration skips: {}\n",
+            self.missing_integration_skip_count()
+        ));
+        output.push_str(&format!("Issues: {}\n", self.issues.len()));
+        output.push_str(&format!("Notices: {}\n", self.notices.len()));
         output.push_str(&format!("Overall success: {}\n", self.overall_success));
 
         output
@@ -185,6 +287,18 @@ mod tests {
     }
 
     #[test]
+    fn test_notices_render_separately_from_issues() {
+        let mut summary = ExecutionSummary::new();
+        summary.add_notice("Optional preset font bundle had partial misses");
+
+        let message = summary.format_completion_message();
+        assert!(message.contains("Notes:"));
+        assert!(message.contains("Optional preset font bundle had partial misses"));
+        assert!(!message
+            .contains("Issues To Check:\n  • Optional preset font bundle had partial misses"));
+    }
+
+    #[test]
     fn test_failed_tool_ids() {
         let mut summary = ExecutionSummary::new();
         summary.add_tool_result(ToolInstallResult {
@@ -215,6 +329,7 @@ mod tests {
             error_message: None,
         });
         summary.font_applied = true;
+        summary.overall_success = true;
         let message = summary.format_completion_message();
         assert!(message.contains("Setup Complete"));
         assert!(message.contains("Fresh Shell or Tab"));

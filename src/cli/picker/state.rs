@@ -239,8 +239,6 @@ mod tests {
     #[test]
     fn test_picker_state_theme_wrap_down() {
         let mut state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
-        let first_index = state.selected_theme_index;
-        let first_theme = state.get_current_theme_id().to_string();
 
         // Move down to the last theme
         while state.selected_theme_index < state.theme_ids.len() - 1 {

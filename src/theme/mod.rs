@@ -1,6 +1,7 @@
-use crate::error::Result;
+use crate::error::{Result, SlateError};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 // Re-export theme variants
 pub mod catppuccin;
@@ -14,6 +15,22 @@ pub mod tokyo_night;
 
 /// Shared default theme ID used when Slate needs a fallback theme.
 pub const DEFAULT_THEME_ID: &str = "catppuccin-mocha";
+
+const REQUIRED_TOOL_REFS: &[&str] = &[
+    "alacritty",
+    "bat",
+    "delta",
+    "eza",
+    "fastfetch",
+    "ghostty",
+    "lazygit",
+    "starship",
+    "tmux",
+    "zsh_syntax_highlighting",
+];
+
+const EMBEDDED_THEMES_TOML: &str = include_str!("../../themes/themes.toml");
+static EMBEDDED_THEMES: OnceLock<std::result::Result<EmbeddedThemes, String>> = OnceLock::new();
 
 /// Color palette for a theme.
 /// Per revised: Hybrid design with semantic UI colors (5) + ANSI normal/bright (16) as named fields,
@@ -73,13 +90,52 @@ pub struct Palette {
 }
 
 impl Palette {
-    /// Verify palette has all required fields populated
+    /// Verify palette has all required fields populated with valid hex colors.
     pub fn validate(&self) -> Result<()> {
-        if self.foreground.is_empty() || self.background.is_empty() {
-            return Err(crate::error::SlateError::InvalidThemeData(
-                "Palette missing required colors".to_string(),
-            ));
+        validate_hex_color("foreground", &self.foreground)?;
+        validate_hex_color("background", &self.background)?;
+        validate_hex_color("black", &self.black)?;
+        validate_hex_color("red", &self.red)?;
+        validate_hex_color("green", &self.green)?;
+        validate_hex_color("yellow", &self.yellow)?;
+        validate_hex_color("blue", &self.blue)?;
+        validate_hex_color("magenta", &self.magenta)?;
+        validate_hex_color("cyan", &self.cyan)?;
+        validate_hex_color("white", &self.white)?;
+        validate_hex_color("bright_black", &self.bright_black)?;
+        validate_hex_color("bright_red", &self.bright_red)?;
+        validate_hex_color("bright_green", &self.bright_green)?;
+        validate_hex_color("bright_yellow", &self.bright_yellow)?;
+        validate_hex_color("bright_blue", &self.bright_blue)?;
+        validate_hex_color("bright_magenta", &self.bright_magenta)?;
+        validate_hex_color("bright_cyan", &self.bright_cyan)?;
+        validate_hex_color("bright_white", &self.bright_white)?;
+
+        validate_optional_hex_color("cursor", self.cursor.as_deref())?;
+        validate_optional_hex_color("selection_bg", self.selection_bg.as_deref())?;
+        validate_optional_hex_color("selection_fg", self.selection_fg.as_deref())?;
+        validate_optional_hex_color("bg_dim", self.bg_dim.as_deref())?;
+        validate_optional_hex_color("bg_darker", self.bg_darker.as_deref())?;
+        validate_optional_hex_color("bg_darkest", self.bg_darkest.as_deref())?;
+        validate_optional_hex_color("rosewater", self.rosewater.as_deref())?;
+        validate_optional_hex_color("flamingo", self.flamingo.as_deref())?;
+        validate_optional_hex_color("pink", self.pink.as_deref())?;
+        validate_optional_hex_color("mauve", self.mauve.as_deref())?;
+        validate_optional_hex_color("lavender", self.lavender.as_deref())?;
+        validate_optional_hex_color("text", self.text.as_deref())?;
+        validate_optional_hex_color("subtext1", self.subtext1.as_deref())?;
+        validate_optional_hex_color("subtext0", self.subtext0.as_deref())?;
+        validate_optional_hex_color("overlay2", self.overlay2.as_deref())?;
+        validate_optional_hex_color("overlay1", self.overlay1.as_deref())?;
+        validate_optional_hex_color("overlay0", self.overlay0.as_deref())?;
+        validate_optional_hex_color("surface2", self.surface2.as_deref())?;
+        validate_optional_hex_color("surface1", self.surface1.as_deref())?;
+        validate_optional_hex_color("surface0", self.surface0.as_deref())?;
+
+        for (name, value) in &self.extras {
+            validate_hex_color(&format!("extras.{name}"), value)?;
         }
+
         Ok(())
     }
 
@@ -152,114 +208,213 @@ pub struct ThemeVariant {
     pub tool_refs: ToolRefs, // Now HashMap<String, String>
     pub palette: Palette, // Raw colors for tools without built-in support
     pub appearance: ThemeAppearance, // Dark or Light classification
-    pub auto_pair: Option<&'static str>, // Paired dark/light variant ID, if applicable
+    pub auto_pair: Option<String>, // Preferred paired variant ID, if applicable
 }
 
 impl ThemeVariant {
-    /// Validate theme variant
+    /// Validate theme variant.
     pub fn validate(&self) -> Result<()> {
-        if self.id.is_empty() || self.name.is_empty() {
-            return Err(crate::error::SlateError::InvalidThemeData(format!(
-                "Theme {} missing required fields",
+        if self.id.trim().is_empty() {
+            return Err(SlateError::InvalidThemeData(
+                "theme id must not be empty".to_string(),
+            ));
+        }
+        if self.name.trim().is_empty() {
+            return Err(SlateError::InvalidThemeData(format!(
+                "theme '{}' is missing a display name",
                 self.id
             )));
         }
+        if self.family.trim().is_empty() {
+            return Err(SlateError::InvalidThemeData(format!(
+                "theme '{}' is missing a family name",
+                self.id
+            )));
+        }
+
+        for key in REQUIRED_TOOL_REFS {
+            let Some(value) = self.tool_refs.get(*key) else {
+                return Err(SlateError::InvalidThemeData(format!(
+                    "theme '{}' is missing required tool_ref '{}'",
+                    self.id, key
+                )));
+            };
+            if value.trim().is_empty() {
+                return Err(SlateError::InvalidThemeData(format!(
+                    "theme '{}' has empty tool_ref '{}'",
+                    self.id, key
+                )));
+            }
+        }
+
         self.palette.validate()?;
         Ok(())
     }
 }
 
+#[derive(Debug)]
+struct EmbeddedThemes {
+    ordered: Vec<ThemeVariant>,
+    index_by_id: HashMap<String, usize>,
+}
+
+impl EmbeddedThemes {
+    fn get(&self, id: &str) -> Option<&ThemeVariant> {
+        self.index_by_id.get(id).map(|index| &self.ordered[*index])
+    }
+
+    fn all(&self) -> impl Iterator<Item = &ThemeVariant> {
+        self.ordered.iter()
+    }
+}
+
 /// Theme loader and registry.
-/// Embedded in binary; loads all 18 variants at startup.
+/// Embedded in binary; loads and validates all variants once per process.
 pub struct ThemeRegistry {
-    variants: HashMap<String, ThemeVariant>,
+    embedded: &'static EmbeddedThemes,
+}
+
+#[derive(Debug, Deserialize)]
+struct ThemeFile {
+    theme: Vec<ThemeVariant>,
+}
+
+fn validate_hex_color(field: &str, value: &str) -> Result<()> {
+    if value.len() != 7
+        || !value.starts_with('#')
+        || !value[1..].chars().all(|ch| ch.is_ascii_hexdigit())
+    {
+        return Err(SlateError::InvalidThemeData(format!(
+            "invalid hex color for {field}: '{value}'"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_optional_hex_color(field: &str, value: Option<&str>) -> Result<()> {
+    if let Some(value) = value {
+        validate_hex_color(field, value)?;
+    }
+    Ok(())
+}
+
+fn validate_auto_pair(
+    theme: &ThemeVariant,
+    themes: &[ThemeVariant],
+    ids: &HashMap<String, usize>,
+) -> Result<()> {
+    let Some(pair_id) = theme.auto_pair.as_deref() else {
+        return Ok(());
+    };
+
+    let Some(pair_index) = ids.get(pair_id) else {
+        return Err(SlateError::InvalidThemeData(format!(
+            "theme '{}' references missing auto_pair '{}'",
+            theme.id, pair_id
+        )));
+    };
+    let pair = &themes[*pair_index];
+
+    if pair_id != theme.id && pair.appearance == theme.appearance {
+        return Err(SlateError::InvalidThemeData(format!(
+            "theme '{}' auto_pair '{}' must switch to the opposite appearance",
+            theme.id, pair_id
+        )));
+    }
+
+    if pair_id == theme.id {
+        let has_opposite_in_family = themes.iter().any(|candidate| {
+            candidate.family == theme.family
+                && candidate.id != theme.id
+                && candidate.appearance != theme.appearance
+        });
+        if has_opposite_in_family {
+            return Err(SlateError::InvalidThemeData(format!(
+                "theme '{}' self-pairs even though family '{}' has an opposite appearance variant",
+                theme.id, theme.family
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn load_embedded_themes() -> Result<EmbeddedThemes> {
+    let file: ThemeFile = toml::from_str(EMBEDDED_THEMES_TOML).map_err(|error| {
+        SlateError::InvalidThemeData(format!("failed to parse embedded theme TOML: {error}"))
+    })?;
+
+    if file.theme.is_empty() {
+        return Err(SlateError::InvalidThemeData(
+            "embedded theme TOML did not contain any themes".to_string(),
+        ));
+    }
+
+    let mut seen_ids = HashSet::new();
+    let mut index_by_id = HashMap::new();
+    for (index, theme) in file.theme.iter().enumerate() {
+        theme.validate()?;
+        if !seen_ids.insert(theme.id.clone()) {
+            return Err(SlateError::InvalidThemeData(format!(
+                "duplicate theme id '{}' in embedded theme TOML",
+                theme.id
+            )));
+        }
+        index_by_id.insert(theme.id.clone(), index);
+    }
+
+    for theme in &file.theme {
+        validate_auto_pair(theme, &file.theme, &index_by_id)?;
+    }
+
+    Ok(EmbeddedThemes {
+        ordered: file.theme,
+        index_by_id,
+    })
+}
+
+fn embedded_themes() -> Result<&'static EmbeddedThemes> {
+    match EMBEDDED_THEMES.get_or_init(|| load_embedded_themes().map_err(|error| error.to_string()))
+    {
+        Ok(themes) => Ok(themes),
+        Err(message) => Err(SlateError::InvalidThemeData(message.clone())),
+    }
+}
+
+pub(crate) fn load_theme(theme_id: &str) -> Result<ThemeVariant> {
+    embedded_themes()?
+        .get(theme_id)
+        .cloned()
+        .ok_or_else(|| SlateError::InvalidThemeData(format!("theme '{theme_id}' not found")))
 }
 
 impl ThemeRegistry {
-    /// Create registry with all embedded themes
+    /// Create registry with all embedded themes.
     pub fn new() -> Result<Self> {
-        let mut variants = HashMap::new();
-
-        // Catppuccin variants (sync fresh from official repo)
-        let cat_latte = catppuccin::catppuccin_latte()?;
-        let cat_frappe = catppuccin::catppuccin_frappe()?;
-        let cat_macchiato = catppuccin::catppuccin_macchiato()?;
-        let cat_mocha = catppuccin::catppuccin_mocha()?;
-
-        // Tokyo Night variants
-        let tn_light = tokyo_night::tokyo_night_light()?;
-        let tn_dark = tokyo_night::tokyo_night_dark()?;
-
-        // Dracula
-        let drac = dracula::dracula()?;
-
-        // Nord
-        let nd = nord::nord()?;
-
-        // Gruvbox variants
-        let gruvbox_dark = gruvbox::gruvbox_dark()?;
-        let gruvbox_light = gruvbox::gruvbox_light()?;
-
-        // Rosé Pine variants
-        let rp_main = rose_pine::rose_pine_main()?;
-        let rp_moon = rose_pine::rose_pine_moon()?;
-        let rp_dawn = rose_pine::rose_pine_dawn()?;
-
-        // Kanagawa variants
-        let kg_wave = kanagawa::kanagawa_wave()?;
-        let kg_dragon = kanagawa::kanagawa_dragon()?;
-        let kg_lotus = kanagawa::kanagawa_lotus()?;
-
-        // Everforest variants
-        let ef_dark = everforest::everforest_dark()?;
-        let ef_light = everforest::everforest_light()?;
-
-        // Register all variants
-        for variant in &[
-            &cat_latte,
-            &cat_frappe,
-            &cat_macchiato,
-            &cat_mocha,
-            &tn_light,
-            &tn_dark,
-            &rp_main,
-            &rp_moon,
-            &rp_dawn,
-            &kg_wave,
-            &kg_dragon,
-            &kg_lotus,
-            &ef_dark,
-            &ef_light,
-            &drac,
-            &nd,
-            &gruvbox_dark,
-            &gruvbox_light,
-        ] {
-            variants.insert(variant.id.clone(), (*variant).clone());
-        }
-
-        Ok(Self { variants })
+        Ok(Self {
+            embedded: embedded_themes()?,
+        })
     }
 
-    /// Get theme variant by ID
+    /// Get theme variant by ID.
     pub fn get(&self, id: &str) -> Option<&ThemeVariant> {
-        self.variants.get(id)
+        self.embedded.get(id)
     }
 
-    /// Get all theme variants
+    /// Get all theme variants in their TOML order.
     pub fn all(&self) -> Vec<&ThemeVariant> {
-        self.variants.values().collect()
+        self.embedded.all().collect()
     }
 
-    /// List all theme IDs
+    /// List all theme IDs in their TOML order.
     pub fn list_ids(&self) -> Vec<String> {
-        self.variants.keys().cloned().collect()
+        self.embedded.all().map(|theme| theme.id.clone()).collect()
     }
 
-    /// Get themes grouped by family
+    /// Get themes grouped by family.
     pub fn by_family(&self) -> HashMap<String, Vec<&ThemeVariant>> {
         let mut families = HashMap::new();
-        for variant in self.variants.values() {
+        for variant in self.embedded.all() {
             families
                 .entry(variant.family.clone())
                 .or_insert_with(Vec::new)
@@ -313,18 +468,18 @@ pub fn get_theme_description(theme_id: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_palette_validation() {
-        let palette = Palette {
+    fn sample_palette() -> Palette {
+        Palette {
             foreground: "#ffffff".to_string(),
             background: "#000000".to_string(),
-            cursor: None,
-            selection_bg: None,
-            selection_fg: None,
+            cursor: Some("#ffffff".to_string()),
+            selection_bg: Some("#222222".to_string()),
+            selection_fg: Some("#eeeeee".to_string()),
             black: "#000000".to_string(),
             red: "#ff0000".to_string(),
             green: "#00ff00".to_string(),
@@ -359,34 +514,69 @@ mod tests {
             surface1: None,
             surface0: None,
             extras: HashMap::new(),
-        };
+        }
+    }
 
-        assert!(palette.validate().is_ok());
+    #[test]
+    fn test_palette_validation_accepts_valid_hex_colors() {
+        assert!(sample_palette().validate().is_ok());
+    }
+
+    #[test]
+    fn test_palette_validation_rejects_invalid_hex_colors() {
+        let mut palette = sample_palette();
+        palette.surface2 = Some("#98989 2".to_string());
+        let err = palette.validate().expect_err("invalid color should fail");
+        assert!(err.to_string().contains("surface2"));
+    }
+
+    #[test]
+    fn test_theme_registry_reuses_cached_embedded_data() {
+        let first = ThemeRegistry::new().expect("first registry constructs");
+        let second = ThemeRegistry::new().expect("second registry constructs");
+        let first_theme = first.get(DEFAULT_THEME_ID).expect("default theme exists");
+        let second_theme = second.get(DEFAULT_THEME_ID).expect("default theme exists");
+        assert!(std::ptr::eq(first_theme, second_theme));
+    }
+
+    #[test]
+    fn test_embedded_themes_have_unique_ids_and_valid_pairs() {
+        let registry = ThemeRegistry::new().expect("registry constructs");
+        let mut ids = HashSet::new();
+        for theme in registry.all() {
+            assert!(
+                ids.insert(theme.id.clone()),
+                "duplicate theme id: {}",
+                theme.id
+            );
+            if let Some(pair_id) = theme.auto_pair.as_deref() {
+                assert!(
+                    registry.get(pair_id).is_some(),
+                    "missing auto_pair target for {}",
+                    theme.id
+                );
+            }
+        }
     }
 
     #[test]
     fn test_tool_refs_lookup() {
-        let mut refs = HashMap::new();
-        refs.insert("ghostty".to_string(), "Test Ghostty".to_string());
-        refs.insert("alacritty".to_string(), "test_alacritty".to_string());
-        refs.insert("bat".to_string(), "Test Bat".to_string());
-        refs.insert("delta".to_string(), "test_delta".to_string());
-        refs.insert("starship".to_string(), "test_starship".to_string());
-        refs.insert("eza".to_string(), "test_eza".to_string());
-        refs.insert("lazygit".to_string(), "test_lazygit".to_string());
-        refs.insert("fastfetch".to_string(), "test_fastfetch".to_string());
-        refs.insert("tmux".to_string(), "test_tmux".to_string());
-        refs.insert(
-            "zsh_syntax_highlighting".to_string(),
-            "test_zsh".to_string(),
-        );
-
+        let registry = ThemeRegistry::new().expect("registry constructs");
+        let theme = registry
+            .get(DEFAULT_THEME_ID)
+            .expect("default theme exists");
+        for key in REQUIRED_TOOL_REFS {
+            assert!(theme.tool_refs.contains_key(*key), "missing tool ref {key}");
+        }
         assert_eq!(
-            refs.get("ghostty").map(String::as_str),
-            Some("Test Ghostty")
+            theme.tool_refs.get("ghostty").map(String::as_str),
+            Some("Catppuccin Mocha")
         );
-        assert_eq!(refs.get("bat").map(String::as_str), Some("Test Bat"));
-        assert_eq!(refs.get("unknown"), None);
+        assert_eq!(
+            theme.tool_refs.get("bat").map(String::as_str),
+            Some("Catppuccin Mocha")
+        );
+        assert_eq!(theme.tool_refs.get("unknown"), None);
     }
 
     /// Regression guard for the Ghostty theme-name naming convention.
@@ -432,9 +622,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("theme '{}' has no ghostty tool_ref", theme_id));
             assert_eq!(
                 actual, expected_ghostty_name,
-                "ghostty tool_ref for '{}' does not match Ghostty's built-in \
-                 theme name — slate will write an invalid `theme = \"...\"` \
-                 line and Ghostty will raise 'theme not found'",
+                "ghostty tool_ref for '{}' does not match Ghostty's built-in theme name",
                 theme_id
             );
         }
@@ -469,9 +657,7 @@ mod tests {
 
         assert!(
             missing.is_empty(),
-            "ghostty tool_refs reference themes that do not exist in \
-             {:?}. Either Ghostty renamed them or slate's theme files are \
-             wrong. Fix: {:?}",
+            "ghostty tool_refs reference themes missing in {:?}; either Ghostty renamed them or slate theme refs are wrong. Fix: {:?}",
             themes_dir,
             missing
         );

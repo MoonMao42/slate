@@ -4,6 +4,7 @@
 //! because actual export happens in shell init.
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
+use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeVariant;
@@ -31,17 +32,6 @@ impl BatAdapter {
         }
         config_home.join("bat").join("config")
     }
-
-    /// Get config home directory (XDG default)
-    fn config_home() -> Result<PathBuf> {
-        let env = SlateEnv::from_process()?;
-        Self::config_home_with_env(&env)
-    }
-
-    /// Get config home directory with injected SlateEnv
-    fn config_home_with_env(env: &SlateEnv) -> Result<PathBuf> {
-        Ok(env.xdg_config_home().to_path_buf())
-    }
 }
 
 impl ToolAdapter for BatAdapter {
@@ -50,19 +40,7 @@ impl ToolAdapter for BatAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        // Check if binary exists in PATH
-        let binary_exists = which::which("bat").is_ok();
-
-        // Check if config directory exists
-        let config_home = match Self::config_home() {
-            Ok(home) => home,
-            Err(_) => return Ok(binary_exists),
-        };
-
-        let config_dir = config_home.join("bat");
-        let config_dir_exists = config_dir.exists();
-
-        Ok(binary_exists || config_dir_exists)
+        Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {

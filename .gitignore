@@ -1,4 +1,5 @@
 /target/
+.clang-module-cache/
 Cargo.lock
 *.swp
 *.swo

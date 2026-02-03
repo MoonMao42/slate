@@ -73,24 +73,24 @@ fn test_theme_tool_refs_consistency() {
     for theme in registry.all() {
         // Verify each tool_ref is non-empty
         assert!(
-            theme.tool_refs.get("ghostty").is_some(),
+            theme.tool_refs.contains_key("ghostty"),
             "Ghostty ref empty for {}",
             theme.id
         );
         assert!(
-            theme.tool_refs.get("alacritty").is_some(),
+            theme.tool_refs.contains_key("alacritty"),
             "Alacritty ref empty for {}",
             theme.id
         );
         assert!(
-            theme.tool_refs.get("bat").is_some(),
+            theme.tool_refs.contains_key("bat"),
             "bat ref empty for {}",
             theme.id
         );
 
         // Verify tool_refs.get() works for all tools
-        assert!(theme.tool_refs.get("ghostty").is_some());
-        assert!(theme.tool_refs.get("bat").is_some());
+        assert!(theme.tool_refs.contains_key("ghostty"));
+        assert!(theme.tool_refs.contains_key("bat"));
     }
 }
 

@@ -3,33 +3,26 @@ use crate::design::typography::Typography;
 use crate::env::SlateEnv;
 use crate::error::Result;
 
-/// Handle `slate set <theme>` command
-/// Thin dispatcher that routes to new noun-driven subcommands:
-/// 1. `slate set <theme>` — Delegate to `slate theme <theme>` + show dim tip
-/// 2. `slate set --auto` — Delegate to `slate theme --auto` (no tip)
-/// 3. `slate set` (no args) — Delegate to `slate theme` picker
-pub fn handle(args: &[&str]) -> Result<()> {
-    // Check for --auto flag (auto path delegates to theme --auto)
-    if args.contains(&"--auto") {
+/// Handle `slate set` compatibility alias using structured clap arguments.
+/// Routes to the noun-driven theme surface while preserving the current CLI:
+/// 1. `slate set <theme>` → `slate theme <theme>` + dim tip
+/// 2. `slate set --auto` → `slate theme --auto`
+/// 3. `slate set` → theme picker + dim tip
+pub fn handle(theme_name: Option<&str>, auto: bool) -> Result<()> {
+    if auto {
         crate::cli::theme::handle_theme(None, true, false)?;
-        // No dim tip for auto path — it's already using the new surface
         return Ok(());
     }
 
-    // Explicit theme or picker path
-    if let Some(theme_arg) = args.first() {
-        // Direct theme apply with dispatcher
+    if let Some(theme_arg) = theme_name {
         crate::cli::theme::handle_theme(Some(theme_arg.to_string()), false, false)?;
 
-        // Show dim tip for legacy usage
         print_dim_tip();
         Ok(())
     } else {
-        // Picker path: launch interactive picker via theme
         let env = SlateEnv::from_process()?;
         crate::cli::picker::launch_picker(&env)?;
 
-        // After picker returns, show dim tip
         print_dim_tip();
         Ok(())
     }

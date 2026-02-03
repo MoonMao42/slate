@@ -5,6 +5,7 @@
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
+use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -39,6 +40,16 @@ impl EzaAdapter {
             palette.magenta,
         )
     }
+
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
+        theme.palette.validate()?;
+
+        let yaml_content = Self::render_eza_yaml(theme);
+        let config_manager = ConfigManager::with_env(env)?;
+        config_manager.write_managed_file("eza", "theme.yml", &yaml_content)?;
+
+        Ok(ApplyOutcome::Applied)
+    }
 }
 
 impl ToolAdapter for EzaAdapter {
@@ -47,24 +58,7 @@ impl ToolAdapter for EzaAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        // Check if binary exists in PATH
-        let binary_exists = which::which("eza").is_ok();
-
-        // Check if config directory exists
-        let config_home = match Self::config_home() {
-            Ok(home) => home,
-            Err(_) => return Ok(binary_exists),
-        };
-
-        // Check EZA_CONFIG_DIR env var or default ~/.config/eza/
-        let config_dir = match std::env::var("EZA_CONFIG_DIR") {
-            Ok(var) => PathBuf::from(var),
-            Err(_) => config_home.join("eza"),
-        };
-
-        let config_dir_exists = config_dir.exists();
-
-        Ok(binary_exists || config_dir_exists)
+        Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
@@ -92,17 +86,8 @@ impl ToolAdapter for EzaAdapter {
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
-        // Validate theme has palette data
-        theme.palette.validate()?;
-
-        // Render theme as YAML
-        let yaml_content = Self::render_eza_yaml(theme);
-
-        // Write to managed config via ConfigManager
-        let config_manager = ConfigManager::new()?;
-        config_manager.write_managed_file("eza", "theme.yml", &yaml_content)?;
-
-        Ok(ApplyOutcome::Applied)
+        let env = SlateEnv::from_process()?;
+        self.apply_theme_with_env(theme, &env)
     }
 
     fn reload(&self) -> Result<()> {
@@ -166,12 +151,14 @@ mod tests {
 
     #[test]
     fn test_apply_theme_writes_managed_yaml_theme() {
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
         let adapter = EzaAdapter;
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
 
-        // Just verify it returns Ok without errors
-        // Actual file writing would require mocking ConfigManager
-        let result = adapter.apply_theme(&theme);
+        let result = adapter.apply_theme_with_env(&theme, &env);
         assert!(result.is_ok());
     }
 

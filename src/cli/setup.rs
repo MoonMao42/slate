@@ -32,9 +32,21 @@ pub fn handle_with_env(
     eprintln!("{}", preflight_result.format_for_display());
 
     if !preflight_result.is_ready() {
-        return Err(crate::error::SlateError::Internal(
-            "Pre-flight checks failed. Please resolve issues above.".to_string(),
-        ));
+        // Build actionable guidance from failed checks
+        let failed: Vec<_> = preflight_result
+            .checks
+            .iter()
+            .filter(|c| !c.passed && !c.name.starts_with("Optional:"))
+            .collect();
+        let guidance = failed
+            .iter()
+            .map(|c| format!("  → {}: {}", c.name, c.description))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(crate::error::SlateError::Internal(format!(
+            "Setup requires:\n{}\n\nResolve the above and run 'slate setup' again.",
+            guidance
+        )));
     }
 
     eprintln!("\n");
@@ -55,20 +67,12 @@ pub fn handle_with_env(
     let selected_opacity = context.selected_opacity;
     let fastfetch_enabled = context.fastfetch_enabled;
 
-    // Enable fastfetch auto-run marker BEFORE execute_setup_with_env writes
-    // env.zsh — write_shell_integration_file() checks the marker's existence
-    // and only emits the `if command -v fastfetch; then fastfetch; fi` block
-    // when the marker is present. Creating the marker after setup leaves
-    // env.zsh stale and silently breaks the "Yes" answer to auto-run.
-    if fastfetch_enabled {
-        if let Ok(config_mgr) = crate::config::ConfigManager::with_env(env) {
-            let _ = config_mgr.enable_fastfetch_autorun();
-        }
-    }
-
     // Snapshot current state BEFORE any mutations
     {
-        use crate::config::{begin_restore_point_baseline_with_env, list_restore_points_with_env, snapshot_current_state_with_env};
+        use crate::config::{
+            begin_restore_point_baseline_with_env, list_restore_points_with_env,
+            snapshot_current_state_with_env,
+        };
         let backups = list_restore_points_with_env(env).ok();
         let has_baseline = if let Some(ref backups) = backups {
             backups.iter().any(|rp| rp.is_baseline)
@@ -78,8 +82,13 @@ pub fn handle_with_env(
 
         if !has_baseline {
             // First time: create baseline (pre-slate state)
-            if let Ok(baseline_point) = begin_restore_point_baseline_with_env(env) {
-                eprintln!("✓ Baseline snapshot created ({})", baseline_point.id);
+            match begin_restore_point_baseline_with_env(env) {
+                Ok(baseline_point) => {
+                    eprintln!("✓ Baseline snapshot created ({})", baseline_point.id);
+                }
+                Err(_) => {
+                    eprintln!("⚠ Could not create baseline snapshot — slate restore will not be available for pre-slate state");
+                }
             }
         } else {
             // Subsequent runs: snapshot current config so user can restore back
@@ -87,11 +96,18 @@ pub fn handle_with_env(
             let label = config
                 .and_then(|c| c.get_current_theme().ok().flatten())
                 .unwrap_or_else(|| "pre-setup".to_string());
-            if let Ok(snap) = snapshot_current_state_with_env(env, &label) {
-                eprintln!("✓ Snapshot created ({})", snap.id);
+            match snapshot_current_state_with_env(env, &label) {
+                Ok(snap) => {
+                    eprintln!("✓ Snapshot created ({})", snap.id);
+                }
+                Err(_) => {
+                    eprintln!("⚠ Could not create restore snapshot — continuing without it");
+                }
             }
         }
     }
+
+    prepare_setup_state(env, fastfetch_enabled, selected_opacity)?;
 
     // Execute the setup (install tools, apply configurations)
     let summary = setup_executor::execute_setup_with_env(
@@ -100,17 +116,6 @@ pub fn handle_with_env(
         selected_theme,
         env,
     )?;
-
-    // Persist selected opacity if chosen (manual mode only)
-    if let Some(opacity) = selected_opacity {
-        if let Ok(config_mgr) = crate::config::ConfigManager::with_env(env) {
-            let _ = config_mgr.set_current_opacity_preset(opacity);
-        }
-        // Write opacity to adapters
-        let _ = crate::adapter::ghostty::write_opacity_config(env, opacity);
-        let _ = crate::adapter::ghostty::write_blur_radius(env, opacity);
-        let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
-    }
 
     // Display completion message with visibility guidance
     eprintln!("\n{}", summary.format_completion_message());
@@ -126,6 +131,32 @@ pub fn handle_with_env(
 pub fn handle(quick: bool, force: bool, only: Option<String>) -> Result<()> {
     let env = SlateEnv::from_process()?;
     handle_with_env(quick, force, only, &env)
+}
+
+fn prepare_setup_state(
+    env: &SlateEnv,
+    fastfetch_enabled: bool,
+    selected_opacity: Option<crate::opacity::OpacityPreset>,
+) -> Result<()> {
+    let config_mgr = crate::config::ConfigManager::with_env(env)?;
+
+    // Fastfetch and opacity are non-critical preferences — log failures but
+    // don't abort setup over them.
+    if fastfetch_enabled {
+        if let Err(e) = config_mgr.enable_fastfetch_autorun() {
+            eprintln!("⚠ Could not save fastfetch preference: {}", e);
+        }
+    } else if let Err(e) = config_mgr.disable_fastfetch_autorun() {
+        eprintln!("⚠ Could not save fastfetch preference: {}", e);
+    }
+
+    if let Some(opacity) = selected_opacity {
+        if let Err(e) = config_mgr.set_current_opacity_preset(opacity) {
+            eprintln!("⚠ Could not save opacity preference: {}", e);
+        }
+    }
+
+    Ok(())
 }
 
 /// Handle --only flag: retry a single tool installation
@@ -189,7 +220,9 @@ fn format_completion_timing(start_time: Option<Instant>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::opacity::OpacityPreset;
     use std::time::Duration;
+    use tempfile::TempDir;
 
     #[test]
     fn test_setup_force_flag_recognized() {
@@ -232,5 +265,22 @@ mod tests {
     #[test]
     fn test_format_completion_timing_none() {
         assert!(format_completion_timing(None).is_none());
+    }
+
+    #[test]
+    fn test_prepare_setup_state_updates_marker_and_opacity_before_apply() {
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let config = crate::config::ConfigManager::with_env(&env).unwrap();
+
+        config.enable_fastfetch_autorun().unwrap();
+
+        prepare_setup_state(&env, false, Some(OpacityPreset::Frosted)).unwrap();
+
+        assert!(!config.has_fastfetch_autorun().unwrap());
+        assert_eq!(
+            config.get_current_opacity_preset().unwrap(),
+            OpacityPreset::Frosted
+        );
     }
 }

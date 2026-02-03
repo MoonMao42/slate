@@ -1,48 +1,24 @@
 use crate::brand::language::Language;
-use crate::config::{execute_restore, get_restore_point, is_baseline_restore_point, list_restore_points, delete_restore_point};
+use crate::config::{
+    delete_restore_point, execute_restore, get_restore_point, is_baseline_restore_point,
+    list_restore_points,
+};
 use crate::error::Result;
 use cliclack::{confirm, select};
 use std::process::Command;
 
-/// Handle `slate restore [ID] [--list] [--delete ID]` command
-pub fn handle(args: &[&str]) -> Result<()> {
-    // Parse arguments for --list, --delete
-    let mut restore_id: Option<&str> = None;
-    let mut list_mode = false;
-    let mut delete_id: Option<&str> = None;
-
-    let mut i = 0;
-    while i < args.len() {
-        match args[i] {
-            "--list" => list_mode = true,
-            "--delete" => {
-                // Next arg is the ID to delete
-                if i + 1 < args.len() {
-                    delete_id = Some(args[i + 1]);
-                    i += 1;
-                }
-            }
-            id if !id.starts_with('-') => {
-                restore_id = Some(id);
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    // Handle --delete flow
+/// Handle `slate restore [ID] [--list] [--delete ID]` with structured clap arguments.
+pub fn handle(restore_id: Option<&str>, list_mode: bool, delete_id: Option<&str>) -> Result<()> {
     if let Some(id) = delete_id {
         handle_delete(id)?;
         return Ok(());
     }
 
-    // Handle --list flow
     if list_mode {
         handle_list()?;
         return Ok(());
     }
 
-    // Handle direct restore with ID or picker
     if let Some(id) = restore_id {
         handle_restore_direct(id)?;
     } else {
@@ -86,8 +62,11 @@ fn handle_restore_direct(restore_id: &str) -> Result<()> {
             .initial_value(false)
             .interact()?
     } else {
-        confirm(format!("Restore to {}? This will modify your configuration files.", restore_point.theme_name))
-            .interact()?
+        confirm(format!(
+            "Restore to {}? This will modify your configuration files.",
+            restore_point.theme_name
+        ))
+        .interact()?
     };
 
     if !confirmed {
@@ -111,7 +90,10 @@ fn handle_restore_direct(restore_id: &str) -> Result<()> {
         println!("\nPartially failed:");
         for result in receipt.failed_results() {
             if let Some(error) = &result.error {
-                println!("{}", Language::restore_receipt_failures(&result.display_tool, error));
+                println!(
+                    "{}",
+                    Language::restore_receipt_failures(&result.display_tool, error)
+                );
             }
         }
     }
@@ -132,11 +114,19 @@ fn handle_restore_direct(restore_id: &str) -> Result<()> {
     // Reload Ghostty so changes are visible immediately
     let _ = Command::new("osascript")
         .arg("-e")
-        .arg(r#"tell application "Ghostty"
+        .arg(
+            r#"tell application "Ghostty"
     set target_terminal to focused terminal of selected tab of front window
     perform action "reload_config" on target_terminal
-end tell"#)
+end tell"#,
+        )
         .output();
+
+    // Sync watcher state: stop if auto-theme is now disabled, restart if enabled
+    let _ = crate::platform::dark_mode_notify::stop();
+    if config.is_auto_theme_enabled().unwrap_or(false) {
+        let _ = crate::platform::dark_mode_notify::start(&config);
+    }
 
     Ok(())
 }
@@ -188,7 +178,6 @@ fn handle_restore_picker() -> Result<()> {
         .items(&select_items)
         .interact()?;
 
-    // selected_id is already the restore point ID from the first tuple element
     handle_restore_direct(selected_id)?;
 
     Ok(())
@@ -209,7 +198,8 @@ fn handle_delete(restore_id: &str) -> Result<()> {
     let confirmed = confirm(format!(
         "Delete restore point {}? This cannot be undone.",
         restore_point.id
-    )).interact()?;
+    ))
+    .interact()?;
 
     if !confirmed {
         println!("Deletion cancelled.");

@@ -126,10 +126,7 @@ impl Language {
         if failed == 0 {
             format!("{} file(s) restored successfully", succeeded)
         } else {
-            format!(
-                "{} file(s) restored, {} failed",
-                succeeded, failed
-            )
+            format!("{} file(s) restored, {} failed", succeeded, failed)
         }
     }
 
@@ -172,9 +169,9 @@ impl Language {
     // Hub menu labels (07-01, to)
     pub const HUB_SWITCH_THEME: &str = "✦ Switch Theme";
     pub const HUB_PAUSE_AUTO_PICK: &str = "✦ Pause Auto & Pick Theme";
-    pub const HUB_CHANGE_FONT: &str = "🔤 Change Font";
-    pub const HUB_TOGGLE_AUTO_ON: &str = "🌓 Toggle Auto Theme · on";
-    pub const HUB_TOGGLE_AUTO_OFF: &str = "🌓 Toggle Auto Theme · off";
+    pub const HUB_CHANGE_FONT: &str = "✦ Change Font";
+    pub const HUB_TOGGLE_AUTO_ON: &str = "✦ Toggle Auto Theme · on";
+    pub const HUB_TOGGLE_AUTO_OFF: &str = "✦ Toggle Auto Theme · off";
     pub const HUB_VIEW_STATUS: &str = "◆ View Status";
     pub const HUB_PREFERENCES: &str = "⚙ Preferences…";
     pub const HUB_QUIT: &str = "⏊ Quit";
@@ -196,25 +193,6 @@ impl Language {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_setup_messages_exist() {
-        assert!(!Language::SETUP_WELCOME.is_empty());
-        assert!(!Language::SETUP_COMPLETE.is_empty());
-    }
-
-    #[test]
-    fn test_receipt_messages_exist() {
-        assert!(!Language::RECEIPT_HEADER.is_empty());
-        assert!(!Language::RECEIPT_INSTALL_SECTION.is_empty());
-        assert!(!Language::RECEIPT_FOOTER.is_empty());
-    }
-
-    #[test]
-    fn test_completion_messages_exist() {
-        assert!(!Language::COMPLETION_TIME_TAKEN.is_empty());
-        assert!(!Language::COMPLETION_NEXT_STEPS.is_empty());
-    }
 
     #[test]
     fn test_error_messages_format() {
@@ -265,15 +243,9 @@ mod tests {
     }
 
     #[test]
-    fn test_restore_messages_exist() {
-        assert!(!Language::RESTORE_HEADER.is_empty());
-        assert!(!Language::RESTORE_LIST_HEADER.is_empty());
-        assert!(!Language::RESTORE_CHOOSE_POINT.is_empty());
-    }
-
-    #[test]
     fn test_restore_receipt_format() {
-        let summary = Language::restore_point_summary("2026-04-09T10-00-00Z", "Catppuccin Mocha", 5);
+        let summary =
+            Language::restore_point_summary("2026-04-09T10-00-00Z", "Catppuccin Mocha", 5);
         assert!(summary.contains("2026-04-09T10-00-00Z"));
         assert!(summary.contains("Catppuccin Mocha"));
         assert!(summary.contains("5"));

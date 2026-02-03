@@ -130,16 +130,21 @@ fn test_reset_subcommand_is_not_exposed() {
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     // reset should not appear in help (it's a hidden compatibility alias)
-    assert!(!stdout.contains("reset"), "reset should be hidden from help");
-    
+    assert!(
+        !stdout.contains("reset"),
+        "reset should be hidden from help"
+    );
+
     // But reset command still works for backward compatibility
     let tempdir = TempDir::new().unwrap();
     let mut cmd2 = slate_cmd_isolated(&tempdir);
     let output2 = cmd2.args(["reset", "--help"]).output().unwrap();
-    
+
     // reset --help should work (it's hidden but functional)
-    assert!(output2.status.success(),
-        "reset command should still be recognized internally");
+    assert!(
+        output2.status.success(),
+        "reset command should still be recognized internally"
+    );
 }
 
 // Setup wizard tests 
@@ -518,16 +523,6 @@ mod rerun_behavior {
     use slate_cli::cli::wizard_core::{Wizard, WizardMode};
 
     #[test]
-    fn test_wizard_detects_current_state_on_new() {
-        // Wizard detects current font on startup
-        let wizard = Wizard::new().unwrap();
-        let _context = wizard.get_context();
-        // current_font may be Some or None depending on environment
-        // The important thing is detection doesn't crash
-        assert!(true);
-    }
-
-    #[test]
     fn test_wizard_context_has_rerun_awareness() {
         // WizardContext tracks current state for rerun
         let wizard = Wizard::new().unwrap();
@@ -535,11 +530,7 @@ mod rerun_behavior {
         // These fields allow the wizard to show "current" and default to "keep"
         assert_eq!(context.selected_font, None);
         assert_eq!(context.selected_theme, None);
-        // But detection fields are available:
-        let has_font_detection = context.current_font.is_some() || context.current_font.is_none();
-        let has_theme_detection =
-            context.current_theme.is_some() || context.current_theme.is_none();
-        assert!(has_font_detection && has_theme_detection);
+        assert_eq!(context.current_step, 0);
     }
 
     #[test]
@@ -617,7 +608,7 @@ mod optional_automations {
         let formatted = wizard.display_receipt(&receipt);
         assert!(formatted.contains("Terminal"));
         assert!(formatted.contains("opacity 0.95"));
-        assert!(formatted.contains("padding 12x12"));
+        assert!(formatted.contains("blur"));
     }
 }
 

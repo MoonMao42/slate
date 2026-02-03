@@ -1,3 +1,4 @@
+use crate::brand::Language;
 use crate::cli::config::{disable_auto_theme, enable_auto_theme};
 use crate::config::ConfigManager;
 use crate::error::Result;
@@ -27,12 +28,7 @@ fn has_current_theme(config: &ConfigManager) -> Result<bool> {
 }
 
 fn sync_auto_theme_toggle(config: &ConfigManager, enabled: bool) -> Result<()> {
-    sync_auto_theme_toggle_with(
-        config,
-        enabled,
-        enable_auto_theme,
-        disable_auto_theme,
-    )
+    sync_auto_theme_toggle_with(config, enabled, enable_auto_theme, disable_auto_theme)
 }
 
 fn sync_auto_theme_toggle_with<Enable, Disable>(
@@ -75,6 +71,32 @@ fn toggle_fastfetch_from_preferences(config: &ConfigManager) -> Result<()> {
     Ok(())
 }
 
+fn toggle_starship_from_preferences(config: &ConfigManager) -> Result<()> {
+    let was_enabled = config.is_starship_enabled()?;
+    config.set_starship_enabled(!was_enabled)?;
+
+    if let Err(err) = config.refresh_shell_integration() {
+        let _ = config.set_starship_enabled(was_enabled);
+        let _ = config.refresh_shell_integration();
+        return Err(err);
+    }
+
+    Ok(())
+}
+
+fn toggle_zsh_highlighting_from_preferences(config: &ConfigManager) -> Result<()> {
+    let was_enabled = config.is_zsh_highlighting_enabled()?;
+    config.set_zsh_highlighting_enabled(!was_enabled)?;
+
+    if let Err(err) = config.refresh_shell_integration() {
+        let _ = config.set_zsh_highlighting_enabled(was_enabled);
+        let _ = config.refresh_shell_integration();
+        return Err(err);
+    }
+
+    Ok(())
+}
+
 /// Single-entry guided flow - show state, present one action menu, execute, exit
 fn show_hub_once(config: &ConfigManager) -> Result<()> {
     cliclack::intro("✦ slate")?;
@@ -102,10 +124,13 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
         .unwrap_or_else(|| "Solid".to_string());
 
     // Dashboard rendering with color hierarchy
-    cliclack::log::info(format!("[1m{}[0m    {}", "Theme", current_theme.name))?;
-    cliclack::log::info(format!("[1m{}[0m  {}", "Opacity", current_opacity))?;
     cliclack::log::info(format!(
-        "[1m{}[0m    {}",
+        "\x1b[1m{}\x1b[0m    {}",
+        "Theme", current_theme.name
+    ))?;
+    cliclack::log::info(format!("\x1b[1m{}\x1b[0m  {}", "Opacity", current_opacity))?;
+    cliclack::log::info(format!(
+        "\x1b[1m{}\x1b[0m    {}",
         "Font",
         current_font.unwrap_or_else(|| "Not configured".to_string())
     ))?;
@@ -137,25 +162,16 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
     })?;
 
     match selection {
-        "switch" => {
-            // Route to picker
-            return crate::cli::picker::launch_picker(&env);
-        }
-        "font" => {
-            // Delegate to font picker
-            return crate::cli::font::handle_font(None);
-        }
-        "more" => {
-            // More options submenu
-            return handle_more_options(config);
-        }
+        "switch" => crate::cli::picker::launch_picker(&env),
+        "font" => crate::cli::font::handle_font(None),
+        "more" => handle_more_options(config),
         "quit" => {
             cliclack::outro("✦ Done")?;
-            return Ok(());
+            Ok(())
         }
         _ => {
             cliclack::outro("✦ Done")?;
-            return Ok(());
+            Ok(())
         }
     }
 }
@@ -175,6 +191,16 @@ fn handle_more_options(config: &ConfigManager) -> Result<()> {
                 },
                 "",
             )
+            .item(
+                "auto-theme-configure",
+                "✦ Auto-Theme Pairing",
+                "choose dark/light themes",
+            )
+            .item(
+                "tools",
+                "✦ Tool Toggles…",
+                "starship, highlighting, fastfetch",
+            )
             .item("restore", "⏏ Restore from snapshot", "")
             .item("setup", "⚙ Setup Wizard", "")
             .item("quit", "○ Back", "")
@@ -191,23 +217,90 @@ fn handle_more_options(config: &ConfigManager) -> Result<()> {
             "auto-theme" => {
                 let new_state = !auto_enabled;
                 sync_auto_theme_toggle(config, new_state)?;
-                // After toggling, show updated state and menu again
+            }
+            "auto-theme-configure" => {
+                crate::cli::auto_theme::configure_auto_theme()?;
+                if config.is_auto_theme_enabled()? {
+                    config.refresh_shell_integration()?;
+                    // Restart watcher so new pairing takes effect immediately
+                    let _ = crate::platform::dark_mode_notify::stop();
+                    let _ = crate::platform::dark_mode_notify::start(config);
+                }
+            }
+            "tools" => {
+                handle_tool_toggles(config)?;
             }
             "restore" => {
-                // Delegate to restore command
-                return crate::cli::restore::handle(&[]);
+                return crate::cli::restore::handle(None, false, None);
             }
             "setup" => {
                 let env = crate::env::SlateEnv::from_process()?;
                 crate::cli::setup::handle_with_env(false, false, None, &env)?;
-                // After setup, exit
                 cliclack::outro("✦ Done")?;
                 return Ok(());
             }
-            "quit" | _ => {
+            "quit" => {
                 cliclack::outro("✦ Done")?;
                 return Ok(());
             }
+            _ => {
+                cliclack::outro("✦ Done")?;
+                return Ok(());
+            }
+        }
+    }
+}
+
+fn handle_tool_toggles(config: &ConfigManager) -> Result<()> {
+    loop {
+        let starship_enabled = config.is_starship_enabled()?;
+        let zsh_highlighting_enabled = config.is_zsh_highlighting_enabled()?;
+        let fastfetch_enabled = config.has_fastfetch_autorun()?;
+
+        let selection = cliclack::select("Tool toggles")
+            .item(
+                "starship",
+                if starship_enabled {
+                    "Starship Prompt · on"
+                } else {
+                    "Starship Prompt · off"
+                },
+                "",
+            )
+            .item(
+                "zsh-highlighting",
+                if zsh_highlighting_enabled {
+                    "zsh Highlighting · on"
+                } else {
+                    "zsh Highlighting · off"
+                },
+                "",
+            )
+            .item(
+                "fastfetch",
+                if fastfetch_enabled {
+                    Language::HUB_TOGGLE_FASTFETCH_ON
+                } else {
+                    Language::HUB_TOGGLE_FASTFETCH_OFF
+                },
+                "",
+            )
+            .item("back", "○ Back", "")
+            .interact()
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::Interrupted {
+                    crate::error::SlateError::UserCancelled
+                } else {
+                    crate::error::SlateError::IOError(e)
+                }
+            })?;
+
+        match selection {
+            "starship" => toggle_starship_from_preferences(config)?,
+            "zsh-highlighting" => toggle_zsh_highlighting_from_preferences(config)?,
+            "fastfetch" => toggle_fastfetch_from_preferences(config)?,
+            "back" => return Ok(()),
+            _ => return Ok(()),
         }
     }
 }
@@ -297,5 +390,49 @@ mod tests {
         let disabled_content = fs::read_to_string(&shell_path).unwrap();
         assert!(!config.has_fastfetch_autorun().unwrap());
         assert!(!disabled_content.contains("if command -v fastfetch &> /dev/null; then"));
+    }
+
+    #[test]
+    fn test_toggle_starship_from_preferences_rewrites_shell_integration() {
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let config = ConfigManager::with_env(&env).unwrap();
+        let shell_path = env.config_dir().join("managed/shell/env.zsh");
+
+        config.set_current_theme("catppuccin-mocha").unwrap();
+
+        toggle_starship_from_preferences(&config).unwrap();
+
+        let disabled_content = fs::read_to_string(&shell_path).unwrap();
+        assert!(!config.is_starship_enabled().unwrap());
+        assert!(!disabled_content.contains("starship init zsh"));
+
+        toggle_starship_from_preferences(&config).unwrap();
+
+        let enabled_content = fs::read_to_string(&shell_path).unwrap();
+        assert!(config.is_starship_enabled().unwrap());
+        assert!(enabled_content.contains("starship init zsh"));
+    }
+
+    #[test]
+    fn test_toggle_zsh_highlighting_from_preferences_rewrites_shell_integration() {
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let config = ConfigManager::with_env(&env).unwrap();
+        let shell_path = env.config_dir().join("managed/shell/env.zsh");
+
+        config.set_current_theme("catppuccin-mocha").unwrap();
+
+        toggle_zsh_highlighting_from_preferences(&config).unwrap();
+
+        let disabled_content = fs::read_to_string(&shell_path).unwrap();
+        assert!(!config.is_zsh_highlighting_enabled().unwrap());
+        assert!(!disabled_content.contains("highlight-styles.sh"));
+
+        toggle_zsh_highlighting_from_preferences(&config).unwrap();
+
+        let enabled_content = fs::read_to_string(&shell_path).unwrap();
+        assert!(config.is_zsh_highlighting_enabled().unwrap());
+        assert!(enabled_content.contains("highlight-styles.sh"));
     }
 }

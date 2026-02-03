@@ -5,11 +5,11 @@
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
+use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::path::PathBuf;
-use which::which;
 
 /// lazygit adapter implementing v2 ToolAdapter trait.
 pub struct LazygitAdapter;
@@ -77,8 +77,7 @@ impl ToolAdapter for LazygitAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        let binary_exists = which("lazygit").is_ok();
-        Ok(binary_exists)
+        Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {

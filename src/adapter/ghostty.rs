@@ -7,6 +7,7 @@
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::config::ConfigManager;
+use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -19,28 +20,29 @@ pub struct GhosttyAdapter;
 
 impl GhosttyAdapter {
     /// The current Ghostty default config path documented upstream.
+    /// Ghostty uses `config` (no extension) as the standard config filename.
     fn default_config_path(xdg_dir: &Path) -> PathBuf {
-        xdg_dir.join("config.ghostty")
+        xdg_dir.join("config")
     }
 
     /// Build candidate config paths in priority order.
-    /// Ghostty resolves: official > XDG > macOS legacy (Application Support).
+    /// Ghostty resolves: XDG config > legacy .ghostty extension > macOS App Support.
     fn candidate_paths(xdg_dir: &Path, home: Option<&str>) -> Vec<PathBuf> {
         let mut paths = Vec::new();
 
-        // Upstream-documented default path (Ghostty 1.1+).
-        paths.push(Self::default_config_path(xdg_dir));
-
-        // XDG config (without .ghostty extension) — common user setup.
+        // Standard Ghostty config path (no extension).
         paths.push(xdg_dir.join("config"));
+
+        // Legacy .ghostty extension (some older setups).
+        paths.push(xdg_dir.join("config.ghostty"));
 
         // Legacy macOS App Support location, lowest priority.
         if cfg!(target_os = "macos") {
             if let Some(h) = home {
                 let appsupport =
                     PathBuf::from(h).join("Library/Application Support/com.mitchellh.ghostty");
-                paths.push(appsupport.join("config.ghostty"));
                 paths.push(appsupport.join("config"));
+                paths.push(appsupport.join("config.ghostty"));
             }
         }
 
@@ -130,13 +132,16 @@ impl GhosttyAdapter {
 
     /// Apply font-only update to Ghostty without triggering full theme reapply.
     /// Writes only font.conf and ensures it's included.
-    /// Does not call reload or touch the theme.
+    /// Reloads Ghostty so the font change is visible immediately.
     pub fn apply_font_only(env: &SlateEnv, font_name: &str) -> Result<()> {
         let config_manager = ConfigManager::with_env(env)?;
 
         // Write only the font-family to managed font.conf
-        let font_conf_content = format!("font-family = \"{}\"
-", font_name);
+        let font_conf_content = format!(
+            "font-family = \"{}\"
+",
+            font_name
+        );
         config_manager.write_managed_file("ghostty", "font.conf", &font_conf_content)?;
 
         // Ensure integration file includes the font.conf file
@@ -146,6 +151,9 @@ impl GhosttyAdapter {
             let managed_font_path = config_manager.managed_dir("ghostty").join("font.conf");
             Self::ensure_integration_includes_managed(&integration_path, &managed_font_path)?;
         }
+
+        // Reload Ghostty so the font change takes effect immediately
+        let _ = adapter.reload();
 
         Ok(())
     }
@@ -206,14 +214,7 @@ impl ToolAdapter for GhosttyAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        let binary_exists = which::which("ghostty").is_ok();
-
-        let config_exists = match self.integration_config_path() {
-            Ok(path) => path.exists(),
-            Err(_) => false,
-        };
-
-        Ok(binary_exists || config_exists)
+        Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
@@ -232,7 +233,28 @@ impl ToolAdapter for GhosttyAdapter {
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
         let env = SlateEnv::from_process()?;
-        let integration_path = self.integration_config_path_with_env(&env)?;
+        self.apply_theme_with_env(theme, &env)
+    }
+
+    fn reload(&self) -> Result<()> {
+        // macOS: use Ghostty's own AppleScript API (Automation permission, not Accessibility).
+        // No System Events access = no Accessibility popup.
+        #[cfg(target_os = "macos")]
+        {
+            Self::reload_via_applescript()
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            Self::send_reload_signal()
+        }
+    }
+}
+
+/// Helper methods using injected SlateEnv (for testing)
+impl GhosttyAdapter {
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
+        let integration_path = self.integration_config_path_with_env(env)?;
         if !integration_path.exists() {
             return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
         }
@@ -287,12 +309,12 @@ impl ToolAdapter for GhosttyAdapter {
         );
 
         // Step 3: Write managed theme config
-        let config_manager = ConfigManager::with_env(&env)?;
+        let config_manager = ConfigManager::with_env(env)?;
         config_manager.write_managed_file("ghostty", "theme.conf", &managed_content)?;
 
         let current_opacity = config_manager.get_current_opacity_preset()?;
-        write_opacity_config(&env, current_opacity)?;
-        write_blur_radius(&env, current_opacity)?;
+        write_opacity_config(env, current_opacity)?;
+        write_blur_radius(env, current_opacity)?;
 
         let current_font = config_manager.get_current_font()?;
         if let Some(ref font_family) = current_font {
@@ -301,7 +323,7 @@ impl ToolAdapter for GhosttyAdapter {
         }
 
         // Step 4: Ensure integration file includes all managed paths idempotently
-        let managed_base = self.managed_config_path_with_env(Some(&env));
+        let managed_base = self.managed_config_path_with_env(Some(env));
         let theme_path = managed_base.join("theme.conf");
         let opacity_path = managed_base.join("opacity.conf");
         let blur_path = managed_base.join("blur.conf");
@@ -322,23 +344,6 @@ impl ToolAdapter for GhosttyAdapter {
         Ok(ApplyOutcome::Applied)
     }
 
-    fn reload(&self) -> Result<()> {
-        // macOS: use Ghostty's own AppleScript API (Automation permission, not Accessibility).
-        // No System Events access = no Accessibility popup.
-        #[cfg(target_os = "macos")]
-        {
-            Self::reload_via_applescript()
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            Self::send_reload_signal()
-        }
-    }
-}
-
-/// Helper methods using injected SlateEnv (for testing)
-impl GhosttyAdapter {
     pub fn integration_config_path_with_env(&self, env: &SlateEnv) -> Result<PathBuf> {
         let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
         let xdg_dir = env.xdg_config_home().join("ghostty");
@@ -415,13 +420,16 @@ mod tests {
     fn test_ghostty_default_config_path() {
         let xdg_dir = PathBuf::from("/test/.config/ghostty");
         let path = GhosttyAdapter::default_config_path(&xdg_dir);
-        assert!(path.to_string_lossy().contains("config.ghostty"));
+        assert!(path.ends_with("ghostty/config"));
+        assert!(!path.to_string_lossy().ends_with("config.ghostty"));
     }
 
     #[test]
-    fn test_ghostty_candidate_paths_includes_xdg() {
+    fn test_ghostty_candidate_paths_includes_both_names() {
         let xdg_dir = PathBuf::from("/test/.config/ghostty");
         let candidates = GhosttyAdapter::candidate_paths(&xdg_dir, Some("/home/user"));
+        // Must include both config (primary) and config.ghostty (legacy)
+        assert!(candidates.iter().any(|p| p.ends_with("ghostty/config")));
         assert!(candidates
             .iter()
             .any(|p| p.to_string_lossy().contains("config.ghostty")));
@@ -449,7 +457,7 @@ mod tests {
         let adapter = GhosttyAdapter;
 
         let path = adapter.integration_config_path_with_env(&env).unwrap();
-        assert!(path.ends_with("config.ghostty"));
+        assert!(path.ends_with("ghostty/config"));
     }
 
     #[test]
@@ -607,7 +615,7 @@ mod tests {
 
         // Apply theme
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
-        adapter.apply_theme(&theme).unwrap();
+        adapter.apply_theme_with_env(&theme, &env).unwrap();
 
         let new_content = fs::read_to_string(&integration_path).unwrap();
 

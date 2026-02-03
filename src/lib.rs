@@ -1,5 +1,6 @@
 pub mod brand;
 pub mod design;
+pub mod detection;
 pub mod env;
 pub mod opacity;
 pub mod platform;

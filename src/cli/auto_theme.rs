@@ -78,8 +78,8 @@ pub fn resolve_auto_theme(_env: &SlateEnv, config: &ConfigManager) -> Result<Str
             }
 
             // 4c: If no match, check auto_pair
-            if let Some(pair_id) = current_theme.auto_pair {
-                return Ok(pair_id.to_string());
+            if let Some(pair_id) = current_theme.auto_pair.as_ref() {
+                return Ok(pair_id.clone());
             }
         }
     }

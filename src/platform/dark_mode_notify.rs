@@ -93,7 +93,9 @@ pub fn is_running() -> Result<bool> {
     let status = Command::new("pgrep")
         .args(["-qf", PROCESS_PATTERN])
         .status()
-        .map_err(|e| SlateError::PlatformError(format!("Failed to check watcher process state: {}", e)))?;
+        .map_err(|e| {
+            SlateError::PlatformError(format!("Failed to check watcher process state: {}", e))
+        })?;
 
     Ok(status.success())
 }
@@ -113,6 +115,38 @@ pub fn stop() -> Result<()> {
         "Watcher stop command exited with status {}",
         status
     )))
+}
+
+/// Start the watcher process in the background if not already running.
+/// The watcher calls `slate theme --auto --quiet` on each macOS appearance change.
+pub fn start(config: &ConfigManager) -> Result<()> {
+    if is_running()? {
+        return Ok(());
+    }
+
+    let bin_path = binary_path(config)?;
+    if !bin_path.exists() {
+        return Err(SlateError::PlatformError(
+            "Watcher binary not found. Run 'slate config set auto-theme enable' first.".to_string(),
+        ));
+    }
+
+    let slate_bin = std::env::current_exe()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "slate".to_string());
+
+    Command::new(&bin_path)
+        .args([&slate_bin, "theme", "--auto", "--quiet"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| {
+            SlateError::PlatformError(format!("Failed to start watcher process: {}", e))
+        })?;
+
+    Ok(())
 }
 
 /// Remove the compiled binary

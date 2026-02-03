@@ -7,7 +7,7 @@ fn main() {
 
     // Read the Swift source
     let swift_source_path = "resources/dark-mode-notify.swift";
-    
+
     if !std::path::Path::new(swift_source_path).exists() {
         eprintln!("Swift source file not found at {}", swift_source_path);
         panic!("Swift source file missing");

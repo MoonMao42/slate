@@ -92,7 +92,14 @@ enum ConfigSubcommand {
     },
 }
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
     error::install_error_handler()?;
 
     // Initialize SlateEnv from process environment early
@@ -100,90 +107,44 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    match cli.command {
+    let result = match cli.command {
         None => {
             // Bare `slate` invocation routes to hub
-            cli::hub::handle()?;
+            cli::hub::handle()
         }
         Some(Commands::Setup { quick, force, only }) => {
-            // Dispatch to setup handler with env
-            match cli::setup::handle_with_env(quick, force, only, &env) {
-                Err(error::SlateError::UserCancelled) => {
-                    let _ = cliclack::outro_cancel("✦ Setup cancelled.");
-                    std::process::exit(130);
-                }
-                Err(error::SlateError::IOError(ref e))
-                    if e.kind() == std::io::ErrorKind::Interrupted =>
-                {
-                    // Fallback: IO interrupted that slipped past handle_cliclack_error
-                    let _ = cliclack::outro_cancel("✦ Setup cancelled.");
-                    std::process::exit(130);
-                }
-                other => other?,
-            }
+            cli::setup::handle_with_env(quick, force, only, &env)
         }
-        Some(Commands::Set { theme, auto }) => {
-            // Dispatch to set handler
-            let mut args: Vec<&str> = Vec::new();
-            if auto {
-                args.push("--auto");
-            } else if let Some(t) = theme.as_ref() {
-                args.push(t.as_str());
-            }
-            cli::set::handle(&args)?;
-        }
-        Some(Commands::Theme { name, auto, quiet }) => {
-            cli::theme::handle_theme(name, auto, quiet)?;
-        }
-        Some(Commands::Font { name }) => {
-            cli::font::handle_font(name.as_deref())?;
-        }
+        Some(Commands::Set { theme, auto }) => cli::set::handle(theme.as_deref(), auto),
+        Some(Commands::Theme { name, auto, quiet }) => cli::theme::handle_theme(name, auto, quiet),
+        Some(Commands::Font { name }) => cli::font::handle_font(name.as_deref()),
         Some(Commands::Config { subcommand }) => match subcommand {
-            ConfigSubcommand::Set { key, value } => {
-                cli::config::handle_config_set(&key, &value)?;
-            }
+            ConfigSubcommand::Set { key, value } => cli::config::handle_config_set(&key, &value),
         },
-        Some(Commands::Status) => {
-            cli::status::handle(&[])?;
-        }
-        Some(Commands::List) => {
-            cli::list::handle(&[])?;
-        }
-        Some(Commands::Clean) => {
-            cli::clean::handle_clean()?;
-        }
-        Some(Commands::Restore {
-            id,
-            list,
-            delete,
-        }) => {
-            // Build arguments vector for restore handler
-            let mut args: Vec<&str> = Vec::new();
-
-            if list {
-                args.push("--list");
-            } else if let Some(del_id) = &delete {
-                args.push("--delete");
-                args.push(del_id.as_str());
-            } else if let Some(restore_id) = &id {
-                args.push(restore_id.as_str());
-            }
-
-            cli::restore::handle(&args)?;
+        Some(Commands::Status) => cli::status::handle(&[]),
+        Some(Commands::List) => cli::list::handle(&[]),
+        Some(Commands::Clean) => cli::clean::handle_clean(),
+        Some(Commands::Restore { id, list, delete }) => {
+            cli::restore::handle(id.as_deref(), list, delete.as_deref())
         }
         Some(Commands::Reset { id }) => {
             // reset is now a compatibility alias that routes to restore
             println!("(i) Tip: 'slate reset' is transitioning to 'slate restore'. Use 'slate restore [id]' next time.");
             println!();
-
-            let mut args: Vec<&str> = Vec::new();
-            if let Some(restore_id) = &id {
-                args.push(restore_id.as_str());
-            }
-
-            cli::restore::handle(&args)?;
+            cli::restore::handle(id.as_deref(), false, None)
         }
-    }
+    };
 
-    Ok(())
+    // Unified cancellation handling — clean exit with no error dump
+    match result {
+        Err(error::SlateError::UserCancelled) => {
+            let _ = cliclack::outro_cancel("");
+            std::process::exit(130);
+        }
+        Err(error::SlateError::IOError(ref e)) if e.kind() == std::io::ErrorKind::Interrupted => {
+            let _ = cliclack::outro_cancel("");
+            std::process::exit(130);
+        }
+        other => Ok(other?),
+    }
 }

@@ -5,6 +5,7 @@
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::config::ConfigManager;
+use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -15,18 +16,25 @@ use std::path::{Path, PathBuf};
 pub struct AlacrittyAdapter;
 
 impl AlacrittyAdapter {
-    /// Get config home directory (XDG default)
-    fn config_home() -> Result<PathBuf> {
-        let env = SlateEnv::from_process()?;
-        Ok(env.xdg_config_home().to_path_buf())
+    fn config_home_with_env(env: &SlateEnv) -> PathBuf {
+        env.xdg_config_home().to_path_buf()
     }
 
     /// Resolve Alacritty config path, respecting ALACRITTY_SOCKET_PATH and XDG_CONFIG_HOME.
     fn resolve_config_path() -> Result<PathBuf> {
-        let config_home = Self::config_home()?;
+        let env = SlateEnv::from_process()?;
+        Ok(Self::resolve_config_path_with_env(&env))
+    }
+
+    fn resolve_config_path_with_env(env: &SlateEnv) -> PathBuf {
+        let config_home = Self::config_home_with_env(env);
 
         // Alacritty default: ~/.config/alacritty/alacritty.toml
-        Ok(config_home.join("alacritty").join("alacritty.toml"))
+        config_home.join("alacritty").join("alacritty.toml")
+    }
+
+    pub(crate) fn integration_config_path_with_env(env: &SlateEnv) -> PathBuf {
+        Self::resolve_config_path_with_env(env)
     }
 
     /// Render Palette into Alacritty TOML color scheme structure.
@@ -100,7 +108,11 @@ impl AlacrittyAdapter {
             }
         }
         // Remove empty [font] table after clearing children
-        if doc.get("font").and_then(|f| f.as_table()).is_some_and(|t| t.is_empty()) {
+        if doc
+            .get("font")
+            .and_then(|f| f.as_table())
+            .is_some_and(|t| t.is_empty())
+        {
             doc.remove("font");
         }
 
@@ -130,7 +142,9 @@ impl AlacrittyAdapter {
         }
 
         let import_array = doc["general"]["import"].as_array_mut().ok_or_else(|| {
-            SlateError::InvalidConfig("Alacritty 'general.import' field is not an array".to_string())
+            SlateError::InvalidConfig(
+                "Alacritty 'general.import' field is not an array".to_string(),
+            )
         })?;
 
         // Idempotent: check if managed path already present
@@ -162,12 +176,15 @@ impl AlacrittyAdapter {
     /// Does not touch colors or call theme apply.
     pub fn apply_font_only(env: &SlateEnv, font_name: &str) -> Result<()> {
         let config_manager = ConfigManager::with_env(env)?;
-        let integration_path = Self::resolve_config_path()?;
+        let integration_path = Self::resolve_config_path_with_env(env);
 
         // Write only the font section to dedicated font.toml
-        let font_content = format!("[font.normal]
+        let font_content = format!(
+            "[font.normal]
 family = \"{}\"
-", font_name);
+",
+            font_name
+        );
         config_manager.write_managed_file("alacritty", "font.toml", &font_content)?;
 
         // Ensure integration file includes the font.toml file
@@ -186,19 +203,7 @@ impl ToolAdapter for AlacrittyAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        // Check if binary exists in PATH
-        let binary_exists = which::which("alacritty").is_ok();
-
-        // Check if config directory exists
-        let config_home = match Self::config_home() {
-            Ok(home) => home,
-            Err(_) => return Ok(binary_exists),
-        };
-
-        let config_dir = config_home.join("alacritty");
-        let config_dir_exists = config_dir.exists();
-
-        Ok(binary_exists || config_dir_exists)
+        Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
@@ -259,9 +264,7 @@ impl ToolAdapter for AlacrittyAdapter {
         // Touch the main config to trigger Alacritty's live_config_reload,
         // which only watches the main file, not imported files.
         if integration_path.exists() {
-            let _ = fs::OpenOptions::new()
-                .append(true)
-                .open(&integration_path);
+            let _ = fs::OpenOptions::new().append(true).open(&integration_path);
         }
 
         Ok(ApplyOutcome::Applied)

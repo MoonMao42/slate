@@ -7,7 +7,6 @@ mod font_integration_tests {
     use slate_cli::adapter::font::FontAdapter;
     use slate_cli::env::SlateEnv;
     use std::fs;
-    use std::path::PathBuf;
     use tempfile::TempDir;
 
     /// Test: Changing font updates managed font files
@@ -20,14 +19,22 @@ mod font_integration_tests {
         let ghostty_dir = env.xdg_config_home().join("ghostty");
         fs::create_dir_all(&ghostty_dir).unwrap();
         let ghostty_config = ghostty_dir.join("config.ghostty");
-        fs::write(&ghostty_config, "# Ghostty config
-").unwrap();
+        fs::write(
+            &ghostty_config,
+            "# Ghostty config
+",
+        )
+        .unwrap();
 
         let alacritty_dir = env.xdg_config_home().join("alacritty");
         fs::create_dir_all(&alacritty_dir).unwrap();
         let alacritty_config = alacritty_dir.join("alacritty.toml");
-        fs::write(&alacritty_config, "[general]
-").unwrap();
+        fs::write(
+            &alacritty_config,
+            "[general]
+",
+        )
+        .unwrap();
 
         // Apply font
         FontAdapter::apply_font(&env, "JetBrainsMono Nerd Font").unwrap();
@@ -78,20 +85,31 @@ mod font_integration_tests {
         // Setup: Create integration configs
         let ghostty_dir = env.xdg_config_home().join("ghostty");
         fs::create_dir_all(&ghostty_dir).unwrap();
-        fs::write(ghostty_dir.join("config.ghostty"), "# Config
-").unwrap();
+        fs::write(
+            ghostty_dir.join("config.ghostty"),
+            "# Config
+",
+        )
+        .unwrap();
 
         let alacritty_dir = env.xdg_config_home().join("alacritty");
         fs::create_dir_all(&alacritty_dir).unwrap();
-        fs::write(alacritty_dir.join("alacritty.toml"), "[general]
-").unwrap();
+        fs::write(
+            alacritty_dir.join("alacritty.toml"),
+            "[general]
+",
+        )
+        .unwrap();
 
         // Apply font
         FontAdapter::apply_font(&env, "Fira Code Nerd Font").unwrap();
 
         // Verify: Check that current-font was persisted
         let current_font_file = env.config_dir().join("current-font");
-        assert!(current_font_file.exists(), "current-font file should be created");
+        assert!(
+            current_font_file.exists(),
+            "current-font file should be created"
+        );
 
         let persisted_font = fs::read_to_string(&current_font_file)
             .unwrap()
@@ -113,20 +131,32 @@ mod font_integration_tests {
         let ghostty_managed = env.config_dir().join("managed/ghostty");
         fs::create_dir_all(&ghostty_managed).unwrap();
         let theme_conf = ghostty_managed.join("theme.conf");
-        fs::write(&theme_conf, "# Original theme colors
-").unwrap();
+        fs::write(
+            &theme_conf,
+            "# Original theme colors
+",
+        )
+        .unwrap();
         let original_theme_content = fs::read_to_string(&theme_conf).unwrap();
 
         // Create integration configs
         let ghostty_dir = env.xdg_config_home().join("ghostty");
         fs::create_dir_all(&ghostty_dir).unwrap();
-        fs::write(ghostty_dir.join("config.ghostty"), "# Config
-").unwrap();
+        fs::write(
+            ghostty_dir.join("config.ghostty"),
+            "# Config
+",
+        )
+        .unwrap();
 
         let alacritty_dir = env.xdg_config_home().join("alacritty");
         fs::create_dir_all(&alacritty_dir).unwrap();
-        fs::write(alacritty_dir.join("alacritty.toml"), "[general]
-").unwrap();
+        fs::write(
+            alacritty_dir.join("alacritty.toml"),
+            "[general]
+",
+        )
+        .unwrap();
 
         // Apply font
         FontAdapter::apply_font(&env, "Iosevka Nerd Font").unwrap();
@@ -148,20 +178,32 @@ mod font_integration_tests {
         // Setup: Create a marker file in integration directory
         let shell_integ = env.config_dir().join("integration/env.zsh");
         fs::create_dir_all(shell_integ.parent().unwrap()).unwrap();
-        fs::write(&shell_integ, "# Original integration
-").unwrap();
+        fs::write(
+            &shell_integ,
+            "# Original integration
+",
+        )
+        .unwrap();
         let original_integ = fs::read_to_string(&shell_integ).unwrap();
 
         // Create integration configs
         let ghostty_dir = env.xdg_config_home().join("ghostty");
         fs::create_dir_all(&ghostty_dir).unwrap();
-        fs::write(ghostty_dir.join("config.ghostty"), "# Config
-").unwrap();
+        fs::write(
+            ghostty_dir.join("config.ghostty"),
+            "# Config
+",
+        )
+        .unwrap();
 
         let alacritty_dir = env.xdg_config_home().join("alacritty");
         fs::create_dir_all(&alacritty_dir).unwrap();
-        fs::write(alacritty_dir.join("alacritty.toml"), "[general]
-").unwrap();
+        fs::write(
+            alacritty_dir.join("alacritty.toml"),
+            "[general]
+",
+        )
+        .unwrap();
 
         // Apply font
         FontAdapter::apply_font(&env, "Hack Nerd Font").unwrap();

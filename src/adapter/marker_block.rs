@@ -15,6 +15,10 @@
 //! ```
 
 use crate::error::SlateError;
+use atomic_write_file::AtomicWriteFile;
+use std::fs;
+use std::io::Write;
+use std::path::Path;
 
 /// Start marker for managed blocks
 pub const START: &str = "# slate:start — managed by slate, do not edit";
@@ -98,6 +102,38 @@ pub fn upsert_managed_block(content: &str, block: &str) -> String {
     }
 
     cleaned
+}
+
+fn write_atomic(path: &Path, content: &str) -> Result<(), SlateError> {
+    let mut file = AtomicWriteFile::open(path)?;
+    file.write_all(content.as_bytes())?;
+    file.commit()?;
+    Ok(())
+}
+
+/// Upsert a managed block in a file, creating the file if it does not exist.
+pub fn upsert_managed_block_file(path: &Path, block: &str) -> Result<(), SlateError> {
+    let content = if path.exists() {
+        fs::read_to_string(path)?
+    } else {
+        String::new()
+    };
+
+    validate_block_state(&content)?;
+    let updated = upsert_managed_block(&content, block);
+    write_atomic(path, &updated)
+}
+
+/// Remove managed blocks from a file if it exists.
+pub fn remove_managed_blocks_from_file(path: &Path) -> Result<(), SlateError> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(path)?;
+    validate_block_state(&content)?;
+    let cleaned = strip_managed_blocks(&content);
+    write_atomic(path, &cleaned)
 }
 
 #[cfg(test)]

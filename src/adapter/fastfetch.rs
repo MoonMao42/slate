@@ -4,11 +4,11 @@
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
+use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::path::PathBuf;
-use which::which;
 
 /// fastfetch adapter implementing v2 ToolAdapter trait.
 pub struct FastfetchAdapter;
@@ -27,13 +27,7 @@ impl ToolAdapter for FastfetchAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        let binary_exists = which("fastfetch").is_ok();
-        let config_dir_exists = match Self::config_home() {
-            Ok(home) => home.join("fastfetch").exists(),
-            Err(_) => false,
-        };
-
-        Ok(binary_exists || config_dir_exists)
+        Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {

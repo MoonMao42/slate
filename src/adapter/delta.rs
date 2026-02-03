@@ -5,11 +5,11 @@
 
 use crate::adapter::{marker_block, ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
+use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
-use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// delta adapter implementing v2 ToolAdapter trait.
 pub struct DeltaAdapter;
@@ -23,7 +23,7 @@ impl DeltaAdapter {
     }
 
     /// Format include path for gitconfig
-    fn format_gitconfig_include_path(config_path: &PathBuf) -> String {
+    fn format_gitconfig_include_path(config_path: &Path) -> String {
         let escaped = config_path
             .display()
             .to_string()
@@ -33,7 +33,7 @@ impl DeltaAdapter {
     }
 
     /// Render delta config in gitconfig INI format with marker blocks
-    fn render_delta_config(_theme: &ThemeVariant, managed_path: &PathBuf) -> String {
+    fn render_delta_config(_theme: &ThemeVariant, managed_path: &Path) -> String {
         let managed_str = Self::format_gitconfig_include_path(managed_path);
         format!(
             "{}\n[include]\n\tpath = {}\n{}\n",
@@ -66,9 +66,7 @@ impl ToolAdapter for DeltaAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        // delta requires git (git config delta.useDeltas true)
-        // Check if git binary exists in PATH
-        Ok(which::which("git").is_ok())
+        Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
@@ -99,30 +97,10 @@ impl ToolAdapter for DeltaAdapter {
         let config_mgr = ConfigManager::new()?;
         config_mgr.write_managed_file("delta", "colors", &delta_colors)?;
 
-        // Read current gitconfig
         let gitconfig_path = Self::gitconfig_path()?;
-        let gitconfig_content = if gitconfig_path.exists() {
-            fs::read_to_string(&gitconfig_path)?
-        } else {
-            String::new()
-        };
-
-        // Validate marker block state before modifying
-        marker_block::validate_block_state(&gitconfig_content)?;
-
-        // Build new marker block with include directive
         let managed_path = self.managed_config_path().join("colors");
         let new_block = Self::render_delta_config(theme, &managed_path);
-
-        // Upsert managed block
-        let updated_content = marker_block::upsert_managed_block(&gitconfig_content, &new_block);
-
-        // Write back to gitconfig (atomic per)
-        use atomic_write_file::AtomicWriteFile;
-        use std::io::Write;
-        let mut file = AtomicWriteFile::open(&gitconfig_path)?;
-        file.write_all(updated_content.as_bytes())?;
-        file.commit()?;
+        marker_block::upsert_managed_block_file(&gitconfig_path, &new_block)?;
 
         Ok(ApplyOutcome::Applied)
     }

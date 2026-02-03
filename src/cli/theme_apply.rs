@@ -1,7 +1,7 @@
 use crate::adapter::{SkipReason, ToolApplyResult, ToolApplyStatus, ToolRegistry};
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
-use crate::error::{Result, SlateError};
+use crate::error::Result;
 use crate::theme::ThemeVariant;
 
 /// Coordinated result for a single theme application run.
@@ -56,10 +56,9 @@ impl<'a> ThemeApplyCoordinator<'a> {
         let results = registry.apply_theme_to_all(theme);
         let report = ThemeApplyReport { results };
 
-        if report.applied_count() == 0 {
-            return Err(self.no_success_error(&report));
-        }
-
+        // Still persist theme and write shell integration even if no adapters applied.
+        // This handles fresh users where config files were just created — the theme
+        // data is written to managed/ files and shell integration (env.zsh) regardless.
         let config = ConfigManager::with_env(self.env)?;
         config.set_current_theme(&theme.id)?;
         config.write_shell_integration_file(theme)?;
@@ -71,37 +70,6 @@ impl<'a> ThemeApplyCoordinator<'a> {
         }
 
         Ok(report)
-    }
-
-    fn no_success_error(&self, report: &ThemeApplyReport) -> SlateError {
-        let mut details = Vec::new();
-
-        for result in &report.results {
-            match &result.status {
-                ToolApplyStatus::Failed(err) => {
-                    details.push(format!("{} failed: {}", result.tool_name, err));
-                }
-                ToolApplyStatus::Skipped(SkipReason::MissingIntegrationConfig) => {
-                    details.push(format!(
-                        "{} skipped: missing integration config",
-                        result.tool_name
-                    ));
-                }
-                ToolApplyStatus::Skipped(SkipReason::NotInstalled) => {}
-                ToolApplyStatus::Applied => {}
-            }
-        }
-
-        let reason = if details.is_empty() {
-            "No adapters were successfully configured".to_string()
-        } else {
-            format!(
-                "No adapters were successfully configured: {}",
-                details.join("; ")
-            )
-        };
-
-        SlateError::ApplyThemeFailed("all".to_string(), reason)
     }
 }
 
@@ -118,12 +86,15 @@ pub fn log_apply_report(report: &ThemeApplyReport) {
     }
 }
 
-pub fn apply_theme_selection(theme: &ThemeVariant) -> Result<()> {
+pub fn apply_theme_selection(theme: &ThemeVariant) -> Result<ThemeApplyReport> {
     let env = SlateEnv::from_process()?;
     apply_theme_selection_with_env(theme, &env)
 }
 
-pub fn apply_theme_selection_with_env(theme: &ThemeVariant, env: &SlateEnv) -> Result<()> {
+pub fn apply_theme_selection_with_env(
+    theme: &ThemeVariant,
+    env: &SlateEnv,
+) -> Result<ThemeApplyReport> {
     // Snapshot current state before switching themes
     let config = crate::config::ConfigManager::with_env(env)?;
     let current_theme = config.get_current_theme()?.unwrap_or_default();
@@ -133,13 +104,14 @@ pub fn apply_theme_selection_with_env(theme: &ThemeVariant, env: &SlateEnv) -> R
 
     let report = ThemeApplyCoordinator::new(env).apply(theme)?;
     log_apply_report(&report);
-    Ok(())
+    Ok(report)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::adapter::{SkipReason, ToolApplyStatus};
+    use crate::error::SlateError;
 
     #[test]
     fn test_report_counts_statuses() {

@@ -5,13 +5,13 @@
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::config::ConfigManager;
+use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, Value};
-use which::which;
 
 /// Starship adapter implementing v2 ToolAdapter trait.
 pub struct StarshipAdapter;
@@ -69,6 +69,13 @@ impl StarshipAdapter {
         }
         config_home.join("starship.toml")
     }
+
+    pub(crate) fn integration_config_path_with_env(env: &SlateEnv) -> PathBuf {
+        Self::resolve_path(
+            std::env::var("STARSHIP_CONFIG").ok().as_deref(),
+            env.xdg_config_home(),
+        )
+    }
 }
 
 impl ToolAdapter for StarshipAdapter {
@@ -77,22 +84,12 @@ impl ToolAdapter for StarshipAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        let binary_exists = which("starship").is_ok();
-
-        let config_exists = match self.integration_config_path() {
-            Ok(path) => path.exists(),
-            Err(_) => false,
-        };
-
-        Ok(binary_exists || config_exists)
+        Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-        Ok(Self::resolve_path(
-            std::env::var("STARSHIP_CONFIG").ok().as_deref(),
-            env.xdg_config_home(),
-        ))
+        Ok(Self::integration_config_path_with_env(&env))
     }
 
     fn managed_config_path(&self) -> PathBuf {

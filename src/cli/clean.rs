@@ -1,9 +1,7 @@
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::{config::ConfigManager, platform};
-use atomic_write_file::AtomicWriteFile;
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 /// Handle `slate clean` command
@@ -57,45 +55,5 @@ Use 'slate restore' to recover from a snapshot.",
 /// Handles multiple blocks and preserves rest of file content
 fn remove_marker_block_from_zshrc(home: &Path) -> Result<()> {
     let zshrc_path = home.join(".zshrc");
-
-    if !zshrc_path.exists() {
-        return Ok(());
-    }
-
-    let content = fs::read_to_string(&zshrc_path)?;
-    let lines: Vec<&str> = content.lines().collect();
-
-    // Find all marker blocks and collect their ranges (handles multiple blocks)
-    let mut indices_to_remove = Vec::new();
-    let mut in_block = false;
-    let mut block_start = 0;
-
-    for (i, line) in lines.iter().enumerate() {
-        if line.trim().starts_with("# slate:start") {
-            if !in_block {
-                in_block = true;
-                block_start = i;
-            }
-        } else if line.trim().starts_with("# slate:end") && in_block {
-            indices_to_remove.push(block_start..=i);
-            in_block = false;
-        }
-    }
-
-    // Reconstruct file without marker blocks
-    let filtered_lines: Vec<&str> = lines
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| !indices_to_remove.iter().any(|r| r.contains(i)))
-        .map(|(_, line)| *line)
-        .collect();
-
-    let new_content = filtered_lines.join("\n");
-
-    // Write atomically using AtomicWriteFile::open
-    let mut writer = AtomicWriteFile::open(&zshrc_path)?;
-    writer.write_all(new_content.as_bytes())?;
-    writer.commit()?;
-
-    Ok(())
+    crate::adapter::marker_block::remove_managed_blocks_from_file(&zshrc_path)
 }

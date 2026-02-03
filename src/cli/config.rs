@@ -14,6 +14,9 @@ pub(crate) fn enable_auto_theme(config: &ConfigManager) -> Result<()> {
         return Err(err);
     }
 
+    // Start watcher immediately so the user doesn't have to open a new terminal
+    let _ = platform::dark_mode_notify::start(config);
+
     Ok(())
 }
 
@@ -66,7 +69,9 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
                     enable_auto_theme(&config)?;
 
                     println!("{} Auto theme enabled", Symbols::SUCCESS);
-                    println!("  New Ghostty shell sessions will auto-switch on macOS appearance change");
+                    println!(
+                        "  New Ghostty shell sessions will auto-switch on macOS appearance change"
+                    );
                     println!("  Run 'slate config set auto-theme configure' to customize dark/light pairing");
                     Ok(())
                 }
@@ -77,13 +82,14 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
                     Ok(())
                 }
                 "configure" => {
-                    // Launch Configure Auto Theme two-step cliclack flow (reuse from)
                     crate::cli::auto_theme::configure_auto_theme()?;
 
-                    // If auto-theme is now enabled, regenerate shell integration
                     if config.is_auto_theme_enabled()? {
                         platform::dark_mode_notify::ensure_binary(&config)?;
                         config.refresh_shell_integration()?;
+                        // Restart watcher so new pairing takes effect immediately
+                        let _ = platform::dark_mode_notify::stop();
+                        let _ = platform::dark_mode_notify::start(&config);
                     }
 
                     Ok(())
@@ -94,26 +100,24 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
                 ))),
             }
         }
-        "fastfetch" => {
-            match value {
-                "enable" => {
-                    config.enable_fastfetch_autorun()?;
-                    config.refresh_shell_integration()?;
-                    println!("{} Fastfetch auto-run enabled", Symbols::SUCCESS);
-                    Ok(())
-                }
-                "disable" => {
-                    config.disable_fastfetch_autorun()?;
-                    config.refresh_shell_integration()?;
-                    println!("{} Fastfetch auto-run disabled", Symbols::SUCCESS);
-                    Ok(())
-                }
-                _ => Err(crate::error::SlateError::InvalidConfig(format!(
-                    "Invalid fastfetch action: '{}'. Must be one of: enable, disable",
-                    value
-                ))),
+        "fastfetch" => match value {
+            "enable" => {
+                config.enable_fastfetch_autorun()?;
+                config.refresh_shell_integration()?;
+                println!("{} Fastfetch auto-run enabled", Symbols::SUCCESS);
+                Ok(())
             }
-        }
+            "disable" => {
+                config.disable_fastfetch_autorun()?;
+                config.refresh_shell_integration()?;
+                println!("{} Fastfetch auto-run disabled", Symbols::SUCCESS);
+                Ok(())
+            }
+            _ => Err(crate::error::SlateError::InvalidConfig(format!(
+                "Invalid fastfetch action: '{}'. Must be one of: enable, disable",
+                value
+            ))),
+        },
         _ => Err(crate::error::SlateError::InvalidConfig(format!(
             "Unknown config key: '{}'. Known keys: opacity, auto-theme, fastfetch",
             key

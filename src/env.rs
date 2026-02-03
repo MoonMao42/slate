@@ -93,6 +93,11 @@ impl SlateEnv {
         self.home.join(".zshrc")
     }
 
+    /// Get the per-user local bin directory (~/.local/bin).
+    pub fn user_local_bin(&self) -> PathBuf {
+        self.home.join(".local").join("bin")
+    }
+
     /// Get path to a managed config file (e.g., current, current-font, auto.toml)
     pub fn managed_file(&self, filename: &str) -> PathBuf {
         self.slate_config_dir.join(filename)
@@ -137,6 +142,14 @@ mod tests {
         let zshrc = env.zshrc_path();
 
         assert!(zshrc.ends_with(".zshrc"));
+    }
+
+    #[test]
+    fn test_user_local_bin_path() {
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+
+        assert!(env.user_local_bin().ends_with(".local/bin"));
     }
 
     #[test]

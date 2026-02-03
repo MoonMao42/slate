@@ -140,10 +140,6 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
     use crate::adapter::palette_renderer::PaletteRenderer;
 
     const RESET: &str = "\x1b[0m";
-    let fg = |hex: &str| -> String {
-        let (r, g, b) = PaletteRenderer::hex_to_rgb(hex).unwrap_or((200, 200, 200));
-        format!("\x1b[38;2;{};{};{}m", r, g, b)
-    };
     let bg = |hex: &str| -> String {
         let (r, g, b) = PaletteRenderer::hex_to_rgb(hex).unwrap_or((200, 200, 200));
         format!("\x1b[48;2;{};{};{}m", r, g, b)
@@ -197,7 +193,7 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
     if !palette.extras.is_empty() {
         output.push_str("Extras: ");
         let mut sorted_extras: Vec<_> = palette.extras.iter().collect();
-        sorted_extras.sort_by_key(|(name, _)| name.clone());
+        sorted_extras.sort_by(|(left, _), (right, _)| left.cmp(right));
         let mut extra_count = 0;
         for (name, color) in &sorted_extras {
             output.push_str(&bg(color));
@@ -233,12 +229,6 @@ mod tests {
             role: SemanticColor::Muted,
         };
         assert_eq!(span.text, "test");
-    }
-
-    #[test]
-    fn test_sample_tokens_not_empty() {
-        assert!(!SAMPLE_TOKENS.is_empty());
-        assert!(SAMPLE_TOKENS.len() > 10);
     }
 
     #[test]

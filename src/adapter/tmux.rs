@@ -5,11 +5,11 @@
 
 use crate::adapter::{marker_block, ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
+use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
-use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// tmux adapter implementing v2 ToolAdapter trait.
@@ -60,7 +60,7 @@ impl TmuxAdapter {
     }
 
     /// Render managed block with source-file directive
-    fn render_tmux_block(managed_path: &PathBuf) -> String {
+    fn render_tmux_block(managed_path: &Path) -> String {
         let managed_str = managed_path.display().to_string();
         format!(
             "{}\nsource-file {}\n{}\n",
@@ -77,9 +77,7 @@ impl ToolAdapter for TmuxAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        // Check if tmux binary exists in PATH
-        // This is optional tool: if not found, return false (no error)
-        Ok(which::which("tmux").is_ok())
+        Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
@@ -110,30 +108,10 @@ impl ToolAdapter for TmuxAdapter {
         let config_mgr = ConfigManager::new()?;
         config_mgr.write_managed_file("tmux", "colors.conf", &tmux_colors)?;
 
-        // Read current .tmux.conf
         let tmux_conf_path = Self::tmux_conf_path()?;
-        let tmux_content = if tmux_conf_path.exists() {
-            fs::read_to_string(&tmux_conf_path)?
-        } else {
-            String::new()
-        };
-
-        // Validate marker block state before modifying
-        marker_block::validate_block_state(&tmux_content)?;
-
-        // Build new marker block with source-file directive
         let managed_colors_path = self.managed_config_path().join("colors.conf");
         let new_block = Self::render_tmux_block(&managed_colors_path);
-
-        // Upsert managed block
-        let updated_content = marker_block::upsert_managed_block(&tmux_content, &new_block);
-
-        // Write back to .tmux.conf (atomic per)
-        use atomic_write_file::AtomicWriteFile;
-        use std::io::Write;
-        let mut file = AtomicWriteFile::open(&tmux_conf_path)?;
-        file.write_all(updated_content.as_bytes())?;
-        file.commit()?;
+        marker_block::upsert_managed_block_file(&tmux_conf_path, &new_block)?;
 
         Ok(ApplyOutcome::Applied)
     }

@@ -5,6 +5,7 @@
 
 use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
+use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -53,25 +54,7 @@ impl ToolAdapter for ZshHighlightAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        let home = Self::home()?;
-
-        // Check if plugin installed in oh-my-zsh
-        let omz_plugin = home.join(".oh-my-zsh/plugins/zsh-syntax-highlighting");
-        if omz_plugin.exists() {
-            return Ok(true);
-        }
-
-        // Check if zsh-syntax-highlighting is sourced or installed in .zshrc
-        let zshrc = home.join(".zshrc");
-        if zshrc.exists() {
-            if let Ok(content) = fs::read_to_string(&zshrc) {
-                if content.contains("zsh-syntax-highlighting") {
-                    return Ok(true);
-                }
-            }
-        }
-
-        Ok(false)
+        Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {

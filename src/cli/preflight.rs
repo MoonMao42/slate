@@ -1,5 +1,6 @@
-use crate::adapter::ToolRegistry;
 use crate::cli::font_selection::FontCatalog;
+use crate::cli::tool_selection::{detect_installed_tools_with_env, ToolCatalog};
+use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use std::process::Command;
@@ -48,13 +49,13 @@ pub fn run_checks() -> Result<PreflightResult> {
 pub fn run_checks_with_env(env: &SlateEnv) -> Result<PreflightResult> {
     let mut checks = Vec::new();
 
-    // Check 1: Homebrew is installed
+    // Check 1: Homebrew is installed (required for tool and font installation)
     checks.push(PreflightCheck {
         name: "Homebrew".to_string(),
         description: if is_homebrew_installed() {
             "installed".to_string()
         } else {
-            "not found (required for tool installation)".to_string()
+            "not found — install at https://brew.sh".to_string()
         },
         passed: is_homebrew_installed(),
     });
@@ -93,13 +94,16 @@ pub fn run_checks_with_env(env: &SlateEnv) -> Result<PreflightResult> {
     });
 
     // Check 5: Tools available
-    let registry = ToolRegistry::default();
-    let installed = registry.detect_installed();
+    let installed = detect_installed_tools_with_env(env);
     let tool_count = installed.values().filter(|&&v| v).count();
 
     checks.push(PreflightCheck {
         name: "Optional: Tools".to_string(),
-        description: format!("{} of 11 tools already installed", tool_count),
+        description: format!(
+            "{} of {} tools already installed",
+            tool_count,
+            ToolCatalog::all_tools().len()
+        ),
         passed: true, // Optional — user can install from scratch
     });
 
@@ -115,11 +119,8 @@ pub fn run_checks_with_env(env: &SlateEnv) -> Result<PreflightResult> {
 }
 
 /// Check if Homebrew is installed
-fn is_homebrew_installed() -> bool {
-    match Command::new("brew").arg("--version").output() {
-        Ok(status) => status.status.success(),
-        Err(_) => false,
-    }
+pub fn is_homebrew_installed() -> bool {
+    detection::homebrew_executable().is_some()
 }
 
 /// Check if Zsh is available

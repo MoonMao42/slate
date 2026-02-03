@@ -7,13 +7,12 @@ use crate::cli::tool_selection::{
     compute_install_candidates, detect_installed_tools, InstallAction, ReviewReceipt,
     TerminalSettings, ToolCatalog,
 };
-use crate::design::typography::Typography;
+use crate::cli::wizard_support;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use cliclack::{confirm, intro, multiselect, outro_cancel, select};
 use std::collections::HashMap;
 use std::fs;
-use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -154,7 +153,7 @@ impl Wizard {
     fn step_select_mode(&mut self) -> Result<()> {
         self.log_step("Select Setup Mode");
 
-        if !std::io::stdin().is_terminal() {
+        if !wizard_support::is_interactive() {
             self.context.mode = WizardMode::Quick;
             self.context.current_step += 1;
             return Ok(());
@@ -180,13 +179,10 @@ impl Wizard {
     fn step_select_preset_quick(&mut self) -> Result<()> {
         self.log_step("Select Style Preset");
 
-        if !std::io::stdin().is_terminal() {
+        if !wizard_support::is_interactive() {
             // Non-interactive: use the locked default preset.
             let preset = PresetCatalog::default_preset();
-            self.context.selected_font = Some(preset.font_id.to_string());
-            self.context.selected_theme = Some(preset.theme_id.to_string());
-            self.context.selected_terminal_settings =
-                Some(self.terminal_settings_from_preset(&preset));
+            wizard_support::apply_preset_selection(&mut self.context, &preset);
             self.context.current_step += 1;
             return Ok(());
         }
@@ -203,10 +199,7 @@ impl Wizard {
             .map_err(handle_cliclack_error)?;
 
         if let Some(preset) = PresetCatalog::get_preset(selected_preset_id) {
-            self.context.selected_font = Some(preset.font_id.to_string());
-            self.context.selected_theme = Some(preset.theme_id.to_string());
-            self.context.selected_terminal_settings =
-                Some(self.terminal_settings_from_preset(&preset));
+            wizard_support::apply_preset_selection(&mut self.context, &preset);
         }
 
         self.context.current_step += 1;
@@ -232,7 +225,7 @@ impl Wizard {
         }
 
         // Non-interactive quick mode: select all candidates by default
-        if !std::io::stdin().is_terminal() {
+        if !wizard_support::is_interactive() {
             self.context.selected_tools = candidates.iter().map(|c| c.id.to_string()).collect();
             self.context.current_step += 1;
             return Ok(());
@@ -264,29 +257,10 @@ impl Wizard {
     fn step_select_font(&mut self) -> Result<()> {
         self.log_step("Select Font");
 
-        // Display current font if available with better formatting
-        if let Some(ref current) = self.context.current_font {
-            eprintln!("{}", Typography::secondary_label("current font", current));
-        } else {
-            eprintln!(
-                "{}",
-                Typography::secondary_label("current font", "system default")
-            );
-        }
-        eprintln!();
+        wizard_support::print_current_font(self.context.current_font.as_deref());
+        let font_options = wizard_support::build_font_options();
 
-        // Build font options with skip
-        let fonts = FontCatalog::all_fonts();
-        let mut font_options: Vec<(&str, &str, String)> = fonts
-            .iter()
-            .map(|f| (f.id, f.name, format!("— {}", f.label)))
-            .collect();
-
-        // Add skip option manually (as a tuple)
-        let (skip_id, skip_label) = FontCatalog::skip_option();
-        font_options.push((skip_id, skip_label, "".to_string()));
-
-        if !std::io::stdin().is_terminal() {
+        if !wizard_support::is_interactive() {
             // Non-interactive: keep current font if present, otherwise preserve preset/default.
             self.context.current_step += 1;
             return Ok(());
@@ -318,39 +292,19 @@ impl Wizard {
     fn step_select_theme(&mut self) -> Result<()> {
         self.log_step("Select Theme");
 
-        if let Some(ref current_theme_id) = self.context.current_theme {
-            let current_label = self.resolve_theme_label(current_theme_id);
-            eprintln!(
-                "{}",
-                Typography::secondary_label("current theme", &current_label)
-            );
-        } else {
-            eprintln!(
-                "{}",
-                Typography::secondary_label("current theme", "not yet applied")
-            );
-        }
-        eprintln!();
+        wizard_support::print_current_theme(
+            &self.theme_selector,
+            self.context.current_theme.as_deref(),
+        );
 
         // Get all themes for display
         let all_themes = self.theme_selector.all_themes();
-        let mut theme_options: Vec<(String, String, String)> = Vec::new();
-
-        if let Some(current_theme_id) = &self.context.current_theme {
-            theme_options.push((
-                "keep-current".to_string(),
-                "Keep current theme".to_string(),
-                format!("— {}", self.resolve_theme_label(current_theme_id)),
-            ));
-        }
-
-        theme_options.extend(
-            all_themes
-                .iter()
-                .map(|t| (t.id.clone(), t.name.clone(), format!("— {}", t.family))),
+        let theme_options = wizard_support::build_theme_options(
+            &self.theme_selector,
+            self.context.current_theme.as_deref(),
         );
 
-        if !std::io::stdin().is_terminal() {
+        if !wizard_support::is_interactive() {
             // Non-interactive: keep current theme if present, otherwise preserve preset/default.
             if self.context.current_theme.is_none() && self.context.selected_theme.is_none() {
                 if let Some(first) = all_themes.first() {
@@ -382,35 +336,7 @@ impl Wizard {
     }
 
     fn display_tool_inventory(&self, installed: &HashMap<String, bool>) -> Result<()> {
-        eprintln!("\n{}\n", Typography::section_header("Tool Inventory"));
-
-        for tool in ToolCatalog::all_tools() {
-            let status_mark = if installed.get(tool.id).copied().unwrap_or(false) {
-                "✓"
-            } else if tool.detect_only {
-                "◆"
-            } else {
-                "○"
-            };
-
-            let install_note = if tool.detect_only {
-                " (synced if installed)"
-            } else if !tool.installable {
-                " (not installable)"
-            } else {
-                ""
-            };
-
-            eprintln!(
-                "{}",
-                Typography::list_item(
-                    status_mark.chars().next().unwrap_or('•'),
-                    tool.label,
-                    &format!("{}{}", tool.pitch, install_note)
-                )
-            );
-        }
-        eprintln!();
+        wizard_support::print_tool_inventory(installed);
         Ok(())
     }
 
@@ -433,20 +359,8 @@ impl Wizard {
         self.log_step("Select Background Style");
 
         // Get selected theme to make recommendation
-        let selected_theme_id = if let Some(tid) = &self.context.selected_theme {
-            tid.clone()
-        } else if let Some(tid) = &self.context.current_theme {
-            tid.clone()
-        } else {
-            // Fallback: use first theme
-            if let Some(first_theme) = self.theme_selector.all_themes().first() {
-                first_theme.id.clone()
-            } else {
-                return Err(crate::error::SlateError::InvalidThemeData(
-                    "No themes available".to_string(),
-                ));
-            }
-        };
+        let selected_theme_id =
+            wizard_support::resolve_theme_id_for_opacity(&self.context, &self.theme_selector)?;
 
         // Load the theme and get recommendation
         let registry = crate::theme::ThemeRegistry::new()?;
@@ -459,7 +373,7 @@ impl Wizard {
 
         let recommended = crate::opacity::recommended_opacity_for_theme(theme);
 
-        if !std::io::stdin().is_terminal() {
+        if !wizard_support::is_interactive() {
             // Non-interactive: use recommended opacity
             self.context.selected_opacity = Some(recommended);
             self.context.current_step += 1;
@@ -523,7 +437,7 @@ impl Wizard {
         // Default disabled (N), ask user in both modes
         self.log_step("Fastfetch Auto-Run");
 
-        if !std::io::stdin().is_terminal() {
+        if !wizard_support::is_interactive() {
             // Non-interactive mode: skip fastfetch prompt
             self.context.current_step += 1;
             return Ok(());
@@ -544,7 +458,7 @@ impl Wizard {
         let receipt = self.build_review_receipt();
         eprintln!("\n{}", self.display_receipt(&receipt));
 
-        if !std::io::stdin().is_terminal() {
+        if !wizard_support::is_interactive() {
             self.context.confirmed = true;
             self.context.current_step += 1;
             return Ok(());
@@ -629,18 +543,6 @@ impl Wizard {
             .map(|theme| theme.name.clone())
             .unwrap_or_else(|| theme_id_or_name.to_string())
     }
-
-    fn terminal_settings_from_preset(
-        &self,
-        preset: &crate::cli::preset_selection::StylePreset,
-    ) -> TerminalSettings {
-        TerminalSettings {
-            background_opacity: preset.visuals.background_opacity,
-            blur_enabled: preset.visuals.blur_radius > 0,
-            padding_x: preset.visuals.padding_x,
-            padding_y: preset.visuals.padding_y,
-        }
-    }
 }
 
 fn detect_current_theme_id() -> Option<String> {
@@ -693,14 +595,6 @@ mod tests {
 
         assert!(wizard.context.force);
         assert!(wizard.context.current_font.is_none());
-    }
-
-    #[test]
-    fn test_wizard_detects_font() {
-        let wizard = Wizard::new().unwrap();
-        let _context = wizard.get_context();
-        // current_font may be None or Some depending on environment
-        assert!(true); // Wizard created successfully with font detection
     }
 
     #[test]

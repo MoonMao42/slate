@@ -85,10 +85,10 @@ pub fn audit_palette(palette: &Palette) -> Vec<ContrastAudit> {
 /// Returns all failures with theme ID and color information.
 pub fn generate_full_audit_report(registry: &crate::theme::ThemeRegistry) -> Vec<AuditFailure> {
     let mut all_failures = Vec::new();
-    
+
     for theme in registry.all() {
         let audits = audit_palette(&theme.palette);
-        
+
         for audit in audits {
             if !audit.is_accessible {
                 all_failures.push(AuditFailure {
@@ -101,7 +101,7 @@ pub fn generate_full_audit_report(registry: &crate::theme::ThemeRegistry) -> Vec
             }
         }
     }
-    
+
     all_failures
 }
 

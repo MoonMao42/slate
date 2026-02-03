@@ -2,8 +2,9 @@
 /// Single source of truth for tool metadata, installability, and selection logic.
 use crate::brand::language::Language;
 use crate::design::typography::Typography;
+use crate::detection;
+use crate::env::SlateEnv;
 use std::collections::HashMap;
-use std::path::Path;
 
 /// Brew installation kind
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,7 +14,7 @@ pub enum BrewKind {
 }
 
 /// Tool metadata: single source of truth for wizard-managed tools.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ToolMetadata {
     /// Stable tool identifier (e.g., "ghostty", "starship", "bat")
     pub id: &'static str,
@@ -31,61 +32,98 @@ pub struct ToolMetadata {
     pub detect_only: bool,
 }
 
-impl ToolMetadata {
-    /// Create metadata from parts
-    fn new(
-        id: &'static str,
-        label: &'static str,
-        pitch: &'static str,
-        installable: bool,
-        brew_package: &'static str,
-        brew_kind: BrewKind,
-        detect_only: bool,
-    ) -> Self {
-        Self {
-            id,
-            label,
-            pitch,
-            installable,
-            brew_package,
-            brew_kind,
-            detect_only,
-        }
-    }
-
-    /// Create formula install metadata
-    fn formula(
-        id: &'static str,
-        label: &'static str,
-        pitch: &'static str,
-        brew_package: &'static str,
-    ) -> Self {
-        Self::new(
-            id,
-            label,
-            pitch,
-            true,
-            brew_package,
-            BrewKind::Formula,
-            false,
-        )
-    }
-
-    /// Create cask install metadata
-    fn cask(
-        id: &'static str,
-        label: &'static str,
-        pitch: &'static str,
-        brew_package: &'static str,
-    ) -> Self {
-        Self::new(id, label, pitch, true, brew_package, BrewKind::Cask, false)
-    }
-
-    /// Create detect-only metadata (no installation offered)
-    fn detect_only(id: &'static str, label: &'static str, pitch: &'static str) -> Self {
-        Self::new(id, label, pitch, false, "", BrewKind::Formula, true)
-    }
-}
+const ALL_TOOLS: [ToolMetadata; 10] = [
+    ToolMetadata {
+        id: "ghostty",
+        label: "Ghostty",
+        pitch: Language::PITCH_GHOSTTY,
+        installable: true,
+        brew_package: "ghostty",
+        brew_kind: BrewKind::Cask,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "starship",
+        label: "Starship",
+        pitch: Language::PITCH_STARSHIP,
+        installable: true,
+        brew_package: "starship",
+        brew_kind: BrewKind::Formula,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "bat",
+        label: "bat",
+        pitch: Language::PITCH_BAT,
+        installable: true,
+        brew_package: "bat",
+        brew_kind: BrewKind::Formula,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "delta",
+        label: "delta",
+        pitch: Language::PITCH_DELTA,
+        installable: true,
+        brew_package: "delta",
+        brew_kind: BrewKind::Formula,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "eza",
+        label: "eza",
+        pitch: Language::PITCH_EZA,
+        installable: true,
+        brew_package: "eza",
+        brew_kind: BrewKind::Formula,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "lazygit",
+        label: "lazygit",
+        pitch: Language::PITCH_LAZYGIT,
+        installable: true,
+        brew_package: "lazygit",
+        brew_kind: BrewKind::Formula,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "fastfetch",
+        label: "fastfetch",
+        pitch: Language::PITCH_FASTFETCH,
+        installable: true,
+        brew_package: "fastfetch",
+        brew_kind: BrewKind::Formula,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "zsh-syntax-highlighting",
+        label: "zsh-syntax-highlighting",
+        pitch: Language::PITCH_ZSH_SYNTAX,
+        installable: true,
+        brew_package: "zsh-syntax-highlighting",
+        brew_kind: BrewKind::Formula,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "alacritty",
+        label: "Alacritty",
+        pitch: Language::PITCH_ALACRITTY,
+        installable: true,
+        brew_package: "alacritty",
+        brew_kind: BrewKind::Cask,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "tmux",
+        label: "tmux",
+        pitch: Language::PITCH_TMUX,
+        installable: false,
+        brew_package: "",
+        brew_kind: BrewKind::Formula,
+        detect_only: true,
+    },
+];
 
 /// Central registry of all tools managed by + setup.
 /// This is the source of truth for tool selection, inventory, and installation.
@@ -93,48 +131,20 @@ pub struct ToolCatalog;
 
 impl ToolCatalog {
     /// Get all tools managed by setup wizard
-    pub fn all_tools() -> Vec<ToolMetadata> {
-        vec![
-            // Installable tools
-            ToolMetadata::cask("ghostty", "Ghostty", Language::PITCH_GHOSTTY, "ghostty"),
-            ToolMetadata::formula("starship", "Starship", Language::PITCH_STARSHIP, "starship"),
-            ToolMetadata::formula("bat", "bat", Language::PITCH_BAT, "bat"),
-            ToolMetadata::formula("delta", "delta", Language::PITCH_DELTA, "delta"),
-            ToolMetadata::formula("eza", "eza", Language::PITCH_EZA, "eza"),
-            ToolMetadata::formula("lazygit", "lazygit", Language::PITCH_LAZYGIT, "lazygit"),
-            ToolMetadata::formula(
-                "fastfetch",
-                "fastfetch",
-                Language::PITCH_FASTFETCH,
-                "fastfetch",
-            ),
-            ToolMetadata::formula(
-                "zsh-syntax-highlighting",
-                "zsh-syntax-highlighting",
-                Language::PITCH_ZSH_SYNTAX,
-                "zsh-syntax-highlighting",
-            ),
-            // Cask-based installations
-            ToolMetadata::cask(
-                "alacritty",
-                "Alacritty",
-                Language::PITCH_ALACRITTY,
-                "alacritty",
-            ),
-            // Detect-only: synced if installed, not offered for install
-            ToolMetadata::detect_only("tmux", "tmux", Language::PITCH_TMUX),
-        ]
+    pub fn all_tools() -> &'static [ToolMetadata] {
+        &ALL_TOOLS
     }
 
     /// Get a tool by id
     pub fn get_tool(id: &str) -> Option<ToolMetadata> {
-        Self::all_tools().into_iter().find(|t| t.id == id)
+        Self::all_tools().iter().copied().find(|t| t.id == id)
     }
 
     /// Get all installable tools (excludes detect-only)
     pub fn installable_tools() -> Vec<ToolMetadata> {
         Self::all_tools()
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|t| t.installable)
             .collect()
     }
@@ -142,17 +152,31 @@ impl ToolCatalog {
     /// Get detect-only tools
     pub fn detect_only_tools() -> Vec<ToolMetadata> {
         Self::all_tools()
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|t| t.detect_only)
             .collect()
     }
 }
 
-/// Detect installation state for all wizard-managed tools without relying on adapter registration.
+/// Detect installation state for all wizard-managed tools using the shared presence resolver.
 pub fn detect_installed_tools() -> HashMap<String, bool> {
+    SlateEnv::from_process()
+        .map(|env| detect_installed_tools_with_env(&env))
+        .unwrap_or_default()
+}
+
+/// Detect installation state for all wizard-managed tools with injected SlateEnv.
+pub fn detect_installed_tools_with_env(env: &SlateEnv) -> HashMap<String, bool> {
     ToolCatalog::all_tools()
-        .into_iter()
-        .map(|tool| (tool.id.to_string(), detect_tool_installed(&tool)))
+        .iter()
+        .copied()
+        .map(|tool| {
+            (
+                tool.id.to_string(),
+                detection::detect_tool_presence_with_env(tool.id, env).installed,
+            )
+        })
         .collect()
 }
 
@@ -257,18 +281,14 @@ impl ReviewReceipt {
         }
 
         if let Some(settings) = &self.terminal_settings {
+            let terminal_summary = if settings.blur_enabled {
+                format!("opacity {}, blur", settings.background_opacity)
+            } else {
+                format!("opacity {}", settings.background_opacity)
+            };
             output.push_str(&format!(
                 "{}\n",
-                Language::receipt_line(
-                    Language::RECEIPT_TERMINAL_SECTION,
-                    &format!(
-                        "opacity {}, {}padding {}x{}",
-                        settings.background_opacity,
-                        if settings.blur_enabled { "blur, " } else { "" },
-                        settings.padding_x,
-                        settings.padding_y
-                    )
-                )
+                Language::receipt_line(Language::RECEIPT_TERMINAL_SECTION, &terminal_summary)
             ));
         }
 
@@ -305,22 +325,6 @@ pub fn filter_valid_selections(selected_ids: Vec<String>) -> Vec<InstallAction> 
             })
         })
         .collect()
-}
-
-fn detect_tool_installed(tool: &ToolMetadata) -> bool {
-    match tool.id {
-        "zsh-syntax-highlighting" => detect_zsh_syntax_highlighting(),
-        _ => which::which(tool.id).is_ok() || which::which(tool.brew_package).is_ok(),
-    }
-}
-
-fn detect_zsh_syntax_highlighting() -> bool {
-    [
-        "/opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh",
-        "/usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh",
-    ]
-    .iter()
-    .any(|path| Path::new(path).exists())
 }
 
 #[cfg(test)]
@@ -390,7 +394,15 @@ mod tests {
 
     #[test]
     fn test_install_action_from_metadata() {
-        let metadata = ToolMetadata::formula("starship", "Starship", "pitch", "starship");
+        let metadata = ToolMetadata {
+            id: "starship",
+            label: "Starship",
+            pitch: "pitch",
+            installable: true,
+            brew_package: "starship",
+            brew_kind: BrewKind::Formula,
+            detect_only: false,
+        };
         let action = InstallAction::from_metadata(&metadata);
 
         assert_eq!(action.tool_id, "starship");

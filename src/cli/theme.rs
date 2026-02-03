@@ -66,7 +66,7 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
             let result = apply_theme_selection(theme);
             result?;
         } else {
-            apply_theme_selection(theme)?;
+            let _ = apply_theme_selection(theme)?;
             println!(
                 "{} Theme auto-switched to '{}' (system appearance)",
                 Symbols::SUCCESS,
@@ -82,7 +82,7 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
             crate::error::SlateError::InvalidThemeData(format!("Theme '{}' not found", name))
         })?;
 
-        apply_theme_selection(theme)?;
+        let _ = apply_theme_selection(theme)?;
 
         println!("{} Theme switched to '{}'", Symbols::SUCCESS, theme.name);
         Ok(())

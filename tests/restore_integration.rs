@@ -36,10 +36,16 @@ fn test_restore_help_shows_subcommand() {
 fn test_restore_with_invalid_id_fails_gracefully() {
     let tempdir = TempDir::new().unwrap();
     let mut cmd = slate_cmd_isolated(&tempdir);
-    let output = cmd.args(["restore", "nonexistent-restore-id"]).output().unwrap();
+    let output = cmd
+        .args(["restore", "nonexistent-restore-id"])
+        .output()
+        .unwrap();
 
     // Command should fail
-    assert!(!output.status.success(), "restore with invalid ID should fail");
+    assert!(
+        !output.status.success(),
+        "restore with invalid ID should fail"
+    );
 
     let stderr = String::from_utf8(output.stderr).unwrap();
     // Error message should mention the problem
@@ -91,10 +97,16 @@ fn test_restore_not_hidden_but_reset_is() {
 fn test_restore_delete_command_fails_gracefully() {
     let tempdir = TempDir::new().unwrap();
     let mut cmd = slate_cmd_isolated(&tempdir);
-    let output = cmd.args(["restore", "--delete", "nonexistent-id"]).output().unwrap();
+    let output = cmd
+        .args(["restore", "--delete", "nonexistent-id"])
+        .output()
+        .unwrap();
 
     // Should fail gracefully
-    assert!(!output.status.success(), "delete with invalid ID should fail");
+    assert!(
+        !output.status.success(),
+        "delete with invalid ID should fail"
+    );
 
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(

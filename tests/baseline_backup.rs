@@ -96,8 +96,11 @@ fn test_baseline_is_listed_via_injected_env() {
     let temp_home = TempDir::new().expect("Failed to create temp home");
     let env = SlateEnv::with_home(temp_home.path().to_path_buf());
 
-    let baseline = begin_restore_point_baseline(temp_home.path()).expect("Failed to create baseline");
+    let baseline =
+        begin_restore_point_baseline(temp_home.path()).expect("Failed to create baseline");
     let restore_points = list_restore_points_with_env(&env).expect("Failed to list restore points");
 
-    assert!(restore_points.iter().any(|point| point.id == baseline.id && point.is_baseline));
+    assert!(restore_points
+        .iter()
+        .any(|point| point.id == baseline.id && point.is_baseline));
 }

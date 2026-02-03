@@ -1,6 +1,5 @@
 /// Font selection for setup wizard.
 /// Per through from 02-.
-
 /// Font option for wizard selection
 #[derive(Debug, Clone)]
 pub struct FontOption {
@@ -12,6 +11,8 @@ pub struct FontOption {
     pub label: &'static str,
     /// Homebrew cask package name (e.g., "font-jetbrains-mono-nerd-font")
     pub brew_cask: &'static str,
+    /// Official Nerd Fonts release asset stem (e.g., "JetBrainsMono")
+    pub release_asset: &'static str,
 }
 
 /// Font catalog: all available Nerd Font options for setup
@@ -26,24 +27,28 @@ impl FontCatalog {
                 name: "JetBrains Mono Nerd Font",
                 label: "terminal favorite",
                 brew_cask: "font-jetbrains-mono-nerd-font",
+                release_asset: "JetBrainsMono",
             },
             FontOption {
                 id: "fira-code",
                 name: "Fira Code Nerd Font",
                 label: "ligature lover",
                 brew_cask: "font-fira-code-nerd-font",
+                release_asset: "FiraCode",
             },
             FontOption {
                 id: "iosevka-term",
                 name: "Iosevka Term Nerd Font",
                 label: "compact & dense",
                 brew_cask: "font-iosevka-term-nerd-font",
+                release_asset: "IosevkaTerm",
             },
             FontOption {
                 id: "hack",
                 name: "Hack Nerd Font",
                 label: "clean classic",
                 brew_cask: "font-hack-nerd-font",
+                release_asset: "Hack",
             },
         ]
     }
@@ -93,6 +98,14 @@ mod tests {
                 "Invalid brew cask name: {}",
                 font.brew_cask
             );
+        }
+    }
+
+    #[test]
+    fn test_font_release_assets_exist() {
+        for font in FontCatalog::all_fonts() {
+            assert!(!font.release_asset.is_empty());
+            assert!(!font.release_asset.contains(' '));
         }
     }
 
