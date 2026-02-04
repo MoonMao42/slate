@@ -167,7 +167,8 @@ fn prepare_setup_state(
     Ok(())
 }
 
-/// Handle --only flag: retry a single tool installation
+/// Handle --only flag: retry a single tool installation.
+/// Only installs the tool — does NOT rewrite shell integration or apply themes.
 fn handle_retry_only(tool_id: &str) -> Result<()> {
     let tool = validate_retry_tool(tool_id)?;
 
@@ -181,17 +182,19 @@ fn handle_retry_only(tool_id: &str) -> Result<()> {
         ));
     }
 
-    // Execute single tool installation
-    let summary = setup_executor::execute_setup(&[tool_id.to_string()], None, None)?;
+    let env = crate::env::SlateEnv::from_process()?;
 
-    // Show completion
-    if summary.success_count() > 0 {
-        eprintln!("\n✓ Tool '{}' installed successfully.\n", tool.label);
-    } else {
-        eprintln!(
-            "\n✗ Tool '{}' installation failed. Check logs above.\n",
-            tool.label
-        );
+    // Only install the single tool — no shell integration, no theme apply
+    match setup_executor::install_tool(tool.brew_package, tool.brew_kind, &env) {
+        Ok(method) => {
+            eprintln!("\n{}", method.success_message(tool.label));
+        }
+        Err(e) => {
+            eprintln!(
+                "\n✗ Tool '{}' installation failed: {}\n",
+                tool.label, e
+            );
+        }
     }
 
     Ok(())

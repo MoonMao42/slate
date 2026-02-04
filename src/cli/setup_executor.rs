@@ -407,13 +407,13 @@ fn ensure_tool_configs(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum ToolInstallMethod {
+pub(crate) enum ToolInstallMethod {
     Homebrew,
     UserLocal(PathBuf),
 }
 
 impl ToolInstallMethod {
-    fn success_message(&self, label: &str) -> String {
+    pub(crate) fn success_message(&self, label: &str) -> String {
         match self {
             Self::Homebrew => format!("✓ {} installed", label),
             Self::UserLocal(bin_dir) => {
@@ -424,7 +424,7 @@ impl ToolInstallMethod {
 }
 
 /// Install a tool via Homebrew, with a user-local Starship fallback for shared machines.
-fn install_tool(package: &str, kind: BrewKind, env: &SlateEnv) -> Result<ToolInstallMethod> {
+pub(crate) fn install_tool(package: &str, kind: BrewKind, env: &SlateEnv) -> Result<ToolInstallMethod> {
     match install_tool_via_homebrew(package, kind) {
         Ok(()) => Ok(ToolInstallMethod::Homebrew),
         Err(err) if package == "starship" && should_try_local_starship_fallback(&err) => {

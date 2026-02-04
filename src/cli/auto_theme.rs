@@ -92,7 +92,7 @@ pub fn resolve_auto_theme(_env: &SlateEnv, config: &ConfigManager) -> Result<Str
     };
 
     if current_theme_id.is_some() {
-        eprintln!("✦ Using built-in auto pairing. Run slate set --auto --configure to customize.");
+        eprintln!("✦ Using built-in auto pairing. Run slate config set auto-theme configure to customize.");
     }
 
     Ok(default_theme)
