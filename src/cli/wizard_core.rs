@@ -209,6 +209,8 @@ impl Wizard {
         // 2. Tier 2 candidates: installed but not in PATH (need user opt-in to configure)
         let install_candidates = compute_install_candidates(&installed);
 
+        // Tier 2 candidates include detect-only terminals (ghostty/alacritty in /Applications)
+        // so users can explicitly opt in to configure them
         let tier2_candidates: Vec<&crate::cli::tool_selection::ToolMetadata> =
             crate::cli::tool_selection::ToolCatalog::all_tools()
                 .iter()
@@ -217,7 +219,6 @@ impl Wizard {
                         .get(tool.id)
                         .map(|p| p.installed && !p.in_path)
                         .unwrap_or(false)
-                        && !tool.detect_only
                 })
                 .collect();
 

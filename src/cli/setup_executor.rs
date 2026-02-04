@@ -362,10 +362,10 @@ fn ensure_tool_configs(
         if !is_detected {
             return false;
         }
-        // Terminal emulators (detect-only): configure only if Tier 1 (user-local)
-        // On shared Macs, Tier 2 terminals in /opt/homebrew belong to another user.
+        // Terminal emulators (detect-only): configure if Tier 1 (user-local)
+        // OR if user explicitly selected them in the wizard (Tier 2 opt-in).
         if id == "ghostty" || id == "alacritty" {
-            return presence.map(|p| p.is_tier1()).unwrap_or(false);
+            return presence.map(|p| p.is_tier1()).unwrap_or(false) || user_set.contains(id);
         }
         // CLI tools: only if user chose them
         user_set.contains(id)
