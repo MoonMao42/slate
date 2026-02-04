@@ -137,19 +137,25 @@ pub fn handle(quick: bool, force: bool, only: Option<String>) -> Result<()> {
 
 fn prepare_setup_state(
     env: &SlateEnv,
-    fastfetch_enabled: bool,
+    fastfetch_enabled: Option<bool>,
     selected_opacity: Option<crate::opacity::OpacityPreset>,
 ) -> Result<()> {
     let config_mgr = crate::config::ConfigManager::with_env(env)?;
 
-    // Fastfetch and opacity are non-critical preferences — log failures but
-    // don't abort setup over them.
-    if fastfetch_enabled {
-        if let Err(e) = config_mgr.enable_fastfetch_autorun() {
-            eprintln!("⚠ Could not save fastfetch preference: {}", e);
+    // Fastfetch: only write if user made an explicit choice (Some).
+    // None = user wasn't asked (quick mode) — preserve existing setting.
+    match fastfetch_enabled {
+        Some(true) => {
+            if let Err(e) = config_mgr.enable_fastfetch_autorun() {
+                eprintln!("⚠ Could not save fastfetch preference: {}", e);
+            }
         }
-    } else if let Err(e) = config_mgr.disable_fastfetch_autorun() {
-        eprintln!("⚠ Could not save fastfetch preference: {}", e);
+        Some(false) => {
+            if let Err(e) = config_mgr.disable_fastfetch_autorun() {
+                eprintln!("⚠ Could not save fastfetch preference: {}", e);
+            }
+        }
+        None => {} // Don't touch existing setting
     }
 
     if let Some(opacity) = selected_opacity {
@@ -279,7 +285,7 @@ mod tests {
 
         config.enable_fastfetch_autorun().unwrap();
 
-        prepare_setup_state(&env, false, Some(OpacityPreset::Frosted)).unwrap();
+        prepare_setup_state(&env, Some(false), Some(OpacityPreset::Frosted)).unwrap();
 
         assert!(!config.has_fastfetch_autorun().unwrap());
         assert_eq!(

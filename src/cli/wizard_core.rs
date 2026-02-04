@@ -39,7 +39,9 @@ pub struct WizardContext {
     pub selected_font: Option<String>,
     pub selected_theme: Option<String>,
     pub selected_opacity: Option<crate::opacity::OpacityPreset>,
-    pub fastfetch_enabled: bool,
+    /// None = user wasn't asked (quick mode), don't touch existing setting.
+    /// Some(true/false) = user made an explicit choice.
+    pub fastfetch_enabled: Option<bool>,
     pub selected_terminal_settings: Option<TerminalSettings>,
     pub current_font: Option<String>,
     pub current_theme: Option<String>,
@@ -74,7 +76,7 @@ impl Wizard {
                 tools_to_configure: Vec::new(),
                 selected_font: None,
                 selected_theme: None,
-                fastfetch_enabled: false,
+                fastfetch_enabled: None,
                 selected_opacity: None,
                 selected_terminal_settings: None,
                 current_font,
@@ -426,8 +428,14 @@ impl Wizard {
     }
 
     /// Auto-select opacity based on theme (dark → Frosted, light → Solid).
-    /// No interactive prompt — users can fine-tune in the Picker later.
+    /// Skips if a preset already locked the opacity (e.g. quick mode presets).
     fn step_auto_opacity(&mut self) -> Result<()> {
+        // If a preset already set opacity, respect it
+        if self.context.selected_opacity.is_some() {
+            self.context.current_step += 1;
+            return Ok(());
+        }
+
         let selected_theme_id =
             wizard_support::resolve_theme_id_for_opacity(&self.context, &self.theme_selector)?;
 
@@ -436,7 +444,6 @@ impl Wizard {
             let recommended = crate::opacity::recommended_opacity_for_theme(theme);
             self.context.selected_opacity = Some(recommended);
         } else {
-            // Fallback: frosted
             self.context.selected_opacity = Some(crate::opacity::OpacityPreset::Frosted);
         }
 
@@ -458,7 +465,7 @@ impl Wizard {
             .interact()
             .map_err(handle_cliclack_error)?;
 
-        self.context.fastfetch_enabled = enable_fastfetch;
+        self.context.fastfetch_enabled = Some(enable_fastfetch);
         self.context.current_step += 1;
         Ok(())
     }

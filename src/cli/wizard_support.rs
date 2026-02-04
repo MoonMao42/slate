@@ -181,7 +181,7 @@ mod tests {
             selected_font: None,
             selected_theme: None,
             selected_opacity: None,
-            fastfetch_enabled: false,
+            fastfetch_enabled: None,
             selected_terminal_settings: None,
             current_font: None,
             current_theme: None,

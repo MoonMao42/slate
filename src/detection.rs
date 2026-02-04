@@ -150,13 +150,20 @@ pub fn command_path_with_env(command: &str, env: &SlateEnv) -> Option<PathBuf> {
     search_paths(command, &normalized_path_dirs_for_home(Some(env.home())))
 }
 
-fn macos_app_path(name: &str, home: &Path) -> Option<PathBuf> {
-    [
-        PathBuf::from(format!("/Applications/{name}.app")),
-        home.join("Applications").join(format!("{name}.app")),
-    ]
-    .into_iter()
-    .find(|path| path.exists())
+/// Detect macOS .app bundles. Returns (path, is_user_local).
+/// ~/Applications is Tier 1 (user-local); /Applications is Tier 2 (shared system).
+fn macos_app_path(name: &str, home: &Path) -> Option<(PathBuf, bool)> {
+    // Check user-local first (Tier 1)
+    let user_app = home.join("Applications").join(format!("{name}.app"));
+    if user_app.exists() {
+        return Some((user_app, true));
+    }
+    // System-wide (Tier 2 — could be installed by another user)
+    let system_app = PathBuf::from(format!("/Applications/{name}.app"));
+    if system_app.exists() {
+        return Some((system_app, false));
+    }
+    None
 }
 
 fn ghostty_candidate_paths(env: &SlateEnv) -> Vec<PathBuf> {
@@ -230,9 +237,12 @@ fn detect_cli_tool_tiered(command: &str, env: &SlateEnv) -> ToolPresence {
 pub fn detect_tool_presence_with_env(tool_id: &str, env: &SlateEnv) -> ToolPresence {
     match tool_id {
         "ghostty" => {
-            // AppBundle / Config evidence → always Tier 1 (user-local)
-            if let Some(path) = macos_app_path("Ghostty", env.home()) {
-                ToolPresence::installed_with(ToolEvidence::AppBundle(path))
+            if let Some((path, is_user_local)) = macos_app_path("Ghostty", env.home()) {
+                if is_user_local {
+                    ToolPresence::in_path_with(ToolEvidence::AppBundle(path))
+                } else {
+                    ToolPresence::fallback_with(ToolEvidence::AppBundle(path))
+                }
             } else if let Some(path) = command_in_actual_path("ghostty") {
                 ToolPresence::in_path_with(ToolEvidence::Executable(path))
             } else if let Some(path) = command_path_with_env("ghostty", env) {
@@ -244,8 +254,12 @@ pub fn detect_tool_presence_with_env(tool_id: &str, env: &SlateEnv) -> ToolPrese
             }
         }
         "alacritty" => {
-            if let Some(path) = macos_app_path("Alacritty", env.home()) {
-                ToolPresence::installed_with(ToolEvidence::AppBundle(path))
+            if let Some((path, is_user_local)) = macos_app_path("Alacritty", env.home()) {
+                if is_user_local {
+                    ToolPresence::in_path_with(ToolEvidence::AppBundle(path))
+                } else {
+                    ToolPresence::fallback_with(ToolEvidence::AppBundle(path))
+                }
             } else if let Some(path) = command_in_actual_path("alacritty") {
                 ToolPresence::in_path_with(ToolEvidence::Executable(path))
             } else if let Some(path) = command_path_with_env("alacritty", env) {
