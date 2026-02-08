@@ -1,8 +1,14 @@
 [package]
 name = "slate-cli"
-version = "0.1.0"
+version = "2.0.0"
 edition = "2021"
 build = "build.rs"
+description = "macOS terminal beautification kit -- beautiful terminal in 30 seconds"
+repository = "https://github.com/MoonMao42/slate-dev"
+license = "MIT"
+keywords = ["terminal", "theme", "macos", "cli", "dotfiles"]
+categories = ["command-line-utilities"]
+publish = false
 
 [lib]
 path = "src/lib.rs"
