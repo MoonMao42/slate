@@ -137,20 +137,41 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
 
     cliclack::log::remark("")?;
 
-    // /Build single menu with high-frequency actions
+    // /Flat single-level menu with all actions accessible
+    let auto_enabled = config.is_auto_theme_enabled()?;
     let mut menu_builder = cliclack::select("What would you like to do?");
 
-    // Item 1: Switch Theme
+    // High-frequency actions
     menu_builder = menu_builder.item("switch", "✦ Switch Theme", "");
-
-    // Item 2: Change Font
     menu_builder = menu_builder.item("font", "✦ Change Font", "");
 
-    // Item 3: More options (includes auto-theme toggle, restore, setup wizard)
-    menu_builder = menu_builder.item("more", "◆ More options…", "");
+    // Auto-theme toggle (dynamic label)
+    menu_builder = menu_builder.item(
+        "auto-theme",
+        if auto_enabled {
+            "✦ Auto-Theme (enabled)"
+        } else {
+            "✦ Auto-Theme (disabled)"
+        },
+        "",
+    );
 
-    // Item 4: Quit
-    menu_builder = menu_builder.item("quit", "○ Quit", "");
+    // Auto-theme pairing
+    menu_builder =
+        menu_builder.item("auto-theme-configure", "◆ Auto-Theme Pairing", "choose dark/light themes");
+
+    // Tool toggles
+    menu_builder =
+        menu_builder.item("tools", "◆ Tool Toggles", "starship, highlighting, fastfetch");
+
+    // Undo changes (casual tone per)
+    menu_builder = menu_builder.item("restore", "◆ Undo Changes", "restore from snapshot");
+
+    // Run setup (casual tone per)
+    menu_builder = menu_builder.item("setup", "◆ Run Setup", "");
+
+    // Quit (no ○ prefix to avoid cliclack radio-button conflict)
+    menu_builder = menu_builder.item("quit", "Quit", "");
 
     // Render and handle selection (execute one action and exit)
     let selection = menu_builder.interact().map_err(|e| {
@@ -164,7 +185,33 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
     match selection {
         "switch" => crate::cli::picker::launch_picker(&env),
         "font" => crate::cli::font::handle_font(None),
-        "more" => handle_more_options(config),
+        "auto-theme" => {
+            let new_state = !auto_enabled;
+            sync_auto_theme_toggle(config, new_state)?;
+            cliclack::outro("✦ Done")?;
+            Ok(())
+        }
+        "auto-theme-configure" => {
+            crate::cli::auto_theme::configure_auto_theme()?;
+            if config.is_auto_theme_enabled()? {
+                config.refresh_shell_integration()?;
+                let _ = crate::platform::dark_mode_notify::stop();
+                let _ = crate::platform::dark_mode_notify::start(config);
+            }
+            cliclack::outro("✦ Done")?;
+            Ok(())
+        }
+        "tools" => {
+            handle_tool_toggles(config)?;
+            cliclack::outro("✦ Done")?;
+            Ok(())
+        }
+        "restore" => crate::cli::restore::handle(None, false, None),
+        "setup" => {
+            crate::cli::setup::handle_with_env(false, false, None, &env)?;
+            cliclack::outro("✦ Done")?;
+            Ok(())
+        }
         "quit" => {
             cliclack::outro("✦ Done")?;
             Ok(())
@@ -172,81 +219,6 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
         _ => {
             cliclack::outro("✦ Done")?;
             Ok(())
-        }
-    }
-}
-
-/// More options submenu (looping menu, back to main hub not supported)
-fn handle_more_options(config: &ConfigManager) -> Result<()> {
-    loop {
-        let auto_enabled = config.is_auto_theme_enabled()?;
-
-        let selection = cliclack::select("More options")
-            .item(
-                "auto-theme",
-                if auto_enabled {
-                    "✦ Auto-Theme (enabled)"
-                } else {
-                    "✦ Auto-Theme (disabled)"
-                },
-                "",
-            )
-            .item(
-                "auto-theme-configure",
-                "✦ Auto-Theme Pairing",
-                "choose dark/light themes",
-            )
-            .item(
-                "tools",
-                "✦ Tool Toggles…",
-                "starship, highlighting, fastfetch",
-            )
-            .item("restore", "⏏ Restore from snapshot", "")
-            .item("setup", "⚙ Setup Wizard", "")
-            .item("quit", "○ Back", "")
-            .interact()
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::Interrupted {
-                    crate::error::SlateError::UserCancelled
-                } else {
-                    crate::error::SlateError::IOError(e)
-                }
-            })?;
-
-        match selection {
-            "auto-theme" => {
-                let new_state = !auto_enabled;
-                sync_auto_theme_toggle(config, new_state)?;
-            }
-            "auto-theme-configure" => {
-                crate::cli::auto_theme::configure_auto_theme()?;
-                if config.is_auto_theme_enabled()? {
-                    config.refresh_shell_integration()?;
-                    // Restart watcher so new pairing takes effect immediately
-                    let _ = crate::platform::dark_mode_notify::stop();
-                    let _ = crate::platform::dark_mode_notify::start(config);
-                }
-            }
-            "tools" => {
-                handle_tool_toggles(config)?;
-            }
-            "restore" => {
-                return crate::cli::restore::handle(None, false, None);
-            }
-            "setup" => {
-                let env = crate::env::SlateEnv::from_process()?;
-                crate::cli::setup::handle_with_env(false, false, None, &env)?;
-                cliclack::outro("✦ Done")?;
-                return Ok(());
-            }
-            "quit" => {
-                cliclack::outro("✦ Done")?;
-                return Ok(());
-            }
-            _ => {
-                cliclack::outro("✦ Done")?;
-                return Ok(());
-            }
         }
     }
 }
