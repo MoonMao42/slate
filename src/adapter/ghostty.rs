@@ -395,7 +395,7 @@ pub fn write_blur_radius(env: &SlateEnv, opacity: crate::opacity::OpacityPreset)
 
     let blur_value = opacity.blur_radius();
     let config_content = format!(
-        "background-blur-radius = {}
+        "background-blur = {}
 ",
         blur_value
     );
