@@ -715,12 +715,12 @@ mod polish_and_clarity {
 
     #[test]
     fn test_polish_preserves_symbol_language() {
-        // Design system symbols remain consistent
+        // Design system: exactly 5 core symbols (pruned set)
         assert_eq!(slate_cli::design::symbols::Symbols::BRAND, '✦');
         assert_eq!(slate_cli::design::symbols::Symbols::SUCCESS, '✓');
+        assert_eq!(slate_cli::design::symbols::Symbols::FAILURE, '✗');
         assert_eq!(slate_cli::design::symbols::Symbols::PENDING, '○');
-        assert_eq!(slate_cli::design::symbols::Symbols::CTA_ARROW, '→');
-        // No conflicting changes to symbols
+        assert_eq!(slate_cli::design::symbols::Symbols::DIAMOND, '◆');
     }
 
     #[test]
