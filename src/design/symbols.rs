@@ -15,29 +15,13 @@ impl Symbols {
     /// Pending state or not installed
     pub const PENDING: char = '○';
 
-    /// Call-to-action arrow (used in receipts, action lists)
-    pub const CTA_ARROW: char = '→';
-
-    /// Chevron/continuation marker (used in hierarchical displays)
-    pub const CHEVRON: char = '❯';
-
     /// Diamond marker (used for special/metadata info)
     pub const DIAMOND: char = '◆';
-
-    /// Preferences/settings icon
-    pub const PREFERENCES: char = '⚙';
-
-    /// Quit/exit icon
-    pub const QUIT: char = '⏊';
-
-    /// Back/return icon
-    pub const BACK: char = '←';
 }
 
 // Example usage:
 // println!("{} Theme applied", Symbols::SUCCESS);
 // println!("{} Ghostty not installed", Symbols::PENDING);
-// println!("{} Install", Symbols::CTA_ARROW);
 
 #[cfg(test)]
 mod tests {
@@ -49,12 +33,7 @@ mod tests {
         assert_eq!(Symbols::SUCCESS, '✓');
         assert_eq!(Symbols::FAILURE, '✗');
         assert_eq!(Symbols::PENDING, '○');
-        assert_eq!(Symbols::CTA_ARROW, '→');
-        assert_eq!(Symbols::CHEVRON, '❯');
         assert_eq!(Symbols::DIAMOND, '◆');
-        assert_eq!(Symbols::PREFERENCES, '⚙');
-        assert_eq!(Symbols::QUIT, '⏊');
-        assert_eq!(Symbols::BACK, '←');
     }
 
     #[test]
@@ -63,8 +42,8 @@ mod tests {
         let formatted = format!("{} Success message", Symbols::SUCCESS);
         assert!(formatted.contains("✓"));
 
-        let cta = format!("{} Install tools", Symbols::CTA_ARROW);
-        assert!(cta.contains("→"));
+        let diamond = format!("{} Special info", Symbols::DIAMOND);
+        assert!(diamond.contains("◆"));
     }
 
     #[test]
@@ -75,12 +54,7 @@ mod tests {
             Symbols::SUCCESS,
             Symbols::FAILURE,
             Symbols::PENDING,
-            Symbols::CTA_ARROW,
-            Symbols::CHEVRON,
             Symbols::DIAMOND,
-            Symbols::PREFERENCES,
-            Symbols::QUIT,
-            Symbols::BACK,
         ];
 
         for (i, &sym1) in symbols.iter().enumerate() {
