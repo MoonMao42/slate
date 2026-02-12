@@ -42,8 +42,14 @@ pub fn execute_setup_with_env(
 
             spinner.start(format!("Installing {}...", tool.label));
 
+            let install_start = std::time::Instant::now();
             match install_tool(tool.brew_package, tool.brew_kind, env) {
                 Ok(method) => {
+                    // Labor illusion — ensure spinner is visible for at least 400ms
+                    let elapsed = install_start.elapsed();
+                    if elapsed < std::time::Duration::from_millis(400) {
+                        std::thread::sleep(std::time::Duration::from_millis(400) - elapsed);
+                    }
                     summary.add_tool_result(ToolInstallResult {
                         tool_id: tool_id.clone(),
                         tool_label: tool.label.to_string(),
@@ -53,6 +59,11 @@ pub fn execute_setup_with_env(
                     spinner.stop(method.success_message(tool.label));
                 }
                 Err(e) => {
+                    // Labor illusion — don't flash errors too quickly either
+                    let elapsed = install_start.elapsed();
+                    if elapsed < std::time::Duration::from_millis(400) {
+                        std::thread::sleep(std::time::Duration::from_millis(400) - elapsed);
+                    }
                     summary.add_tool_result(ToolInstallResult {
                         tool_id: tool_id.clone(),
                         tool_label: tool.label.to_string(),
@@ -188,6 +199,30 @@ pub fn execute_setup_with_env(
             spinner.error(format!("✗ Shell integration had issues: {}", e));
             summary.add_issue(format!("Shell integration setup failed: {}", e));
         }
+    }
+
+    // Wow moment receipt card with self-rendered fetch info
+    if summary.theme_applied {
+        // Anticipation pause before the receipt 
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let theme_name = theme.unwrap_or("catppuccin-mocha");
+        let font_name = font.unwrap_or("(system default)");
+        let tool_count = summary.success_count();
+        let shell = std::env::var("SHELL")
+            .ok()
+            .and_then(|s| s.rsplit('/').next().map(String::from))
+            .unwrap_or_else(|| "zsh".to_string());
+        let terminal = std::env::var("TERM_PROGRAM").unwrap_or_else(|_| "Terminal".to_string());
+
+        let receipt_body = format!(
+            "Terminal    {terminal}\n\
+             Theme       {theme_name}\n\
+             Font        {font_name}\n\
+             Shell       {shell}\n\
+             Tools       {tool_count} configured"
+        );
+        let _ = cliclack::note("Your terminal is beautiful", receipt_body);
     }
 
     // Overall success: no tool failures, and font applied if selected
