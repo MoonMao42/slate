@@ -1,3 +1,4 @@
+pub mod aura;
 pub mod auto_theme;
 pub mod clean;
 pub mod config;

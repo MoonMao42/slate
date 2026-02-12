@@ -4,6 +4,7 @@ use slate_cli::{cli, env::SlateEnv, error};
 
 #[derive(Parser)]
 #[command(name = "slate")]
+#[command(version)]
 #[command(about = "✦ slate — macOS terminal beautification kit")]
 #[command(long_about = "Transform your terminal in 30 seconds")]
 struct Cli {
@@ -72,6 +73,9 @@ enum Commands {
         #[arg(long, value_name = "ID")]
         delete: Option<String>,
     },
+    /// Hidden easter egg
+    #[command(hide = true)]
+    Aura,
     /// Deprecated: use 'slate restore' instead
     #[command(hide = true)]
     Reset {
@@ -127,6 +131,7 @@ fn run() -> Result<()> {
         Some(Commands::Restore { id, list, delete }) => {
             cli::restore::handle(id.as_deref(), list, delete.as_deref())
         }
+        Some(Commands::Aura) => cli::aura::handle(),
         Some(Commands::Reset { id }) => {
             // reset is now a compatibility alias that routes to restore
             println!("(i) Tip: 'slate reset' is transitioning to 'slate restore'. Use 'slate restore [id]' next time.");
