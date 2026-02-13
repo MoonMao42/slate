@@ -4,7 +4,7 @@
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::opacity::OpacityPreset;
-use std::io;
+use std::io::{self, Write as _};
 use std::time::{Duration, Instant};
 
 use crossterm::{
@@ -68,6 +68,24 @@ pub fn launch_picker(env: &SlateEnv) -> Result<()> {
     let _ = crate::cli::set::silent_preview_apply(env, state.get_current_theme_id(), effective);
 
     let exit_action = event_loop(env, &mut state)?;
+
+    // Picker Enter tactile feedback — brief reverse-video flash before leaving alt screen
+    if matches!(exit_action, ExitAction::Commit) {
+        let mut stdout = io::stdout();
+        let _ = execute!(
+            stdout,
+            crossterm::style::SetAttribute(crossterm::style::Attribute::Reverse)
+        );
+        // Re-render current view with inverted colors for a brief tactile flash
+        let _ = render(&state, Some("Applied!"));
+        let _ = execute!(
+            stdout,
+            crossterm::style::SetAttribute(crossterm::style::Attribute::Reset)
+        );
+        let _ = stdout.flush();
+        std::thread::sleep(Duration::from_millis(80));
+    }
+
     drop(_guard);
 
     match exit_action {
