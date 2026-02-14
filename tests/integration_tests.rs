@@ -391,6 +391,233 @@ mod tool_selection_tests {
     }
 }
 
+// Full pipeline and adapter output tests 
+
+#[test]
+fn test_full_pipeline() {
+    let tempdir = TempDir::new().unwrap();
+
+    // Step 1: setup --quick (non-interactive, uses defaults)
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["setup", "--quick"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "setup --quick failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Step 2: theme catppuccin-mocha
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["theme", "catppuccin-mocha"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "theme set failed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("Catppuccin Mocha") || stdout.contains("catppuccin-mocha"),
+        "theme output should mention the theme name"
+    );
+
+    // Step 3: status (verify theme is reflected)
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["status"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "status failed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("Catppuccin Mocha") || stdout.contains("catppuccin"),
+        "status should show the current theme"
+    );
+
+    // Step 4: list (verify themes are listed)
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["list"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "list failed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("catppuccin") || stdout.contains("Catppuccin"),
+        "list should include catppuccin themes"
+    );
+    assert!(
+        stdout.contains("tokyo") || stdout.contains("Tokyo"),
+        "list should include tokyo night themes"
+    );
+
+    // Step 5: font (verify font surface is reachable with a direct name argument)
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["font", "JetBrainsMono Nerd Font"])
+        .output()
+        .unwrap();
+    // font <name> should succeed in setting the font
+    assert!(
+        output.status.success(),
+        "font <name> failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Step 6: clean (removes managed configs)
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["clean"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clean failed");
+
+    // Step 6b: verify clean actually removed managed files
+    let managed_dir = tempdir.path().join("config/slate/managed");
+    if managed_dir.exists() {
+        let entries: Vec<_> = std::fs::read_dir(&managed_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            entries.is_empty(),
+            "managed dir should be empty after clean, found {} entries",
+            entries.len()
+        );
+    }
+
+    // Step 7: restore --list (verify restore surface is accessible)
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["restore", "--list"])
+        .output()
+        .unwrap();
+    // restore --list should succeed even if no snapshots exist
+    assert!(
+        output.status.success(),
+        "restore --list failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn test_adapter_output_ghostty() {
+    let tempdir = TempDir::new().unwrap();
+
+    // Setup + set theme
+    slate_cmd_isolated(&tempdir)
+        .args(["setup", "--quick"])
+        .output()
+        .unwrap();
+    slate_cmd_isolated(&tempdir)
+        .args(["theme", "catppuccin-mocha"])
+        .output()
+        .unwrap();
+
+    // Verify Ghostty managed config
+    let theme_conf = tempdir.path().join("config/slate/managed/ghostty/theme.conf");
+    if theme_conf.exists() {
+        let content = std::fs::read_to_string(&theme_conf).unwrap();
+        assert!(
+            content.contains("background ="),
+            "Ghostty theme.conf should contain background color"
+        );
+        assert!(
+            content.contains("foreground ="),
+            "Ghostty theme.conf should contain foreground color"
+        );
+        assert!(
+            content.contains("palette ="),
+            "Ghostty theme.conf should contain palette entries"
+        );
+    }
+
+    // Verify blur.conf uses correct key name (BUG-1 regression test)
+    let blur_conf = tempdir.path().join("config/slate/managed/ghostty/blur.conf");
+    if blur_conf.exists() {
+        let content = std::fs::read_to_string(&blur_conf).unwrap();
+        assert!(
+            !content.contains("background-blur-radius"),
+            "blur.conf must NOT use deprecated background-blur-radius key"
+        );
+        assert!(
+            content.contains("background-blur"),
+            "blur.conf should use background-blur key"
+        );
+    }
+}
+
+#[test]
+fn test_adapter_output_starship() {
+    let tempdir = TempDir::new().unwrap();
+    slate_cmd_isolated(&tempdir)
+        .args(["setup", "--quick"])
+        .output()
+        .unwrap();
+    slate_cmd_isolated(&tempdir)
+        .args(["theme", "catppuccin-mocha"])
+        .output()
+        .unwrap();
+
+    let palette_toml = tempdir.path().join("config/slate/managed/starship/palette.toml");
+    if palette_toml.exists() {
+        let content = std::fs::read_to_string(&palette_toml).unwrap();
+        assert!(
+            content.contains("[palettes.slate]") || content.contains("palettes"),
+            "Starship palette.toml should contain palette section"
+        );
+    }
+}
+
+#[test]
+fn test_aura_command() {
+    let tempdir = TempDir::new().unwrap();
+    // Set up a theme first so aura has colors to use
+    slate_cmd_isolated(&tempdir)
+        .args(["setup", "--quick"])
+        .output()
+        .unwrap();
+
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["aura"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "slate aura should succeed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    // Should contain some quote text (at least one of the attribution markers)
+    assert!(
+        stdout.contains("--") || stdout.contains("\u{2014}"),
+        "aura should display a quote with attribution"
+    );
+}
+
+#[test]
+fn test_unsupported_terminal_graceful_skip() {
+    let tempdir = TempDir::new().unwrap();
+    // Simulate running from Terminal.app
+    let output = slate_cmd_isolated(&tempdir)
+        .env("TERM_PROGRAM", "Apple_Terminal")
+        .args(["setup", "--quick"])
+        .output()
+        .unwrap();
+    // Should succeed (skip terminal-specific features, not crash)
+    assert!(
+        output.status.success(),
+        "setup should succeed even from Apple_Terminal: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn test_version_flag() {
+    let output = Command::cargo_bin("slate")
+        .unwrap()
+        .args(["--version"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("slate") && stdout.contains("2.0"),
+        "version should contain crate name and version, got: {}",
+        stdout
+    );
+}
+
 // Tests for -03: Preset/Font/Theme Selection & Mapping Logic
 
 #[cfg(test)]
