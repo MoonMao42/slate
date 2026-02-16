@@ -4,11 +4,15 @@ version = "2.0.0"
 edition = "2021"
 build = "build.rs"
 description = "macOS terminal beautification kit -- beautiful terminal in 30 seconds"
+homepage = "https://github.com/MoonMao42/slate-dev"
 repository = "https://github.com/MoonMao42/slate-dev"
 license = "MIT"
 keywords = ["terminal", "theme", "macos", "cli", "dotfiles"]
 categories = ["command-line-utilities"]
 publish = false
+
+[package.metadata.dist]
+dist = true
 
 [lib]
 path = "src/lib.rs"
