@@ -1,113 +1,132 @@
 <p align="center">
-  <!-- <img src="assets/logo.svg" width="120" alt="slate logo"> -->
+  <img
+    width="320"
+    src="assets/logo.svg"
+    alt="slate — terminal aesthetics suite"
+  />
 </p>
 
-<h1 align="center">slate</h1>
-
-<p align="center">Beautiful terminal in 30 seconds</p>
+<p align="center">
+  <strong>30 seconds to a beautiful macOS terminal.</strong>
+</p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/platform-macOS-black.svg" alt="macOS">
-  <img src="https://img.shields.io/badge/built%20with-Rust-orange.svg" alt="Rust">
-  <a href="https://github.com/MoonMao42/slate-dev/releases"><img src="https://img.shields.io/github/v/release/MoonMao42/slate-dev?label=release" alt="GitHub Release"></a>
+  <a href="https://github.com/maokaiyue/slate/releases"><img src="https://img.shields.io/github/v/release/maokaiyue/slate?style=flat-square&color=585b70" alt="Release" /></a>
+  <img src="https://img.shields.io/badge/platform-macOS-585b70?style=flat-square" alt="macOS" />
+  <img src="https://img.shields.io/badge/license-MIT-585b70?style=flat-square" alt="License" />
 </p>
 
 ---
 
-## See it in action
-
-<!-- TODO: Replace with hero video (mp4/webp, 12-15s, 960x600) -->
-> *Coming soon: setup wizard + live theme picker demo*
+<!-- Hero demo goes here -->
+<!-- <p align="center"><img src="assets/demo.gif" width="720" /></p> -->
 
 ## Quick Start
 
 ```bash
-brew install MoonMao42/tap/slate
+brew install maokaiyue/tap/slate
 slate setup
 ```
 
-That's it. Your terminal is beautiful now.
+That's it. Slate detects your terminal and tools, installs what's missing, and applies a curated theme — fonts, colors, prompt, and all.
 
-## What You Get
+## See It in Action
 
-One command configures your entire terminal stack:
+<!-- Live preview picker demo goes here -->
+<!-- <p align="center"><img src="assets/picker.gif" width="720" /></p> -->
 
-| Tool | What slate does |
-|------|----------------|
-| Ghostty / Alacritty | Theme colors, font, opacity, blur |
-| Starship | Prompt palette matching your theme |
-| bat, delta, eza | Syntax highlighting & git colors |
-| lazygit | UI colors synced to theme |
-| fastfetch | System info card with themed colors |
-| tmux | Status bar theme sync |
-| zsh-syntax-highlighting | Command colors |
-| Nerd Font | Icon font installation |
+Run `slate theme` to open the interactive picker. Arrow keys to browse, live preview as you go, Enter to commit.
 
 ## Day & Night
 
-slate follows your macOS appearance setting. Switch to Dark Mode and your entire terminal stack updates instantly.
+<!-- Dark/light comparison image goes here -->
+<!-- <p align="center"><img src="assets/day-night.png" width="720" /></p> -->
 
-<!-- TODO: dark/light comparison image -->
+`slate theme --auto` follows macOS appearance. Switch to dark mode and your entire terminal stack updates instantly — no manual intervention.
 
-## Themes
+## Ecosystem
 
-18 built-in themes across 8 families:
+Slate unifies the look of your entire terminal environment in one command:
 
-**Catppuccin** Mocha  Macchiato  Frappe  Latte
-**Tokyo Night** Night  Storm
-**Rose Pine** Main  Moon  Dawn
-**Kanagawa** Wave  Dragon  Lotus
-**Everforest** Dark  Light
-**Dracula**  **Nord**  **Gruvbox** Dark  Light
+| Terminals | Shell & Prompt | CLI Tools |
+|-----------|---------------|-----------|
+| Ghostty | Starship | bat |
+| Alacritty | zsh-syntax-highlighting | eza |
+| | | delta |
+| | | lazygit |
+| | | fastfetch |
+| | | tmux |
 
-<!-- TODO: 4 hero theme screenshots + collapsible full gallery -->
+Plus Nerd Font detection and installation.
 
 ## Everyday Usage
 
 ```bash
-slate                  # Launch interactive hub
-slate theme            # Pick a theme with live preview
-slate font             # Change your Nerd Font
-slate status           # See what's configured
-slate restore          # Undo changes from a snapshot
+slate theme              # interactive picker with live preview
+slate theme tokyo-night  # switch directly
+slate theme --auto       # follow macOS dark/light mode
+slate font               # change your Nerd Font
+slate status             # see what's configured
+slate list               # browse all 18 themes
 ```
 
-## Safety Net
+## The Safety Net
 
-slate snapshots your configs before every change. Made a mess? `slate restore` takes you back.
+Slate backs up your configs before touching anything. If something goes wrong:
 
-- First-time setup creates a pre-mutation backup
-- Every theme switch is reversible
-- `slate clean` removes all slate-managed configs
-- Your custom config files are never touched
+```bash
+slate restore            # pick a snapshot to roll back to
+slate clean              # remove everything slate added
+```
+
+## 18 Curated Themes
+
+<!-- Gallery: 4 signature themes as large screenshots -->
+<!-- Collapsible section with full 18-theme matrix -->
 
 <details>
-<summary><strong>Command Reference</strong></summary>
+<summary><strong>Explore all 18 themes</strong></summary>
+
+**Catppuccin** — Mocha, Macchiato, Frappe, Latte
+**Tokyo Night** — Night, Storm
+**Rose Pine** — Main, Moon, Dawn
+**Kanagawa** — Wave, Dragon, Lotus
+**Everforest** — Dark, Light
+**Dracula** — Classic
+**Nord** — Classic
+**Gruvbox** — Dark, Light
+
+</details>
+
+## Command Reference
+
+<details>
+<summary><strong>Full command list</strong></summary>
 
 | Command | Description |
-|---------|-------------|
-| `slate setup` | Interactive setup wizard |
-| `slate setup --quick` | One-click setup with defaults |
-| `slate theme [name]` | Set theme or launch picker |
-| `slate font [name]` | Set font or launch picker |
-| `slate status` | Show current configuration |
-| `slate list` | List available themes |
-| `slate clean` | Remove all slate-managed configs |
-| `slate restore [id]` | Restore from snapshot |
-| `slate restore --list` | List available snapshots |
-| `slate config set opacity <value>` | Set opacity (solid/frosted/clear) |
-| `slate config set auto-theme <enable/disable>` | Toggle auto dark/light mode |
+|---------|------------|
+| `slate` | Status dashboard + guided action |
+| `slate setup` | First-time setup wizard |
+| `slate setup --quick` | One-click defaults |
+| `slate theme [NAME]` | Switch theme or open picker |
+| `slate theme --auto` | Auto-follow macOS appearance |
+| `slate font [NAME]` | Switch Nerd Font |
+| `slate status` | Current configuration |
+| `slate list` | All available themes |
+| `slate config set KEY VALUE` | Configure settings |
+| `slate clean` | Remove slate configurations |
+| `slate restore [ID]` | Restore from snapshot |
 
 </details>
 
 ## Philosophy
 
-- **30-second Time-to-Dopamine** -- from install to beautiful
-- **Sell taste, not code** -- curated presets, not config files
-- **Transparent, never sneaky** -- see every change before it happens
-- **Your configs, your rules** -- three-tier system never touches your overrides
+> We sell taste, not code.
 
-## License
+Slate exists because configuring 11 tools to look good together is painful. We package designer-verified setups so you don't think about color theory — just pick a vibe and go.
 
-[MIT](LICENSE)
+---
+
+<p align="center">
+  Built with Rust. Themed with care.
+</p>
