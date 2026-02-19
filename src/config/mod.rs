@@ -122,15 +122,11 @@ impl ConfigManager {
             .join("plain.toml")
             .to_string_lossy()
             .to_string();
-        let active_starship_path = std::env::var("STARSHIP_CONFIG")
-            .ok()
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| {
-                self.xdg_config_root()
-                    .join("starship.toml")
-                    .to_string_lossy()
-                    .to_string()
-            });
+        let active_starship_path = self
+            .xdg_config_root()
+            .join("starship.toml")
+            .to_string_lossy()
+            .to_string();
         let notify_path = self
             .managed_dir("bin")
             .join("slate-dark-mode-notify")
@@ -467,6 +463,20 @@ mod tests {
         let xdg_root = base_path.parent().unwrap().to_string_lossy().to_string();
         let managed_root = crate::detection::shell_quote(&managed_root);
         let xdg_root = crate::detection::shell_quote(&xdg_root);
+        let active_starship = crate::detection::shell_quote(
+            &base_path
+                .parent()
+                .unwrap()
+                .join("starship.toml")
+                .to_string_lossy(),
+        );
+        let plain_starship = crate::detection::shell_quote(
+            &base_path
+                .join("managed")
+                .join("starship")
+                .join("plain.toml")
+                .to_string_lossy(),
+        );
 
         assert!(content.contains(&format!("export EZA_CONFIG_DIR={}/eza", managed_root)));
         assert!(content.contains(&format!(
@@ -474,6 +484,8 @@ mod tests {
             managed = managed_root,
             xdg = xdg_root
         )));
+        assert!(content.contains(&format!("export STARSHIP_CONFIG={}", active_starship)));
+        assert!(content.contains(&plain_starship));
         assert!(!content.contains("$HOME/.config/slate"));
     }
 

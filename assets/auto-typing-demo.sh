@@ -5,42 +5,103 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+SCENE="${1:-${SCENE:-all}}"
+
 SLATE_BIN="${SLATE_BIN:-$PROJECT_DIR/target/release/slate}"
-GHOSTTY_BIN="${GHOSTTY_BIN:-/Applications/Ghostty.app/Contents/MacOS/ghostty}"
+GHOSTTY_APP="${GHOSTTY_APP:-/Applications/Ghostty.app}"
 RECORDER_BUILD_DIR="${RECORDER_BUILD_DIR:-/tmp/slate-demo-recorder}"
 RECORDER_BIN="$RECORDER_BUILD_DIR/window_recorder"
-
-OUTPUT_BASENAME="${OUTPUT_BASENAME:-demo}"
 OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR}"
+WIDTH="${WIDTH:-960}"
+GIF_FPS="${GIF_FPS:-18}"
+WINDOW_WIDTH="${WINDOW_WIDTH:-1180}"
+WINDOW_HEIGHT="${WINDOW_HEIGHT:-760}"
+WINDOW_X="${WINDOW_X:-140}"
+WINDOW_Y="${WINDOW_Y:-110}"
+
+case "$SCENE" in
+  setup)
+    OUTPUT_BASENAME="${OUTPUT_BASENAME:-setup-demo}"
+    MAX_SECONDS="${MAX_SECONDS:-18}"
+    TRIM_START="${TRIM_START:-0.60}"
+    TRIM_END="${TRIM_END:-0.50}"
+    STARTUP_WAIT="${STARTUP_WAIT:-1.8}"
+    ;;
+  theme)
+    OUTPUT_BASENAME="${OUTPUT_BASENAME:-theme-demo}"
+    MAX_SECONDS="${MAX_SECONDS:-20}"
+    TRIM_START="${TRIM_START:-0.35}"
+    TRIM_END="${TRIM_END:-0.45}"
+    STARTUP_WAIT="${STARTUP_WAIT:-1.9}"
+    ;;
+  full)
+    OUTPUT_BASENAME="${OUTPUT_BASENAME:-demo}"
+    MAX_SECONDS="${MAX_SECONDS:-30}"
+    TRIM_START="${TRIM_START:-0.35}"
+    TRIM_END="${TRIM_END:-0.60}"
+    STARTUP_WAIT="${STARTUP_WAIT:-1.8}"
+    ;;
+  all)
+    "$0" setup
+    "$0" theme
+    exit 0
+    ;;
+  *)
+    echo "Unknown scene: $SCENE" >&2
+    echo "Usage: $0 [setup|theme|full|all]" >&2
+    exit 1
+    ;;
+esac
+
 RAW_MOV="$OUTPUT_DIR/${OUTPUT_BASENAME}-raw.mov"
 MP4_OUT="$OUTPUT_DIR/${OUTPUT_BASENAME}.mp4"
 GIF_OUT="$OUTPUT_DIR/${OUTPUT_BASENAME}.gif"
 POSTER_OUT="$OUTPUT_DIR/${OUTPUT_BASENAME}-poster.png"
 
-MAX_SECONDS="${MAX_SECONDS:-30}"
-TRIM_START="${TRIM_START:-0.60}"
-TRIM_END="${TRIM_END:-0.80}"
-WIDTH="${WIDTH:-960}"
-GIF_FPS="${GIF_FPS:-18}"
-
 DEMO_ROOT="$(mktemp -d /tmp/slate-demo.XXXXXX)"
 DEMO_HOME="$DEMO_ROOT/home"
 DEMO_CONFIG="$DEMO_HOME/.config"
-GHOSTTY_CONFIG="$DEMO_CONFIG/ghostty/config"
-STARSHIP_CONFIG="$DEMO_CONFIG/starship.toml"
-EXPECT_SCRIPT="$DEMO_ROOT/demo.expect"
-READY_FILE="$DEMO_ROOT/ready"
-DONE_FILE="$DEMO_ROOT/done"
+DEMO_BIN_DIR="$DEMO_ROOT/bin"
+DEMO_GHOSTTY_DIR="$DEMO_CONFIG/ghostty"
+DEMO_GHOSTTY_CONFIG="$DEMO_GHOSTTY_DIR/config"
+DEMO_STARSHIP_CONFIG="$DEMO_CONFIG/starship.toml"
+DEMO_PROJECT_LINK="$DEMO_HOME/slate"
+PATCH_STARSHIP_SCRIPT="$DEMO_ROOT/patch-starship.sh"
+PREWARM_SCRIPT="$DEMO_ROOT/prewarm.sh"
+SCENE_SCRIPT="$DEMO_ROOT/scene.applescript"
+WINDOW_TITLE="slate-${SCENE}-demo-$$-$RANDOM"
+
+close_demo_window() {
+  local window_key="${1:-}"
+  if [[ -z "$window_key" ]]; then
+    return 0
+  fi
+
+  osascript <<EOF >/dev/null 2>&1 || true
+tell application "Ghostty"
+  if (count of (every window whose id is "$window_key")) > 0 then
+    set targetWindow to first window whose id is "$window_key"
+    close window targetWindow
+  end if
+end tell
+EOF
+}
 
 cleanup() {
   if [[ -n "${RECORD_PID:-}" ]]; then
     kill -INT "$RECORD_PID" 2>/dev/null || true
     wait "$RECORD_PID" 2>/dev/null || true
   fi
-  if [[ -n "${GHOSTTY_PID:-}" ]]; then
-    kill "$GHOSTTY_PID" 2>/dev/null || true
-    wait "$GHOSTTY_PID" 2>/dev/null || true
+
+  if [[ -n "${GHOSTTY_WINDOW_KEY:-}" ]]; then
+    close_demo_window "$GHOSTTY_WINDOW_KEY"
   fi
+
+  if [[ -n "${DEMO_GHOSTTY_PID:-}" ]]; then
+    kill "$DEMO_GHOSTTY_PID" 2>/dev/null || true
+    wait "$DEMO_GHOSTTY_PID" 2>/dev/null || true
+  fi
+
   if [[ "${KEEP_DEMO_SANDBOX:-0}" != "1" ]]; then
     rm -rf "$DEMO_ROOT"
   else
@@ -57,7 +118,7 @@ require_command() {
 }
 
 build_slate() {
-  if [[ ! -x "$SLATE_BIN" ]]; then
+  if [[ ! -x "$SLATE_BIN" ]] || find "$PROJECT_DIR/src" "$PROJECT_DIR/Cargo.toml" "$PROJECT_DIR/Cargo.lock" -type f -newer "$SLATE_BIN" -print -quit | grep -q .; then
     echo "==> building release binary"
     cargo build --release --manifest-path "$PROJECT_DIR/Cargo.toml"
   fi
@@ -76,149 +137,376 @@ build_recorder() {
 }
 
 prepare_demo_fs() {
-  mkdir -p "$DEMO_CONFIG/ghostty" "$DEMO_HOME"
-
-  cat > "$GHOSTTY_CONFIG" <<'EOF'
-font-family = Menlo
-font-size = 14
-background = #f6f6f3
-foreground = #2b2b2b
-cursor-color = #2b2b2b
-selection-background = #d8e8ff
-selection-foreground = #1f1f1f
-window-padding-x = 6
-window-padding-y = 6
-window-width = 102
-window-height = 30
-title = slate demo
-EOF
-
-  : > "$STARSHIP_CONFIG"
+  mkdir -p "$DEMO_HOME" "$DEMO_CONFIG" "$DEMO_BIN_DIR" "$DEMO_GHOSTTY_DIR"
   : > "$DEMO_HOME/.zshrc"
-}
+  ln -s "$PROJECT_DIR" "$DEMO_PROJECT_LINK"
 
-write_expect_script() {
-  cat > "$EXPECT_SCRIPT" <<EOF
-#!/usr/bin/expect -f
-set timeout 180
-
-proc wait_for_prompt {} {
-    expect -re {[$] $}
-}
-
-proc type_slow {text {delay_ms 55}} {
-    foreach char [split \$text ""] {
-        send -- "\$char"
-        after \$delay_ms
-    }
-}
-
-spawn env \\
-  HOME="$DEMO_HOME" \\
-  SLATE_HOME="$DEMO_HOME" \\
-  XDG_CONFIG_HOME="$DEMO_CONFIG" \\
-  STARSHIP_CONFIG="$STARSHIP_CONFIG" \\
-  PATH="$(dirname "$SLATE_BIN"):\$env(PATH)" \\
-  TERM_PROGRAM=ghostty \\
-  zsh -f
-
-wait_for_prompt
-send -- "PROMPT='\\$ '\\r"
-wait_for_prompt
-send -- "clear\\r"
-wait_for_prompt
-
-type_slow "echo 'default prompt. default colors. default everything.'" 40
-send -- "\\r"
-after 700
-wait_for_prompt
-
-type_slow "ls" 40
-send -- "\\r"
-after 900
-wait_for_prompt
-
-exec touch "$READY_FILE"
-after 1200
-
-type_slow "slate setup --quick" 55
-send -- "\\r"
-expect -re {[$] $}
-after 900
-
-type_slow "slate theme" 55
-send -- "\\r"
-after 1500
-send -- "\\033\\[B"
-after 500
-send -- "\\033\\[B"
-after 500
-send -- "\\033\\[A"
-after 500
-send -- "\\r"
-after 1500
-wait_for_prompt
-
-type_slow "exec zsh" 55
-send -- "\\r"
-after 1800
-
-type_slow "slate status" 50
-send -- "\\r"
-after 3200
-
-exec touch "$DONE_FILE"
-after 500
+  cat > "$DEMO_GHOSTTY_CONFIG" <<EOF
+title = "$WINDOW_TITLE"
+font-size = 14
+window-show-tab-bar = never
+macos-titlebar-style = hidden
+macos-titlebar-proxy-icon = hidden
+command = /bin/zsh -f -i
 EOF
 
-  chmod +x "$EXPECT_SCRIPT"
+  cat > "$PATCH_STARSHIP_SCRIPT" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+patch_file() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  perl -0pi -e 's/format = '\''\[\$user \]\(\$style\)'\''/format = '\''[ moonmao ](\$style)'\''/g' "$file"
+  perl -0pi -e 's/format = "\[\$user\]\(\$style\) "/format = "[moonmao](\$style) "/g' "$file"
 }
 
-wait_for_file() {
-  local path="$1"
-  local seconds="$2"
-  local elapsed=0
+patch_file "${DEMO_STARSHIP_CONFIG:-}"
 
-  while [[ ! -f "$path" ]]; do
-    sleep 1
+if [[ -d "${DEMO_STARSHIP_DIR:-}" ]]; then
+  while IFS= read -r -d '' file; do
+    patch_file "$file"
+  done < <(find "${DEMO_STARSHIP_DIR:-}" -type f -name '*.toml' -print0)
+fi
+EOF
+  chmod +x "$PATCH_STARSHIP_SCRIPT"
+
+  cat > "$DEMO_BIN_DIR/slate" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+set +e
+"$SLATE_BIN" "\$@"
+status=\$?
+set -e
+
+case "\${1:-}" in
+  setup|theme|set)
+    if [[ \$status -eq 0 ]]; then
+      "$PATCH_STARSHIP_SCRIPT" >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
+
+exit \$status
+EOF
+  chmod +x "$DEMO_BIN_DIR/slate"
+}
+
+write_prewarm_script() {
+  cat > "$PREWARM_SCRIPT" <<EOF
+export HOME="$DEMO_HOME"
+export ZDOTDIR="$DEMO_HOME"
+export XDG_CONFIG_HOME="$DEMO_CONFIG"
+export SLATE_HOME="$DEMO_HOME"
+export DEMO_STARSHIP_CONFIG="$DEMO_STARSHIP_CONFIG"
+export DEMO_STARSHIP_DIR="$DEMO_CONFIG/slate/managed/starship"
+export PATH="$DEMO_BIN_DIR:$(dirname "$SLATE_BIN"):\$PATH"
+export USER="moonmao"
+export LOGNAME="moonmao"
+export LANG="en_US.UTF-8"
+export LC_ALL="en_US.UTF-8"
+export TERM_PROGRAM="ghostty"
+cd "$DEMO_PROJECT_LINK"
+PS1='$ '
+PROMPT='$ '
+RPROMPT=''
+RPS1=''
+PROMPT_EOL_MARK=''
+precmd_functions=()
+preexec_functions=()
+EOF
+
+  case "$SCENE" in
+    setup|full)
+      cat >> "$PREWARM_SCRIPT" <<'EOF'
+clear
+EOF
+      ;;
+    theme)
+      cat >> "$PREWARM_SCRIPT" <<'EOF'
+slate setup --quick </dev/null >/dev/null 2>&1
+EOF
+      ;;
+  esac
+}
+
+ghostty_window_id() {
+  "$RECORDER_BIN" list 2>/dev/null | awk -F '\t' -v title="$WINDOW_TITLE" '
+    $2 == "Ghostty" && $3 == title { print $1; exit }
+  '
+}
+
+ghostty_process_id() {
+  ps -axo pid=,command= | awk -v config="$DEMO_GHOSTTY_CONFIG" '
+    index($0, "/Applications/Ghostty.app/Contents/MacOS/ghostty") && index($0, config) {
+      print $1
+    }
+  ' | tail -n 1
+}
+
+wait_for_window_key() {
+  local elapsed=0
+  while [[ -z "${GHOSTTY_WINDOW_KEY:-}" ]]; do
+    GHOSTTY_WINDOW_KEY="$(osascript <<EOF 2>/dev/null || true
+tell application "Ghostty"
+  if (count of (every window whose name is "$WINDOW_TITLE")) > 0 then
+    return id of (first window whose name is "$WINDOW_TITLE")
+  end if
+end tell
+EOF
+)"
+    if [[ -n "${GHOSTTY_WINDOW_KEY:-}" ]]; then
+      break
+    fi
+    sleep 0.5
     elapsed=$((elapsed + 1))
-    if (( elapsed >= seconds )); then
-      echo "Timed out waiting for $path" >&2
+    if (( elapsed >= 20 )); then
+      echo "Could not locate Ghostty AppleScript window for $WINDOW_TITLE" >&2
       exit 1
     fi
   done
 }
 
-find_new_window_id() {
-  local before_ids after_ids
-  before_ids="$("$RECORDER_BIN" list 2>/dev/null | awk '/Ghostty/ {print $1}' | sort)"
+wait_for_window_recorder_id() {
+  local elapsed=0
+  while [[ -z "${WINDOW_ID:-}" ]]; do
+    WINDOW_ID="$(ghostty_window_id)"
+    if [[ -n "${WINDOW_ID:-}" ]]; then
+      break
+    fi
+    sleep 0.5
+    elapsed=$((elapsed + 1))
+    if (( elapsed >= 20 )); then
+      echo "Could not determine ScreenCaptureKit window id for $WINDOW_TITLE" >&2
+      exit 1
+    fi
+  done
+}
 
-  XDG_CONFIG_HOME="$DEMO_CONFIG" \
-    "$GHOSTTY_BIN" --config-file="$GHOSTTY_CONFIG" -e "$EXPECT_SCRIPT" &
-  GHOSTTY_PID=$!
+wait_for_ghostty_pid() {
+  local elapsed=0
+  while [[ -z "${DEMO_GHOSTTY_PID:-}" ]]; do
+    DEMO_GHOSTTY_PID="$(ghostty_process_id)"
+    if [[ -n "${DEMO_GHOSTTY_PID:-}" ]]; then
+      break
+    fi
+    sleep 0.5
+    elapsed=$((elapsed + 1))
+    if (( elapsed >= 20 )); then
+      echo "Could not determine Ghostty process id for demo instance" >&2
+      exit 1
+    fi
+  done
+}
 
-  wait_for_file "$READY_FILE" 45
-  sleep 1
+activate_demo_window() {
+  osascript <<EOF >/dev/null
+tell application "Ghostty"
+  set targetWindow to first window whose id is "$GHOSTTY_WINDOW_KEY"
+  activate
+  activate window targetWindow
+end tell
+EOF
+}
 
-  after_ids="$("$RECORDER_BIN" list 2>/dev/null | awk '/Ghostty/ {print $1}' | sort)"
-  comm -13 <(printf "%s\n" "$before_ids") <(printf "%s\n" "$after_ids") | head -n 1
+position_demo_window() {
+  activate_demo_window
+  osascript <<EOF >/dev/null 2>&1 || true
+tell application "System Events"
+  tell process "ghostty"
+    set position of front window to {$WINDOW_X, $WINDOW_Y}
+    set size of front window to {$WINDOW_WIDTH, $WINDOW_HEIGHT}
+  end tell
+end tell
+EOF
+}
+
+launch_demo_window() {
+  env \
+    HOME="$DEMO_HOME" \
+    XDG_CONFIG_HOME="$DEMO_CONFIG" \
+    SLATE_HOME="$DEMO_HOME" \
+    USER="moonmao" \
+    LOGNAME="moonmao" \
+    PATH="$DEMO_BIN_DIR:$(dirname "$SLATE_BIN"):$PATH" \
+    open -na "$GHOSTTY_APP" --args --config-file="$DEMO_GHOSTTY_CONFIG"
+
+  sleep "$STARTUP_WAIT"
+
+  wait_for_window_key
+  wait_for_window_recorder_id
+  wait_for_ghostty_pid
+  position_demo_window
+}
+
+run_prewarm() {
+  local post_exec_delay="${1:-2.2}"
+
+  case "$SCENE" in
+    setup|full)
+      osascript <<EOF >/dev/null
+tell application "Ghostty"
+  set targetWindow to first window whose id is "$GHOSTTY_WINDOW_KEY"
+  activate window targetWindow
+  set t to focused terminal of selected tab of targetWindow
+  input text ". \"$PREWARM_SCRIPT\"" to t
+  send key "enter" to t
+  delay 0.8
+end tell
+EOF
+      ;;
+    theme)
+      osascript <<EOF >/dev/null
+tell application "Ghostty"
+  set targetWindow to first window whose id is "$GHOSTTY_WINDOW_KEY"
+  activate window targetWindow
+  set t to focused terminal of selected tab of targetWindow
+  input text ". \"$PREWARM_SCRIPT\"" to t
+  send key "enter" to t
+  delay 3.2
+  input text "exec zsh -i" to t
+  send key "enter" to t
+  delay $post_exec_delay
+  input text "clear" to t
+  send key "enter" to t
+  delay 0.8
+end tell
+EOF
+      ;;
+  esac
+}
+
+scene_body() {
+  case "$SCENE" in
+    setup)
+      cat <<'EOF'
+  delay 0.95
+  my type_slow(t, "echo 'default prompt. default colors. default everything.'", 0.04)
+  send key "enter" to t
+  delay 1.1
+
+  my type_slow(t, "ls", 0.04)
+  send key "enter" to t
+  delay 1.0
+
+  my type_slow(t, "slate setup --quick </dev/null", 0.05)
+  send key "enter" to t
+  delay 2.6
+
+  my type_slow(t, "exec zsh -i", 0.05)
+  send key "enter" to t
+  delay 2.8
+
+  input text "clear" to t
+  send key "enter" to t
+  delay 3.0
+EOF
+      ;;
+    theme)
+      cat <<'EOF'
+  delay 0.4
+  my type_slow(t, "slate theme", 0.05)
+  send key "enter" to t
+  delay 1.8
+
+  send key "arrowRight" to t
+  delay 0.65
+  send key "arrowRight" to t
+  delay 0.65
+  send key "arrowLeft" to t
+  delay 0.65
+  send key "arrowDown" to t
+  delay 0.65
+  send key "arrowDown" to t
+  delay 0.65
+  send key "arrowUp" to t
+  delay 0.65
+  send key "enter" to t
+  delay 2.6
+
+  input text "clear" to t
+  send key "enter" to t
+  delay 2.4
+EOF
+      ;;
+    full)
+      cat <<'EOF'
+  delay 0.95
+  my type_slow(t, "echo 'default prompt. default colors. default everything.'", 0.04)
+  send key "enter" to t
+  delay 1.1
+
+  my type_slow(t, "ls", 0.04)
+  send key "enter" to t
+  delay 1.0
+
+  my type_slow(t, "slate setup --quick </dev/null", 0.05)
+  send key "enter" to t
+  delay 2.6
+
+  my type_slow(t, "exec zsh -i", 0.05)
+  send key "enter" to t
+  delay 2.8
+
+  input text "clear" to t
+  send key "enter" to t
+  delay 0.8
+
+  my type_slow(t, "slate theme", 0.05)
+  send key "enter" to t
+  delay 1.8
+
+  send key "arrowRight" to t
+  delay 0.65
+  send key "arrowLeft" to t
+  delay 0.65
+  send key "arrowDown" to t
+  delay 0.65
+  send key "arrowUp" to t
+  delay 0.65
+  send key "enter" to t
+  delay 2.4
+
+  input text "clear" to t
+  send key "enter" to t
+  delay 2.2
+EOF
+      ;;
+  esac
+}
+
+write_scene_script() {
+  cat > "$SCENE_SCRIPT" <<EOF
+on type_slow(t, txt, delay_seconds)
+  repeat with ch in characters of txt
+    tell application "Ghostty" to input text (contents of ch) to t
+    delay delay_seconds
+  end repeat
+end type_slow
+
+tell application "Ghostty"
+  set targetWindow to first window whose id is "$GHOSTTY_WINDOW_KEY"
+  activate window targetWindow
+  set t to focused terminal of selected tab of targetWindow
+$(scene_body)
+end tell
+EOF
 }
 
 record_demo() {
-  local window_id="$1"
-
-  if [[ -z "$window_id" ]]; then
+  if [[ -z "${WINDOW_ID:-}" ]]; then
     echo "Could not determine Ghostty window id" >&2
     exit 1
   fi
 
   rm -f "$RAW_MOV" "$MP4_OUT" "$GIF_OUT" "$POSTER_OUT"
 
-  echo "==> recording Ghostty window $window_id"
-  "$RECORDER_BIN" "$window_id" "$RAW_MOV" &
+  echo "==> recording Ghostty window $WINDOW_ID"
+  "$RECORDER_BIN" "$WINDOW_ID" "$RAW_MOV" &
   RECORD_PID=$!
 
-  wait_for_file "$DONE_FILE" 120
+  osascript "$SCENE_SCRIPT"
   sleep 1
 
   kill -INT "$RECORD_PID" 2>/dev/null || true
@@ -287,23 +575,27 @@ main() {
   require_command cargo
   require_command ffmpeg
   require_command ffprobe
+  require_command open
+  require_command osascript
+  require_command perl
+  require_command ps
   require_command swiftc
-  require_command expect
 
-  if [[ ! -x "$GHOSTTY_BIN" ]]; then
-    echo "Ghostty binary not found at $GHOSTTY_BIN" >&2
+  if [[ ! -d "$GHOSTTY_APP" ]]; then
+    echo "Ghostty.app not found at $GHOSTTY_APP" >&2
     exit 1
   fi
 
   build_slate
   build_recorder
   prepare_demo_fs
-  write_expect_script
+  write_prewarm_script
 
-  echo "==> launching storyboard"
-  local window_id
-  window_id="$(find_new_window_id)"
-  record_demo "$window_id"
+  echo "==> scene: $SCENE"
+  launch_demo_window
+  run_prewarm
+  write_scene_script
+  record_demo
   export_assets
 
   echo ""
