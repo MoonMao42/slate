@@ -42,6 +42,10 @@ impl FontAdapter {
         name.contains("NerdFont") || name.contains("Nerd Font")
     }
 
+    pub fn is_nerd_font_name(name: &str) -> bool {
+        Self::looks_like_nerd_font(name)
+    }
+
     /// Normalize a font filename into the family name terminal configs expect.
     /// Example: "JetBrainsMonoNerdFont-Regular.ttf" -> "JetBrainsMono Nerd Font"
     pub(crate) fn normalize_font_family(name: &str) -> String {
@@ -243,6 +247,7 @@ impl FontAdapter {
 
         // Persist to current-font file
         config.set_current_font(font_name)?;
+        config.refresh_shell_integration()?;
 
         // Apply font to Ghostty (font-only path)
         crate::adapter::ghostty::GhosttyAdapter::apply_font_only(env, font_name)?;

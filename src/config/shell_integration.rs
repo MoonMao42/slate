@@ -11,6 +11,7 @@ pub(crate) struct ShellIntegrationOptions<'a> {
     pub slate_bin: &'a str,
     pub zsh_highlighting_plugin_path: Option<&'a str>,
     pub homebrew_prefix: Option<&'a str>,
+    pub prefer_plain_starship: bool,
     pub starship_enabled: bool,
     pub zsh_highlighting_enabled: bool,
     pub fastfetch_autorun: bool,
@@ -182,6 +183,52 @@ disabled = true
 disabled = true
 "#;
 
+const BASIC_STARSHIP_CONTENT: &str = r#""$schema" = 'https://starship.rs/config-schema.json'
+
+add_newline = true
+command_timeout = 1500
+palette = "slate"
+
+format = "$username$directory$git_branch$git_status$cmd_duration$line_break$character"
+
+[username]
+show_always = true
+format = "[$user]($style) "
+style_user = "bold red"
+style_root = "bold red"
+
+[directory]
+format = "[$path]($style) "
+style = "bold peach"
+truncation_length = 3
+truncate_to_repo = false
+truncation_symbol = ".../"
+
+[git_branch]
+symbol = "git:"
+style = "bold yellow"
+format = "[$symbol$branch]($style) "
+
+[git_status]
+style = "bold yellow"
+format = "([$all_status$ahead_behind]($style) )"
+
+[cmd_duration]
+min_time = 2000
+style = "fg:yellow"
+format = "[$duration]($style) "
+
+[character]
+success_symbol = "[>](bold fg:green)"
+error_symbol = "[x](bold fg:red)"
+vimcmd_symbol = "[<](bold fg:green)"
+
+[aws]
+disabled = true
+[gcloud]
+disabled = true
+"#;
+
 pub(crate) fn build_shell_integration_content(
     theme: &ThemeVariant,
     options: &ShellIntegrationOptions<'_>,
@@ -277,11 +324,18 @@ pub(crate) fn build_shell_integration_content(
     }
 
     if options.starship_enabled {
-        content.push_str(&format!(
-            "if [ -f {active} ]; then\n  export STARSHIP_CONFIG={active}\nelse\n  export STARSHIP_CONFIG={plain}\nfi\n",
-            active = active_starship_path,
-            plain = plain_starship_path
-        ));
+        if options.prefer_plain_starship {
+            content.push_str(&format!(
+                "export STARSHIP_CONFIG={plain}\n",
+                plain = plain_starship_path
+            ));
+        } else {
+            content.push_str(&format!(
+                "if [ -f {active} ]; then\n  export STARSHIP_CONFIG={active}\nelse\n  export STARSHIP_CONFIG={plain}\nfi\n",
+                active = active_starship_path,
+                plain = plain_starship_path
+            ));
+        }
 
         content.push_str("\nif command -v starship &> /dev/null; then\n");
         content.push_str("  eval \"$(starship init zsh)\"\n");
@@ -360,8 +414,8 @@ fn starship_palette_value(theme: &ThemeVariant, key: &str) -> String {
     }
 }
 
-pub(crate) fn themed_starship_content(theme: &ThemeVariant) -> String {
-    let mut content = DEFAULT_STARSHIP_CONTENT.to_string();
+fn with_slate_palette(base: &str, theme: &ThemeVariant) -> String {
+    let mut content = base.to_string();
     content.push_str("\n\n[palettes.slate]\n");
     for key in [
         "red",
@@ -391,8 +445,12 @@ pub(crate) fn themed_starship_content(theme: &ThemeVariant) -> String {
 }
 
 #[allow(dead_code)]
-pub(crate) fn plain_starship_content() -> &'static str {
-    DEFAULT_STARSHIP_CONTENT
+pub(crate) fn themed_starship_content(theme: &ThemeVariant) -> String {
+    with_slate_palette(DEFAULT_STARSHIP_CONTENT, theme)
+}
+
+pub(crate) fn themed_plain_starship_content(theme: &ThemeVariant) -> String {
+    with_slate_palette(BASIC_STARSHIP_CONTENT, theme)
 }
 
 pub(crate) fn starter_starship_content() -> &'static str {
@@ -423,6 +481,7 @@ mod tests {
                 "/opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh",
             ),
             homebrew_prefix: Some("/opt/homebrew"),
+            prefer_plain_starship: false,
             starship_enabled: true,
             zsh_highlighting_enabled: true,
             fastfetch_autorun: true,
@@ -475,6 +534,18 @@ mod tests {
     }
 
     #[test]
+    fn test_shell_integration_can_force_plain_starship_profile() {
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        let mut options = sample_options();
+        options.prefer_plain_starship = true;
+
+        let content = build_shell_integration_content(&theme, &options);
+
+        assert!(content.contains("export STARSHIP_CONFIG='/tmp/slate/managed/starship/plain.toml'"));
+        assert!(!content.contains("if [ -f '/tmp/.config/starship.toml' ]; then"));
+    }
+
+    #[test]
     fn test_starter_starship_content_uses_slate_palette() {
         let content = starter_starship_content();
 
@@ -492,6 +563,17 @@ mod tests {
         assert!(content.contains("[palettes.slate]"));
         assert!(content.contains("powerline_fg = "));
         assert!(content.contains("peach = "));
+    }
+
+    #[test]
+    fn test_themed_plain_starship_content_is_ascii_only() {
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        let content = themed_plain_starship_content(&theme);
+
+        assert!(content.contains("symbol = \"git:\""));
+        assert!(content.contains("success_symbol = \"[>](bold fg:green)\""));
+        assert!(!content.contains("󰀵"));
+        assert!(!content.contains(""));
     }
 
     #[test]

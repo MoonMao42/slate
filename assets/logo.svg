@@ -1,0 +1,33 @@
+<svg width="480" height="310" viewBox="0 0 480 310" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Icon group -->
+  <g transform="translate(120 0)">
+    <!-- Main block -->
+    <rect x="0" y="0" width="240" height="240" fill="#2E3136"/>
+
+    <!-- Negative-space S cut -->
+    <path d="
+      M 172.5 0
+      L 92.5 80
+      L 160 147.5
+      L 92.5 240
+      L 132.5 240
+      L 200 147.5
+      L 132.5 80
+      L 212.5 0
+      Z
+    " fill="white"/>
+
+    <!-- subtle edge accents -->
+    <path d="M172.5 0 L92.5 80 L98 85.5 L184.5 0 Z" fill="#202328" opacity="0.45"/>
+    <path d="M160 147.5 L92.5 240 L104 240 L166 154 Z" fill="#202328" opacity="0.35"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="240" y="300"
+        text-anchor="middle"
+        font-family="Avenir Next, Inter, Helvetica Neue, Arial, sans-serif"
+        font-size="59"
+        font-weight="400"
+        letter-spacing="1.8"
+        fill="#34373C">slate</text>
+</svg>

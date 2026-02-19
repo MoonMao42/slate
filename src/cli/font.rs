@@ -4,6 +4,10 @@ use crate::design::symbols::Symbols;
 use crate::env::SlateEnv;
 use crate::error::Result;
 
+fn font_uses_basic_prompt(font_name: &str) -> bool {
+    !FontAdapter::is_nerd_font_name(font_name)
+}
+
 /// Handle `slate font` command
 /// Supports two modes:
 /// 1. `slate font <name>` — Apply explicit font directly
@@ -48,6 +52,7 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
                     Symbols::SUCCESS,
                     cat_font.name
                 );
+                println!("New shells will continue using the full Slate prompt profile.");
                 return Ok(());
             }
 
@@ -67,6 +72,11 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
             Symbols::SUCCESS,
             name
         );
+        if font_uses_basic_prompt(name) {
+            println!("(i) Basic Starship mode enabled for new shells because this font does not include Nerd Font glyphs.");
+        } else {
+            println!("New shells will continue using the full Slate prompt profile.");
+        }
         Ok(())
     } else {
         // Picker path: show font picker UI per 
@@ -223,7 +233,7 @@ fn show_font_picker() -> Result<()> {
 
         // Show system fonts warning
         if *is_system {
-            println!("(i) System fonts lack Nerd Font icons — starship/eza/lazygit glyphs may render as '?'");
+            println!("(i) System fonts lack Nerd Font icons. Slate will switch new shells to the basic Starship profile.");
         }
 
         // Apply font
@@ -235,7 +245,9 @@ fn show_font_picker() -> Result<()> {
             bare_name
         );
 
-        if !*is_system {
+        if font_uses_basic_prompt(&bare_name) {
+            println!("(i) Basic Starship mode enabled for new shells because this font does not include Nerd Font glyphs.");
+        } else {
             println!("Font updated and will take effect immediately if live reload is enabled.");
         }
         break;

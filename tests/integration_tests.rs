@@ -467,17 +467,20 @@ fn test_full_pipeline() {
         .unwrap();
     assert!(output.status.success(), "clean failed");
 
-    // Step 6b: verify clean actually removed managed files
-    let managed_dir = tempdir.path().join("config/slate/managed");
-    if managed_dir.exists() {
-        let entries: Vec<_> = std::fs::read_dir(&managed_dir)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .collect();
+    // Step 6b: verify clean actually removed Slate-owned config state
+    let slate_config_dir = tempdir.path().join(".config/slate");
+    assert!(
+        !slate_config_dir.exists(),
+        "slate config dir should be removed after clean"
+    );
+
+    // Step 6c: shell marker block should also be gone
+    let zshrc_path = tempdir.path().join(".zshrc");
+    if zshrc_path.exists() {
+        let zshrc = std::fs::read_to_string(&zshrc_path).unwrap();
         assert!(
-            entries.is_empty(),
-            "managed dir should be empty after clean, found {} entries",
-            entries.len()
+            !zshrc.contains("slate:start"),
+            ".zshrc should not retain Slate marker block after clean"
         );
     }
 
@@ -509,7 +512,9 @@ fn test_adapter_output_ghostty() {
         .unwrap();
 
     // Verify Ghostty managed config
-    let theme_conf = tempdir.path().join("config/slate/managed/ghostty/theme.conf");
+    let theme_conf = tempdir
+        .path()
+        .join("config/slate/managed/ghostty/theme.conf");
     if theme_conf.exists() {
         let content = std::fs::read_to_string(&theme_conf).unwrap();
         assert!(
@@ -527,7 +532,9 @@ fn test_adapter_output_ghostty() {
     }
 
     // Verify blur.conf uses correct key name (BUG-1 regression test)
-    let blur_conf = tempdir.path().join("config/slate/managed/ghostty/blur.conf");
+    let blur_conf = tempdir
+        .path()
+        .join("config/slate/managed/ghostty/blur.conf");
     if blur_conf.exists() {
         let content = std::fs::read_to_string(&blur_conf).unwrap();
         assert!(
@@ -553,7 +560,9 @@ fn test_adapter_output_starship() {
         .output()
         .unwrap();
 
-    let palette_toml = tempdir.path().join("config/slate/managed/starship/palette.toml");
+    let palette_toml = tempdir
+        .path()
+        .join("config/slate/managed/starship/palette.toml");
     if palette_toml.exists() {
         let content = std::fs::read_to_string(&palette_toml).unwrap();
         assert!(
@@ -600,6 +609,92 @@ fn test_unsupported_terminal_graceful_skip() {
         "setup should succeed even from Apple_Terminal: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn test_system_font_switch_uses_plain_starship_profile() {
+    let tempdir = TempDir::new().unwrap();
+
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["font", "Menlo"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "font command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let shell_env = tempdir.path().join(".config/slate/managed/shell/env.zsh");
+    let content = std::fs::read_to_string(&shell_env).unwrap();
+
+    assert!(content.contains("managed/starship/plain.toml"));
+    assert!(!content.contains("else\n  export STARSHIP_CONFIG="));
+}
+
+#[test]
+fn test_clean_removes_ghostty_managed_config_references() {
+    let tempdir = TempDir::new().unwrap();
+    let ghostty_dir = tempdir.path().join(".config/ghostty");
+    std::fs::create_dir_all(&ghostty_dir).unwrap();
+
+    let managed_root = tempdir.path().join(".config/slate/managed/ghostty");
+    let ghostty_config = ghostty_dir.join("config");
+    std::fs::write(
+        &ghostty_config,
+        format!(
+            "font-family = Menlo\nconfig-file = \"{}/theme.conf\"\nconfig-file = \"{}/opacity.conf\"\nconfig-file = \"{}/blur.conf\"\n",
+            managed_root.display(),
+            managed_root.display(),
+            managed_root.display()
+        ),
+    )
+    .unwrap();
+
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["clean"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "clean failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let content = std::fs::read_to_string(&ghostty_config).unwrap();
+    assert!(content.contains("font-family = Menlo"));
+    assert!(!content.contains("config-file = "));
+}
+
+#[test]
+fn test_clean_removes_alacritty_managed_imports() {
+    let tempdir = TempDir::new().unwrap();
+    let alacritty_dir = tempdir.path().join(".config/alacritty");
+    std::fs::create_dir_all(&alacritty_dir).unwrap();
+
+    let managed_root = tempdir.path().join(".config/slate/managed/alacritty");
+    let alacritty_config = alacritty_dir.join("alacritty.toml");
+    std::fs::write(
+        &alacritty_config,
+        format!(
+            "[general]\nimport = [\"{}/colors.toml\", \"{}/opacity.toml\", \"~/dotfiles/alacritty/base.toml\"]\n",
+            managed_root.display(),
+            managed_root.display()
+        ),
+    )
+    .unwrap();
+
+    let output = slate_cmd_isolated(&tempdir).args(["clean"]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "clean failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let content = std::fs::read_to_string(&alacritty_config).unwrap();
+    assert!(content.contains("~/dotfiles/alacritty/base.toml"));
+    assert!(!content.contains("managed/alacritty/colors.toml"));
+    assert!(!content.contains("managed/alacritty/opacity.toml"));
 }
 
 #[test]
