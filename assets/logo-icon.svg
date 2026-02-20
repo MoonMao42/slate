@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" width="518" height="513" viewBox="369 289 518 513" fill="none">
   <defs>
     <linearGradient id="slate-fill" x1="369" y1="289" x2="887" y2="802" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#2B2D32"/>
@@ -60,16 +60,4 @@
       <rect x="369" y="289" width="518" height="513" fill="#FFFFFF" filter="url(#slate-relief)" opacity="0.24"/>
     </g>
   </g>
-
-  <text
-    x="628.5"
-    y="993"
-    text-anchor="middle"
-    textLength="520"
-    lengthAdjust="spacingAndGlyphs"
-    font-family="Avenir Next, Helvetica Neue, Arial, sans-serif"
-    font-size="190"
-    font-weight="400"
-    fill="#35383E"
-  >slate</text>
 </svg>
