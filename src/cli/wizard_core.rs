@@ -8,6 +8,7 @@ use crate::cli::tool_selection::{
     TerminalSettings, ToolCatalog,
 };
 use crate::cli::wizard_support;
+use crate::detection::ToolPresence;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use cliclack::{confirm, intro, multiselect, outro_cancel, select};
@@ -59,6 +60,66 @@ pub enum WizardMode {
 pub struct Wizard {
     context: WizardContext,
     theme_selector: ThemeSelector,
+}
+
+fn current_terminal_tool_id() -> Option<&'static str> {
+    match std::env::var("TERM_PROGRAM").ok()?.to_ascii_lowercase().as_str() {
+        "ghostty" => Some("ghostty"),
+        "alacritty" => Some("alacritty"),
+        _ => None,
+    }
+}
+
+fn compute_quick_tool_plan(
+    installed: &HashMap<String, ToolPresence>,
+    current_terminal: Option<&str>,
+) -> (Vec<String>, Vec<String>) {
+    let core_tools = ["starship", "zsh-syntax-highlighting"];
+
+    let selected_tools = core_tools
+        .iter()
+        .filter(|&&id| {
+            let is_missing = !installed.get(id).map(|p| p.installed).unwrap_or(false);
+            let is_installable = ToolCatalog::get_tool(id)
+                .map(|t| t.installable)
+                .unwrap_or(false);
+            is_missing && is_installable
+        })
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>();
+
+    let mut tools_to_configure = installed
+        .iter()
+        .filter(|(_, presence)| presence.is_tier1())
+        .map(|(id, _)| id.clone())
+        .collect::<Vec<_>>();
+
+    for id in core_tools {
+        if installed.get(id).map(|p| p.installed).unwrap_or(false)
+            && !tools_to_configure.contains(&id.to_string())
+        {
+            tools_to_configure.push(id.to_string());
+        }
+    }
+
+    if let Some(terminal_id) = current_terminal {
+        if installed
+            .get(terminal_id)
+            .map(|presence| presence.installed)
+            .unwrap_or(false)
+            && !tools_to_configure.contains(&terminal_id.to_string())
+        {
+            tools_to_configure.push(terminal_id.to_string());
+        }
+    }
+
+    for id in &selected_tools {
+        if !tools_to_configure.contains(id) {
+            tools_to_configure.push(id.clone());
+        }
+    }
+
+    (selected_tools, tools_to_configure)
 }
 
 impl Wizard {
@@ -407,22 +468,11 @@ impl Wizard {
     /// No multiselect — the preset decides what's essential.
     fn step_quick_auto_tools(&mut self) -> Result<()> {
         let installed = detect_installed_tools();
-        let core_tools = ["starship", "zsh-syntax-highlighting"];
+        let (selected_tools, tools_to_configure) =
+            compute_quick_tool_plan(&installed, current_terminal_tool_id());
 
-        self.context.selected_tools = core_tools
-            .iter()
-            .filter(|&&id| {
-                let is_missing = !installed
-                    .get(id)
-                    .map(|p| p.installed)
-                    .unwrap_or(false);
-                let is_installable = ToolCatalog::get_tool(id)
-                    .map(|t| t.installable)
-                    .unwrap_or(false);
-                is_missing && is_installable
-            })
-            .map(|id| id.to_string())
-            .collect();
+        self.context.selected_tools = selected_tools;
+        self.context.tools_to_configure = tools_to_configure;
 
         self.context.current_step += 1;
         Ok(())
@@ -699,5 +749,33 @@ mod tests {
         let mut wizard = Wizard::new().unwrap();
         wizard.context.start_time = Some(Instant::now());
         assert!(wizard.context.start_time.is_some());
+    }
+
+    #[test]
+    fn test_compute_quick_tool_plan_configures_starship_and_current_terminal() {
+        let mut installed = HashMap::new();
+        installed.insert(
+            "starship".to_string(),
+            ToolPresence {
+                installed: true,
+                in_path: true,
+                evidence: None,
+            },
+        );
+        installed.insert(
+            "ghostty".to_string(),
+            ToolPresence {
+                installed: true,
+                in_path: false,
+                evidence: None,
+            },
+        );
+
+        let (selected_tools, tools_to_configure) =
+            compute_quick_tool_plan(&installed, Some("ghostty"));
+
+        assert!(!selected_tools.contains(&"starship".to_string()));
+        assert!(tools_to_configure.contains(&"starship".to_string()));
+        assert!(tools_to_configure.contains(&"ghostty".to_string()));
     }
 }

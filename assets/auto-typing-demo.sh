@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+HOST_HOME="${HOME}"
+HOST_STARSHIP_CONFIG="${HOST_STARSHIP_CONFIG:-$HOST_HOME/.config/starship.toml}"
 
 SCENE="${1:-${SCENE:-all}}"
 
@@ -12,20 +14,29 @@ GHOSTTY_APP="${GHOSTTY_APP:-/Applications/Ghostty.app}"
 RECORDER_BUILD_DIR="${RECORDER_BUILD_DIR:-/tmp/slate-demo-recorder}"
 RECORDER_BIN="$RECORDER_BUILD_DIR/window_recorder"
 OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR}"
-WIDTH="${WIDTH:-960}"
 GIF_FPS="${GIF_FPS:-18}"
-WINDOW_WIDTH="${WINDOW_WIDTH:-1180}"
-WINDOW_HEIGHT="${WINDOW_HEIGHT:-760}"
-WINDOW_X="${WINDOW_X:-140}"
-WINDOW_Y="${WINDOW_Y:-110}"
+WIDTH="${WIDTH:-900}"
+WINDOW_WIDTH="${WINDOW_WIDTH:-980}"
+WINDOW_HEIGHT="${WINDOW_HEIGHT:-620}"
+WINDOW_X="${WINDOW_X:-250}"
+WINDOW_Y="${WINDOW_Y:-80}"
+GHOSTTY_FONT_SIZE="${GHOSTTY_FONT_SIZE:-13}"
+POSTER_TIMESTAMP="${POSTER_TIMESTAMP:-1.5}"
 
 case "$SCENE" in
   setup)
     OUTPUT_BASENAME="${OUTPUT_BASENAME:-setup-demo}"
     MAX_SECONDS="${MAX_SECONDS:-18}"
-    TRIM_START="${TRIM_START:-0.60}"
+    TRIM_START="${TRIM_START:-0.50}"
     TRIM_END="${TRIM_END:-0.50}"
     STARTUP_WAIT="${STARTUP_WAIT:-1.8}"
+    WIDTH="${WIDTH:-860}"
+    WINDOW_WIDTH="${WINDOW_WIDTH:-920}"
+    WINDOW_HEIGHT="${WINDOW_HEIGHT:-560}"
+    WINDOW_X="${WINDOW_X:-300}"
+    WINDOW_Y="${WINDOW_Y:-40}"
+    GHOSTTY_FONT_SIZE="${GHOSTTY_FONT_SIZE:-13}"
+    POSTER_TIMESTAMP="${POSTER_TIMESTAMP:-4.0}"
     ;;
   theme)
     OUTPUT_BASENAME="${OUTPUT_BASENAME:-theme-demo}"
@@ -33,6 +44,13 @@ case "$SCENE" in
     TRIM_START="${TRIM_START:-0.35}"
     TRIM_END="${TRIM_END:-0.45}"
     STARTUP_WAIT="${STARTUP_WAIT:-1.9}"
+    WIDTH="${WIDTH:-900}"
+    WINDOW_WIDTH="${WINDOW_WIDTH:-980}"
+    WINDOW_HEIGHT="${WINDOW_HEIGHT:-620}"
+    WINDOW_X="${WINDOW_X:-250}"
+    WINDOW_Y="${WINDOW_Y:-48}"
+    GHOSTTY_FONT_SIZE="${GHOSTTY_FONT_SIZE:-13}"
+    POSTER_TIMESTAMP="${POSTER_TIMESTAMP:-5.5}"
     ;;
   full)
     OUTPUT_BASENAME="${OUTPUT_BASENAME:-demo}"
@@ -40,6 +58,13 @@ case "$SCENE" in
     TRIM_START="${TRIM_START:-0.35}"
     TRIM_END="${TRIM_END:-0.60}"
     STARTUP_WAIT="${STARTUP_WAIT:-1.8}"
+    WIDTH="${WIDTH:-940}"
+    WINDOW_WIDTH="${WINDOW_WIDTH:-1040}"
+    WINDOW_HEIGHT="${WINDOW_HEIGHT:-680}"
+    WINDOW_X="${WINDOW_X:-220}"
+    WINDOW_Y="${WINDOW_Y:-96}"
+    GHOSTTY_FONT_SIZE="${GHOSTTY_FONT_SIZE:-13}"
+    POSTER_TIMESTAMP="${POSTER_TIMESTAMP:-6.5}"
     ;;
   all)
     "$0" setup
@@ -138,15 +163,30 @@ build_recorder() {
 
 prepare_demo_fs() {
   mkdir -p "$DEMO_HOME" "$DEMO_CONFIG" "$DEMO_BIN_DIR" "$DEMO_GHOSTTY_DIR"
-  : > "$DEMO_HOME/.zshrc"
+  cat > "$DEMO_HOME/.zshrc" <<'EOF'
+if [[ -n "${SLATE_DEMO_AUTO_CLEAR:-}" ]]; then
+  autoload -Uz add-zsh-hook
+  __slate_demo_clear_once() {
+    clear
+    unset SLATE_DEMO_AUTO_CLEAR
+    add-zsh-hook -d precmd __slate_demo_clear_once
+  }
+  add-zsh-hook precmd __slate_demo_clear_once
+fi
+EOF
   ln -s "$PROJECT_DIR" "$DEMO_PROJECT_LINK"
 
   cat > "$DEMO_GHOSTTY_CONFIG" <<EOF
 title = "$WINDOW_TITLE"
-font-size = 14
+font-size = $GHOSTTY_FONT_SIZE
 window-show-tab-bar = never
 macos-titlebar-style = hidden
 macos-titlebar-proxy-icon = hidden
+background = #11111b
+foreground = #cdd6f4
+cursor-color = #f38ba8
+background-opacity = 1.0
+background-blur = 0
 command = /bin/zsh -f -i
 EOF
 
@@ -175,6 +215,16 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
+seed_active_starship() {
+  if [[ -f "\${DEMO_STARSHIP_CONFIG:-}" ]]; then
+    return 0
+  fi
+
+  if [[ -n "\${DEMO_HOST_STARSHIP_CONFIG:-}" ]] && [[ -f "\${DEMO_HOST_STARSHIP_CONFIG:-}" ]]; then
+    cp "\${DEMO_HOST_STARSHIP_CONFIG}" "\${DEMO_STARSHIP_CONFIG}"
+  fi
+}
+
 set +e
 "$SLATE_BIN" "\$@"
 status=\$?
@@ -183,7 +233,12 @@ set -e
 case "\${1:-}" in
   setup|theme|set)
     if [[ \$status -eq 0 ]]; then
+      seed_active_starship
       "$PATCH_STARSHIP_SCRIPT" >/dev/null 2>&1 || true
+      if [[ "\${1:-}" == "setup" ]] && [[ "\${SLATE_DEMO_AUTO_RELOAD:-0}" == "1" ]]; then
+        export SLATE_DEMO_AUTO_CLEAR=1
+        exec zsh -i
+      fi
     fi
     ;;
 esac
@@ -201,12 +256,22 @@ export XDG_CONFIG_HOME="$DEMO_CONFIG"
 export SLATE_HOME="$DEMO_HOME"
 export DEMO_STARSHIP_CONFIG="$DEMO_STARSHIP_CONFIG"
 export DEMO_STARSHIP_DIR="$DEMO_CONFIG/slate/managed/starship"
+export DEMO_HOST_STARSHIP_CONFIG="$HOST_STARSHIP_CONFIG"
 export PATH="$DEMO_BIN_DIR:$(dirname "$SLATE_BIN"):\$PATH"
 export USER="moonmao"
 export LOGNAME="moonmao"
 export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
 export TERM_PROGRAM="ghostty"
+EOF
+
+  cat >> "$PREWARM_SCRIPT" <<'EOF'
+slate() {
+  command slate "$@" </dev/null
+}
+EOF
+
+  cat >> "$PREWARM_SCRIPT" <<EOF
 cd "$DEMO_PROJECT_LINK"
 PS1='$ '
 PROMPT='$ '
@@ -220,6 +285,7 @@ EOF
   case "$SCENE" in
     setup|full)
       cat >> "$PREWARM_SCRIPT" <<'EOF'
+export SLATE_DEMO_AUTO_RELOAD=1
 clear
 EOF
       ;;
@@ -381,26 +447,10 @@ scene_body() {
   case "$SCENE" in
     setup)
       cat <<'EOF'
-  delay 0.95
-  my type_slow(t, "echo 'default prompt. default colors. default everything.'", 0.04)
+  delay 0.7
+  my type_slow(t, "slate setup --quick", 0.05)
   send key "enter" to t
-  delay 1.1
-
-  my type_slow(t, "ls", 0.04)
-  send key "enter" to t
-  delay 1.0
-
-  my type_slow(t, "slate setup --quick </dev/null", 0.05)
-  send key "enter" to t
-  delay 2.6
-
-  my type_slow(t, "exec zsh -i", 0.05)
-  send key "enter" to t
-  delay 2.8
-
-  input text "clear" to t
-  send key "enter" to t
-  delay 3.0
+  delay 14.2
 EOF
       ;;
     theme)
@@ -411,19 +461,39 @@ EOF
   delay 1.8
 
   send key "arrowRight" to t
-  delay 0.65
+  delay 0.48
   send key "arrowRight" to t
-  delay 0.65
+  delay 0.48
+  send key "arrowDown" to t
+  delay 0.48
+  send key "arrowDown" to t
+  delay 0.48
   send key "arrowLeft" to t
-  delay 0.65
+  delay 0.48
   send key "arrowDown" to t
-  delay 0.65
+  delay 0.48
+  send key "arrowRight" to t
+  delay 0.48
   send key "arrowDown" to t
-  delay 0.65
+  delay 0.48
+  send key "arrowDown" to t
+  delay 0.48
+  send key "arrowRight" to t
+  delay 0.48
   send key "arrowUp" to t
-  delay 0.65
+  delay 0.48
+  send key "arrowDown" to t
+  delay 0.48
+  send key "arrowDown" to t
+  delay 0.48
+  send key "arrowUp" to t
+  delay 0.48
+  send key "arrowLeft" to t
+  delay 0.48
+  send key "arrowDown" to t
+  delay 0.48
   send key "enter" to t
-  delay 2.6
+  delay 2.8
 
   input text "clear" to t
   send key "enter" to t
@@ -432,39 +502,27 @@ EOF
       ;;
     full)
       cat <<'EOF'
-  delay 0.95
-  my type_slow(t, "echo 'default prompt. default colors. default everything.'", 0.04)
-  send key "enter" to t
   delay 1.1
-
-  my type_slow(t, "ls", 0.04)
+  my type_slow(t, "slate setup --quick", 0.05)
   send key "enter" to t
-  delay 1.0
-
-  my type_slow(t, "slate setup --quick </dev/null", 0.05)
-  send key "enter" to t
-  delay 2.6
-
-  my type_slow(t, "exec zsh -i", 0.05)
-  send key "enter" to t
-  delay 2.8
-
-  input text "clear" to t
-  send key "enter" to t
-  delay 0.8
+  delay 14.0
 
   my type_slow(t, "slate theme", 0.05)
   send key "enter" to t
   delay 1.8
 
   send key "arrowRight" to t
-  delay 0.65
+  delay 0.55
   send key "arrowLeft" to t
-  delay 0.65
+  delay 0.55
   send key "arrowDown" to t
-  delay 0.65
+  delay 0.55
+  send key "arrowDown" to t
+  delay 0.55
+  send key "arrowDown" to t
+  delay 0.55
   send key "arrowUp" to t
-  delay 0.65
+  delay 0.55
   send key "enter" to t
   delay 2.4
 
@@ -565,7 +623,7 @@ export_assets() {
 
   echo "==> exporting poster frame"
   ffmpeg -y \
-    -ss 1.5 \
+    -ss "$POSTER_TIMESTAMP" \
     -i "$MP4_OUT" \
     -frames:v 1 \
     "$POSTER_OUT" >/dev/null 2>&1
