@@ -145,20 +145,16 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
     menu_builder = menu_builder.item("switch", "✦ Switch Theme", "");
     menu_builder = menu_builder.item("font", "✦ Change Font", "");
 
-    // Auto-theme toggle (dynamic label)
+    // Auto-theme (combined toggle + pairing)
     menu_builder = menu_builder.item(
         "auto-theme",
         if auto_enabled {
-            "✦ Auto-Theme (enabled)"
+            "✦ Auto-Theme (on)"
         } else {
-            "✦ Auto-Theme (disabled)"
+            "◆ Auto-Theme (off)"
         },
-        "",
+        "toggle, configure pairing",
     );
-
-    // Auto-theme pairing
-    menu_builder =
-        menu_builder.item("auto-theme-configure", "◆ Auto-Theme Pairing", "choose dark/light themes");
 
     // Tool toggles
     menu_builder =
@@ -186,18 +182,7 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
         "switch" => crate::cli::picker::launch_picker(&env),
         "font" => crate::cli::font::handle_font(None),
         "auto-theme" => {
-            let new_state = !auto_enabled;
-            sync_auto_theme_toggle(config, new_state)?;
-            cliclack::outro("✦ Done")?;
-            Ok(())
-        }
-        "auto-theme-configure" => {
-            crate::cli::auto_theme::configure_auto_theme()?;
-            if config.is_auto_theme_enabled()? {
-                config.refresh_shell_integration()?;
-                let _ = crate::platform::dark_mode_notify::stop();
-                let _ = crate::platform::dark_mode_notify::start(config);
-            }
+            handle_auto_theme(config, auto_enabled)?;
             cliclack::outro("✦ Done")?;
             Ok(())
         }
@@ -221,6 +206,47 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn handle_auto_theme(config: &ConfigManager, currently_enabled: bool) -> Result<()> {
+    let selection = cliclack::select("Auto-Theme")
+        .item(
+            "toggle",
+            if currently_enabled {
+                "Turn off"
+            } else {
+                "Turn on"
+            },
+            "",
+        )
+        .item("configure", "Configure Pairing", "choose dark/light themes")
+        .item("back", "Back", "")
+        .interact()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::Interrupted {
+                crate::error::SlateError::UserCancelled
+            } else {
+                crate::error::SlateError::IOError(e)
+            }
+        })?;
+
+    match selection {
+        "toggle" => {
+            let new_state = !currently_enabled;
+            sync_auto_theme_toggle(config, new_state)?;
+        }
+        "configure" => {
+            crate::cli::auto_theme::configure_auto_theme()?;
+            if config.is_auto_theme_enabled()? {
+                config.refresh_shell_integration()?;
+                let _ = crate::platform::dark_mode_notify::stop();
+                let _ = crate::platform::dark_mode_notify::start(config);
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
 }
 
 fn handle_tool_toggles(config: &ConfigManager) -> Result<()> {
@@ -257,7 +283,7 @@ fn handle_tool_toggles(config: &ConfigManager) -> Result<()> {
                 },
                 "",
             )
-            .item("back", "○ Back", "")
+            .item("back", "Back", "")
             .interact()
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::Interrupted {
