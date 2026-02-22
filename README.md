@@ -60,84 +60,66 @@ Slate takes the opposite approach:
 | Typography | Nerd Font detection, install, and switching |
 | Theme logic | 18 curated variants across 8 families |
 
-### Daily Commands
+### Commands
 
 ```bash
-slate setup --quick
-slate theme
-slate theme tokyo-night-storm
-slate theme --auto
-slate font
-slate status
-slate clean
-slate restore
+slate                         # interactive hub — theme, font, auto-theme, tool toggles
+slate setup                   # guided setup wizard
+slate setup --quick           # non-interactive, all defaults
+slate setup --only starship   # retry a single tool
+slate theme                   # live preview picker
+slate theme tokyo-night-storm # apply by name
+slate theme --auto            # follow system dark/light
+slate font                    # Nerd Font picker
+slate config set opacity 85   # window opacity (Ghostty)
+slate status                  # show current config at a glance
+slate list                    # list all available themes
+slate restore                 # pick a snapshot to roll back to
+slate restore --list          # list restore points
+slate clean                   # remove all slate-managed config
 ```
 
-## Install Channels
+## Auto-Theme
 
-| Channel | Status | Why it exists |
-| --- | --- | --- |
-| Homebrew tap | Primary | Best default for macOS users. Minimal friction, native updates, no Rust toolchain required. |
-| GitHub Releases | Required | Direct binary download, checksums, and release notes. Also powers Homebrew formula distribution. |
-| crates.io | Prepared | Important Rust-native path for discoverability and ecosystem compatibility. Publish once release assets and package metadata are finalized. |
+Slate can follow your macOS system appearance. When dark mode toggles, your terminal theme switches automatically.
 
-Homebrew is the opinionated user-facing path. GitHub Releases are the binary source of truth. `crates.io` should exist too, but as a secondary install path instead of the main onboarding story.
+```bash
+slate config set auto-theme on     # enable
+slate theme --auto                 # apply once based on current appearance
+```
 
-## Compatibility Strategy
+Configure which themes map to dark and light through the hub (`slate` → Auto-Theme → Configure Pairing), or let Slate use built-in pairs like Catppuccin Mocha ↔ Latte.
 
-Slate aims for **semantic consistency** and **graceful visual degradation**.
+## How It Works
 
-- Colors, theme identity, and managed-file composition should stay consistent everywhere Slate supports.
-- Terminal-specific chrome such as blur, opacity, and live reload can degrade when the host terminal does not expose identical capabilities.
-- If a user selects a non-Nerd Font or the machine has no Nerd Font installed, Slate now switches Starship to a basic prompt profile for new shells instead of leaving powerline glyphs to render as tofu.
-- Shell activation is scoped to a managed marker block so PATH changes and environment exports disappear cleanly on `slate clean`.
-
-That means we do **not** chase pixel-perfect parity across every terminal at any cost. We keep the important parts consistent, and we degrade intentionally when an emulator cannot deliver the same surface area.
-
-## Configuration Architecture
-
-Slate already follows a composition model that is closer to Ghostty and Alacritty than to copy-paste dotfile repos:
+Slate composes managed config files into your existing setup — it never replaces your dotfiles.
 
 ```text
-~/.config/slate/config.toml        # Slate-owned feature flags
-~/.config/slate/auto.toml          # light/dark theme pairing
+~/.config/slate/config.toml        # preferences (theme, font, toggles)
+~/.config/slate/auto.toml          # dark/light theme pairing
 ~/.config/slate/managed/<tool>/*   # generated assets Slate can fully rewrite
-~/.config/<tool>/...               # user entry files that import/include managed files
+~/.config/<tool>/...               # your files, untouched — import managed files
 ```
 
-The guiding rule is:
+For Ghostty that means `config-file = ...`; for Alacritty that means managed `import` entries; for shell startup that means a removable marker block in `.zshrc`. Slate files stay Slate-owned, your files stay yours.
 
-- user files stay user-owned
-- Slate files stay Slate-owned
-- integration happens through import/include layers, not destructive replacement
-
-For Ghostty that means `config-file = ...`; for Alacritty that means managed `import` entries; for shell startup that means a removable marker block in `.zshrc`.
-
-## Lifecycle
-
-### Install
+## Install
 
 ```bash
-brew install MoonMao42/tap/slate
-slate setup
+brew install MoonMao42/tap/slate    # Homebrew (recommended)
+brew upgrade slate                  # update
 ```
 
-### Update
+Binaries are also available from [GitHub Releases](https://github.com/MoonMao42/slate-dev/releases).
+
+### Uninstall
 
 ```bash
-brew upgrade slate
-```
-
-### Remove Slate Cleanly
-
-```bash
-slate clean
+slate clean          # remove managed config, shell hooks, watcher artifacts
 brew uninstall slate
 ```
 
-`slate clean` removes Slate-owned shell integration, watcher artifacts, and managed config state. If you also want to purge restore snapshots, remove `~/.cache/slate` manually after cleanup.
-
-For repeatable verification, run [`scripts/test-install-lifecycle.sh`](scripts/test-install-lifecycle.sh). It runs isolated lifecycle smoke tests for setup, cleanup, fallback mode, and terminal hook removal without touching your real home directory.
+To also purge restore snapshots, remove `~/.cache/slate` after cleanup.
 
 ## Theming
 
@@ -153,10 +135,6 @@ Slate ships 18 curated variants across these families:
 - Gruvbox
 
 The project philosophy is to curate a small, confident palette library and make every supported tool agree with it.
-
-## Demo Pipeline
-
-The README demos are recorded from a real Ghostty window using [Recordly](https://recordly.app/), then optimized with ffmpeg palette-based GIF encoding for GitHub autoplay.
 
 ## License
 
