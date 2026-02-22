@@ -4,27 +4,10 @@ use crate::config::ConfigManager;
 use crate::error::Result;
 use crate::theme::ThemeRegistry;
 
-/// Handle bare `slate` invocation (single-entry guided flow)
+/// Handle bare `slate` invocation — always show hub, never hijack with setup
 pub fn handle() -> Result<()> {
     let config = ConfigManager::new()?;
-
-    // First-time setup detection
-    if !has_current_theme(&config)? {
-        cliclack::intro("✦ Welcome to slate. Let's set it up.")?;
-        crate::cli::setup::handle_with_env(
-            false,
-            false,
-            None,
-            &crate::env::SlateEnv::from_process()?,
-        )?;
-        // After setup, show hub and exit
-    }
-
     show_hub_once(&config)
-}
-
-fn has_current_theme(config: &ConfigManager) -> Result<bool> {
-    Ok(config.get_current_theme()?.is_some())
 }
 
 fn sync_auto_theme_toggle(config: &ConfigManager, enabled: bool) -> Result<()> {
@@ -123,25 +106,33 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
         .get_current_opacity()?
         .unwrap_or_else(|| "Solid".to_string());
 
-    // Dashboard rendering with color hierarchy
-    cliclack::log::info(format!(
-        "\x1b[1m{}\x1b[0m    {}",
-        "Theme", current_theme.name
-    ))?;
-    cliclack::log::info(format!("\x1b[1m{}\x1b[0m  {}", "Opacity", current_opacity))?;
-    cliclack::log::info(format!(
-        "\x1b[1m{}\x1b[0m    {}",
-        "Font",
-        current_font.unwrap_or_else(|| "Not configured".to_string())
-    ))?;
+    let is_first_run = config.get_current_theme()?.is_none();
+
+    if is_first_run {
+        cliclack::log::warning("No theme set yet. Run Setup to get started.")?;
+    } else {
+        cliclack::log::info(format!(
+            "\x1b[1m{}\x1b[0m    {}",
+            "Theme", current_theme.name
+        ))?;
+        cliclack::log::info(format!("\x1b[1m{}\x1b[0m  {}", "Opacity", current_opacity))?;
+        cliclack::log::info(format!(
+            "\x1b[1m{}\x1b[0m    {}",
+            "Font",
+            current_font.unwrap_or_else(|| "Not configured".to_string())
+        ))?;
+    }
 
     cliclack::log::remark("")?;
 
-    // /Flat single-level menu with all actions accessible
     let auto_enabled = config.is_auto_theme_enabled()?;
     let mut menu_builder = cliclack::select("What would you like to do?");
 
-    // High-frequency actions
+    // First-run: setup first; otherwise high-frequency actions first
+    if is_first_run {
+        menu_builder = menu_builder.item("setup", "✦ Run Setup", "get started in 30 seconds");
+    }
+
     menu_builder = menu_builder.item("switch", "✦ Switch Theme", "");
     menu_builder = menu_builder.item("font", "✦ Change Font", "");
 
@@ -163,8 +154,9 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
     // Undo changes (casual tone per)
     menu_builder = menu_builder.item("restore", "◆ Undo Changes", "restore from snapshot");
 
-    // Run setup (casual tone per)
-    menu_builder = menu_builder.item("setup", "◆ Run Setup", "");
+    if !is_first_run {
+        menu_builder = menu_builder.item("setup", "◆ Run Setup", "");
+    }
 
     // Quit (no ○ prefix to avoid cliclack radio-button conflict)
     menu_builder = menu_builder.item("quit", "Quit", "");
