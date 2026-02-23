@@ -84,34 +84,32 @@ impl FastfetchAdapter {
 
         let palette = &theme.palette;
 
-        // Convert hex colors to ANSI 24-bit RGB format
+        // Use subtext color for keys (muted), accent for separators (subtle pop)
+        let key_hex = palette
+            .subtext1
+            .as_deref()
+            .unwrap_or(&palette.foreground);
+        let (r_key, g_key, b_key) = PaletteRenderer::hex_to_rgb(key_hex)?;
+        let (r_acc, g_acc, b_acc) = PaletteRenderer::hex_to_rgb(&palette.blue)?;
         let (r_fg, g_fg, b_fg) = PaletteRenderer::hex_to_rgb(&palette.foreground)?;
-        let (r_blue, g_blue, b_blue) = PaletteRenderer::hex_to_rgb(&palette.blue)?;
 
-        let color_keys = format!("38;2;{};{};{}", r_fg, g_fg, b_fg);
-        let color_accent = format!("38;2;{};{};{}", r_blue, g_blue, b_blue);
+        let color_keys = format!("38;2;{};{};{}", r_key, g_key, b_key);
+        let color_separator = format!("38;2;{};{};{}", r_acc, g_acc, b_acc);
+        let color_output = format!("38;2;{};{};{}", r_fg, g_fg, b_fg);
 
-        // Schema targets fastfetch >= 2.x. Key structural rules:
-        // - `logo` is a TOP-LEVEL field (not nested under `display`)
-        // - `logo.source` is the builtin logo id (not `name`)
-        // - color overrides live under `display.color`
-        // - `key-width`/`keyWidth` is not a supported display field
-        // See `fastfetch --gen-config-full` for the authoritative schema.
         let config = json!({
             "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
             "logo": {
                 "type": "builtin",
-                "source": "apple",
-                "width": 20,
-                "height": 10,
-                "preserveAspectRatio": true
+                "source": "apple_small",
+                "padding": { "top": 1 }
             },
             "display": {
-                "separator": "─",
+                "separator": " ",
                 "color": {
                     "keys": color_keys,
-                    "separator": color_keys,
-                    "output": color_keys
+                    "separator": color_separator,
+                    "output": color_output
                 }
             },
             "modules": [
@@ -119,22 +117,13 @@ impl FastfetchAdapter {
                 { "type": "separator" },
                 { "type": "os" },
                 { "type": "kernel" },
+                { "type": "uptime" },
+                { "type": "terminal" },
+                { "type": "shell" },
                 { "type": "cpu" },
-                {
-                    "type": "memory",
-                    "options": {
-                        "barLength": 20,
-                        "barsColors": [color_accent]
-                    }
-                },
-                {
-                    "type": "disk",
-                    "key": "Disk (/)",
-                    "options": {
-                        "barsColors": [color_accent]
-                    }
-                },
-                { "type": "shell" }
+                { "type": "memory" },
+                { "type": "break" },
+                { "type": "colors" }
             ]
         });
 
