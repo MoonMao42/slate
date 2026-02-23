@@ -1,4 +1,3 @@
-use crate::brand::Language;
 use crate::cli::config::{disable_auto_theme, enable_auto_theme};
 use crate::config::ConfigManager;
 use crate::error::Result;
@@ -128,37 +127,32 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
     let auto_enabled = config.is_auto_theme_enabled()?;
     let mut menu_builder = cliclack::select("What would you like to do?");
 
-    // First-run: setup first; otherwise high-frequency actions first
     if is_first_run {
-        menu_builder = menu_builder.item("setup", "✦ Run Setup", "get started in 30 seconds");
+        menu_builder = menu_builder.item("setup", "Run Setup", "get started in 30 seconds");
     }
 
-    menu_builder = menu_builder.item("switch", "✦ Switch Theme", "");
-    menu_builder = menu_builder.item("font", "✦ Change Font", "");
+    menu_builder = menu_builder.item("switch", "Switch Theme", "");
+    menu_builder = menu_builder.item("font", "Change Font", "");
 
-    // Auto-theme (combined toggle + pairing)
     menu_builder = menu_builder.item(
         "auto-theme",
         if auto_enabled {
-            "✦ Auto-Theme (on)"
+            "Auto-Theme: On"
         } else {
-            "◆ Auto-Theme (off)"
+            "Auto-Theme: Off"
         },
         "toggle, configure pairing",
     );
 
-    // Tool toggles
     menu_builder =
-        menu_builder.item("tools", "◆ Tool Toggles", "starship, highlighting, fastfetch");
+        menu_builder.item("tools", "Configure Tools", "starship, highlighting, fastfetch");
 
-    // Undo changes (casual tone per)
-    menu_builder = menu_builder.item("restore", "◆ Undo Changes", "restore from snapshot");
+    menu_builder = menu_builder.item("restore", "Revert Changes", "restore from snapshot");
 
     if !is_first_run {
-        menu_builder = menu_builder.item("setup", "◆ Run Setup", "");
+        menu_builder = menu_builder.item("setup", "Run Setup", "");
     }
 
-    // Quit (no ○ prefix to avoid cliclack radio-button conflict)
     menu_builder = menu_builder.item("quit", "Quit", "");
 
     // Render and handle selection (execute one action and exit)
@@ -247,31 +241,31 @@ fn handle_tool_toggles(config: &ConfigManager) -> Result<()> {
         let zsh_highlighting_enabled = config.is_zsh_highlighting_enabled()?;
         let fastfetch_enabled = config.has_fastfetch_autorun()?;
 
-        let selection = cliclack::select("Tool toggles")
+        let selection = cliclack::select("Configure Tools")
             .item(
                 "starship",
                 if starship_enabled {
-                    "Starship Prompt · on"
+                    "Starship: On"
                 } else {
-                    "Starship Prompt · off"
+                    "Starship: Off"
                 },
                 "",
             )
             .item(
                 "zsh-highlighting",
                 if zsh_highlighting_enabled {
-                    "zsh Highlighting · on"
+                    "Syntax Highlighting: On"
                 } else {
-                    "zsh Highlighting · off"
+                    "Syntax Highlighting: Off"
                 },
                 "",
             )
             .item(
                 "fastfetch",
                 if fastfetch_enabled {
-                    Language::HUB_TOGGLE_FASTFETCH_ON
+                    "Fastfetch: On"
                 } else {
-                    Language::HUB_TOGGLE_FASTFETCH_OFF
+                    "Fastfetch: Off"
                 },
                 "",
             )
