@@ -60,6 +60,12 @@ Slate takes the opposite approach:
 | Typography | Nerd Font detection, install, and switching |
 | Theme logic | 18 curated variants across 8 families |
 
+<p align="center">
+  <img src="./assets/fastfetch-preview.png" alt="fastfetch themed output" width="600" />
+  <br />
+  <sub>Every tool picks up the same palette — terminal, prompt, system info, and CLI utilities.</sub>
+</p>
+
 ### Commands
 
 ```bash
