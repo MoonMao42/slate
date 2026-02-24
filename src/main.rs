@@ -73,6 +73,13 @@ enum Commands {
         #[arg(long, value_name = "ID")]
         delete: Option<String>,
     },
+    /// Export current config as a shareable code
+    Export,
+    /// Import a shared config
+    Import {
+        /// Share code (e.g. slate://catppuccin-mocha/JetBrainsMono/frosted/s,h,f)
+        uri: String,
+    },
     /// Hidden easter egg
     #[command(hide = true)]
     Aura,
@@ -131,6 +138,8 @@ fn run() -> Result<()> {
         Some(Commands::Restore { id, list, delete }) => {
             cli::restore::handle(id.as_deref(), list, delete.as_deref())
         }
+        Some(Commands::Export) => cli::share::handle_export(),
+        Some(Commands::Import { uri }) => cli::share::handle_import(&uri),
         Some(Commands::Aura) => cli::aura::handle(),
         Some(Commands::Reset { id }) => {
             // reset is now a compatibility alias that routes to restore

@@ -14,6 +14,7 @@ pub mod preset_selection;
 pub mod restore;
 pub mod set;
 pub mod setup;
+pub mod share;
 pub mod setup_executor;
 pub mod status;
 pub mod status_panel;
