@@ -15,6 +15,8 @@ pub mod restore;
 pub mod set;
 pub mod setup;
 pub mod share;
+pub mod share_screenshot;
+pub mod sound;
 pub mod setup_executor;
 pub mod status;
 pub mod status_panel;

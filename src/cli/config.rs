@@ -118,8 +118,24 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
                 value
             ))),
         },
+        "sound" => match value {
+            "on" => {
+                config.set_sound_enabled(true)?;
+                println!("{} Sound feedback enabled", Symbols::SUCCESS);
+                Ok(())
+            }
+            "off" => {
+                config.set_sound_enabled(false)?;
+                println!("{} Sound feedback disabled", Symbols::SUCCESS);
+                Ok(())
+            }
+            _ => Err(crate::error::SlateError::InvalidConfig(format!(
+                "Invalid sound value: '{}'. Must be one of: on, off",
+                value
+            ))),
+        },
         _ => Err(crate::error::SlateError::InvalidConfig(format!(
-            "Unknown config key: '{}'. Known keys: opacity, auto-theme, fastfetch",
+            "Unknown config key: '{}'. Known keys: opacity, auto-theme, fastfetch, sound",
             key
         ))),
     }

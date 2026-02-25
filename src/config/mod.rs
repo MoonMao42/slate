@@ -291,6 +291,16 @@ impl ConfigManager {
         flags::set_config_flag(&self.base_path, "tools", "zsh_highlighting", enabled)
     }
 
+    /// Check if sound feedback is enabled.
+    pub fn is_sound_enabled(&self) -> Result<bool> {
+        Ok(flags::config_flag(&self.base_path, "preferences", "sound")?.unwrap_or(false))
+    }
+
+    /// Enable or disable sound feedback.
+    pub fn set_sound_enabled(&self, enabled: bool) -> Result<()> {
+        flags::set_config_flag(&self.base_path, "preferences", "sound", enabled)
+    }
+
     /// A simple pre-edit backup is required by.
     pub fn backup_file(&self, config_path: &Path) -> Result<PathBuf> {
         backup::backup_file(&self.backup_root, config_path)

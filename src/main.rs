@@ -73,6 +73,8 @@ enum Commands {
         #[arg(long, value_name = "ID")]
         delete: Option<String>,
     },
+    /// Screenshot your terminal with share code
+    Share,
     /// Export current config as a shareable code
     Export,
     /// Import a shared config
@@ -138,6 +140,7 @@ fn run() -> Result<()> {
         Some(Commands::Restore { id, list, delete }) => {
             cli::restore::handle(id.as_deref(), list, delete.as_deref())
         }
+        Some(Commands::Share) => cli::share_screenshot::handle_share(),
         Some(Commands::Export) => cli::share::handle_export(),
         Some(Commands::Import { uri }) => cli::share::handle_import(&uri),
         Some(Commands::Aura) => cli::aura::handle(),

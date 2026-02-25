@@ -73,6 +73,7 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
                 theme.name
             );
         }
+        crate::cli::sound::play_feedback();
         Ok(())
     } else if let Some(name) = theme_name {
         // Direct apply path: theme_name is canonical kebab-case
@@ -85,6 +86,7 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         let _ = apply_theme_selection(theme)?;
 
         println!("{} Theme switched to '{}'", Symbols::SUCCESS, theme.name);
+        crate::cli::sound::play_feedback();
         Ok(())
     } else {
         // Picker path: launch interactive picker

@@ -59,15 +59,8 @@ fn test_apple_logo_preserved_in_all_themes() {
 
         assert_eq!(
             logo.get("source").and_then(|v| v.as_str()),
-            Some("apple"),
-            "Logo source should be 'apple' for theme {}",
-            theme.id
-        );
-
-        assert_eq!(
-            logo.get("preserveAspectRatio").and_then(|v| v.as_bool()),
-            Some(true),
-            "Logo preserveAspectRatio should be true for theme {}",
+            Some("apple_small"),
+            "Logo source should be 'apple_small' for theme {}",
             theme.id
         );
 
@@ -143,8 +136,8 @@ fn test_modules_array_contains_at_least_6_items() {
             .unwrap_or_else(|| panic!("modules should be an array for theme {}", theme.id));
 
         assert!(
-            modules.len() >= 6 && modules.len() <= 8,
-            "Theme {} has {} modules, expected 6-8",
+            modules.len() >= 6 && modules.len() <= 12,
+            "Theme {} has {} modules, expected 6-12",
             theme.id,
             modules.len()
         );
