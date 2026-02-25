@@ -18,9 +18,11 @@ pub fn handle_share() -> Result<()> {
     // Determine output path
     let output_path = output_path();
 
+    // Print URI first so it's visible in the screenshot
+    println!();
+    println!("  {}", uri);
     println!();
     println!("  Click your terminal window to capture it.");
-    println!();
 
     // Capture window screenshot (blocks until user clicks)
     let capture_result = Command::new("screencapture")
@@ -40,10 +42,8 @@ pub fn handle_share() -> Result<()> {
         let _ = add_watermark(&output_path, &uri);
     }
 
-    println!("  ✓ Saved to {}", output_path.display());
     println!();
-    println!("  Share code:");
-    println!("  {}", uri);
+    println!("  ✓ Saved to {}", output_path.display());
     println!();
 
     Ok(())
