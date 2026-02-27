@@ -95,6 +95,7 @@ pub fn launch_picker(env: &SlateEnv) -> Result<()> {
             let opacity = get_effective_opacity_for_rendering(&state);
             crate::cli::set::silent_commit_apply(env, &theme_id, opacity)?;
             render_afterglow_receipt(&state, env)?;
+            crate::cli::sound::play_feedback();
         }
         ExitAction::Cancel => {
             let _ = crate::cli::set::silent_preview_apply(

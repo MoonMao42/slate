@@ -125,6 +125,8 @@ pub fn handle_with_env(
         eprintln!("{}", timing_line);
     }
 
+    crate::cli::sound::play_feedback();
+
     Ok(())
 }
 
