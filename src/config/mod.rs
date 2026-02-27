@@ -293,7 +293,7 @@ impl ConfigManager {
 
     /// Check if sound feedback is enabled.
     pub fn is_sound_enabled(&self) -> Result<bool> {
-        Ok(flags::config_flag(&self.base_path, "preferences", "sound")?.unwrap_or(false))
+        Ok(flags::config_flag(&self.base_path, "preferences", "sound")?.unwrap_or(true))
     }
 
     /// Enable or disable sound feedback.
