@@ -340,6 +340,10 @@ pub(crate) fn build_shell_integration_content(
         content.push_str("\nif command -v starship &> /dev/null; then\n");
         content.push_str("  eval \"$(starship init zsh)\"\n");
         content.push_str("fi\n");
+    } else {
+        // Clean minimal prompt when starship is disabled
+        content.push_str("\n# Minimal prompt (starship disabled)\n");
+        content.push_str("PROMPT=$'%n\\n❯ '\n");
     }
 
     content

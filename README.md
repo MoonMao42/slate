@@ -78,6 +78,10 @@ slate theme tokyo-night-storm # apply by name
 slate theme --auto            # follow system dark/light
 slate font                    # Nerd Font picker
 slate config set opacity 85   # window opacity (Ghostty)
+slate config set sound off    # toggle feedback sound
+slate export                  # export config as shareable URI
+slate import <uri>            # apply config from URI
+slate share                   # screenshot terminal with watermark
 slate status                  # show current config at a glance
 slate list                    # list all available themes
 slate restore                 # pick a snapshot to roll back to

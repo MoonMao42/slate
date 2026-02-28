@@ -1,7 +1,7 @@
 use crate::config::ConfigManager;
 use std::process::Command;
 
-const SOUND_FILE: &str = "/System/Library/Sounds/Tink.aiff";
+const SOUND_FILE: &str = "/System/Library/Sounds/Pop.aiff";
 
 /// Play a subtle feedback sound if sound is enabled in config.
 /// Runs asynchronously (non-blocking) so it doesn't slow down the CLI.

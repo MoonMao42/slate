@@ -280,9 +280,18 @@ fn handle_tool_toggles(config: &ConfigManager) -> Result<()> {
             })?;
 
         match selection {
-            "starship" => toggle_starship_from_preferences(config)?,
-            "zsh-highlighting" => toggle_zsh_highlighting_from_preferences(config)?,
-            "fastfetch" => toggle_fastfetch_from_preferences(config)?,
+            "starship" => {
+                toggle_starship_from_preferences(config)?;
+                cliclack::log::warning("Open a new terminal tab for changes to take effect.")?;
+            }
+            "zsh-highlighting" => {
+                toggle_zsh_highlighting_from_preferences(config)?;
+                cliclack::log::warning("Open a new terminal tab for changes to take effect.")?;
+            }
+            "fastfetch" => {
+                toggle_fastfetch_from_preferences(config)?;
+                cliclack::log::warning("Open a new terminal tab for changes to take effect.")?;
+            }
             "back" => return Ok(()),
             _ => return Ok(()),
         }
