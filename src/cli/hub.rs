@@ -144,8 +144,11 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
         "toggle, configure pairing",
     );
 
-    menu_builder =
-        menu_builder.item("tools", "Configure Tools", "starship, highlighting, fastfetch");
+    menu_builder = menu_builder.item(
+        "tools",
+        "Configure Tools",
+        "starship, highlighting, fastfetch",
+    );
 
     menu_builder = menu_builder.item("restore", "Revert Changes", "restore from snapshot");
 

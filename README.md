@@ -10,13 +10,12 @@
 
 <p align="center">
   <strong>30 seconds to a beautiful macOS terminal.</strong><br />
-  Curated terminal theming for people who want taste, not dotfile archaeology.
+  One command. 18 themes. Every tool in sync.
 </p>
 
 <p align="center">
   <a href="https://github.com/MoonMao42/slate-dev/releases"><img src="https://img.shields.io/github/v/release/MoonMao42/slate-dev?style=flat-square&color=585b70" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/platform-macOS-585b70?style=flat-square" alt="macOS only" />
-  <img src="https://img.shields.io/badge/rust-stable-585b70?style=flat-square" alt="Rust stable" />
   <img src="https://img.shields.io/badge/license-MIT-585b70?style=flat-square" alt="MIT license" />
 </p>
 
@@ -27,6 +26,8 @@
 </p>
 
 ## Quick Start
+
+> Requires **macOS** and **[Homebrew](https://brew.sh)**.
 
 ```bash
 brew install MoonMao42/tap/slate
@@ -39,45 +40,49 @@ slate setup
   <sub>Detects your stack, installs what's missing, applies a coordinated theme — all in one command.</sub>
 </p>
 
-## Why Slate
+## Features
 
-Most terminal setup guides hand you a bag of unrelated configs and tell you to sort it out yourself.
-
-Slate takes the opposite approach:
-
-- One command configures a coherent stack instead of 11 disconnected tools.
-- Managed files are composed into your setup instead of replacing your dotfiles.
-- Backups are created before mutation, and cleanup removes Slate-owned shell hooks cleanly.
-- The visual language is intentionally curated: minimal, premium, and macOS-native rather than endlessly tweakable for its own sake.
-
-## What You Get
-
-| Layer | Tools |
-| --- | --- |
-| Terminal chrome | Ghostty, Alacritty |
-| Prompt and shell | Starship, zsh-syntax-highlighting |
-| Daily CLI tools | bat, delta, eza, lazygit, fastfetch, tmux |
-| Typography | Nerd Font detection, install, and switching |
-| Theme logic | 18 curated variants across 8 families |
+- **One palette, everywhere** — Ghostty, Alacritty, Starship, bat, delta, eza, lazygit, fastfetch, tmux, zsh-syntax-highlighting all share the same color scheme.
+- **Auto dark/light** — Follows macOS appearance in real time. Toggle system dark mode and your entire terminal switches with it.
+- **Live preview** — Browse 18 themes with instant terminal preview. Arrow keys to navigate, Enter to apply.
+- **Nerd Font management** — Detect, install, and switch fonts without leaving the terminal.
+- **Non-destructive** — Uses managed includes, never overwrites your dotfiles. Snapshots before every change, one-command rollback.
+- **Shareable** — Export your setup as a URI, import on another machine, or screenshot with a branded watermark.
 
 <p align="center">
   <img src="./assets/fastfetch-preview.png" alt="fastfetch themed output" width="600" />
   <br />
-  <sub>Every tool picks up the same palette — terminal, prompt, system info, and CLI utilities.</sub>
+  <sub>Every tool picks up the same palette — terminal, prompt, system info, CLI utilities.</sub>
 </p>
 
-### Commands
+## 🌗 Auto-Theme
+
+```
+☀️  Light Mode  →  your light theme + matching prompt, syntax, tools
+🌙  Dark Mode   →  your dark theme + matching prompt, syntax, tools
+```
+
+Enable from the hub (`slate` → Auto-Theme) or:
 
 ```bash
-slate                         # interactive hub — theme, font, auto-theme, tool toggles
+slate config set auto-theme enable
+```
+
+Every theme family ships a built-in dark/light pair. Configure your own pairing through the hub.
+
+<details>
+<summary><strong>All Commands</strong></summary>
+
+```bash
+slate                         # interactive hub
 slate setup                   # guided setup wizard
 slate setup --quick           # non-interactive, all defaults
 slate setup --only starship   # retry a single tool
 slate theme                   # live preview picker
-slate theme tokyo-night-storm # apply by name
+slate theme <name>            # apply by name
 slate theme --auto            # follow system dark/light
 slate font                    # Nerd Font picker
-slate config set opacity 85   # window opacity (Ghostty)
+slate config set opacity frosted  # window opacity (solid/frosted/clear)
 slate config set sound off    # toggle feedback sound
 slate export                  # export config as shareable URI
 slate import <uri>            # apply config from URI
@@ -89,18 +94,10 @@ slate restore --list          # list restore points
 slate clean                   # remove all slate-managed config
 ```
 
-## Auto-Theme
+</details>
 
-Slate can follow your macOS system appearance. When dark mode toggles, your terminal theme switches automatically.
-
-```bash
-slate config set auto-theme on     # enable
-slate theme --auto                 # apply once based on current appearance
-```
-
-Configure which themes map to dark and light through the hub (`slate` → Auto-Theme → Configure Pairing), or let Slate use built-in pairs like Catppuccin Mocha ↔ Latte.
-
-## How It Works
+<details>
+<summary><strong>How It Works</strong></summary>
 
 Slate composes managed config files into your existing setup — it never replaces your dotfiles.
 
@@ -108,56 +105,35 @@ Slate composes managed config files into your existing setup — it never replac
 ~/.config/slate/config.toml        # preferences (theme, font, toggles)
 ~/.config/slate/auto.toml          # dark/light theme pairing
 ~/.config/slate/managed/<tool>/*   # generated assets Slate can fully rewrite
-~/.config/<tool>/...               # your files, untouched — import managed files
+~/.config/<tool>/...               # your files, untouched
 ```
 
-For Ghostty that means `config-file = ...`; for Alacritty that means managed `import` entries; for shell startup that means a removable marker block in `.zshrc`. Slate files stay Slate-owned, your files stay yours.
+For Ghostty: `config-file = ...`. For Alacritty: managed `import` entries. For zsh: a removable marker block in `.zshrc`. Slate files stay Slate-owned, your files stay yours.
+
+</details>
 
 ## Install
 
 ```bash
-brew install MoonMao42/tap/slate    # Homebrew (recommended)
-brew upgrade slate                  # update
+brew install MoonMao42/tap/slate
+brew upgrade slate
 ```
 
-Binaries are also available from [GitHub Releases](https://github.com/MoonMao42/slate-dev/releases).
-
-### Uninstall
+Binaries also available from [GitHub Releases](https://github.com/MoonMao42/slate-dev/releases).
 
 ```bash
-slate clean          # remove managed config, shell hooks, watcher artifacts
-brew uninstall slate
+# Uninstall
+slate clean && brew uninstall slate
 ```
 
-To also purge restore snapshots, remove `~/.cache/slate` after cleanup.
+## Themes
 
-## Theming
-
-Slate ships 18 curated variants across these families:
-
-- Catppuccin
-- Tokyo Night
-- Rosé Pine
-- Kanagawa
-- Everforest
-- Dracula
-- Nord
-- Gruvbox
-
-The project philosophy is to curate a small, confident palette library and make every supported tool agree with it.
+18 curated variants across 8 families: **Catppuccin** · **Tokyo Night** · **Rosé Pine** · **Kanagawa** · **Everforest** · **Dracula** · **Nord** · **Gruvbox**
 
 ## License
 
-MIT.
+MIT
 
 ## Credits
 
-Slate stands on the shoulders of great tools and great visual systems.
-
-- Terminal inspiration: [Ghostty](https://ghostty.org/), [Alacritty](https://github.com/alacritty/alacritty)
-- Prompt layer: [Starship](https://github.com/starship/starship)
-- Tooling ecosystem: [bat](https://github.com/sharkdp/bat), [delta](https://github.com/dandavison/delta), [eza](https://github.com/eza-community/eza), [lazygit](https://github.com/jesseduffield/lazygit), [fastfetch](https://github.com/fastfetch-cli/fastfetch), [tmux](https://github.com/tmux/tmux), [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting)
-- Font ecosystem: [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts)
-- Theme families: Catppuccin, Tokyo Night, Rosé Pine, Kanagawa, Everforest, Dracula, Nord, Gruvbox
-
-Open source deserves visible credit. If Slate borrows an idea, palette, or integration pattern, it should say so.
+- [Ghostty](https://ghostty.org/) · [Alacritty](https://github.com/alacritty/alacritty) · [Starship](https://github.com/starship/starship) · [bat](https://github.com/sharkdp/bat) · [delta](https://github.com/dandavison/delta) · [eza](https://github.com/eza-community/eza) · [lazygit](https://github.com/jesseduffield/lazygit) · [fastfetch](https://github.com/fastfetch-cli/fastfetch) · [tmux](https://github.com/tmux/tmux) · [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting) · [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts)

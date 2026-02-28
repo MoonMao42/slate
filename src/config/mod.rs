@@ -140,6 +140,7 @@ impl ConfigManager {
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or_else(|| "slate".to_string());
         let prefer_plain_starship = self.should_prefer_plain_starship()?;
+        let starship_enabled = self.is_starship_enabled()?;
 
         let content = shell_integration::build_shell_integration_content(
             theme,
@@ -156,7 +157,7 @@ impl ConfigManager {
                     .as_ref()
                     .and_then(|path| path.to_str()),
                 prefer_plain_starship,
-                starship_enabled: self.is_starship_enabled()?,
+                starship_enabled,
                 zsh_highlighting_enabled: self.is_zsh_highlighting_enabled()?,
                 fastfetch_autorun: self.has_fastfetch_autorun()?,
                 auto_theme_enabled: self.is_auto_theme_enabled()?,
@@ -173,6 +174,11 @@ impl ConfigManager {
     }
 
     fn should_prefer_plain_starship(&self) -> Result<bool> {
+        self.has_no_nerd_font()
+    }
+
+    /// Returns true if no Nerd Font is configured or detected on the system.
+    fn has_no_nerd_font(&self) -> Result<bool> {
         let env = SlateEnv::with_home(self.home_path.clone());
         if let Some(font) = self.get_current_font()? {
             return Ok(!crate::adapter::font::FontAdapter::is_nerd_font_name(&font));
@@ -738,13 +744,14 @@ format = "..."
         let config_manager = test_config_manager(temp.path());
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
 
+        config_manager.set_starship_enabled(true).unwrap();
         config_manager.set_current_font("Menlo").unwrap();
         config_manager.write_shell_integration_file(&theme).unwrap();
 
         let env_zsh_path = temp.path().join("managed/shell/env.zsh");
         let content = std::fs::read_to_string(&env_zsh_path).unwrap();
 
-        assert!(content.contains("export STARSHIP_CONFIG='"));
+        assert!(content.contains("export STARSHIP_CONFIG="));
         assert!(content.contains("/managed/starship/plain.toml"));
         assert!(!content.contains("else\n  export STARSHIP_CONFIG="));
     }
@@ -755,6 +762,7 @@ format = "..."
         let config_manager = test_config_manager(temp.path());
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
 
+        config_manager.set_starship_enabled(true).unwrap();
         config_manager
             .set_current_font("JetBrainsMono Nerd Font")
             .unwrap();

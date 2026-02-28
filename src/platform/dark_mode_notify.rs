@@ -12,16 +12,9 @@ fn binary_path(config: &ConfigManager) -> Result<PathBuf> {
     Ok(bin_dir.join("slate-dark-mode-notify"))
 }
 
-/// Get the path to the pre-compiled binary from the build output.
-fn build_time_binary_path() -> Result<PathBuf> {
-    let path = env!("WATCHER_BINARY");
-    if !Path::new(path).exists() {
-        return Err(SlateError::PlatformError(
-            "Pre-compiled watcher binary not found in build output".to_string(),
-        ));
-    }
-    Ok(PathBuf::from(path))
-}
+/// The watcher binary is embedded at compile time so it travels inside the slate executable.
+/// This eliminates the dependency on build-machine paths after distribution.
+const EMBEDDED_WATCHER: &[u8] = include_bytes!(env!("WATCHER_BINARY"));
 
 fn binary_needs_refresh(bin_path: &Path) -> bool {
     if !bin_path.exists() {
@@ -48,12 +41,18 @@ fn binary_needs_refresh(bin_path: &Path) -> bool {
 pub fn ensure_binary(config: &ConfigManager) -> Result<PathBuf> {
     let bin_path = binary_path(config)?;
 
+    // Guard: if swiftc was missing at build time, the embedded binary is an empty stub
+    if EMBEDDED_WATCHER.is_empty() {
+        return Err(SlateError::PlatformError(
+            "Auto-theme is not available: slate was built without swiftc (Xcode Command Line Tools). \
+             Install them with 'xcode-select --install' and rebuild slate."
+                .to_string(),
+        ));
+    }
+
     if !binary_needs_refresh(&bin_path) {
         return Ok(bin_path);
     }
-
-    // Get the pre-compiled binary from the build output
-    let source_binary = build_time_binary_path()?;
 
     // Ensure parent directory exists
     if let Some(parent) = bin_path.parent() {
@@ -62,11 +61,10 @@ pub fn ensure_binary(config: &ConfigManager) -> Result<PathBuf> {
         })?;
     }
 
-    // Copy the pre-compiled binary to the managed location
-    fs::copy(&source_binary, &bin_path).map_err(|e| {
+    // Write the embedded watcher binary to the managed location
+    fs::write(&bin_path, EMBEDDED_WATCHER).map_err(|e| {
         SlateError::PlatformError(format!(
-            "Failed to install watcher binary from {} to {}: {}",
-            source_binary.display(),
+            "Failed to write watcher binary to {}: {}",
             bin_path.display(),
             e
         ))
@@ -107,7 +105,7 @@ pub fn stop() -> Result<()> {
         .status()
         .map_err(|e| SlateError::PlatformError(format!("Failed to stop watcher process: {}", e)))?;
 
-    if status.success() || status.code() == Some(1) {
+    if watcher_stop_succeeded(&status) {
         return Ok(());
     }
 
@@ -115,6 +113,23 @@ pub fn stop() -> Result<()> {
         "Watcher stop command exited with status {}",
         status
     )))
+}
+
+fn watcher_stop_succeeded(status: &std::process::ExitStatus) -> bool {
+    if status.success() || status.code() == Some(1) {
+        return true;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+
+        if matches!(status.signal(), Some(libc::SIGTERM)) {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Start the watcher process in the background if not already running.
@@ -156,4 +171,31 @@ pub fn remove_binary(config: &ConfigManager) -> Result<()> {
         fs::remove_file(&bin_path).ok();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::watcher_stop_succeeded;
+
+    #[test]
+    fn test_watcher_stop_succeeds_when_no_processes_match() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+
+            let status = std::process::ExitStatus::from_raw(1 << 8);
+            assert!(watcher_stop_succeeded(&status));
+        }
+    }
+
+    #[test]
+    fn test_watcher_stop_tolerates_sigterm_exit_status() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+
+            let status = std::process::ExitStatus::from_raw(libc::SIGTERM);
+            assert!(watcher_stop_succeeded(&status));
+        }
+    }
 }

@@ -16,23 +16,29 @@ fn main() {
     // Output binary path
     let binary_path = out_path.join("slate-dark-mode-notify");
 
-    // Compile the Swift binary
-    let output = Command::new("swiftc")
+    // Compile the Swift binary (requires swiftc from Xcode or Command Line Tools)
+    let swiftc_result = Command::new("swiftc")
         .arg(swift_source_path)
         .arg("-o")
         .arg(&binary_path)
-        .output()
-        .expect("Failed to run swiftc");
+        .output();
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("swiftc compilation failed: {}", stderr);
-        panic!("Failed to compile Swift watcher binary");
-    }
-
-    // Ensure the binary was created
-    if !binary_path.exists() {
-        panic!("Swift watcher binary was not created at {:?}", binary_path);
+    match swiftc_result {
+        Ok(output) if output.status.success() && binary_path.exists() => {
+            // Successfully compiled
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("cargo:warning=swiftc compilation failed: {}", stderr);
+            eprintln!("cargo:warning=Auto-theme (dark mode watcher) will not be available.");
+            // Create a minimal stub so include_bytes! doesn't fail
+            std::fs::write(&binary_path, b"").expect("Failed to create stub binary");
+        }
+        Err(e) => {
+            eprintln!("cargo:warning=swiftc not found ({}). Install Xcode Command Line Tools for auto-theme support.", e);
+            // Create a minimal stub so include_bytes! doesn't fail
+            std::fs::write(&binary_path, b"").expect("Failed to create stub binary");
+        }
     }
 
     println!("cargo:rustc-env=WATCHER_BINARY={}", binary_path.display());
