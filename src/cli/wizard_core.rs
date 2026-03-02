@@ -8,7 +8,7 @@ use crate::cli::tool_selection::{
     TerminalSettings, ToolCatalog,
 };
 use crate::cli::wizard_support;
-use crate::detection::ToolPresence;
+use crate::detection::{TerminalKind, TerminalProfile, ToolPresence};
 use crate::env::SlateEnv;
 use crate::error::Result;
 use cliclack::{confirm, intro, multiselect, outro_cancel, select};
@@ -63,9 +63,9 @@ pub struct Wizard {
 }
 
 fn current_terminal_tool_id() -> Option<&'static str> {
-    match std::env::var("TERM_PROGRAM").ok()?.to_ascii_lowercase().as_str() {
-        "ghostty" => Some("ghostty"),
-        "alacritty" => Some("alacritty"),
+    match TerminalProfile::detect().kind() {
+        TerminalKind::Ghostty => Some("ghostty"),
+        TerminalKind::Alacritty => Some("alacritty"),
         _ => None,
     }
 }
@@ -300,8 +300,10 @@ impl Wizard {
 
         // Non-interactive mode: install candidates only, configure Tier 1
         if !wizard_support::is_interactive() {
-            self.context.selected_tools =
-                install_candidates.iter().map(|c| c.id.to_string()).collect();
+            self.context.selected_tools = install_candidates
+                .iter()
+                .map(|c| c.id.to_string())
+                .collect();
             let mut to_configure = tier1_ids;
             for id in &self.context.selected_tools {
                 if !to_configure.contains(id) {

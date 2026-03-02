@@ -1,4 +1,5 @@
 use crate::config::ConfigManager;
+use crate::detection::TerminalProfile;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::{ThemeAppearance, ThemeRegistry};
@@ -106,7 +107,14 @@ pub fn configure_auto_theme() -> Result<()> {
 
     cliclack::intro("✦ Configure Auto Theme")?;
     log::info("Match themes to your system appearance .")?;
-    log::remark("Watcher runtime currently launches from Ghostty shell sessions.")?;
+    let terminal = TerminalProfile::detect();
+    if terminal.watcher_shell_autostart_supported() {
+        log::remark("Ghostty shell sessions can relaunch the watcher automatically.")?;
+    } else {
+        log::remark(
+            "Ghostty can relaunch the watcher automatically. In other terminals, auto-theme stays available but restart recovery is manual.",
+        )?;
+    }
 
     let env = SlateEnv::from_process()?;
     let config = ConfigManager::with_env(&env)?;

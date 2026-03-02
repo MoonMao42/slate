@@ -57,6 +57,13 @@ jobs:
         # failing. otherwise `sh` won't catch that `curl` returned non-0
         shell: bash
         run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh | sh"
+      - name: Verify release metadata matches tap
+        run: |
+          grep -q 'brew install MoonMao42/homebrew-tap/slate' README.md
+          grep -q 'tap = "MoonMao42/homebrew-tap"' dist-workspace.toml
+          grep -q 'repository: "MoonMao42/homebrew-tap"' .github/workflows/release.yml
+      - name: Verify package payload
+        run: cargo package --allow-dirty --list > /tmp/slate-package-list.txt
       - name: Cache dist
         uses: actions/upload-artifact@v6
         with:
@@ -280,6 +287,12 @@ jobs:
       GITHUB_EMAIL: "admin+bot@axo.dev"
     if: ${{ !fromJson(needs.plan.outputs.val).announcement_is_prerelease || fromJson(needs.plan.outputs.val).publish_prereleases }}
     steps:
+      - name: Verify tap token exists
+        run: |
+          if [ -z "${{ secrets.HOMEBREW_TAP_TOKEN }}" ]; then
+            echo "HOMEBREW_TAP_TOKEN is required to publish to MoonMao42/homebrew-tap" >&2
+            exit 1
+          fi
       - uses: actions/checkout@v6
         with:
           persist-credentials: true

@@ -1,38 +1,40 @@
 # Distribution and Lifecycle
 
-This document defines how Slate should be shipped, tested, and removed.
+This document is the release truth source for how Slate ships, installs, and fails gracefully on a fresh macOS machine.
 
-## Recommended Channel Strategy
+## Install Channels
 
 | Channel | Decision | Role |
 | --- | --- | --- |
-| Homebrew tap | Keep | Primary install path for macOS users |
-| GitHub Releases | Keep | Source of signed versioned binaries and release notes |
-| crates.io | Enable | Secondary Rust-native install path and ecosystem metadata |
+| Homebrew tap | Keep | Primary public install path |
+| GitHub Releases | Keep | Binary fallback when `brew` is unavailable |
+| Source build / `cargo install` | Keep, but secondary | Developer-only path, not the main README story |
 
-### Why all three
+## Single Source Of Truth
 
-- Homebrew is the smoothest path for the target audience.
-- GitHub Releases are the artifact backbone for Homebrew and direct downloads.
-- crates.io matters for Rust discoverability, `cargo install`, and package metadata hygiene.
+The following values must always match:
 
-The channels should share one version number, one changelog, and one release commit.
+- README install command: `brew install MoonMao42/homebrew-tap/slate`
+- `dist-workspace.toml`: `tap = "MoonMao42/homebrew-tap"`
+- release workflow tap checkout: `repository: "MoonMao42/homebrew-tap"`
+- publish token: `HOMEBREW_TAP_TOKEN`
 
-## Release Checklist
+If one of these changes, update all of them in the same PR.
 
-1. Run `cargo test`.
-2. Run `cargo package --allow-dirty --list` to verify the publish payload.
-3. Run `./scripts/test-install-lifecycle.sh`.
-4. Regenerate the hero demo with `./assets/auto-typing-demo.sh`.
-5. Tag the release and let `cargo-dist` publish GitHub Releases plus the Homebrew formula update.
-6. Publish to `crates.io` once the release artifacts and README are final.
+## Public Install Contract
 
-## Install and Uninstall Contract
-
-### Install
+### Primary path
 
 ```bash
-brew install MoonMao42/tap/slate
+brew install MoonMao42/homebrew-tap/slate
+slate setup
+```
+
+### Fallback path
+
+If Homebrew is not available yet on that Mac, download the matching binary from [GitHub Releases](https://github.com/MoonMao42/slate-dev/releases), put `slate` on the user's `PATH`, then run:
+
+```bash
 slate setup
 ```
 
@@ -49,31 +51,49 @@ brew uninstall slate
 rm -rf ~/.cache/slate
 ```
 
-`slate clean` is responsible for:
+## Release Checklist
 
-- removing Slate-managed shell integration
-- removing managed references from Ghostty, Alacritty, tmux, and git config before deleting files
-- removing Slate-managed config files under `~/.config/slate`
-- stopping and removing the auto-theme watcher artifact
+1. Confirm README still uses `brew install MoonMao42/homebrew-tap/slate`.
+2. Confirm `dist-workspace.toml` still points at `MoonMao42/homebrew-tap`.
+3. Confirm `.github/workflows/release.yml` still publishes to `MoonMao42/homebrew-tap`.
+4. Run `cargo test`.
+5. Run `cargo package --allow-dirty --list`.
+6. Run `cargo dist plan`.
+7. Run `cargo dist build`.
+8. Smoke-check a fresh-ish macOS install path with `brew install MoonMao42/homebrew-tap/slate`.
+9. Verify GitHub Releases contains the binary fallback assets for both macOS targets.
+10. Tag the release and let the workflow publish GitHub Releases plus the Homebrew formula update.
 
-`brew uninstall slate` is responsible for:
+## First Tap Publish Requirements
 
-- removing the Slate binary installed by Homebrew
+- The tap repository must already exist at `MoonMao42/homebrew-tap`.
+- `HOMEBREW_TAP_TOKEN` must have write access to that repository.
+- The tap repository should contain a `Formula/` directory before the first automated publish.
+- The first release should be watched manually to confirm the generated formula lands in the tap and `brew install MoonMao42/homebrew-tap/slate` resolves correctly.
 
-Slate does **not** attempt to uninstall third-party tools such as Starship, Ghostty, or Nerd Fonts. Those remain user-owned dependencies once installed.
+## Failure Model
+
+Slate should prefer stability and explainable soft failures over aggressive fallback behavior.
+
+- Network unavailable: local config work can continue, but installs/downloads may need a retry.
+- Permissions / shared Homebrew: keep successful local work, explain what an admin or primary Homebrew owner must do next.
+- Missing dependency: fail clearly when Homebrew, zsh, or build-time watcher prerequisites are absent.
+- Unsupported shell / terminal: keep shell/tool theming where possible, and explicitly mark Ghostty-only features as unavailable instead of implying parity.
 
 ## Compatibility Position
 
 Slate should prefer:
 
-- strong consistency for theme identity, palette mapping, and managed-file composition
-- graceful degradation for terminal-specific chrome or glyph-heavy prompt rendering
+- one shared theme identity across tools
+- predictable managed-file ownership
+- soft failure with recovery guidance
 
 Practical examples:
 
-- no Nerd Font -> use the plain Starship profile
-- no blur support -> keep colors, skip blur
-- limited live reload -> write config successfully and ask for a new shell or terminal window
+- no Nerd Font: keep the terminal usable, then explain the manual font step
+- no blur support: keep theme colors, mark blur as unavailable
+- non-Ghostty terminal: keep shell/tool theming, avoid promising watcher relaunch or frosted glass
+- offline setup: configure already-installed tools first, then explain the missing downloads
 
 ## Demo Asset Policy
 

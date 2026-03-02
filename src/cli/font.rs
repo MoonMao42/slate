@@ -1,11 +1,69 @@
-use crate::adapter::font::FontAdapter;
+use crate::adapter::font::{FontAdapter, FontDiscovery};
 use crate::cli::font_selection::FontCatalog;
 use crate::design::symbols::Symbols;
 use crate::env::SlateEnv;
-use crate::error::Result;
+use crate::error::{Result, SlateError};
 
 fn font_uses_basic_prompt(font_name: &str) -> bool {
     !FontAdapter::is_nerd_font_name(font_name)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ResolvedFontChoice {
+    Installed(String),
+    Catalog(String),
+}
+
+impl ResolvedFontChoice {
+    pub(crate) fn font_name(&self) -> &str {
+        match self {
+            Self::Installed(name) | Self::Catalog(name) => name,
+        }
+    }
+}
+
+fn find_installed_font(discovery: &FontDiscovery, requested_key: &str) -> Option<String> {
+    discovery
+        .nerd_fonts
+        .iter()
+        .chain(discovery.system_fonts.iter())
+        .find(|font| FontAdapter::family_match_key(font) == requested_key)
+        .cloned()
+}
+
+fn resolve_font_choice_with_discovery(
+    name: &str,
+    discovery: &FontDiscovery,
+) -> Result<ResolvedFontChoice> {
+    let requested_key = FontAdapter::family_match_key(name);
+
+    if let Some(installed) = find_installed_font(discovery, &requested_key) {
+        return Ok(ResolvedFontChoice::Installed(installed));
+    }
+
+    if let Some(catalog_font) = FontCatalog::all_fonts().into_iter().find(|font| {
+        font.name == name
+            || font.id == name
+            || FontAdapter::family_match_key(font.name) == requested_key
+            || FontAdapter::family_match_key(font.id) == requested_key
+    }) {
+        let canonical_key = FontAdapter::family_match_key(catalog_font.name);
+        if let Some(installed) = find_installed_font(discovery, &canonical_key) {
+            return Ok(ResolvedFontChoice::Installed(installed));
+        }
+
+        return Ok(ResolvedFontChoice::Catalog(catalog_font.name.to_string()));
+    }
+
+    Err(SlateError::InvalidConfig(format!(
+        "Font '{}' not found. Run 'slate font' to see available options.",
+        name
+    )))
+}
+
+pub(crate) fn resolve_font_choice(name: &str) -> Result<ResolvedFontChoice> {
+    let discovery = FontAdapter::discover_all_fonts()?;
+    resolve_font_choice_with_discovery(name, &discovery)
 }
 
 /// Handle `slate font` command
@@ -16,63 +74,28 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
     if let Some(name) = font_name {
         // Direct apply path: validate and apply font
         let env = SlateEnv::from_process()?;
+        let selection = resolve_font_choice(name)?;
+        let resolved_font = selection.font_name().to_string();
 
-        // Check if font is already installed (nerd or system)
-        let discovery = FontAdapter::discover_all_fonts()?;
-        let all_fonts: Vec<&String> = discovery
-            .nerd_fonts
-            .iter()
-            .chain(discovery.system_fonts.iter())
-            .collect();
-
-        let is_installed = all_fonts.contains(&&name.to_string());
-
-        if !is_installed {
-            // Check if it's a catalog font available for download
-            let catalog_match = FontCatalog::all_fonts()
-                .into_iter()
-                .find(|f| f.name == name || f.id == name);
-
-            if let Some(cat_font) = catalog_match {
-                // Download and install the catalog font
-                eprintln!("Downloading {}...", cat_font.name);
-                match download_catalog_font(cat_font.name, &env) {
-                    Ok(_) => {
-                        eprintln!("{} {} downloaded", Symbols::SUCCESS, cat_font.name);
-                    }
-                    Err(e) => {
-                        eprintln!("{} Download failed: {}", Symbols::FAILURE, e);
-                        return Ok(());
-                    }
-                }
-                // Apply using the catalog display name
-                FontAdapter::apply_font(&env, cat_font.name)?;
-                println!(
-                    "{} Updated font to {} in Ghostty and Alacritty.",
-                    Symbols::SUCCESS,
-                    cat_font.name
-                );
-                println!("New shells will continue using the full Slate prompt profile.");
-                return Ok(());
-            }
-
-            eprintln!(
-                "{} Font '{}' not found. Run 'slate font' to see available options.",
-                Symbols::FAILURE,
-                name
-            );
-            return Ok(());
+        if matches!(selection, ResolvedFontChoice::Catalog(_)) {
+            eprintln!("Downloading {}...", resolved_font);
+            download_catalog_font(&resolved_font, &env).map_err(|err| {
+                SlateError::InvalidConfig(format!(
+                    "Font '{}' could not be installed: {}",
+                    resolved_font, err
+                ))
+            })?;
+            eprintln!("{} {} downloaded", Symbols::SUCCESS, resolved_font);
         }
 
-        // Apply already-installed font
-        FontAdapter::apply_font(&env, name)?;
+        FontAdapter::apply_font(&env, &resolved_font)?;
 
         println!(
             "{} Updated font to {} in Ghostty and Alacritty.",
             Symbols::SUCCESS,
-            name
+            resolved_font
         );
-        if font_uses_basic_prompt(name) {
+        if font_uses_basic_prompt(&resolved_font) {
             println!("(i) Basic Starship mode enabled for new shells because this font does not include Nerd Font glyphs.");
         } else {
             println!("New shells will continue using the full Slate prompt profile.");
@@ -287,4 +310,39 @@ fn download_catalog_font(font_name: &str, env: &SlateEnv) -> std::result::Result
             .unwrap_or(&full)
             .to_string()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_font_choice_with_discovery, ResolvedFontChoice};
+    use crate::adapter::font::FontDiscovery;
+
+    #[test]
+    fn test_resolve_font_choice_matches_catalog_id_to_installed_font() {
+        let discovery = FontDiscovery {
+            nerd_fonts: vec!["JetBrains Mono Nerd Font".to_string()],
+            system_fonts: vec![],
+        };
+
+        let choice = resolve_font_choice_with_discovery("jetbrains-mono", &discovery).unwrap();
+
+        assert_eq!(
+            choice,
+            ResolvedFontChoice::Installed("JetBrains Mono Nerd Font".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_font_choice_rejects_unknown_font() {
+        let discovery = FontDiscovery {
+            nerd_fonts: vec![],
+            system_fonts: vec!["Menlo".to_string()],
+        };
+
+        let err = resolve_font_choice_with_discovery("Definitely Not A Font", &discovery)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("Font 'Definitely Not A Font' not found"));
+    }
 }

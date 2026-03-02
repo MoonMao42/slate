@@ -609,6 +609,137 @@ fn test_unsupported_terminal_graceful_skip() {
         "setup should succeed even from Apple_Terminal: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("ghostty failed during theme apply"),
+        "setup should not report ghostty apply failures when running in Terminal.app: {stderr}"
+    );
+    assert!(
+        !stderr.contains("alacritty failed during theme apply"),
+        "setup should not report alacritty apply failures when running in Terminal.app: {stderr}"
+    );
+}
+
+#[test]
+fn test_status_reports_ghostty_compatibility() {
+    let tempdir = TempDir::new().unwrap();
+    let output = slate_cmd_isolated(&tempdir)
+        .env("TERM_PROGRAM", "ghostty")
+        .arg("status")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Ghostty"));
+    assert!(stdout.contains("best experience"));
+}
+
+#[test]
+fn test_status_reports_alacritty_limits() {
+    let tempdir = TempDir::new().unwrap();
+    let output = slate_cmd_isolated(&tempdir)
+        .env("TERM_PROGRAM", "alacritty")
+        .arg("status")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Alacritty"));
+    assert!(stdout.contains("supported with limits"));
+    assert!(stdout.contains("no blur"));
+}
+
+#[test]
+fn test_status_reports_terminal_app_limits() {
+    let tempdir = TempDir::new().unwrap();
+    let output = slate_cmd_isolated(&tempdir)
+        .env("TERM_PROGRAM", "Apple_Terminal")
+        .arg("status")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Terminal.app"));
+    assert!(stdout.contains("manual font pick"));
+}
+
+#[test]
+fn test_status_reports_unknown_terminal_as_best_effort() {
+    let tempdir = TempDir::new().unwrap();
+    let output = slate_cmd_isolated(&tempdir)
+        .env("TERM_PROGRAM", "WarpTerminal")
+        .arg("status")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("WarpTerminal"));
+    assert!(stdout.contains("best-effort only"));
+}
+
+#[test]
+fn test_font_command_rejects_unknown_font() {
+    let tempdir = TempDir::new().unwrap();
+
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["font", "Definitely Not A Font"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "font command should fail for unknown font"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Font 'Definitely Not A Font' not found"));
+}
+
+#[test]
+fn test_import_rejects_invalid_font_without_mutating_state() {
+    let tempdir = TempDir::new().unwrap();
+
+    let output = slate_cmd_isolated(&tempdir)
+        .args([
+            "import",
+            "slate://catppuccin-mocha/Definitely-Not-A-Font/solid/none",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "import should fail for unknown font"
+    );
+    assert!(
+        !tempdir.path().join(".config/slate/current").exists(),
+        "invalid import should not apply theme state before validation"
+    );
+}
+
+#[test]
+fn test_import_rejects_invalid_opacity_without_mutating_state() {
+    let tempdir = TempDir::new().unwrap();
+
+    let output = slate_cmd_isolated(&tempdir)
+        .args([
+            "import",
+            "slate://catppuccin-mocha/none/not-a-real-opacity/none",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "import should fail for invalid opacity"
+    );
+    assert!(
+        !tempdir.path().join(".config/slate/current").exists(),
+        "invalid import should not apply theme state before validation"
+    );
 }
 
 #[test]
@@ -684,7 +815,10 @@ fn test_clean_removes_alacritty_managed_imports() {
     )
     .unwrap();
 
-    let output = slate_cmd_isolated(&tempdir).args(["clean"]).output().unwrap();
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["clean"])
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "clean failed: {}",
@@ -924,6 +1058,8 @@ mod optional_automations {
 
     #[test]
     fn test_receipt_can_show_terminal_visuals() {
+        use slate_cli::detection::{TerminalKind, TerminalProfile};
+
         let mut wizard = Wizard::new().unwrap();
         wizard.get_context_mut().selected_terminal_settings = Some(TerminalSettings {
             background_opacity: 0.95,
@@ -935,8 +1071,20 @@ mod optional_automations {
         let receipt = wizard.build_review_receipt();
         let formatted = wizard.display_receipt(&receipt);
         assert!(formatted.contains("Terminal"));
-        assert!(formatted.contains("opacity 0.95"));
-        assert!(formatted.contains("blur"));
+        let terminal = TerminalProfile::detect();
+        match terminal.kind() {
+            TerminalKind::Ghostty => {
+                assert!(formatted.contains("opacity 0.95"));
+                assert!(formatted.contains("frosted glass"));
+            }
+            TerminalKind::Alacritty => {
+                assert!(formatted.contains("opacity 0.95"));
+                assert!(formatted.contains("blur not supported here"));
+            }
+            TerminalKind::TerminalApp | TerminalKind::Unknown => {
+                assert!(formatted.contains("shell/tool theme"));
+            }
+        }
     }
 }
 

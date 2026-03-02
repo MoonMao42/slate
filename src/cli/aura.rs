@@ -28,10 +28,7 @@ const QUOTES: &[(&str, &str)] = &[
         "Arthur C. Clarke",
     ),
     ("The best interface is no interface.", "Golden Krishna"),
-    (
-        "Make it work, make it right, make it fast.",
-        "Kent Beck",
-    ),
+    ("Make it work, make it right, make it fast.", "Kent Beck"),
     (
         "Perfection is achieved when there is nothing left to take away.",
         "Antoine de Saint-Exupery",

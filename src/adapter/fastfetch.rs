@@ -85,10 +85,7 @@ impl FastfetchAdapter {
         let palette = &theme.palette;
 
         // Use subtext color for keys (muted), accent for separators (subtle pop)
-        let key_hex = palette
-            .subtext1
-            .as_deref()
-            .unwrap_or(&palette.foreground);
+        let key_hex = palette.subtext1.as_deref().unwrap_or(&palette.foreground);
         let (r_key, g_key, b_key) = PaletteRenderer::hex_to_rgb(key_hex)?;
         let (r_acc, g_acc, b_acc) = PaletteRenderer::hex_to_rgb(&palette.blue)?;
         let (r_fg, g_fg, b_fg) = PaletteRenderer::hex_to_rgb(&palette.foreground)?;

@@ -20,6 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Snapshot-based restore system (`slate restore`)
 - Font management (`slate font`)
 - Three-tier config architecture (managed / integration / user override)
-- Homebrew tap distribution (`brew install MoonMao42/tap/slate`)
+- Homebrew tap distribution (`brew install MoonMao42/homebrew-tap/slate`)
 
 [2.0.0]: https://github.com/MoonMao42/slate-dev/releases/tag/v2.0.0

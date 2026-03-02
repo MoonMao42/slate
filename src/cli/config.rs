@@ -1,5 +1,6 @@
 use crate::config::ConfigManager;
 use crate::design::symbols::Symbols;
+use crate::detection::TerminalProfile;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::opacity::OpacityPreset;
@@ -41,6 +42,7 @@ pub(crate) fn disable_auto_theme(config: &ConfigManager) -> Result<()> {
 pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
     let env = SlateEnv::from_process()?;
     let config = ConfigManager::with_env(&env)?;
+    let terminal = TerminalProfile::detect();
 
     match key {
         "opacity" => {
@@ -69,9 +71,13 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
                     enable_auto_theme(&config)?;
 
                     println!("{} Auto theme enabled", Symbols::SUCCESS);
-                    println!(
-                        "  New Ghostty shell sessions will auto-switch on macOS appearance change"
-                    );
+                    if terminal.watcher_shell_autostart_supported() {
+                        println!("  Ghostty shell sessions can relaunch the watcher automatically");
+                    } else {
+                        println!(
+                            "  Theme switching works now, but automatic relaunch after a restart is Ghostty-only"
+                        );
+                    }
                     println!("  Run 'slate config set auto-theme configure' to customize dark/light pairing");
                     Ok(())
                 }

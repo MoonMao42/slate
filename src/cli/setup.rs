@@ -28,25 +28,18 @@ pub fn handle_with_env(
 
     // Run pre-flight checks
     eprintln!("\n");
-    let preflight_result = preflight::run_checks_with_env(env)?;
+    let scenario = if quick {
+        preflight::PreflightScenario::QuickSetup
+    } else {
+        preflight::PreflightScenario::GuidedSetup
+    };
+    let preflight_result = preflight::run_checks_for_setup_with_env(env, scenario)?;
     eprintln!("{}", preflight_result.format_for_display());
 
     if !preflight_result.is_ready() {
-        // Build actionable guidance from failed checks
-        let failed: Vec<_> = preflight_result
-            .checks
-            .iter()
-            .filter(|c| !c.passed && !c.name.starts_with("Optional:"))
-            .collect();
-        let guidance = failed
-            .iter()
-            .map(|c| format!("  → {}: {}", c.name, c.description))
-            .collect::<Vec<_>>()
-            .join("\n");
-        return Err(crate::error::SlateError::Internal(format!(
-            "Setup requires:\n{}\n\nResolve the above and run 'slate setup' again.",
-            guidance
-        )));
+        return Err(crate::error::SlateError::Internal(
+            preflight_result.format_blocking_guidance(),
+        ));
     }
 
     eprintln!("\n");
@@ -173,18 +166,18 @@ fn prepare_setup_state(
 /// Only installs the tool — does NOT rewrite shell integration or apply themes.
 fn handle_retry_only(tool_id: &str) -> Result<()> {
     let tool = validate_retry_tool(tool_id)?;
+    let env = crate::env::SlateEnv::from_process()?;
 
     eprintln!("\n✦ Retrying tool installation: {}\n", tool.label);
 
     // Run pre-flight checks
-    let preflight_result = preflight::run_checks()?;
+    let preflight_result =
+        preflight::run_checks_for_setup_with_env(&env, preflight::PreflightScenario::RetryInstall)?;
     if !preflight_result.is_ready() {
         return Err(crate::error::SlateError::Internal(
-            "Pre-flight checks failed.".to_string(),
+            preflight_result.format_blocking_guidance(),
         ));
     }
-
-    let env = crate::env::SlateEnv::from_process()?;
 
     // Only install the single tool — no shell integration, no theme apply
     match setup_executor::install_tool(tool.brew_package, tool.brew_kind, &env) {
@@ -192,10 +185,7 @@ fn handle_retry_only(tool_id: &str) -> Result<()> {
             eprintln!("\n{}", method.success_message(tool.label));
         }
         Err(e) => {
-            eprintln!(
-                "\n✗ Tool '{}' installation failed: {}\n",
-                tool.label, e
-            );
+            eprintln!("\n✗ Tool '{}' installation failed: {}\n", tool.label, e);
         }
     }
 

@@ -1,6 +1,7 @@
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::Result;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -80,7 +81,10 @@ fn build_export_uri(config: &ConfigManager) -> Result<String> {
         tools.join(",")
     };
 
-    Ok(format!("slate://{}/{}/{}/{}", theme, font, opacity, tools_str))
+    Ok(format!(
+        "slate://{}/{}/{}/{}",
+        theme, font, opacity, tools_str
+    ))
 }
 
 fn output_path() -> PathBuf {
@@ -97,7 +101,7 @@ fn has_imagemagick() -> bool {
         .is_ok_and(|s| s.success())
 }
 
-fn add_watermark(image_path: &PathBuf, uri: &str) -> std::result::Result<(), ()> {
+fn add_watermark(image_path: &Path, uri: &str) -> std::result::Result<(), ()> {
     // Add "✦ slate" watermark + URI at bottom-right
     let watermark_text = format!("✦ slate  ·  {}", uri);
 
