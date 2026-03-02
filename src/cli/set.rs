@@ -78,6 +78,9 @@ pub fn silent_preview_apply(
     // Update opacity for Alacritty (best-effort)
     let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
 
+    // Update opacity for Kitty (best-effort, Kitty auto-reloads on file change)
+    let _ = crate::adapter::kitty::write_opacity_config(env, opacity);
+
     // Attempt Ghostty live preview with permission-aware behavior (best-effort).
     // Per , Check if Ghostty reload permission is already known.
     // If permission state is unknown, try once and remember the result.
@@ -117,6 +120,11 @@ pub fn silent_preview_apply(
         }
     }
 
+    // Kitty live preview: push colors via kitten @ set-colors (best-effort)
+    if let Some(kitty_adapter) = adapter_registry.get_adapter("kitty") {
+        let _ = kitty_adapter.reload();
+    }
+
     Ok(())
 }
 
@@ -150,6 +158,7 @@ pub fn silent_commit_apply(
     let _ = crate::adapter::ghostty::write_opacity_config(env, opacity);
     let _ = crate::adapter::ghostty::write_blur_radius(env, opacity);
     let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
+    let _ = crate::adapter::kitty::write_opacity_config(env, opacity);
 
     Ok(())
 }

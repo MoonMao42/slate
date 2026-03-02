@@ -67,6 +67,160 @@ impl ToolPresence {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalKind {
+    Ghostty,
+    Alacritty,
+    TerminalApp,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalProfile {
+    kind: TerminalKind,
+    raw_name: String,
+}
+
+impl TerminalProfile {
+    pub fn detect() -> Self {
+        let term_program = env::var("TERM_PROGRAM").ok();
+        let term = env::var("TERM").ok();
+        Self::from_env_vars(term_program.as_deref(), term.as_deref())
+    }
+
+    pub fn from_env_vars(term_program: Option<&str>, term: Option<&str>) -> Self {
+        let term_program_normalized = term_program.map(|value| value.trim().to_ascii_lowercase());
+        let term_normalized = term.map(|value| value.trim().to_ascii_lowercase());
+
+        let kind = match (
+            term_program_normalized.as_deref(),
+            term_normalized.as_deref(),
+        ) {
+            (Some("ghostty"), _) | (_, Some("ghostty")) => TerminalKind::Ghostty,
+            (Some("alacritty"), _) | (_, Some("alacritty")) => TerminalKind::Alacritty,
+            (Some("apple_terminal"), _) => TerminalKind::TerminalApp,
+            _ => TerminalKind::Unknown,
+        };
+
+        let raw_name = match kind {
+            TerminalKind::Ghostty => "Ghostty".to_string(),
+            TerminalKind::Alacritty => "Alacritty".to_string(),
+            TerminalKind::TerminalApp => "Terminal.app".to_string(),
+            TerminalKind::Unknown => term_program
+                .or(term)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("Other terminal")
+                .to_string(),
+        };
+
+        Self { kind, raw_name }
+    }
+
+    pub fn kind(&self) -> TerminalKind {
+        self.kind
+    }
+
+    pub fn display_name(&self) -> &str {
+        &self.raw_name
+    }
+
+    pub fn compatibility_label(&self) -> &'static str {
+        match self.kind {
+            TerminalKind::Ghostty => "best experience",
+            TerminalKind::Alacritty => "supported with limits",
+            TerminalKind::TerminalApp => "supported with limits",
+            TerminalKind::Unknown => "best-effort only",
+        }
+    }
+
+    pub fn compatibility_summary(&self) -> &'static str {
+        match self.kind {
+            TerminalKind::Ghostty => {
+                "live reload, frosted glass, and watcher relaunch are available"
+            }
+            TerminalKind::Alacritty => {
+                "theme sync works well, but blur and watcher relaunch stay Ghostty-only"
+            }
+            TerminalKind::TerminalApp => {
+                "shell/tool theming works, but fonts stay manual and macOS controls the chrome"
+            }
+            TerminalKind::Unknown => {
+                "core shell/tool theming works, while terminal-specific visuals depend on the app"
+            }
+        }
+    }
+
+    pub fn short_limitations(&self) -> &'static str {
+        match self.kind {
+            TerminalKind::Ghostty => "live reload, frosted glass, watcher relaunch",
+            TerminalKind::Alacritty => "no blur, no watcher relaunch",
+            TerminalKind::TerminalApp => "manual font pick, no blur",
+            TerminalKind::Unknown => "shell/tool theme only",
+        }
+    }
+
+    pub fn supports_blur(&self) -> bool {
+        matches!(self.kind, TerminalKind::Ghostty)
+    }
+
+    pub fn watcher_shell_autostart_supported(&self) -> bool {
+        matches!(self.kind, TerminalKind::Ghostty)
+    }
+
+    pub fn font_selection_is_manual(&self) -> bool {
+        matches!(self.kind, TerminalKind::TerminalApp | TerminalKind::Unknown)
+    }
+
+    pub fn setup_review_summary(&self, opacity: Option<f32>, blur_requested: bool) -> String {
+        let opacity_label = opacity
+            .map(|value| format!("opacity {:.2}", value))
+            .unwrap_or_else(|| "core theme sync".to_string());
+
+        match self.kind {
+            TerminalKind::Ghostty => {
+                if blur_requested {
+                    format!("{} · {}, frosted glass", self.display_name(), opacity_label)
+                } else {
+                    format!("{} · {}", self.display_name(), opacity_label)
+                }
+            }
+            TerminalKind::Alacritty => {
+                if blur_requested {
+                    format!(
+                        "{} · {}, blur not supported here",
+                        self.display_name(),
+                        opacity_label
+                    )
+                } else {
+                    format!("{} · {}", self.display_name(), opacity_label)
+                }
+            }
+            TerminalKind::TerminalApp => format!(
+                "{} · shell/tool theme only, font stays manual",
+                self.display_name()
+            ),
+            TerminalKind::Unknown => {
+                format!("{} · shell/tool theme where supported", self.display_name())
+            }
+        }
+    }
+
+    pub fn setup_tip(&self) -> Option<&'static str> {
+        match self.kind {
+            TerminalKind::Ghostty => None,
+            TerminalKind::Alacritty => Some(
+                "Slate updated Alacritty cleanly, but blur and auto-theme relaunch remain Ghostty-only.",
+            ),
+            TerminalKind::TerminalApp => Some(
+                "Slate themed the shell and tools. Terminal.app still needs a manual Nerd Font pick and does not support frosted backgrounds.",
+            ),
+            TerminalKind::Unknown => Some(
+                "Slate applied the shared shell/tool theme. Terminal-specific visuals depend on this app.",
+            ),
+        }
+    }
+}
+
 fn current_path_dirs() -> Vec<PathBuf> {
     env::var_os("PATH")
         .map(|value| env::split_paths(&value).collect())
@@ -276,6 +430,26 @@ pub fn detect_tool_presence_with_env(tool_id: &str, env: &SlateEnv) -> ToolPrese
                 }
             }
         }
+        "kitty" => {
+            if let Some((path, is_user_local)) = macos_app_path("kitty", env.home()) {
+                if is_user_local {
+                    ToolPresence::in_path_with(ToolEvidence::AppBundle(path))
+                } else {
+                    ToolPresence::fallback_with(ToolEvidence::AppBundle(path))
+                }
+            } else if let Some(path) = command_in_actual_path("kitty") {
+                ToolPresence::in_path_with(ToolEvidence::Executable(path))
+            } else if let Some(path) = command_path_with_env("kitty", env) {
+                ToolPresence::fallback_with(ToolEvidence::Executable(path))
+            } else {
+                let config = env.xdg_config_home().join("kitty").join("kitty.conf");
+                if config.exists() {
+                    ToolPresence::installed_with(ToolEvidence::Config(config))
+                } else {
+                    ToolPresence::missing()
+                }
+            }
+        }
         "zsh-syntax-highlighting" => detect_zsh_syntax_highlighting_plugin_with_env(env)
             .map(|path| ToolPresence::installed_with(ToolEvidence::Plugin(path)))
             .unwrap_or_else(ToolPresence::missing),
@@ -340,5 +514,31 @@ mod tests {
 
         let detected = command_path_with_env("starship", &env);
         assert_eq!(detected.as_deref(), Some(executable.as_path()));
+    }
+
+    #[test]
+    fn test_terminal_profile_detects_ghostty() {
+        let profile = TerminalProfile::from_env_vars(Some("ghostty"), Some("xterm-256color"));
+        assert_eq!(profile.kind(), TerminalKind::Ghostty);
+        assert_eq!(profile.display_name(), "Ghostty");
+        assert!(profile.supports_blur());
+    }
+
+    #[test]
+    fn test_terminal_profile_detects_terminal_app() {
+        let profile =
+            TerminalProfile::from_env_vars(Some("Apple_Terminal"), Some("xterm-256color"));
+        assert_eq!(profile.kind(), TerminalKind::TerminalApp);
+        assert_eq!(profile.display_name(), "Terminal.app");
+        assert!(profile.font_selection_is_manual());
+        assert!(!profile.watcher_shell_autostart_supported());
+    }
+
+    #[test]
+    fn test_terminal_profile_keeps_unknown_name() {
+        let profile = TerminalProfile::from_env_vars(Some("WarpTerminal"), Some("xterm-256color"));
+        assert_eq!(profile.kind(), TerminalKind::Unknown);
+        assert_eq!(profile.display_name(), "WarpTerminal");
+        assert_eq!(profile.compatibility_label(), "best-effort only");
     }
 }

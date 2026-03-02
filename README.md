@@ -27,12 +27,14 @@
 
 ## Quick Start
 
-> Requires **macOS** and **[Homebrew](https://brew.sh)**.
+> Requires **macOS** and **[Homebrew](https://brew.sh)**. Best experience with **[Ghostty](https://ghostty.org)** (live reload, frosted glass, auto-theme relaunch). Also supports Kitty, Alacritty, and Terminal.app.
 
 ```bash
-brew install MoonMao42/tap/slate
+brew install MoonMao42/homebrew-tap/slate
 slate setup
 ```
+
+If Homebrew is not ready on that Mac yet, download the matching binary from [GitHub Releases](https://github.com/MoonMao42/slate-dev/releases) as the fallback path.
 
 <p align="center">
   <img src="./assets/setup-demo.gif" alt="slate setup demo" width="600" />
@@ -42,8 +44,8 @@ slate setup
 
 ## Features
 
-- **One palette, everywhere** — Ghostty, Alacritty, Starship, bat, delta, eza, lazygit, fastfetch, tmux, zsh-syntax-highlighting all share the same color scheme.
-- **Auto dark/light** — Follows macOS appearance in real time. Toggle system dark mode and your entire terminal switches with it.
+- **One palette, everywhere** — Ghostty, Kitty, Alacritty, Starship, bat, delta, eza, lazygit, fastfetch, tmux, zsh-syntax-highlighting all share the same color scheme.
+- **Auto dark/light** — Ghostty can relaunch the watcher automatically. Other terminals can still follow macOS while the watcher is running, but restart recovery is more manual.
 - **Live preview** — Browse 18 themes with instant terminal preview. Arrow keys to navigate, Enter to apply.
 - **Nerd Font management** — Detect, install, and switch fonts without leaving the terminal.
 - **Non-destructive** — Uses managed includes, never overwrites your dotfiles. Snapshots before every change, one-command rollback.
@@ -69,6 +71,8 @@ slate config set auto-theme enable
 ```
 
 Every theme family ships a built-in dark/light pair. Configure your own pairing through the hub.
+
+Ghostty is the polished path here. In Terminal.app and other non-Ghostty terminals, Slate will keep shell/tool colors in sync but will not promise blur, automatic font switching, or watcher relaunch after every restart.
 
 <details>
 <summary><strong>All Commands</strong></summary>
@@ -108,18 +112,18 @@ Slate composes managed config files into your existing setup — it never replac
 ~/.config/<tool>/...               # your files, untouched
 ```
 
-For Ghostty: `config-file = ...`. For Alacritty: managed `import` entries. For zsh: a removable marker block in `.zshrc`. Slate files stay Slate-owned, your files stay yours.
+For Ghostty: `config-file = ...`. For Kitty/Alacritty: managed `include`/`import` entries. For zsh: a removable marker block in `.zshrc`. Slate files stay Slate-owned, your files stay yours.
 
 </details>
 
 ## Install
 
 ```bash
-brew install MoonMao42/tap/slate
+brew install MoonMao42/homebrew-tap/slate
 brew upgrade slate
 ```
 
-Binaries also available from [GitHub Releases](https://github.com/MoonMao42/slate-dev/releases).
+If `brew` is not available yet, use the matching binary from [GitHub Releases](https://github.com/MoonMao42/slate-dev/releases) and then run `slate setup`.
 
 ```bash
 # Uninstall
@@ -136,4 +140,4 @@ MIT
 
 ## Credits
 
-- [Ghostty](https://ghostty.org/) · [Alacritty](https://github.com/alacritty/alacritty) · [Starship](https://github.com/starship/starship) · [bat](https://github.com/sharkdp/bat) · [delta](https://github.com/dandavison/delta) · [eza](https://github.com/eza-community/eza) · [lazygit](https://github.com/jesseduffield/lazygit) · [fastfetch](https://github.com/fastfetch-cli/fastfetch) · [tmux](https://github.com/tmux/tmux) · [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting) · [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts)
+- [Ghostty](https://ghostty.org/) · [Kitty](https://sw.kovidgoyal.net/kitty/) · [Alacritty](https://github.com/alacritty/alacritty) · [Starship](https://github.com/starship/starship) · [bat](https://github.com/sharkdp/bat) · [delta](https://github.com/dandavison/delta) · [eza](https://github.com/eza-community/eza) · [lazygit](https://github.com/jesseduffield/lazygit) · [fastfetch](https://github.com/fastfetch-cli/fastfetch) · [tmux](https://github.com/tmux/tmux) · [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting) · [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts)

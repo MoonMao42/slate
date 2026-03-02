@@ -41,6 +41,7 @@ impl Language {
     pub const PITCH_ZSH_SYNTAX: &str = "Code highlighting in your shell";
     pub const PITCH_TMUX: &str = "Themed terminal multiplexer";
     pub const PITCH_ALACRITTY: &str = "GPU-accelerated terminal beauty";
+    pub const PITCH_KITTY: &str = "Feature-rich GPU terminal";
 
     // Daily commands (minimal per)
     pub const SET_SUCCESS: &str = "✓ {theme}";
@@ -182,10 +183,14 @@ impl Language {
     pub const HUB_RUN_SETUP: &str = "Run Setup";
 
     // Status line labels (07-01)
-    pub const STATUS_AUTO_WATCHER_RUNNING: &str = "[running]";
-    pub const STATUS_AUTO_WATCHER_IDLE: &str = "[enabled, not running]";
-    pub const STATUS_AUTO_WATCHER_DISABLED: &str = "[disabled]";
-    pub const STATUS_AUTO_WATCHER_DRIFT: &str = "[disabled, still running]";
+    pub const STATUS_AUTO_WATCHER_RUNNING: &str = "enabled and running";
+    pub const STATUS_AUTO_WATCHER_IDLE_GHOSTTY: &str =
+        "enabled, waiting for the next Ghostty shell";
+    pub const STATUS_AUTO_WATCHER_IDLE_OTHER: &str =
+        "enabled, but not running — re-enable to restart it";
+    pub const STATUS_AUTO_WATCHER_DISABLED: &str = "disabled";
+    pub const STATUS_AUTO_WATCHER_DRIFT: &str =
+        "disabled in config, but the watcher is still running";
 }
 
 #[cfg(test)]

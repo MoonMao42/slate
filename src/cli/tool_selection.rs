@@ -2,7 +2,7 @@
 /// Single source of truth for tool metadata, installability, and selection logic.
 use crate::brand::language::Language;
 use crate::design::typography::Typography;
-use crate::detection::{self, ToolPresence};
+use crate::detection::{self, TerminalProfile, ToolPresence};
 use crate::env::SlateEnv;
 use std::collections::HashMap;
 
@@ -32,7 +32,7 @@ pub struct ToolMetadata {
     pub detect_only: bool,
 }
 
-const ALL_TOOLS: [ToolMetadata; 10] = [
+const ALL_TOOLS: [ToolMetadata; 11] = [
     ToolMetadata {
         id: "ghostty",
         label: "Ghostty",
@@ -111,6 +111,15 @@ const ALL_TOOLS: [ToolMetadata; 10] = [
         pitch: Language::PITCH_ALACRITTY,
         installable: false,
         brew_package: "alacritty",
+        brew_kind: BrewKind::Cask,
+        detect_only: true,
+    },
+    ToolMetadata {
+        id: "kitty",
+        label: "Kitty",
+        pitch: Language::PITCH_KITTY,
+        installable: false,
+        brew_package: "kitty",
         brew_kind: BrewKind::Cask,
         detect_only: true,
     },
@@ -246,6 +255,7 @@ impl ReviewReceipt {
     /// Format receipt as human-readable string for display using typography helpers
     pub fn format_for_display(&self) -> String {
         let mut output = String::new();
+        let terminal = TerminalProfile::detect();
         output.push_str(&format!(
             "{}\n\n",
             Typography::section_header("Review and confirm")
@@ -280,17 +290,24 @@ impl ReviewReceipt {
             ));
         }
 
-        if let Some(settings) = &self.terminal_settings {
-            let terminal_summary = if settings.blur_enabled {
-                format!("opacity {}, blur", settings.background_opacity)
-            } else {
-                format!("opacity {}", settings.background_opacity)
-            };
-            output.push_str(&format!(
-                "{}\n",
-                Language::receipt_line(Language::RECEIPT_TERMINAL_SECTION, &terminal_summary)
-            ));
-        }
+        let terminal_summary = self
+            .terminal_settings
+            .as_ref()
+            .map(|settings| {
+                terminal
+                    .setup_review_summary(Some(settings.background_opacity), settings.blur_enabled)
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "{} · {}",
+                    terminal.display_name(),
+                    terminal.compatibility_label()
+                )
+            });
+        output.push_str(&format!(
+            "{}\n",
+            Language::receipt_line(Language::RECEIPT_TERMINAL_SECTION, &terminal_summary)
+        ));
 
         output.push_str(&format!(
             "\n{}\n",
@@ -306,10 +323,7 @@ pub fn compute_install_candidates(installed: &HashMap<String, ToolPresence>) -> 
         .into_iter()
         .filter(|tool| {
             // Include tool if NOT installed
-            !installed
-                .get(tool.id)
-                .map(|p| p.installed)
-                .unwrap_or(false)
+            !installed.get(tool.id).map(|p| p.installed).unwrap_or(false)
         })
         .collect()
 }
@@ -338,7 +352,7 @@ mod tests {
     fn test_tool_catalog_has_tools() {
         let tools = ToolCatalog::all_tools();
         assert!(!tools.is_empty());
-        assert!(tools.len() >= 10);
+        assert!(tools.len() >= 11);
     }
 
     #[test]
@@ -437,6 +451,7 @@ mod tests {
         assert!(formatted.contains("JetBrains Mono"));
         assert!(formatted.contains("Catppuccin Mocha"));
         assert!(formatted.contains("Review"));
+        assert!(formatted.contains("Terminal"));
     }
 
     #[test]

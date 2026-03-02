@@ -2,7 +2,7 @@ use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::error::Result;
 use crate::theme::ThemeVariant;
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Aggregated status for one adapter after a coordinated theme apply run.
 #[derive(Debug)]
@@ -68,9 +68,29 @@ impl ToolRegistry {
     /// Per research: partial failure pattern (apply to others even if one fails).
     /// Detect-and-install adapters are not theme targets and are skipped.
     pub fn apply_theme_to_all(&self, theme: &ThemeVariant) -> Vec<ToolApplyResult> {
+        self.apply_theme_with_filter(theme, None)
+    }
+
+    /// Apply a theme only to the adapters explicitly selected by the caller.
+    pub fn apply_theme_to_tools(
+        &self,
+        theme: &ThemeVariant,
+        tool_names: &HashSet<String>,
+    ) -> Vec<ToolApplyResult> {
+        self.apply_theme_with_filter(theme, Some(tool_names))
+    }
+
+    fn apply_theme_with_filter(
+        &self,
+        theme: &ThemeVariant,
+        allowed_tools: Option<&HashSet<String>>,
+    ) -> Vec<ToolApplyResult> {
         self.adapters
             .par_iter()
             .filter(|adapter| adapter.apply_strategy() != ApplyStrategy::DetectAndInstall)
+            .filter(|adapter| {
+                allowed_tools.map_or(true, |allowed| allowed.contains(adapter.tool_name()))
+            })
             .map(|adapter| {
                 let tool_name = adapter.tool_name().to_string();
                 let status = match adapter.is_installed() {
@@ -106,6 +126,7 @@ impl Default for ToolRegistry {
         // Register all 11 adapters in default instance
         registry.register(Box::new(crate::adapter::GhosttyAdapter));
         registry.register(Box::new(crate::adapter::AlacrittyAdapter));
+        registry.register(Box::new(crate::adapter::KittyAdapter));
         registry.register(Box::new(crate::adapter::StarshipAdapter));
         registry.register(Box::new(crate::adapter::BatAdapter));
         registry.register(Box::new(crate::adapter::DeltaAdapter));
@@ -188,7 +209,7 @@ mod tests {
     #[test]
     fn test_registry_default() {
         let registry = ToolRegistry::default();
-        assert_eq!(registry.adapters().len(), 11);
+        assert_eq!(registry.adapters().len(), 12);
     }
 
     #[test]
@@ -210,6 +231,29 @@ mod tests {
 
         assert!(results.iter().any(|result| result.tool_name == "themeable"));
         assert!(!results.iter().any(|result| result.tool_name == "detector"));
+    }
+
+    #[test]
+    fn test_apply_theme_to_tools_only_runs_selected_adapters() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(MockAdapter {
+            name: "themeable",
+            strategy: crate::adapter::ApplyStrategy::WriteAndInclude,
+            installed: true,
+        }));
+        registry.register(Box::new(MockAdapter {
+            name: "ignored",
+            strategy: crate::adapter::ApplyStrategy::WriteAndInclude,
+            installed: true,
+        }));
+
+        let selected = HashSet::from(["themeable".to_string()]);
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        let results = registry.apply_theme_to_tools(&theme, &selected);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].tool_name, "themeable");
+        assert!(matches!(results[0].status, ToolApplyStatus::Applied));
     }
 }
 

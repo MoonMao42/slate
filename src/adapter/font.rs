@@ -255,6 +255,9 @@ impl FontAdapter {
         // Apply font to Alacritty (font-only path)
         crate::adapter::alacritty::AlacrittyAdapter::apply_font_only(env, font_name)?;
 
+        // Apply font to Kitty (font-only path)
+        crate::adapter::kitty::KittyAdapter::apply_font_only(env, font_name)?;
+
         Ok(())
     }
 

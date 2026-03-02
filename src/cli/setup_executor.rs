@@ -108,9 +108,7 @@ pub fn execute_setup_with_env(
                     let msg = e.to_string().to_lowercase();
                     if msg.contains("permission denied") || msg.contains("not writable") {
                         brew_font_broken = true;
-                        spinner.stop(
-                            "⚠ Homebrew: no write access — switching to direct download",
-                        );
+                        spinner.stop("⚠ Homebrew: no write access — switching to direct download");
                     }
                     // Fall through to next method
                 }
@@ -183,7 +181,7 @@ pub fn execute_setup_with_env(
 
     // Setup shell integration: write marker block to .zshrc and env.zsh
     spinner.start("Setting up shell integration...");
-    match setup_shell_integration_with_env(theme, env) {
+    match setup_shell_integration_with_env(theme, env, tools_to_configure) {
         Ok((selected_theme, report)) => {
             summary.theme_applied = true;
             for issue in theme_apply_issues(&report.results) {
@@ -208,21 +206,27 @@ pub fn execute_setup_with_env(
 
         let theme_name = theme.unwrap_or("catppuccin-mocha");
         let font_name = font.unwrap_or("(system default)");
-        let tool_count = summary.success_count();
+        let tool_count = summary.configured_count();
         let shell = std::env::var("SHELL")
             .ok()
             .and_then(|s| s.rsplit('/').next().map(String::from))
             .unwrap_or_else(|| "zsh".to_string());
-        let terminal = std::env::var("TERM_PROGRAM").unwrap_or_else(|_| "Terminal".to_string());
+        let terminal = detection::TerminalProfile::detect();
 
         let receipt_body = format!(
-            "Terminal    {terminal}\n\
+            "Terminal    {} ({})\n\
              Theme       {theme_name}\n\
              Font        {font_name}\n\
              Shell       {shell}\n\
-             Tools       {tool_count} configured"
+             Tools       {tool_count} configured",
+            terminal.display_name(),
+            terminal.compatibility_label()
         );
         let _ = cliclack::note("Your terminal is beautiful", receipt_body);
+
+        if let Some(tip) = terminal.setup_tip() {
+            let _ = cliclack::log::remark(tip);
+        }
     }
 
     // Overall success: no tool failures, and font applied if selected
@@ -269,6 +273,7 @@ fn resolve_selected_theme(theme: Option<&str>, env: &SlateEnv) -> Result<ThemeVa
 fn setup_shell_integration_with_env(
     theme: Option<&str>,
     env: &SlateEnv,
+    tools_to_configure: &[String],
 ) -> Result<(ThemeVariant, theme_apply::ThemeApplyReport)> {
     use crate::adapter::marker_block;
 
@@ -277,7 +282,11 @@ fn setup_shell_integration_with_env(
     let env_zsh_shell_path = detection::shell_quote_path(&env_zsh_path);
 
     let selected_theme = resolve_selected_theme(theme, env)?;
-    let report = theme_apply::apply_theme_selection_with_env(&selected_theme, env)?;
+    let report = theme_apply::apply_theme_selection_for_tools_with_env(
+        &selected_theme,
+        env,
+        Some(tools_to_configure),
+    )?;
 
     let marker_content = format!(
         "{}\nif [ -f {path} ]; then\n  source {path}\nfi\n{}\n",
@@ -297,7 +306,7 @@ fn setup_shell_integration(
     theme: Option<&str>,
 ) -> Result<(ThemeVariant, theme_apply::ThemeApplyReport)> {
     let env = SlateEnv::from_process()?;
-    setup_shell_integration_with_env(theme, &env)
+    setup_shell_integration_with_env(theme, &env, &[])
 }
 
 /// Ensure integration config files exist for detected tools so adapters can write to them.
@@ -399,7 +408,7 @@ fn ensure_tool_configs(
         }
         // Terminal emulators (detect-only): configure if Tier 1 (user-local)
         // OR if user explicitly selected them in the wizard (Tier 2 opt-in).
-        if id == "ghostty" || id == "alacritty" {
+        if id == "ghostty" || id == "alacritty" || id == "kitty" {
             return presence.map(|p| p.is_tier1()).unwrap_or(false) || user_set.contains(id);
         }
         // CLI tools: only if user chose them
@@ -424,6 +433,13 @@ fn ensure_tool_configs(
         touch_config(
             "alacritty",
             &AlacrittyAdapter::integration_config_path_with_env(env),
+            &mut issues,
+        );
+    }
+    if should_configure("kitty") {
+        touch_config(
+            "kitty",
+            &crate::adapter::kitty::KittyAdapter::resolve_config_path_with_env(env),
             &mut issues,
         );
     }
@@ -459,7 +475,11 @@ impl ToolInstallMethod {
 }
 
 /// Install a tool via Homebrew, with a user-local Starship fallback for shared machines.
-pub(crate) fn install_tool(package: &str, kind: BrewKind, env: &SlateEnv) -> Result<ToolInstallMethod> {
+pub(crate) fn install_tool(
+    package: &str,
+    kind: BrewKind,
+    env: &SlateEnv,
+) -> Result<ToolInstallMethod> {
     match install_tool_via_homebrew(package, kind) {
         Ok(()) => Ok(ToolInstallMethod::Homebrew),
         Err(err) if package == "starship" && should_try_local_starship_fallback(&err) => {
@@ -795,11 +815,13 @@ pub fn download_font_release(font_name_or_id: &str, env: &SlateEnv) -> Result<()
 fn create_writable_temp_dir(env: &SlateEnv) -> std::io::Result<tempfile::TempDir> {
     use tempfile::TempDir;
 
-    TempDir::new().or_else(|_| TempDir::new_in("/tmp")).or_else(|_| {
-        let fallback = env.slate_cache_dir().join("tmp");
-        std::fs::create_dir_all(&fallback)?;
-        TempDir::new_in(&fallback)
-    })
+    TempDir::new()
+        .or_else(|_| TempDir::new_in("/tmp"))
+        .or_else(|_| {
+            let fallback = env.slate_cache_dir().join("tmp");
+            std::fs::create_dir_all(&fallback)?;
+            TempDir::new_in(&fallback)
+        })
 }
 
 /// Get a font's display name from its catalog ID (e.g. "hack" → "Hack Nerd Font").
@@ -974,6 +996,8 @@ mod tests {
         let summary = result.unwrap();
         assert!(summary.overall_success);
         assert_eq!(summary.success_count(), 0);
+        assert_eq!(summary.configured_count(), 0);
+        assert!(summary.theme_results.is_empty());
     }
 
     #[test]
@@ -1002,8 +1026,11 @@ mod tests {
     fn test_theme_selection_marks_summary_as_applied() {
         let tempdir = TempDir::new().unwrap();
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
-        let summary = execute_setup_with_env(&[], &[], None, Some("catppuccin-mocha"), &env).unwrap();
+        let summary =
+            execute_setup_with_env(&[], &[], None, Some("catppuccin-mocha"), &env).unwrap();
         assert!(summary.theme_applied);
+        assert_eq!(summary.configured_count(), 0);
+        assert!(summary.theme_results.is_empty());
     }
 
     #[test]
@@ -1072,11 +1099,8 @@ error_symbol = "[>](bold red)"
         )
         .unwrap();
 
-        let issues = ensure_tool_configs(
-            &env,
-            &["starship".to_string()],
-            &["starship".to_string()],
-        );
+        let issues =
+            ensure_tool_configs(&env, &["starship".to_string()], &["starship".to_string()]);
         assert!(issues.is_empty());
 
         let content = std::fs::read_to_string(&config_path).unwrap();
