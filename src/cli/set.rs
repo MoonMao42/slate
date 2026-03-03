@@ -120,10 +120,11 @@ pub fn silent_preview_apply(
         }
     }
 
-    // Kitty live preview: push colors via kitten @ set-colors (best-effort)
+    // Kitty live preview: push colors + opacity (best-effort)
     if let Some(kitty_adapter) = adapter_registry.get_adapter("kitty") {
         let _ = kitty_adapter.reload();
     }
+    crate::adapter::kitty::push_opacity_live(opacity);
 
     Ok(())
 }

@@ -43,6 +43,12 @@ impl KittyAdapter {
         }) {
             additions.push_str(&format!("listen_on {}\n", KITTY_SOCKET));
         }
+        if !content.lines().any(|l| {
+            let t = l.trim();
+            !t.starts_with('#') && t.starts_with("dynamic_background_opacity")
+        }) {
+            additions.push_str("dynamic_background_opacity yes\n");
+        }
 
         if additions.is_empty() {
             return Ok(());
@@ -263,16 +269,20 @@ impl ToolAdapter for KittyAdapter {
             return Ok(());
         };
 
-        let output = Command::new("kitten")
+        // Push colors
+        let _ = Command::new("kitten")
             .args(["@", "--to", &socket_path, "set-colors", "--all", "--configured"])
             .arg(&theme_path)
             .output();
 
-        match output {
-            Ok(o) if o.status.success() => Ok(()),
-            // Silent fallback — colors will apply on next Kitty restart
-            _ => Ok(()),
-        }
+        // Push opacity (requires dynamic_background_opacity in kitty.conf)
+        let opacity = config_mgr.get_current_opacity_preset().unwrap_or(crate::opacity::OpacityPreset::Solid);
+        let _ = Command::new("kitten")
+            .args(["@", "--to", &socket_path, "set-background-opacity", "--all"])
+            .arg(format!("{}", opacity.to_f32()))
+            .output();
+
+        Ok(())
     }
 }
 
@@ -302,6 +312,17 @@ pub fn write_opacity_config(env: &SlateEnv, opacity: crate::opacity::OpacityPres
     config_manager.write_managed_file("kitty", "opacity.conf", &config_content)?;
 
     Ok(())
+}
+
+/// Push opacity to running Kitty via socket (for live preview).
+pub fn push_opacity_live(opacity: crate::opacity::OpacityPreset) {
+    let Some(socket_path) = find_kitty_socket() else {
+        return;
+    };
+    let _ = Command::new("kitten")
+        .args(["@", "--to", &socket_path, "set-background-opacity", "--all"])
+        .arg(format!("{}", opacity.to_f32()))
+        .output();
 }
 
 #[cfg(test)]
