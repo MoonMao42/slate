@@ -70,6 +70,7 @@ impl ToolPresence {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalKind {
     Ghostty,
+    Kitty,
     Alacritty,
     TerminalApp,
     Unknown,
@@ -97,6 +98,7 @@ impl TerminalProfile {
             term_normalized.as_deref(),
         ) {
             (Some("ghostty"), _) | (_, Some("ghostty")) => TerminalKind::Ghostty,
+            (Some("kitty"), _) | (_, Some("xterm-kitty")) => TerminalKind::Kitty,
             (Some("alacritty"), _) | (_, Some("alacritty")) => TerminalKind::Alacritty,
             (Some("apple_terminal"), _) => TerminalKind::TerminalApp,
             _ => TerminalKind::Unknown,
@@ -104,6 +106,7 @@ impl TerminalProfile {
 
         let raw_name = match kind {
             TerminalKind::Ghostty => "Ghostty".to_string(),
+            TerminalKind::Kitty => "kitty".to_string(),
             TerminalKind::Alacritty => "Alacritty".to_string(),
             TerminalKind::TerminalApp => "Terminal.app".to_string(),
             TerminalKind::Unknown => term_program
@@ -127,6 +130,7 @@ impl TerminalProfile {
     pub fn compatibility_label(&self) -> &'static str {
         match self.kind {
             TerminalKind::Ghostty => "best experience",
+            TerminalKind::Kitty => "supported",
             TerminalKind::Alacritty => "supported with limits",
             TerminalKind::TerminalApp => "supported with limits",
             TerminalKind::Unknown => "best-effort only",
@@ -137,6 +141,9 @@ impl TerminalProfile {
         match self.kind {
             TerminalKind::Ghostty => {
                 "live reload, frosted glass, and watcher relaunch are available"
+            }
+            TerminalKind::Kitty => {
+                "live reload and opacity work, but blur and watcher relaunch stay Ghostty-only"
             }
             TerminalKind::Alacritty => {
                 "theme sync works well, but blur and watcher relaunch stay Ghostty-only"
@@ -153,6 +160,7 @@ impl TerminalProfile {
     pub fn short_limitations(&self) -> &'static str {
         match self.kind {
             TerminalKind::Ghostty => "live reload, frosted glass, watcher relaunch",
+            TerminalKind::Kitty => "live reload, opacity, no blur",
             TerminalKind::Alacritty => "no blur, no watcher relaunch",
             TerminalKind::TerminalApp => "manual font pick, no blur",
             TerminalKind::Unknown => "shell/tool theme only",
@@ -161,6 +169,13 @@ impl TerminalProfile {
 
     pub fn supports_blur(&self) -> bool {
         matches!(self.kind, TerminalKind::Ghostty)
+    }
+
+    pub fn supports_opacity(&self) -> bool {
+        matches!(
+            self.kind,
+            TerminalKind::Ghostty | TerminalKind::Kitty | TerminalKind::Alacritty
+        )
     }
 
     pub fn watcher_shell_autostart_supported(&self) -> bool {
@@ -184,7 +199,7 @@ impl TerminalProfile {
                     format!("{} · {}", self.display_name(), opacity_label)
                 }
             }
-            TerminalKind::Alacritty => {
+            TerminalKind::Kitty | TerminalKind::Alacritty => {
                 if blur_requested {
                     format!(
                         "{} · {}, blur not supported here",
@@ -208,6 +223,9 @@ impl TerminalProfile {
     pub fn setup_tip(&self) -> Option<&'static str> {
         match self.kind {
             TerminalKind::Ghostty => None,
+            TerminalKind::Kitty => Some(
+                "Slate updated Kitty cleanly, but blur and auto-theme relaunch remain Ghostty-only.",
+            ),
             TerminalKind::Alacritty => Some(
                 "Slate updated Alacritty cleanly, but blur and auto-theme relaunch remain Ghostty-only.",
             ),

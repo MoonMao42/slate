@@ -228,6 +228,9 @@ impl ExecutionSummary {
             TerminalKind::Ghostty => {
                 output.push_str("  • Ghostty chrome, opacity, and frosted glass usually show up after a new tab or window\n");
             }
+            TerminalKind::Kitty => {
+                output.push_str("  • Open a new Kitty window if colors did not reload immediately\n");
+            }
             TerminalKind::Alacritty => {
                 output.push_str("  • Open a new Alacritty window if colors or opacity did not reload immediately\n");
             }
@@ -246,6 +249,9 @@ impl ExecutionSummary {
                 output.push_str(
                     "  • If the font still looks unchanged, fully restart Ghostty once\n",
                 );
+            }
+            TerminalKind::Kitty => {
+                output.push_str("  • If glyphs still look wrong, verify your chosen Nerd Font is available to Kitty\n");
             }
             TerminalKind::Alacritty => {
                 output.push_str("  • If glyphs still look wrong, verify your chosen Nerd Font is available to Alacritty\n");
@@ -269,6 +275,11 @@ impl ExecutionSummary {
             TerminalKind::Ghostty => {
                 output.push_str(
                     "  • Nothing major is gated here — Ghostty gets the full Slate path\n",
+                );
+            }
+            TerminalKind::Kitty => {
+                output.push_str(
+                    "  • Frosted/blurred backgrounds and watcher auto-relaunch remain Ghostty-only\n",
                 );
             }
             TerminalKind::Alacritty => {

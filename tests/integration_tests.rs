@@ -1077,7 +1077,7 @@ mod optional_automations {
                 assert!(formatted.contains("opacity 0.95"));
                 assert!(formatted.contains("frosted glass"));
             }
-            TerminalKind::Alacritty => {
+            TerminalKind::Kitty | TerminalKind::Alacritty => {
                 assert!(formatted.contains("opacity 0.95"));
                 assert!(formatted.contains("blur not supported here"));
             }

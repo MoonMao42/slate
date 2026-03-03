@@ -217,6 +217,14 @@ fn handle_key(
             Ok(KeyOutcome::Continue)
         }
         KeyCode::Left | KeyCode::Char('h') => {
+            let terminal = crate::detection::TerminalProfile::detect();
+            if !terminal.supports_opacity() {
+                *flash = Some(Flash {
+                    text: format!("{} does not support opacity", terminal.display_name()),
+                    until: Instant::now() + Duration::from_millis(1200),
+                });
+                return Ok(KeyOutcome::Inert);
+            }
             let was_guarded = should_guard_light_theme_opacity(state);
             state.set_opacity_override(true);
             let at_edge = state.move_left();
@@ -234,6 +242,14 @@ fn handle_key(
             Ok(KeyOutcome::Continue)
         }
         KeyCode::Right | KeyCode::Char('l') => {
+            let terminal = crate::detection::TerminalProfile::detect();
+            if !terminal.supports_opacity() {
+                *flash = Some(Flash {
+                    text: format!("{} does not support opacity", terminal.display_name()),
+                    until: Instant::now() + Duration::from_millis(1200),
+                });
+                return Ok(KeyOutcome::Inert);
+            }
             let was_guarded = should_guard_light_theme_opacity(state);
             state.set_opacity_override(true);
             let at_edge = state.move_right();
