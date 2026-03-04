@@ -27,14 +27,18 @@
 
 ## Quick Start
 
-> Requires **macOS** and **[Homebrew](https://brew.sh)**. Best experience with **[Ghostty](https://ghostty.org)** (live reload, frosted glass, auto-theme relaunch). Also supports Kitty, Alacritty, and Terminal.app.
+> Requires **macOS**. Best experience with **[Ghostty](https://ghostty.org)** (live reload, frosted glass, auto-theme relaunch). Also supports Kitty, Alacritty, and Terminal.app.
 
 ```bash
-brew install MoonMao42/homebrew-tap/slate
+curl -fsSL https://raw.githubusercontent.com/MoonMao42/slate-dev/main/install.sh | sh
 slate setup
 ```
 
-If Homebrew is not ready on that Mac yet, download the matching binary from [GitHub Releases](https://github.com/MoonMao42/slate-dev/releases) as the fallback path.
+Or with Homebrew:
+
+```bash
+brew install MoonMao42/homebrew-tap/slate
+```
 
 <p align="center">
   <img src="./assets/setup-demo.gif" alt="slate setup demo" width="600" />
@@ -119,15 +123,16 @@ For Ghostty: `config-file = ...`. For Kitty/Alacritty: managed `include`/`import
 ## Install
 
 ```bash
-brew install MoonMao42/homebrew-tap/slate
-brew upgrade slate
-```
+# One-line install (downloads pre-built binary)
+curl -fsSL https://raw.githubusercontent.com/MoonMao42/slate-dev/main/install.sh | sh
 
-If `brew` is not available yet, use the matching binary from [GitHub Releases](https://github.com/MoonMao42/slate-dev/releases) and then run `slate setup`.
+# Or via Homebrew
+brew install MoonMao42/homebrew-tap/slate
+```
 
 ```bash
 # Uninstall
-slate clean && brew uninstall slate
+slate clean && rm "$(which slate)"
 ```
 
 ## Themes
