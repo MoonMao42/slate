@@ -110,19 +110,27 @@ pub(super) fn render(state: &PickerState, flash_text: Option<&str>) -> Result<()
         queue_io(queue!(stdout, Print("\r\n")))?;
     }
 
-    let effective = get_effective_opacity_for_rendering(state);
-    queue_io(queue!(stdout, Print("\r\n  Opacity:  ")))?;
-    render_opacity_slot(&mut stdout, OpacityPreset::Solid, effective)?;
-    queue_io(queue!(stdout, Print("    ")))?;
-    render_opacity_slot(&mut stdout, OpacityPreset::Frosted, effective)?;
-    queue_io(queue!(stdout, Print("    ")))?;
-    render_opacity_slot(&mut stdout, OpacityPreset::Clear, effective)?;
+    let supports_opacity = crate::detection::TerminalProfile::detect().supports_opacity();
+    if supports_opacity {
+        let effective = get_effective_opacity_for_rendering(state);
+        queue_io(queue!(stdout, Print("\r\n  Opacity:  ")))?;
+        render_opacity_slot(&mut stdout, OpacityPreset::Solid, effective)?;
+        queue_io(queue!(stdout, Print("    ")))?;
+        render_opacity_slot(&mut stdout, OpacityPreset::Frosted, effective)?;
+        queue_io(queue!(stdout, Print("    ")))?;
+        render_opacity_slot(&mut stdout, OpacityPreset::Clear, effective)?;
+    }
     queue_io(queue!(stdout, Print("\r\n\r\n")))?;
 
+    let help_line = if supports_opacity {
+        "  ↑↓/jk theme · ←→/hl opacity · Enter save · Esc cancel\r\n"
+    } else {
+        "  ↑↓/jk theme · Enter save · Esc cancel\r\n"
+    };
     queue_io(queue!(
         stdout,
         SetForegroundColor(Color::DarkGrey),
-        Print("  ↑↓/jk theme · ←→/hl opacity · Enter save · Esc cancel\r\n"),
+        Print(help_line),
         Print("  s save-auto · r resume-auto\r\n"),
         ResetColor,
     ))?;
@@ -179,11 +187,16 @@ pub(super) fn render_afterglow_receipt(state: &PickerState, _env: &SlateEnv) -> 
     output.push('\n');
 
     let theme_line = format!("  {}  Theme     {}\n", Symbols::BRAND, current_theme.name);
-    let opacity_line = format!(
-        "  {}  Opacity   {}\n",
-        Symbols::DIAMOND,
-        opacity_to_label(current_opacity)
-    );
+    let show_opacity = crate::detection::TerminalProfile::detect().supports_opacity();
+    let opacity_line = if show_opacity {
+        format!(
+            "  {}  Opacity   {}\n",
+            Symbols::DIAMOND,
+            opacity_to_label(current_opacity)
+        )
+    } else {
+        String::new()
+    };
 
     if let Some((r, g, b)) = text_rgb {
         let text_color = format!("\x1b[38;2;{};{};{}m", r, g, b);
