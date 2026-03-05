@@ -313,7 +313,7 @@ pub(crate) fn build_shell_integration_content(
     if options.auto_theme_enabled {
         content.push_str(&format!(
             r#"if [[ "${{TERM_PROGRAM:l}}" == "ghostty" ]] && [[ -x {path} ]]; then
-    if ! pgrep -qf "slate-dark-mode-notify"; then
+    if ! pgrep -f "slate-dark-mode-notify" >/dev/null 2>&1; then
       {path} {slate_bin} theme --auto --quiet &!
     fi
   fi

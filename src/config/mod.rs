@@ -516,7 +516,7 @@ mod tests {
 
         let shell_file = config_manager.managed_dir("shell").join("env.zsh");
         let content = fs::read_to_string(shell_file).unwrap();
-        assert!(content.contains("if ! pgrep -qf \"slate-dark-mode-notify\"; then"));
+        assert!(content.contains("if ! pgrep -f \"slate-dark-mode-notify\" >/dev/null 2>&1; then"));
         assert!(content.contains("theme --auto --quiet &!"));
         assert!(!content.contains("_SLATE_AUTO_WATCHER"));
     }

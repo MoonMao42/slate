@@ -89,7 +89,9 @@ pub fn ensure_binary(config: &ConfigManager) -> Result<PathBuf> {
 /// Check whether the watcher process is currently running.
 pub fn is_running() -> Result<bool> {
     let status = Command::new("pgrep")
-        .args(["-qf", PROCESS_PATTERN])
+        .args(["-f", PROCESS_PATTERN])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .map_err(|e| {
             SlateError::PlatformError(format!("Failed to check watcher process state: {}", e))
