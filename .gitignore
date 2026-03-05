@@ -1,13 +1,40 @@
 /target/
-.clang-module-cache/
 Cargo.lock
 *.swp
 *.swo
 *~
 .DS_Store
+
+# IDE / editor
 .idea/
 .vscode/
 
-# Claude Code agent worktree scratch dirs — never commit these (they leak
-# as gitlink entries into parent commits when agents do `git add -A`).
+# Build caches
+.clang-module-cache/
+
+# AI tooling workspaces
 .claude/worktrees/
+.serena/
+
+# Planning & review artifacts (local-only, not shipped)
+
+REVIEW.md
+SECONDARY_USER_AUDIT.md
+
+# Raw media sources (only final assets are tracked)
+assets/*-raw.*
+assets/*-concept*
+assets/logo-dark.svg
+assets/logo-light.svg
+assets/demo.tape
+assets/window_recorder.swift
+assets/auto-typing-demo.sh
+assets/record-demo.sh
+assets/*-poster.png
+assets/*.mp4
+
+# Test scripts (dev-only)
+scripts/
+
+# Misc
+plot_25min.png
