@@ -1,3 +1,4 @@
+use crate::cli::apply::{SnapshotPolicy, ThemeApplyCoordinator};
 use crate::cli::auto_theme;
 use crate::cli::theme_apply::apply_theme_selection;
 use crate::config::ConfigManager;
@@ -11,20 +12,37 @@ struct StderrRedirectGuard {
     saved_stderr: RawFd,
 }
 
+#[derive(Debug)]
+enum StderrRedirectError {
+    OpenDevNull(std::io::Error),
+    DupStderr,
+    Dup2DevNull,
+}
+
+impl std::fmt::Display for StderrRedirectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OpenDevNull(err) => write!(f, "cannot open /dev/null: {err}"),
+            Self::DupStderr => f.write_str("dup(STDERR_FILENO) failed"),
+            Self::Dup2DevNull => f.write_str("dup2(/dev/null, STDERR_FILENO) failed"),
+        }
+    }
+}
+
 impl StderrRedirectGuard {
-    fn silence() -> Option<Self> {
-        let devnull = std::fs::File::open("/dev/null").ok()?;
+    fn silence() -> std::result::Result<Self, StderrRedirectError> {
+        let devnull = std::fs::File::open("/dev/null").map_err(StderrRedirectError::OpenDevNull)?;
         let saved_stderr = unsafe { libc::dup(libc::STDERR_FILENO) };
         if saved_stderr < 0 {
-            return None;
+            return Err(StderrRedirectError::DupStderr);
         }
 
         if unsafe { libc::dup2(devnull.as_raw_fd(), libc::STDERR_FILENO) } < 0 {
             unsafe { libc::close(saved_stderr) };
-            return None;
+            return Err(StderrRedirectError::Dup2DevNull);
         }
 
-        Some(Self { saved_stderr })
+        Ok(Self { saved_stderr })
     }
 }
 
@@ -60,11 +78,13 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
             ))
         })?;
 
-        // In quiet mode, suppress all stderr output from apply_theme_selection
+        // In quiet mode, suppress all stderr output from apply_theme_selection.
+        // NOTE: the binding name must not be bare `_` — bare `_` drops immediately and
+        // restores stderr before `apply` runs, defeating quiet mode. `.ok()` gracefully
+        // degrades to non-quiet if the redirect couldn't be established.
         if quiet {
-            let _stderr_guard = StderrRedirectGuard::silence();
-            let result = apply_theme_selection(theme);
-            result?;
+            let _stderr_guard = StderrRedirectGuard::silence().ok();
+            ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip).apply(theme)?;
         } else {
             let _ = apply_theme_selection(theme)?;
             println!(

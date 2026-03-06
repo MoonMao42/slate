@@ -27,6 +27,8 @@ pub fn handle_clean() -> Result<()> {
     // Step 2: Remove integration references before deleting managed files
     log::step("Removing integration references...")?;
     remove_marker_block_from_zshrc(env.home())?;
+    remove_marker_block_from_bashrc(env.home())?;
+    remove_fish_loader(&env)?;
     remove_ghostty_managed_references(&env)?;
     remove_alacritty_managed_references(&env)?;
     remove_tmux_managed_references(env.home())?;
@@ -60,6 +62,19 @@ Use 'slate restore' before cleanup if you want to roll back to a snapshot instea
 fn remove_marker_block_from_zshrc(home: &Path) -> Result<()> {
     let zshrc_path = home.join(".zshrc");
     crate::adapter::marker_block::remove_managed_blocks_from_file(&zshrc_path)
+}
+
+fn remove_marker_block_from_bashrc(home: &Path) -> Result<()> {
+    let bashrc_path = home.join(".bashrc");
+    crate::adapter::marker_block::remove_managed_blocks_from_file(&bashrc_path)
+}
+
+fn remove_fish_loader(env: &SlateEnv) -> Result<()> {
+    match fs::remove_file(env.fish_loader_path()) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.into()),
+    }
 }
 
 fn remove_ghostty_managed_references(env: &SlateEnv) -> Result<()> {

@@ -62,6 +62,8 @@ jobs:
           grep -q 'brew install MoonMao42/homebrew-tap/slate' README.md
           grep -q 'tap = "MoonMao42/homebrew-tap"' dist-workspace.toml
           grep -q 'repository: "MoonMao42/homebrew-tap"' .github/workflows/release.yml
+          grep -q 'x86_64-unknown-linux-gnu' dist-workspace.toml
+          grep -q 'aarch64-unknown-linux-gnu' dist-workspace.toml
       - name: Verify package payload
         run: cargo package --allow-dirty --list > /tmp/slate-package-list.txt
       - name: Cache dist
@@ -141,6 +143,42 @@ jobs:
           # Actually do builds and make zips and whatnot
           dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
           echo "dist ran successfully"
+      - name: Validate built binary dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t binaries < <(find target -type f -path '*/release/slate' | sort)
+          if [ "${#binaries[@]}" -eq 0 ]; then
+            echo "ERROR: no built slate binaries were found under target/"
+            exit 1
+          fi
+
+          for bin in "${binaries[@]}"; do
+            echo "Validating $bin"
+            if [ "${{ runner.os }}" = "macOS" ]; then
+              otool -L "$bin"
+              unexpected="$(otool -L "$bin" | tail -n +2 | grep -v '/usr/lib\|/System\|@executable_path\|target/' || true)"
+              if [ -n "$unexpected" ]; then
+                echo "ERROR: unexpected macOS runtime dependencies:"
+                echo "$unexpected"
+                exit 1
+              fi
+            else
+              if ldd "$bin" >/tmp/slate-ldd.txt 2>&1; then
+                cat /tmp/slate-ldd.txt
+                if grep -q "not found" /tmp/slate-ldd.txt; then
+                  echo "ERROR: missing Linux runtime dependencies"
+                  exit 1
+                fi
+              else
+                echo "ldd could not inspect $bin directly, falling back to readelf"
+                readelf -d "$bin"
+              fi
+            fi
+          done
+      - name: Installer smoke test
+        shell: bash
+        run: bash tests/install-script-smoke.sh
       - id: cargo-dist
         name: Post-build
         # We force bash here just because github makes it really hard to get values up

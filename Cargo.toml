@@ -3,12 +3,12 @@ name = "slate-cli"
 version = "2.0.0"
 edition = "2021"
 build = "build.rs"
-description = "macOS terminal beautification kit -- beautiful terminal in 30 seconds"
+description = "Cross-platform terminal beautification kit for macOS and Linux"
 homepage = "https://github.com/MoonMao42/slate-dev"
 repository = "https://github.com/MoonMao42/slate-dev"
 documentation = "https://github.com/MoonMao42/slate-dev#readme"
 license = "MIT"
-keywords = ["terminal", "theme", "macos", "cli", "dotfiles"]
+keywords = ["terminal", "theme", "macos", "linux", "cli"]
 categories = ["command-line-utilities"]
 include = [
     "/src/**",
@@ -18,6 +18,7 @@ include = [
     "/build.rs",
     "/Cargo.toml",
     "/README.md",
+    "/install.sh",
     "/LICENSE",
     "/CHANGELOG.md",
     "/CONTRIBUTING.md",
@@ -54,7 +55,9 @@ tempfile = "3"
 thiserror = "1"
 toml = "0.8"
 toml_edit = "0.22"
+url = "2"
 which = "5"
+zbus = "4"
 
 [profile.release]
 strip = true

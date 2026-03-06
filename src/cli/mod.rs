@@ -1,3 +1,4 @@
+pub(crate) mod apply;
 pub mod aura;
 pub mod auto_theme;
 pub mod clean;
@@ -24,6 +25,8 @@ pub mod theme;
 pub mod theme_apply;
 pub mod theme_selection;
 pub mod tool_selection;
+#[cfg(target_os = "linux")]
+pub mod watch;
 pub mod wizard_core;
 
 mod wizard_support;

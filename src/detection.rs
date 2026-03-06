@@ -82,6 +82,13 @@ pub struct TerminalProfile {
     raw_name: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalFeatureSummary {
+    pub reload: String,
+    pub live_preview: String,
+    pub font_apply: String,
+}
+
 impl TerminalProfile {
     pub fn detect() -> Self {
         let term_program = env::var("TERM_PROGRAM").ok();
@@ -184,6 +191,45 @@ impl TerminalProfile {
 
     pub fn font_selection_is_manual(&self) -> bool {
         matches!(self.kind, TerminalKind::TerminalApp | TerminalKind::Unknown)
+    }
+
+    pub fn feature_summary(&self) -> TerminalFeatureSummary {
+        let reload = match self.kind {
+            TerminalKind::Ghostty => {
+                if cfg!(target_os = "macos") {
+                    "supported via AppleScript".to_string()
+                } else {
+                    "supported via reload signal".to_string()
+                }
+            }
+            TerminalKind::Kitty => "supported via remote control".to_string(),
+            TerminalKind::Alacritty => {
+                "best effort via live_config_reload or manual restart".to_string()
+            }
+            TerminalKind::TerminalApp => "manual restart only".to_string(),
+            TerminalKind::Unknown => "unsupported".to_string(),
+        };
+
+        let live_preview = match self.kind {
+            TerminalKind::Ghostty | TerminalKind::Kitty => "live push supported".to_string(),
+            TerminalKind::Alacritty => "inline preview only".to_string(),
+            TerminalKind::TerminalApp | TerminalKind::Unknown => "inline preview only".to_string(),
+        };
+
+        let font_apply = match self.kind {
+            TerminalKind::Ghostty | TerminalKind::Kitty | TerminalKind::Alacritty => {
+                "localized config apply supported".to_string()
+            }
+            TerminalKind::TerminalApp | TerminalKind::Unknown => {
+                "manual terminal selection".to_string()
+            }
+        };
+
+        TerminalFeatureSummary {
+            reload,
+            live_preview,
+            font_apply,
+        }
     }
 
     pub fn setup_review_summary(&self, opacity: Option<f32>, blur_requested: bool) -> String {
@@ -373,6 +419,9 @@ pub fn detect_zsh_syntax_highlighting_plugin(home: &Path) -> Option<PathBuf> {
     candidates.push(PathBuf::from(
         "/usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh",
     ));
+    candidates.push(PathBuf::from(
+        "/usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh",
+    ));
     candidates
         .push(home.join(".oh-my-zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"));
     candidates.push(home.join(".zsh/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"));
@@ -395,11 +444,40 @@ fn command_in_actual_path(command: &str) -> Option<PathBuf> {
     search_paths(command, &current_path_dirs())
 }
 
+fn command_aliases(command: &str) -> &'static [&'static str] {
+    match command {
+        "bat" => &["bat", "batcat"],
+        _ => &[],
+    }
+}
+
+fn command_in_actual_path_with_aliases(command: &str) -> Option<PathBuf> {
+    let aliases = command_aliases(command);
+    if aliases.is_empty() {
+        return command_in_actual_path(command);
+    }
+
+    aliases
+        .iter()
+        .find_map(|candidate| search_paths(candidate, &current_path_dirs()))
+}
+
+fn command_path_with_aliases(command: &str, env: &SlateEnv) -> Option<PathBuf> {
+    let aliases = command_aliases(command);
+    if aliases.is_empty() {
+        return command_path_with_env(command, env);
+    }
+
+    aliases.iter().find_map(|candidate| {
+        search_paths(candidate, &normalized_path_dirs_for_home(Some(env.home())))
+    })
+}
+
 /// Detect a CLI tool with tier awareness: Tier 1 if in actual PATH, Tier 2 if only in fallback.
 fn detect_cli_tool_tiered(command: &str, env: &SlateEnv) -> ToolPresence {
-    if let Some(path) = command_in_actual_path(command) {
+    if let Some(path) = command_in_actual_path_with_aliases(command) {
         ToolPresence::in_path_with(ToolEvidence::Executable(path))
-    } else if let Some(path) = command_path_with_env(command, env) {
+    } else if let Some(path) = command_path_with_aliases(command, env) {
         ToolPresence::fallback_with(ToolEvidence::Executable(path))
     } else {
         ToolPresence::missing()
@@ -558,5 +636,15 @@ mod tests {
         assert_eq!(profile.kind(), TerminalKind::Unknown);
         assert_eq!(profile.display_name(), "WarpTerminal");
         assert_eq!(profile.compatibility_label(), "best-effort only");
+    }
+
+    #[test]
+    fn test_terminal_feature_summary_for_kitty_mentions_remote_control() {
+        let profile = TerminalProfile::from_env_vars(Some("kitty"), Some("xterm-kitty"));
+        let summary = profile.feature_summary();
+
+        assert!(summary.reload.contains("remote control"));
+        assert!(summary.live_preview.contains("supported"));
+        assert!(summary.font_apply.contains("localized"));
     }
 }

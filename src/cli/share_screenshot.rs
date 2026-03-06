@@ -1,14 +1,16 @@
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::Result;
+use crate::platform::share::{capture_interactive, ShareCaptureResult};
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
 /// Handle `slate share` — screenshot current terminal + export code.
-/// 1. Capture the terminal window via macOS screencapture
-/// 2. Add watermark if ImageMagick is available
-/// 3. Print the export URI for sharing
+/// 1. Print the export URI
+/// 2. Capture the terminal window via the platform share backend
+/// 3. Add watermark if ImageMagick is available
+/// 4. Save the image path for sharing
 pub fn handle_share() -> Result<()> {
     let env = SlateEnv::from_process()?;
     let config = ConfigManager::with_env(&env)?;
@@ -20,22 +22,14 @@ pub fn handle_share() -> Result<()> {
     let output_path = output_path();
 
     // Print URI first so it's visible in the screenshot
-    println!();
-    println!("  {}", uri);
-    println!();
-    println!("  Click your terminal window to capture it.");
+    println!("{}", share_intro_text(&uri));
 
-    // Capture window screenshot (blocks until user clicks)
-    let capture_result = Command::new("screencapture")
-        .args(["-w", "-o", output_path.to_str().unwrap()])
-        .status();
-
-    match capture_result {
-        Ok(status) if status.success() => {}
-        _ => {
-            eprintln!("  Screenshot cancelled or failed.");
-            return Ok(());
+    let capture_result = capture_interactive(&output_path)?;
+    if !capture_result.captured {
+        if let Some(message) = capture_fallback_text(&capture_result) {
+            println!("{}", message);
         }
+        return Ok(());
     }
 
     // Try to add watermark with ImageMagick
@@ -43,9 +37,7 @@ pub fn handle_share() -> Result<()> {
         let _ = add_watermark(&output_path, &uri);
     }
 
-    println!();
-    println!("  ✓ Saved to {}", output_path.display());
-    println!();
+    println!("{}", share_saved_text(&output_path));
 
     Ok(())
 }
@@ -92,6 +84,21 @@ fn output_path() -> PathBuf {
     PathBuf::from(home).join("Desktop/slate-share.png")
 }
 
+fn share_intro_text(uri: &str) -> String {
+    format!("\n  {}\n\n  Click your terminal window to capture it.", uri)
+}
+
+fn capture_fallback_text(capture_result: &ShareCaptureResult) -> Option<String> {
+    capture_result
+        .reason
+        .as_ref()
+        .map(|reason| format!("  {}", reason))
+}
+
+fn share_saved_text(output_path: &Path) -> String {
+    format!("\n  ✓ Saved to {}\n", output_path.display())
+}
+
 fn has_imagemagick() -> bool {
     Command::new("magick")
         .arg("--version")
@@ -128,5 +135,39 @@ fn add_watermark(image_path: &Path, uri: &str) -> std::result::Result<(), ()> {
         Ok(())
     } else {
         Err(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_share_intro_text_keeps_uri_visible_before_capture() {
+        let intro = share_intro_text("slate://catppuccin-mocha/JetBrainsMono/solid/s,h");
+
+        assert!(intro.contains("slate://catppuccin-mocha/JetBrainsMono/solid/s,h"));
+        assert!(intro.contains("Click your terminal window to capture it."));
+    }
+
+    #[test]
+    fn test_capture_fallback_text_returns_backend_reason() {
+        let message = capture_fallback_text(&ShareCaptureResult {
+            captured: false,
+            reason: Some(
+                "No supported screenshot backend was found. Share URI export is still available."
+                    .to_string(),
+            ),
+        })
+        .expect("fallback message should be rendered");
+
+        assert!(message.contains("Share URI export is still available"));
+    }
+
+    #[test]
+    fn test_share_saved_text_includes_output_path() {
+        let message = share_saved_text(Path::new("/tmp/slate-share.png"));
+        assert!(message.contains("/tmp/slate-share.png"));
+        assert!(message.contains("Saved"));
     }
 }

@@ -5,8 +5,8 @@ use slate_cli::{cli, env::SlateEnv, error};
 #[derive(Parser)]
 #[command(name = "slate")]
 #[command(version)]
-#[command(about = "✦ slate — macOS terminal beautification kit")]
-#[command(long_about = "Transform your terminal in 30 seconds")]
+#[command(about = "✦ slate — terminal beautification kit for macOS and Linux")]
+#[command(long_about = "Transform your terminal in 30 seconds across macOS and Linux")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -30,7 +30,7 @@ enum Commands {
     Set {
         /// Theme name (optional; if omitted, launches picker)
         theme: Option<String>,
-        /// Auto-follow macOS system appearance (light/dark)
+        /// Auto-follow system appearance (light/dark)
         #[arg(long, conflicts_with = "theme")]
         auto: bool,
     },
@@ -85,6 +85,10 @@ enum Commands {
     /// Hidden easter egg
     #[command(hide = true)]
     Aura,
+    /// Hidden auto-theme watcher entrypoint (Linux-only; macOS uses an embedded Swift helper)
+    #[cfg(target_os = "linux")]
+    #[command(hide = true, name = "__watch-auto-theme")]
+    WatchAutoTheme,
     /// Deprecated: use 'slate restore' instead
     #[command(hide = true)]
     Reset {
@@ -144,6 +148,8 @@ fn run() -> Result<()> {
         Some(Commands::Export) => cli::share::handle_export(),
         Some(Commands::Import { uri }) => cli::share::handle_import(&uri),
         Some(Commands::Aura) => cli::aura::handle(),
+        #[cfg(target_os = "linux")]
+        Some(Commands::WatchAutoTheme) => cli::watch::handle_auto_theme_watch(),
         Some(Commands::Reset { id }) => {
             // reset is now a compatibility alias that routes to restore
             println!("(i) Tip: 'slate reset' is transitioning to 'slate restore'. Use 'slate restore [id]' next time.");

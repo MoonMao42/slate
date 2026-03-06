@@ -5,8 +5,6 @@ use crate::config::{
 };
 use crate::error::Result;
 use cliclack::{confirm, select};
-use std::process::Command;
-
 /// Handle `slate restore [ID] [--list] [--delete ID]` with structured clap arguments.
 pub fn handle(restore_id: Option<&str>, list_mode: bool, delete_id: Option<&str>) -> Result<()> {
     if let Some(id) = delete_id {
@@ -110,17 +108,6 @@ fn handle_restore_direct(restore_id: &str) -> Result<()> {
             crate::cli::theme_apply::log_apply_report(&report);
         }
     }
-
-    // Reload Ghostty so changes are visible immediately
-    let _ = Command::new("osascript")
-        .arg("-e")
-        .arg(
-            r#"tell application "Ghostty"
-    set target_terminal to focused terminal of selected tab of front window
-    perform action "reload_config" on target_terminal
-end tell"#,
-        )
-        .output();
 
     // Sync watcher state: stop if auto-theme is now disabled, restart if enabled
     let _ = crate::platform::dark_mode_notify::stop();

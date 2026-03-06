@@ -91,14 +91,14 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
         FontAdapter::apply_font(&env, &resolved_font)?;
 
         println!(
-            "{} Updated font to {} in Ghostty and Alacritty.",
+            "{} Updated font to {} in Slate-managed terminal configs.",
             Symbols::SUCCESS,
             resolved_font
         );
         if font_uses_basic_prompt(&resolved_font) {
             println!("(i) Basic Starship mode enabled for new shells because this font does not include Nerd Font glyphs.");
         } else {
-            println!("New shells will continue using the full Slate prompt profile.");
+            println!("{}", crate::platform::fonts::activation_hint());
         }
         Ok(())
     } else {
@@ -263,7 +263,7 @@ fn show_font_picker() -> Result<()> {
         FontAdapter::apply_font(&env, &bare_name)?;
 
         println!(
-            "{} Updated font to {} in Ghostty and Alacritty.",
+            "{} Updated font to {} in Slate-managed terminal configs.",
             Symbols::SUCCESS,
             bare_name
         );
@@ -271,7 +271,7 @@ fn show_font_picker() -> Result<()> {
         if font_uses_basic_prompt(&bare_name) {
             println!("(i) Basic Starship mode enabled for new shells because this font does not include Nerd Font glyphs.");
         } else {
-            println!("Font updated and will take effect immediately if live reload is enabled.");
+            println!("{}", crate::platform::fonts::activation_hint());
         }
         break;
     }
@@ -293,14 +293,17 @@ fn download_catalog_font(font_name: &str, env: &SlateEnv) -> std::result::Result
         .map(|f| f.id.to_string());
     let lookup = font_id.as_deref().unwrap_or(font_name);
 
-    // Try brew first
-    if install_font(lookup).is_ok() {
-        return Ok(());
-    }
+    if matches!(
+        crate::platform::packages::detect_backend(),
+        crate::platform::packages::PackageManagerBackend::Homebrew
+    ) {
+        if install_font(lookup).is_ok() {
+            return Ok(());
+        }
 
-    // Try caskroom copy
-    if copy_font_from_caskroom(lookup, env).is_ok() {
-        return Ok(());
+        if copy_font_from_caskroom(lookup, env).is_ok() {
+            return Ok(());
+        }
     }
 
     // Download from Nerd Fonts releases

@@ -93,6 +93,21 @@ impl SlateEnv {
         self.home.join(".zshrc")
     }
 
+    /// Get .bashrc path (for shell integration marker block)
+    pub fn bashrc_path(&self) -> PathBuf {
+        self.home.join(".bashrc")
+    }
+
+    /// Get fish conf.d directory for managed loader files.
+    pub fn fish_conf_d_dir(&self) -> PathBuf {
+        self.xdg_config_home.join("fish").join("conf.d")
+    }
+
+    /// Get the path to the Slate-managed fish loader file.
+    pub fn fish_loader_path(&self) -> PathBuf {
+        self.fish_conf_d_dir().join("slate.fish")
+    }
+
     /// Get the per-user local bin directory (~/.local/bin).
     pub fn user_local_bin(&self) -> PathBuf {
         self.home.join(".local").join("bin")
@@ -142,6 +157,26 @@ mod tests {
         let zshrc = env.zshrc_path();
 
         assert!(zshrc.ends_with(".zshrc"));
+    }
+
+    #[test]
+    fn test_bashrc_path() {
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let bashrc = env.bashrc_path();
+
+        assert!(bashrc.ends_with(".bashrc"));
+    }
+
+    #[test]
+    fn test_fish_loader_path() {
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+
+        assert!(env.fish_conf_d_dir().ends_with(".config/fish/conf.d"));
+        assert!(env
+            .fish_loader_path()
+            .ends_with(".config/fish/conf.d/slate.fish"));
     }
 
     #[test]

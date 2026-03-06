@@ -3,38 +3,12 @@ use crate::detection::TerminalProfile;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::{ThemeAppearance, ThemeRegistry};
-use std::process::Command;
-
-/// Detect the current macOS system appearance (Dark or Light).
-/// Runs `defaults read -g AppleInterfaceStyle` once per invocation.
-/// On non-macOS or if the command fails, defaults to Light.
-/// On success, stdout contains "Dark\n" for dark mode, anything else is treated as light.
+/// Detect the current system appearance through the active platform backend.
+/// macOS uses `defaults`, Linux prefers XDG desktop portal and falls back to
+/// GNOME `gsettings` when needed, and unsupported environments default to Light
+/// so manual `slate theme --auto` still degrades safely.
 pub fn detect_system_appearance() -> Result<ThemeAppearance> {
-    // Execute: defaults read -g AppleInterfaceStyle
-    // Output: "Dark" if dark mode, missing/error otherwise
-
-    match Command::new("defaults")
-        .args(["read", "-g", "AppleInterfaceStyle"])
-        .output()
-    {
-        Ok(output) => {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if stdout.contains("Dark") {
-                    Ok(ThemeAppearance::Dark)
-                } else {
-                    Ok(ThemeAppearance::Light)
-                }
-            } else {
-                // Command failed (e.g., light mode on macOS)
-                Ok(ThemeAppearance::Light)
-            }
-        }
-        Err(_) => {
-            // Command not found or failed to execute
-            Ok(ThemeAppearance::Light)
-        }
-    }
+    Ok(crate::platform::desktop::detect_system_appearance())
 }
 
 /// Resolve which theme to apply based on system appearance and auto-pairing.
@@ -108,11 +82,20 @@ pub fn configure_auto_theme() -> Result<()> {
     cliclack::intro("✦ Configure Auto Theme")?;
     log::info("Match themes to your system appearance .")?;
     let terminal = TerminalProfile::detect();
-    if terminal.watcher_shell_autostart_supported() {
-        log::remark("Ghostty shell sessions can relaunch the watcher automatically.")?;
+    let backend = crate::platform::desktop::detect_backend();
+    if backend.supports_watcher() && terminal.watcher_shell_autostart_supported() {
+        log::remark(format!(
+            "Ghostty shell sessions can relaunch the {} watcher automatically.",
+            backend.label()
+        ))?;
+    } else if backend.supports_watcher() {
+        log::remark(format!(
+            "{} watching is available, but restart recovery is still fully supported in Ghostty shells.",
+            backend.label()
+        ))?;
     } else {
         log::remark(
-            "Ghostty can relaunch the watcher automatically. In other terminals, auto-theme stays available but restart recovery is manual.",
+            "Automatic appearance watching is unavailable here. You can still run `slate theme --auto` manually.",
         )?;
     }
 

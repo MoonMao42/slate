@@ -28,7 +28,11 @@ pub fn handle_with_env(
 
     // Run pre-flight checks
     eprintln!("\n");
-    let scenario = if quick {
+    let has_existing_install = env.managed_file("current").exists();
+    let scenario = if quick && has_existing_install {
+        // Reconfigure path: user already has a slate install, doesn't need a package manager.
+        preflight::PreflightScenario::ConfigOnlyReconfigure
+    } else if quick {
         preflight::PreflightScenario::QuickSetup
     } else {
         preflight::PreflightScenario::GuidedSetup
@@ -180,7 +184,7 @@ fn handle_retry_only(tool_id: &str) -> Result<()> {
     }
 
     // Only install the single tool — no shell integration, no theme apply
-    match setup_executor::install_tool(tool.brew_package, tool.brew_kind, &env) {
+    match setup_executor::install_tool(tool.id, tool.brew_package, tool.brew_kind, &env) {
         Ok(method) => {
             eprintln!("\n{}", method.success_message(tool.label));
         }

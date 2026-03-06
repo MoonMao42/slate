@@ -6,6 +6,21 @@ use tempfile::TempDir;
 fn slate_cmd_isolated(tempdir: &TempDir) -> Command {
     let mut cmd = Command::cargo_bin("slate").unwrap();
     cmd.env("SLATE_HOME", tempdir.path());
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+        if cfg!(target_os = "macos") {
+            "/bin/zsh".to_string()
+        } else {
+            "/bin/bash".to_string()
+        }
+    });
+    cmd.env("SHELL", shell);
+    cmd
+}
+
+fn slate_cmd_isolated_with_shell(tempdir: &TempDir, shell: &str) -> Command {
+    let mut cmd = Command::cargo_bin("slate").unwrap();
+    cmd.env("SLATE_HOME", tempdir.path());
+    cmd.env("SHELL", shell);
     cmd
 }
 
@@ -25,6 +40,7 @@ fn test_cli_help_shows_commands() {
     assert!(stdout.contains("font"));
     assert!(stdout.contains("config"));
     assert!(stdout.contains("clean"));
+    assert!(stdout.contains("macOS and Linux"));
 }
 
 #[test]
@@ -79,6 +95,113 @@ fn test_setup_quick_flag() {
 }
 
 #[test]
+fn test_setup_shell_integration_zsh() {
+    let tempdir = TempDir::new().unwrap();
+    std::fs::write(tempdir.path().join(".zshrc"), "# user zsh\n").unwrap();
+
+    let output = slate_cmd_isolated_with_shell(&tempdir, "/bin/zsh")
+        .args(["setup", "--quick"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "setup failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let zshrc = std::fs::read_to_string(tempdir.path().join(".zshrc")).unwrap();
+    assert!(zshrc.contains("slate:start"));
+    assert!(zshrc.contains("managed/shell/env.zsh"));
+    assert!(zshrc.contains("# user zsh"));
+    assert!(tempdir
+        .path()
+        .join(".config/slate/managed/shell/env.zsh")
+        .exists());
+    assert!(tempdir
+        .path()
+        .join(".config/slate/managed/shell/env.bash")
+        .exists());
+    assert!(tempdir
+        .path()
+        .join(".config/slate/managed/shell/env.fish")
+        .exists());
+}
+
+#[test]
+fn test_setup_shell_integration_bash() {
+    let tempdir = TempDir::new().unwrap();
+    std::fs::write(tempdir.path().join(".bashrc"), "# user bash\n").unwrap();
+    std::fs::write(tempdir.path().join(".bash_profile"), "# bash profile\n").unwrap();
+
+    let output = slate_cmd_isolated_with_shell(&tempdir, "/bin/bash")
+        .args(["setup", "--quick"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "setup failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let bashrc = std::fs::read_to_string(tempdir.path().join(".bashrc")).unwrap();
+    assert!(bashrc.contains("slate:start"));
+    assert!(bashrc.contains("managed/shell/env.bash"));
+    assert!(bashrc.contains("# user bash"));
+    let bash_profile = std::fs::read_to_string(tempdir.path().join(".bash_profile")).unwrap();
+    assert_eq!(bash_profile, "# bash profile\n");
+    assert!(tempdir
+        .path()
+        .join(".config/slate/managed/shell/env.zsh")
+        .exists());
+    assert!(tempdir
+        .path()
+        .join(".config/slate/managed/shell/env.bash")
+        .exists());
+    assert!(tempdir
+        .path()
+        .join(".config/slate/managed/shell/env.fish")
+        .exists());
+}
+
+#[test]
+fn test_setup_shell_integration_fish() {
+    let tempdir = TempDir::new().unwrap();
+    let config_fish = tempdir.path().join(".config/fish/config.fish");
+    std::fs::create_dir_all(config_fish.parent().unwrap()).unwrap();
+    std::fs::write(&config_fish, "# user fish\n").unwrap();
+
+    let output = slate_cmd_isolated_with_shell(&tempdir, "/usr/bin/fish")
+        .args(["setup", "--quick"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "setup failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let fish_loader = tempdir.path().join(".config/fish/conf.d/slate.fish");
+    let fish_loader_content = std::fs::read_to_string(&fish_loader).unwrap();
+    assert!(fish_loader_content.contains("managed/shell/env.fish"));
+    assert_eq!(
+        std::fs::read_to_string(&config_fish).unwrap(),
+        "# user fish\n"
+    );
+    assert!(tempdir
+        .path()
+        .join(".config/slate/managed/shell/env.zsh")
+        .exists());
+    assert!(tempdir
+        .path()
+        .join(".config/slate/managed/shell/env.bash")
+        .exists());
+    assert!(tempdir
+        .path()
+        .join(".config/slate/managed/shell/env.fish")
+        .exists());
+}
+
+#[test]
 fn test_set_with_theme_argument() {
     let tempdir = TempDir::new().unwrap();
     let mut cmd = slate_cmd_isolated(&tempdir);
@@ -104,7 +227,15 @@ fn test_status_command_runs() {
     assert!(stdout.contains("Core Vibe")); // Section 1
     assert!(stdout.contains("Typography")); // Section 2
     assert!(stdout.contains("Background")); // Section 3
-    assert!(stdout.contains("Toolkit")); // Section 4
+    assert!(stdout.contains("Platform Capabilities")); //  section
+    assert!(stdout.contains("Desktop Appearance"));
+    assert!(stdout.contains("Share Capture"));
+    assert!(stdout.contains("Package Manager"));
+    assert!(stdout.contains("Reload"));
+    assert!(stdout.contains("Preview"));
+    assert!(stdout.contains("Font"));
+    assert!(stdout.contains("Toolkit")); // Section 5
+    assert!(stdout.contains("supported") || stdout.contains("best effort"));
 }
 
 #[test]
@@ -173,6 +304,14 @@ fn test_setup_wizard_completion_message() {
 
     let output = cmd.output().unwrap();
     assert!(output.status.success());
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("✓ Preflight Checks"));
+    assert!(stderr.contains("Package Manager"));
+    assert!(stderr.contains("Desktop Appearance"));
+    assert!(stderr.contains("Share Capture"));
+    assert!(stderr.contains("Terminal Features"));
+    assert!(stderr.contains("supported") || stderr.contains("best effort"));
 }
 
 #[test]
@@ -829,6 +968,91 @@ fn test_clean_removes_alacritty_managed_imports() {
     assert!(content.contains("~/dotfiles/alacritty/base.toml"));
     assert!(!content.contains("managed/alacritty/colors.toml"));
     assert!(!content.contains("managed/alacritty/opacity.toml"));
+}
+
+#[test]
+fn test_clean_shell_loader_removes_zsh_and_bash_markers() {
+    let tempdir = TempDir::new().unwrap();
+    let zshrc = tempdir.path().join(".zshrc");
+    let bashrc = tempdir.path().join(".bashrc");
+
+    std::fs::write(
+        &zshrc,
+        "# user zsh\n# slate:start — managed by slate, do not edit\nsource '/tmp/env.zsh'\n# slate:end\n# keep zsh\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &bashrc,
+        "# user bash\n# slate:start — managed by slate, do not edit\nsource '/tmp/env.bash'\n# slate:end\n# keep bash\n",
+    )
+    .unwrap();
+
+    let output = slate_cmd_isolated_with_shell(&tempdir, "/bin/bash")
+        .args(["clean"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "clean failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let zshrc_content = std::fs::read_to_string(&zshrc).unwrap();
+    let bashrc_content = std::fs::read_to_string(&bashrc).unwrap();
+    assert!(zshrc_content.contains("# user zsh"));
+    assert!(zshrc_content.contains("# keep zsh"));
+    assert!(!zshrc_content.contains("slate:start"));
+    assert!(bashrc_content.contains("# user bash"));
+    assert!(bashrc_content.contains("# keep bash"));
+    assert!(!bashrc_content.contains("slate:start"));
+}
+
+#[test]
+fn test_clean_shell_loader_removes_fish_loader_but_preserves_config_fish() {
+    let tempdir = TempDir::new().unwrap();
+    let fish_loader = tempdir.path().join(".config/fish/conf.d/slate.fish");
+    let config_fish = tempdir.path().join(".config/fish/config.fish");
+    std::fs::create_dir_all(fish_loader.parent().unwrap()).unwrap();
+    std::fs::write(&fish_loader, "source '/tmp/env.fish'\n").unwrap();
+    std::fs::write(&config_fish, "# keep fish config\n").unwrap();
+
+    let output = slate_cmd_isolated_with_shell(&tempdir, "/usr/bin/fish")
+        .args(["clean"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "clean failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(!fish_loader.exists());
+    assert_eq!(
+        std::fs::read_to_string(&config_fish).unwrap(),
+        "# keep fish config\n"
+    );
+}
+
+#[test]
+fn test_clean_removes_auto_theme_watcher_launcher() {
+    let tempdir = TempDir::new().unwrap();
+    let watcher = tempdir
+        .path()
+        .join(".config/slate/managed/bin/slate-dark-mode-notify");
+    std::fs::create_dir_all(watcher.parent().unwrap()).unwrap();
+    std::fs::write(&watcher, "#!/bin/sh\nexit 0\n").unwrap();
+
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["clean"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "clean failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(!watcher.exists());
 }
 
 #[test]

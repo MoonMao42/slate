@@ -9,25 +9,26 @@
 <h1 align="center">slate</h1>
 
 <p align="center">
-  <strong>30 seconds to a beautiful macOS terminal.</strong><br />
+  <strong>30 seconds to a beautiful terminal on macOS or Linux.</strong><br />
   One command. 18 themes. Every tool in sync.
 </p>
 
 <p align="center">
   <a href="https://github.com/MoonMao42/slate-dev/releases"><img src="https://img.shields.io/github/v/release/MoonMao42/slate-dev?style=flat-square&color=585b70" alt="Latest release" /></a>
-  <img src="https://img.shields.io/badge/platform-macOS-585b70?style=flat-square" alt="macOS only" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-585b70?style=flat-square" alt="macOS and Linux" />
   <img src="https://img.shields.io/badge/license-MIT-585b70?style=flat-square" alt="MIT license" />
 </p>
 
 <p align="center">
   <img src="./assets/theme-demo.gif" alt="slate theme live preview" width="700" />
   <br />
-  <sub>Live preview across 18 curated themes — dark, light, frosted.</sub>
+  <sub>Inline preview across 18 curated themes — with live push where the terminal supports it.</sub>
 </p>
 
 ## Quick Start
 
-> Requires **macOS**. Best experience with **[Ghostty](https://ghostty.org)** (live reload, frosted glass, auto-theme relaunch). Also supports Kitty, Alacritty, and Terminal.app.
+> Official targets: `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`.
+> Validated Linux baseline: Debian/Ubuntu + GNOME. Slate prefers XDG Desktop Portal where available and falls back honestly when it cannot.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/MoonMao42/slate-dev/main/install.sh | sh
@@ -40,6 +41,25 @@ Or with Homebrew:
 brew install MoonMao42/homebrew-tap/slate
 ```
 
+## Support Matrix
+
+| Layer | macOS | Linux |
+|-------|-------|-------|
+| Official targets | `x86_64` / `aarch64` | `x86_64-unknown-linux-gnu` / `aarch64-unknown-linux-gnu` |
+| Desktop appearance | `defaults` + embedded Swift watcher | XDG Desktop Portal first, GNOME `gsettings` fallback |
+| Share capture | `screencapture` | XDG Desktop Portal first, `gnome-screenshot` fallback |
+| Package installs | Homebrew | `apt` |
+| Fonts | `~/Library/Fonts` | `~/.local/share/fonts` + `fc-cache` |
+| Shell loaders | `.zshrc`, `.bashrc`, `~/.config/fish/conf.d/slate.fish` | `.zshrc`, `.bashrc`, `~/.config/fish/conf.d/slate.fish` |
+
+| Terminal | Status | Notes |
+|----------|--------|-------|
+| Ghostty | Best experience | Live reload, opacity, and watcher relaunch where the platform backend supports it |
+| Kitty | Supported | Live push via remote control on macOS and Linux |
+| Alacritty | Supported with limits | Inline preview always works; live reload stays best effort |
+| Terminal.app | Supported with limits | macOS only, manual font selection, no blur/live push promises |
+| Other terminals | Best effort | Shared shell/tool theming works, terminal-specific visuals depend on the app |
+
 <p align="center">
   <img src="./assets/setup-demo.gif" alt="slate setup demo" width="600" />
   <br />
@@ -49,11 +69,11 @@ brew install MoonMao42/homebrew-tap/slate
 ## Features
 
 - **One palette, everywhere** — Ghostty, Kitty, Alacritty, Starship, bat, delta, eza, lazygit, fastfetch, tmux, zsh-syntax-highlighting all share the same color scheme.
-- **Auto dark/light** — Ghostty can relaunch the watcher automatically. Other terminals can still follow macOS while the watcher is running, but restart recovery is more manual.
-- **Live preview** — Browse 18 themes with instant terminal preview. Arrow keys to navigate, Enter to apply.
-- **Nerd Font management** — Detect, install, and switch fonts without leaving the terminal.
+- **Auto dark/light** — One dark/light pairing model, with macOS and Linux appearance backends reported honestly in status and setup review.
+- **Inline preview everywhere** — Browse 18 themes with the built-in preview on every supported platform; Ghostty and Kitty also get live push where available.
+- **Nerd Font management** — Detect, install, and switch fonts without leaving the terminal, using platform-correct user font directories.
 - **Non-destructive** — Uses managed includes, never overwrites your dotfiles. Snapshots before every change, one-command rollback.
-- **Shareable** — Export your setup as a URI, import on another machine, or screenshot with a branded watermark.
+- **Shareable** — Export your setup as a URI, import on another machine, or capture a branded screenshot when a supported backend exists.
 
 <p align="center">
   <img src="./assets/fastfetch-preview.png" alt="fastfetch themed output" width="600" />
@@ -76,7 +96,11 @@ slate config set auto-theme enable
 
 Every theme family ships a built-in dark/light pair. Configure your own pairing through the hub.
 
-Ghostty is the polished path here. In Terminal.app and other non-Ghostty terminals, Slate will keep shell/tool colors in sync but will not promise blur, automatic font switching, or watcher relaunch after every restart.
+Slate keeps the pairing model shared across platforms, but the watcher backend is platform-specific:
+
+- macOS uses the embedded Swift watcher.
+- Linux prefers XDG Desktop Portal and falls back to GNOME `gsettings` on the validated baseline.
+- Ghostty can relaunch the watcher automatically from new shell sessions; other terminals keep the shared theme logic but do not promise the same restart behavior.
 
 <details>
 <summary><strong>All Commands</strong></summary>
@@ -123,10 +147,10 @@ For Ghostty: `config-file = ...`. For Kitty/Alacritty: managed `include`/`import
 ## Install
 
 ```bash
-# One-line install (downloads pre-built binary)
+# One-line install (downloads the right pre-built binary for macOS or Linux)
 curl -fsSL https://raw.githubusercontent.com/MoonMao42/slate-dev/main/install.sh | sh
 
-# Or via Homebrew
+# Or via Homebrew on macOS
 brew install MoonMao42/homebrew-tap/slate
 ```
 

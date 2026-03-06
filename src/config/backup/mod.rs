@@ -12,8 +12,8 @@ mod time;
 
 pub use manifest::display_tools;
 pub use restore::{
-    clear_all_restore_points, delete_restore_point, execute_restore, get_restore_point,
-    get_restore_point_with_env, is_baseline_restore_point, list_restore_points,
+    clear_all_restore_points, delete_restore_point, execute_restore, execute_restore_with_env,
+    get_restore_point, get_restore_point_with_env, is_baseline_restore_point, list_restore_points,
     list_restore_points_with_env, RestoreFileResult, RestoreReceipt,
 };
 pub use snapshot::{

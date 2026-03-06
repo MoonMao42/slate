@@ -1,6 +1,6 @@
 //! Nerd Font adapter for font detection and installation support.
-//! Per through Detects installed Nerd Fonts on macOS and provides
-//! installation command mapping. Scope: detect + install mapping only (no config writing).
+//! Detects installed Nerd Fonts across supported platforms and provides
+//! installation mapping. Scope: detect + install mapping only (no config writing).
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
@@ -31,12 +31,6 @@ impl FontAdapter {
         ("NerdFont", " Nerd Font"),
         ("Nerd Font", " Nerd Font"),
     ];
-
-    /// Get home directory from process environment
-    fn home() -> Result<PathBuf> {
-        let env = SlateEnv::from_process()?;
-        Ok(env.home().to_path_buf())
-    }
 
     fn looks_like_nerd_font(name: &str) -> bool {
         name.contains("NerdFont") || name.contains("Nerd Font")
@@ -87,23 +81,13 @@ impl FontAdapter {
     pub fn detect_installed_fonts_with_env(env: &SlateEnv) -> Result<Vec<String>> {
         let mut fonts = BTreeSet::new();
 
-        // Scan user fonts directory
-        if let Ok(user_fonts) = fs::read_dir(env.home().join("Library/Fonts")) {
-            for entry in user_fonts.flatten() {
-                if let Ok(name) = entry.file_name().into_string() {
-                    if Self::looks_like_nerd_font(&name) {
-                        fonts.insert(Self::normalize_font_family(&name));
-                    }
-                }
-            }
-        }
-
-        // Scan system fonts directory
-        if let Ok(sys_fonts) = fs::read_dir("/Library/Fonts") {
-            for entry in sys_fonts.flatten() {
-                if let Ok(name) = entry.file_name().into_string() {
-                    if Self::looks_like_nerd_font(&name) {
-                        fonts.insert(Self::normalize_font_family(&name));
+        for path in crate::platform::fonts::font_search_paths(env) {
+            if let Ok(entries) = fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    if let Ok(name) = entry.file_name().into_string() {
+                        if Self::looks_like_nerd_font(&name) {
+                            fonts.insert(Self::normalize_font_family(&name));
+                        }
                     }
                 }
             }
@@ -151,15 +135,7 @@ impl FontAdapter {
     pub fn detect_installed_nerd_fonts_with_env(env: &SlateEnv) -> Result<Vec<String>> {
         let mut fonts = BTreeSet::new();
 
-        // Scan font directories (extended paths)
-        let scan_paths = vec![
-            env.home().join("Library/Fonts"),
-            PathBuf::from("/Library/Fonts"),
-            PathBuf::from("/System/Library/Fonts"),
-            PathBuf::from("/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts"),
-        ];
-
-        for path in scan_paths {
+        for path in crate::platform::fonts::font_search_paths(env) {
             if let Ok(entries) = fs::read_dir(&path) {
                 for entry in entries.flatten() {
                     if let Ok(name) = entry.file_name().into_string() {
@@ -188,18 +164,14 @@ impl FontAdapter {
     /// Detect system fonts with injected SlateEnv (for testing).
     /// Whitelist match only (Monaco, Menlo, SF Mono).
     pub fn detect_available_system_fonts_with_env(env: &SlateEnv) -> Result<Vec<String>> {
-        let whitelist = ["Monaco", "Menlo", "SF Mono"];
+        let whitelist: &[&str] = if cfg!(target_os = "macos") {
+            &["Monaco", "Menlo", "SF Mono"]
+        } else {
+            &["DejaVu Sans Mono", "Liberation Mono", "Ubuntu Mono"]
+        };
         let mut fonts = BTreeSet::new();
 
-        // Scan same paths as Nerd Font detection
-        let scan_paths = vec![
-            env.home().join("Library/Fonts"),
-            PathBuf::from("/Library/Fonts"),
-            PathBuf::from("/System/Library/Fonts"),
-            PathBuf::from("/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts"),
-        ];
-
-        for path in scan_paths {
+        for path in crate::platform::fonts::font_search_paths(env) {
             if let Ok(entries) = fs::read_dir(&path) {
                 for entry in entries.flatten() {
                     if let Ok(name) = entry.file_name().into_string() {
@@ -207,7 +179,7 @@ impl FontAdapter {
                         if Self::is_font_file(&name) {
                             let family = Self::normalize_font_family(&name);
                             // Match against whitelist using canonical key
-                            for candidate in &whitelist {
+                            for candidate in whitelist {
                                 if Self::family_match_key(&family)
                                     == Self::family_match_key(candidate)
                                 {
@@ -305,8 +277,8 @@ impl ToolAdapter for FontAdapter {
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
-        let home = Self::home()?;
-        Ok(home.join("Library/Fonts"))
+        let env = SlateEnv::from_process()?;
+        Ok(crate::platform::fonts::user_font_dir(&env))
     }
 
     fn managed_config_path(&self) -> PathBuf {

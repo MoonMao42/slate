@@ -10,10 +10,21 @@ use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeVariant;
 use std::fs;
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const KITTY_SOCKET: &str = "unix:/tmp/kitty-slate";
+const KITTY_SOCKET_PREFIX: &str = "kitty-slate-";
+
+/// Resolve the Kitty `listen_on` socket path. Honors `TMPDIR` so macOS sandboxed / multi-user
+/// setups pick the per-user temp dir instead of `/tmp`.
+fn kitty_socket_dir() -> PathBuf {
+    std::env::temp_dir()
+}
+
+fn kitty_socket_listen_on() -> String {
+    format!("unix:{}/kitty-slate", kitty_socket_dir().display())
+}
 
 pub struct KittyAdapter;
 
@@ -41,7 +52,7 @@ impl KittyAdapter {
             let t = l.trim();
             !t.starts_with('#') && t.starts_with("listen_on")
         }) {
-            additions.push_str(&format!("listen_on {}\n", KITTY_SOCKET));
+            additions.push_str(&format!("listen_on {}\n", kitty_socket_listen_on()));
         }
         if !content.lines().any(|l| {
             let t = l.trim();
@@ -263,42 +274,112 @@ impl ToolAdapter for KittyAdapter {
             return Ok(());
         }
 
-        // Kitty appends -{pid} to the listen_on path, so we glob for the socket.
-        let socket = find_kitty_socket();
-        let Some(socket_path) = socket else {
-            return Ok(());
-        };
+        let sockets = list_kitty_sockets();
+        let color_outcome = broadcast_to_kitty_sockets(&sockets, |socket_path| {
+            Command::new("kitten")
+                .args([
+                    "@",
+                    "--to",
+                    socket_path,
+                    "set-colors",
+                    "--all",
+                    "--configured",
+                ])
+                .arg(&theme_path)
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        });
 
-        // Push colors
-        let _ = Command::new("kitten")
-            .args(["@", "--to", &socket_path, "set-colors", "--all", "--configured"])
-            .arg(&theme_path)
-            .output();
+        let opacity = config_mgr
+            .get_current_opacity_preset()
+            .unwrap_or(crate::opacity::OpacityPreset::Solid);
+        let opacity_outcome = broadcast_to_kitty_sockets(&sockets, |socket_path| {
+            Command::new("kitten")
+                .args(["@", "--to", socket_path, "set-background-opacity", "--all"])
+                .arg(format!("{}", opacity.to_f32()))
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        });
 
-        // Push opacity (requires dynamic_background_opacity in kitty.conf)
-        let opacity = config_mgr.get_current_opacity_preset().unwrap_or(crate::opacity::OpacityPreset::Solid);
-        let _ = Command::new("kitten")
-            .args(["@", "--to", &socket_path, "set-background-opacity", "--all"])
-            .arg(format!("{}", opacity.to_f32()))
-            .output();
+        if matches!(color_outcome, KittyBroadcastOutcome::AllFailed)
+            && matches!(opacity_outcome, KittyBroadcastOutcome::AllFailed)
+        {
+            return Err(crate::error::SlateError::Internal(
+                "Failed to reload any running Kitty instance".to_string(),
+            ));
+        }
 
         Ok(())
     }
 }
 
-/// Find the Kitty listen socket. Kitty appends `-{pid}` to the configured
-/// `listen_on` path, so we scan `/tmp/` for `kitty-slate-*` entries.
-fn find_kitty_socket() -> Option<String> {
-    let prefix = "kitty-slate-";
-    let entries = fs::read_dir("/tmp").ok()?;
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if name_str.starts_with(prefix) {
-            return Some(format!("unix:{}", entry.path().display()));
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KittyBroadcastOutcome {
+    NoSockets,
+    PartialSuccess,
+    AllFailed,
+}
+
+/// Kitty appends `-{pid}` to the configured `listen_on` path, so we scan the
+/// socket directory and sort the discovered sockets for deterministic reloads.
+fn list_kitty_sockets() -> Vec<String> {
+    list_kitty_sockets_in(&kitty_socket_dir())
+}
+
+fn list_kitty_sockets_in(dir: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    let mut sockets: Vec<PathBuf> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if !name.starts_with(KITTY_SOCKET_PREFIX) {
+                return None;
+            }
+
+            let Ok(file_type) = entry.file_type() else {
+                return None;
+            };
+            if !file_type.is_socket() {
+                return None;
+            }
+
+            Some(entry.path())
+        })
+        .collect();
+
+    sockets.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+    sockets
+        .into_iter()
+        .map(|path| format!("unix:{}", path.display()))
+        .collect()
+}
+
+fn broadcast_to_kitty_sockets<F>(sockets: &[String], mut send: F) -> KittyBroadcastOutcome
+where
+    F: FnMut(&str) -> bool,
+{
+    if sockets.is_empty() {
+        return KittyBroadcastOutcome::NoSockets;
+    }
+
+    let mut successful = 0usize;
+    for socket in sockets {
+        if send(socket) {
+            successful += 1;
         }
     }
-    None
+
+    if successful > 0 {
+        KittyBroadcastOutcome::PartialSuccess
+    } else {
+        KittyBroadcastOutcome::AllFailed
+    }
 }
 
 /// Write opacity configuration to managed Kitty config file.
@@ -316,19 +397,22 @@ pub fn write_opacity_config(env: &SlateEnv, opacity: crate::opacity::OpacityPres
 
 /// Push opacity to running Kitty via socket (for live preview).
 pub fn push_opacity_live(opacity: crate::opacity::OpacityPreset) {
-    let Some(socket_path) = find_kitty_socket() else {
-        return;
-    };
-    let _ = Command::new("kitten")
-        .args(["@", "--to", &socket_path, "set-background-opacity", "--all"])
-        .arg(format!("{}", opacity.to_f32()))
-        .output();
+    let sockets = list_kitty_sockets();
+    let _ = broadcast_to_kitty_sockets(&sockets, |socket_path| {
+        Command::new("kitten")
+            .args(["@", "--to", socket_path, "set-background-opacity", "--all"])
+            .arg(format!("{}", opacity.to_f32()))
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::theme::Palette;
+    use std::os::unix::net::UnixListener;
 
     fn create_test_palette() -> Palette {
         Palette {
@@ -483,8 +567,53 @@ mod tests {
     }
 
     #[test]
-    fn test_reload_succeeds() {
-        let adapter = KittyAdapter;
-        assert!(adapter.reload().is_ok());
+    fn test_list_kitty_sockets_is_stably_sorted() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let b = tempdir.path().join("kitty-slate-200");
+        let a = tempdir.path().join("kitty-slate-100");
+        let ignored = tempdir.path().join("kitty-slate-not-a-socket");
+
+        let _listener_b = UnixListener::bind(&b).unwrap();
+        let _listener_a = UnixListener::bind(&a).unwrap();
+        fs::write(&ignored, "not a socket").unwrap();
+
+        let sockets = list_kitty_sockets_in(tempdir.path());
+        assert_eq!(
+            sockets,
+            vec![
+                format!("unix:{}", a.display()),
+                format!("unix:{}", b.display()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_broadcast_to_kitty_sockets_continues_after_failures() {
+        let sockets = vec![
+            "unix:/tmp/kitty-slate-2".to_string(),
+            "unix:/tmp/kitty-slate-1".to_string(),
+        ];
+        let mut visited = Vec::new();
+
+        let outcome = broadcast_to_kitty_sockets(&sockets, |socket| {
+            visited.push(socket.to_string());
+            socket.ends_with("-1")
+        });
+
+        assert_eq!(visited, sockets);
+        assert_eq!(outcome, KittyBroadcastOutcome::PartialSuccess);
+    }
+
+    #[test]
+    fn test_broadcast_to_kitty_sockets_is_noop_when_none_found() {
+        let mut called = false;
+
+        let outcome = broadcast_to_kitty_sockets(&[], |_| {
+            called = true;
+            true
+        });
+
+        assert!(!called);
+        assert_eq!(outcome, KittyBroadcastOutcome::NoSockets);
     }
 }

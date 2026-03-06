@@ -378,14 +378,14 @@ mod tests {
 
         let enabled_content = fs::read_to_string(&shell_path).unwrap();
         assert!(config.has_fastfetch_autorun().unwrap());
-        assert!(enabled_content.contains("if command -v fastfetch &> /dev/null; then"));
+        assert!(enabled_content.contains("if command -v fastfetch >/dev/null 2>&1; then"));
         assert!(enabled_content.contains("  fastfetch\n"));
 
         toggle_fastfetch_from_preferences(&config).unwrap();
 
         let disabled_content = fs::read_to_string(&shell_path).unwrap();
         assert!(!config.has_fastfetch_autorun().unwrap());
-        assert!(!disabled_content.contains("if command -v fastfetch &> /dev/null; then"));
+        assert!(!disabled_content.contains("if command -v fastfetch >/dev/null 2>&1; then"));
     }
 
     #[test]

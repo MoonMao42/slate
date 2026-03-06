@@ -32,8 +32,43 @@ fn test_baseline_has_correct_metadata() {
     // Baseline should snapshot the fixed target list, including absent files.
     assert_eq!(
         baseline.entries.len(),
-        12,
+        18,
         "Baseline should capture the full pre-slate target set"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "bashrc"),
+        "Baseline should track .bashrc"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "fish-loader"),
+        "Baseline should track the fish conf.d loader"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "slate-auto-watcher"),
+        "Baseline should track the managed auto-theme watcher"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "slate-shell-bash"),
+        "Baseline should track managed bash shell env"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "slate-shell-fish"),
+        "Baseline should track managed fish shell env"
     );
     assert!(
         baseline

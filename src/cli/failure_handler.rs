@@ -229,7 +229,8 @@ impl ExecutionSummary {
                 output.push_str("  • Ghostty chrome, opacity, and frosted glass usually show up after a new tab or window\n");
             }
             TerminalKind::Kitty => {
-                output.push_str("  • Open a new Kitty window if colors did not reload immediately\n");
+                output
+                    .push_str("  • Open a new Kitty window if colors did not reload immediately\n");
             }
             TerminalKind::Alacritty => {
                 output.push_str("  • Open a new Alacritty window if colors or opacity did not reload immediately\n");

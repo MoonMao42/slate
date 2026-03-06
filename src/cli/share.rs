@@ -74,8 +74,12 @@ pub fn handle_export() -> Result<()> {
 /// Import a slate config from a shareable URI.
 /// Parses the URI and applies theme, font, opacity, and tool toggles.
 pub fn handle_import(uri: &str) -> Result<()> {
-    let request = parse_import_request(uri)?;
     let env = SlateEnv::from_process()?;
+    handle_import_with_env(uri, &env)
+}
+
+fn handle_import_with_env(uri: &str, env: &SlateEnv) -> Result<()> {
+    let request = parse_import_request(uri)?;
 
     if let Some(font) = request.font.as_deref() {
         crate::cli::font::handle_font(Some(font))?;
@@ -85,10 +89,17 @@ pub fn handle_import(uri: &str) -> Result<()> {
         crate::cli::theme::handle_theme(Some(theme), false, false)?;
     }
 
-    let config = ConfigManager::with_env(&env)?;
+    let config = ConfigManager::with_env(env)?;
 
     if let Some(opacity) = request.opacity {
-        config.set_current_opacity_preset(opacity)?;
+        crate::cli::apply::apply_opacity(
+            env,
+            opacity,
+            crate::cli::apply::OpacityApplyOptions {
+                persist_state: true,
+                reload_terminals: true,
+            },
+        )?;
         println!(
             "{} Opacity set to '{}'",
             Symbols::SUCCESS,
@@ -283,5 +294,32 @@ mod tests {
     fn test_parse_import_request_rejects_invalid_tool_flags() {
         let result = parse_import_request("slate://none/none/solid/s,x");
         assert!(result.is_err());
+    }
+
+    fn managed_tool_dir(env: &SlateEnv, tool: &str) -> std::path::PathBuf {
+        env.config_dir().join("managed").join(tool)
+    }
+
+    #[test]
+    fn test_import_opacity_only_applies_managed_files_immediately() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+
+        handle_import_with_env("slate://none/none/frosted/none", &env).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(env.managed_file("current-opacity")).unwrap(),
+            "frosted"
+        );
+        assert!(managed_tool_dir(&env, "ghostty")
+            .join("opacity.conf")
+            .exists());
+        assert!(managed_tool_dir(&env, "ghostty").join("blur.conf").exists());
+        assert!(managed_tool_dir(&env, "kitty")
+            .join("opacity.conf")
+            .exists());
+        assert!(managed_tool_dir(&env, "alacritty")
+            .join("opacity.toml")
+            .exists());
     }
 }

@@ -89,7 +89,7 @@ impl ToolRegistry {
             .par_iter()
             .filter(|adapter| adapter.apply_strategy() != ApplyStrategy::DetectAndInstall)
             .filter(|adapter| {
-                allowed_tools.map_or(true, |allowed| allowed.contains(adapter.tool_name()))
+                allowed_tools.is_none_or(|allowed| allowed.contains(adapter.tool_name()))
             })
             .map(|adapter| {
                 let tool_name = adapter.tool_name().to_string();

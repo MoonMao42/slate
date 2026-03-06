@@ -37,13 +37,6 @@ fn print_dim_tip() {
     );
 }
 
-/// Check if running in Ghostty terminal.
-fn is_ghostty() -> bool {
-    std::env::var("TERM_PROGRAM")
-        .map(|t| t.to_lowercase() == "ghostty")
-        .unwrap_or(false)
-}
-
 /// Silent preview apply: updates only the live preview path without persisting theme/opacity state.
 /// Called on every keystroke during picker navigation. Updates visual appearance
 /// without committing the selection to ~/.config/slate/current and current-opacity.
@@ -63,70 +56,7 @@ pub fn silent_preview_apply(
         crate::error::SlateError::InvalidThemeData(format!("Theme '{}' not found", theme_id))
     })?;
 
-    // Do NOT persist state files (current, current-opacity)
-    // Just apply visual changes for preview
-
-    // Apply theme palette to adapters (visual preview)
-    let config = crate::config::ConfigManager::with_env(env)?;
-    let adapter_registry = crate::adapter::ToolRegistry::default();
-    let _results = adapter_registry.apply_theme_to_all(theme);
-
-    // Update opacity/blur for Ghostty (best-effort)
-    let _ = crate::adapter::ghostty::write_opacity_config(env, opacity);
-    let _ = crate::adapter::ghostty::write_blur_radius(env, opacity);
-
-    // Update opacity for Alacritty (best-effort)
-    let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
-
-    // Update opacity for Kitty (best-effort, Kitty auto-reloads on file change)
-    let _ = crate::adapter::kitty::write_opacity_config(env, opacity);
-
-    // Attempt Ghostty live preview with permission-aware behavior (best-effort).
-    // Per , Check if Ghostty reload permission is already known.
-    // If permission state is unknown, try once and remember the result.
-    // If permission is known to be disabled, skip reload silently.
-    if let Some(ghostty_adapter) = adapter_registry.get_adapter("ghostty") {
-        // Only attempt reload if we're in Ghostty
-        if is_ghostty() {
-            match config.is_live_preview_state_known() {
-                Ok(true) => {
-                    // Permission state is known
-                    if let Ok(enabled) = config.is_live_preview_enabled() {
-                        if enabled {
-                            // Permission is known to be enabled, attempt reload
-                            let _ = ghostty_adapter.reload();
-                        }
-                        // If enabled is false, skip reload silently (user declined)
-                    }
-                }
-                Ok(false) => {
-                    // Permission state is unknown, attempt reload once and remember result
-                    match ghostty_adapter.reload() {
-                        Ok(()) => {
-                            // Success: remember permission as enabled
-                            let _ = config.set_live_preview_enabled(true);
-                        }
-                        Err(_) => {
-                            // Failed: remember permission as disabled
-                            let _ = config.set_live_preview_enabled(false);
-                        }
-                    }
-                }
-                Err(_) => {
-                    // Error reading config, fall back to best-effort reload attempt
-                    let _ = ghostty_adapter.reload();
-                }
-            }
-        }
-    }
-
-    // Kitty live preview: push colors + opacity (best-effort)
-    if let Some(kitty_adapter) = adapter_registry.get_adapter("kitty") {
-        let _ = kitty_adapter.reload();
-    }
-    crate::adapter::kitty::push_opacity_live(opacity);
-
-    Ok(())
+    crate::cli::apply::preview_theme(env, theme, opacity)
 }
 
 /// Silent commit apply: persists theme/opacity state, then performs full apply.
@@ -150,16 +80,13 @@ pub fn silent_commit_apply(
         crate::error::SlateError::InvalidThemeData(format!("Theme '{}' not found", theme_id))
     })?;
 
-    crate::cli::theme_apply::ThemeApplyCoordinator::new(env).apply(theme)?;
-
-    let config = crate::config::ConfigManager::with_env(env)?;
-    config.set_current_opacity_preset(opacity)?;
-
-    // Update opacity/blur for terminal adapters
-    let _ = crate::adapter::ghostty::write_opacity_config(env, opacity);
-    let _ = crate::adapter::ghostty::write_blur_radius(env, opacity);
-    let _ = crate::adapter::alacritty::write_opacity_config(env, opacity);
-    let _ = crate::adapter::kitty::write_opacity_config(env, opacity);
-
-    Ok(())
+    crate::cli::apply::ThemeApplyCoordinator::new(env).apply(theme)?;
+    crate::cli::apply::apply_opacity(
+        env,
+        opacity,
+        crate::cli::apply::OpacityApplyOptions {
+            persist_state: true,
+            reload_terminals: true,
+        },
+    )
 }

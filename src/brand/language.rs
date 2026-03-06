@@ -48,6 +48,8 @@ impl Language {
     pub const STATUS_LABEL_CURRENT: &str = "current:";
     pub const STATUS_LABEL_TERMINAL: &str = "terminal:";
     pub const STATUS_LABEL_FONT: &str = "font:";
+    pub const PREFLIGHT_HEADER: &str = "✓ Preflight Checks";
+    pub const STATUS_PLATFORM_CAPABILITIES: &str = "Platform Capabilities";
     pub const LIST_HEADER: &str = "Available themes";
     pub const RESTORE_SUCCESS: &str = "✓ Configuration restored";
     pub const SET_PICKER_PENDING: &str =

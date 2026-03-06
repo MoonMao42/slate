@@ -1,22 +1,26 @@
 use crate::env::SlateEnv;
-use crate::error::{Result, SlateError};
+use crate::error::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 mod auto_theme;
 mod backup;
 mod flags;
+mod integration;
+mod preferences;
 pub(crate) mod shell_integration;
 mod state_files;
+mod tracked_state;
 
 pub use backup::{
     backup_directory, backup_directory_with_env, begin_restore_point_baseline,
     begin_restore_point_baseline_with_env, clear_all_restore_points, create_backup_with_session,
     create_pre_restore_snapshot, create_pre_restore_snapshot_with_env, delete_restore_point,
-    display_tools, execute_restore, get_restore_point, get_restore_point_with_env,
-    is_baseline_restore_point, list_restore_points, list_restore_points_with_env,
-    snapshot_current_state, snapshot_current_state_with_env, BackupSession, OriginalFileState,
-    RestoreEntry, RestoreFileResult, RestorePoint, RestoreReceipt,
+    display_tools, execute_restore, execute_restore_with_env, get_restore_point,
+    get_restore_point_with_env, is_baseline_restore_point, list_restore_points,
+    list_restore_points_with_env, snapshot_current_state, snapshot_current_state_with_env,
+    BackupSession, OriginalFileState, RestoreEntry, RestoreFileResult, RestorePoint,
+    RestoreReceipt,
 };
 
 /// Three-tier configuration manager.
@@ -105,231 +109,9 @@ impl ConfigManager {
         state_files::write_managed_file(&self.managed_dir(tool), filename, content)
     }
 
-    /// Write shell integration file (env.zsh) with theme-aware content.
-    /// Per , generates exports + fastfetch wrapper + zsh-highlight source.
-    /// Called both during setup (to initialize) and on `slate set` (to update).
-    pub fn write_shell_integration_file(&self, theme: &crate::theme::ThemeVariant) -> Result<()> {
-        let managed_root = self.base_path.join("managed");
-        let managed_root = managed_root.to_string_lossy().to_string();
-        let user_config_root = self.xdg_config_root().to_string_lossy().to_string();
-        let user_local_bin = self
-            .home_path
-            .join(".local/bin")
-            .to_string_lossy()
-            .to_string();
-        let plain_starship_path = self
-            .managed_dir("starship")
-            .join("plain.toml")
-            .to_string_lossy()
-            .to_string();
-        let active_starship_path = self
-            .xdg_config_root()
-            .join("starship.toml")
-            .to_string_lossy()
-            .to_string();
-        let notify_path = self
-            .managed_dir("bin")
-            .join("slate-dark-mode-notify")
-            .to_string_lossy()
-            .to_string();
-        let zsh_highlighting_plugin_path =
-            crate::detection::detect_zsh_syntax_highlighting_plugin(&self.home_path)
-                .map(|path| path.to_string_lossy().to_string());
-        let slate_bin = std::env::current_exe()
-            .ok()
-            .map(|path| path.to_string_lossy().to_string())
-            .unwrap_or_else(|| "slate".to_string());
-        let prefer_plain_starship = self.should_prefer_plain_starship()?;
-        let starship_enabled = self.is_starship_enabled()?;
-
-        let content = shell_integration::build_shell_integration_content(
-            theme,
-            &shell_integration::ShellIntegrationOptions {
-                managed_root: &managed_root,
-                user_config_root: &user_config_root,
-                user_local_bin: Some(&user_local_bin),
-                plain_starship_path: &plain_starship_path,
-                active_starship_path: &active_starship_path,
-                notify_path: &notify_path,
-                slate_bin: &slate_bin,
-                zsh_highlighting_plugin_path: zsh_highlighting_plugin_path.as_deref(),
-                homebrew_prefix: crate::detection::homebrew_prefix()
-                    .as_ref()
-                    .and_then(|path| path.to_str()),
-                prefer_plain_starship,
-                starship_enabled,
-                zsh_highlighting_enabled: self.is_zsh_highlighting_enabled()?,
-                fastfetch_autorun: self.has_fastfetch_autorun()?,
-                auto_theme_enabled: self.is_auto_theme_enabled()?,
-            },
-        );
-
-        self.write_managed_file(
-            "starship",
-            "plain.toml",
-            &shell_integration::themed_plain_starship_content(theme),
-        )?;
-        self.write_managed_file("shell", "env.zsh", &content)?;
-        Ok(())
-    }
-
-    fn should_prefer_plain_starship(&self) -> Result<bool> {
-        self.has_no_nerd_font()
-    }
-
-    /// Returns true if no Nerd Font is configured or detected on the system.
-    fn has_no_nerd_font(&self) -> Result<bool> {
-        let env = SlateEnv::with_home(self.home_path.clone());
-        if let Some(font) = self.get_current_font()? {
-            return Ok(!crate::adapter::font::FontAdapter::is_nerd_font_name(&font));
-        }
-
-        let installed =
-            crate::adapter::font::FontAdapter::detect_installed_nerd_fonts_with_env(&env)?;
-        Ok(installed.is_empty())
-    }
-
-    /// Rebuild shell integration using the current theme tracking file.
-    /// Falls back to the default theme when no current theme is recorded or
-    /// when the tracked theme ID no longer exists in the registry.
-    pub fn refresh_shell_integration(&self) -> Result<()> {
-        let registry = crate::theme::ThemeRegistry::new()?;
-        let tracked_theme_id = self
-            .get_current_theme()?
-            .unwrap_or_else(|| crate::theme::DEFAULT_THEME_ID.to_string());
-
-        let theme = registry
-            .get(&tracked_theme_id)
-            .or_else(|| registry.get(crate::theme::DEFAULT_THEME_ID))
-            .cloned()
-            .ok_or_else(|| {
-                SlateError::InvalidThemeData(format!(
-                    "Unable to resolve shell integration theme from tracked id '{}'",
-                    tracked_theme_id
-                ))
-            })?;
-
-        self.write_shell_integration_file(&theme)
-    }
-
-    /// Update current theme tracking file.
-    pub fn set_current_theme(&self, theme_id: &str) -> Result<()> {
-        state_files::write_state_file(&self.current_theme_path(), theme_id)
-    }
-
-    /// Get current theme ID from tracking file.
-    pub fn get_current_theme(&self) -> Result<Option<String>> {
-        state_files::read_optional_state_file(&self.current_theme_path())
-    }
-
-    /// Persist user's chosen font family name.
-    pub fn set_current_font(&self, font_family: &str) -> Result<()> {
-        state_files::write_state_file(&self.current_font_path(), font_family)
-    }
-
-    /// Get the user's chosen font family name.
-    pub fn get_current_font(&self) -> Result<Option<String>> {
-        state_files::read_optional_state_file(&self.current_font_path())
-    }
-
-    /// Get the current opacity preset.
-    pub fn get_current_opacity(&self) -> Result<Option<String>> {
-        state_files::read_optional_state_file(&self.current_opacity_path())
-    }
-
-    /// Get the current opacity preset, parsing from file.
-    pub fn get_current_opacity_preset(&self) -> Result<crate::opacity::OpacityPreset> {
-        self.get_current_opacity()?
-            .map(|value| value.parse::<crate::opacity::OpacityPreset>())
-            .transpose()?
-            .map_or(Ok(crate::opacity::OpacityPreset::Solid), Ok)
-    }
-
-    /// Set the current opacity preset, persisting to file.
-    pub fn set_current_opacity_preset(&self, preset: crate::opacity::OpacityPreset) -> Result<()> {
-        state_files::write_state_file(
-            &self.current_opacity_path(),
-            &preset.to_string().to_lowercase(),
-        )
-    }
-
-    /// Read auto.toml from ~/.config/slate/auto.toml if it exists.
-    pub fn read_auto_config(&self) -> Result<Option<AutoConfig>> {
-        auto_theme::read_auto_config(&self.base_path)
-    }
-
-    /// Write auto.toml with the specified dark and light themes.
-    pub fn write_auto_config(
-        &self,
-        dark_theme: Option<&str>,
-        light_theme: Option<&str>,
-    ) -> Result<()> {
-        auto_theme::write_auto_config(&self.base_path, dark_theme, light_theme)
-    }
-
-    /// Check if auto-theme is enabled via config.toml [auto_theme].enabled field.
-    pub fn is_auto_theme_enabled(&self) -> Result<bool> {
-        Ok(flags::config_flag(&self.base_path, "auto_theme", "enabled")?.unwrap_or(false))
-    }
-
-    /// Write auto-theme enabled flag to config.toml.
-    pub fn set_auto_theme_enabled(&self, enabled: bool) -> Result<()> {
-        flags::set_config_flag(&self.base_path, "auto_theme", "enabled", enabled)
-    }
-
-    /// Check if starship prompt initialization is enabled in shell integration.
-    pub fn is_starship_enabled(&self) -> Result<bool> {
-        Ok(flags::config_flag(&self.base_path, "tools", "starship")?.unwrap_or(true))
-    }
-
-    /// Enable or disable starship prompt initialization in shell integration.
-    pub fn set_starship_enabled(&self, enabled: bool) -> Result<()> {
-        flags::set_config_flag(&self.base_path, "tools", "starship", enabled)
-    }
-
-    /// Check if zsh syntax highlighting initialization is enabled in shell integration.
-    pub fn is_zsh_highlighting_enabled(&self) -> Result<bool> {
-        Ok(flags::config_flag(&self.base_path, "tools", "zsh_highlighting")?.unwrap_or(true))
-    }
-
-    /// Enable or disable zsh syntax highlighting initialization in shell integration.
-    pub fn set_zsh_highlighting_enabled(&self, enabled: bool) -> Result<()> {
-        flags::set_config_flag(&self.base_path, "tools", "zsh_highlighting", enabled)
-    }
-
-    /// Check if sound feedback is enabled.
-    pub fn is_sound_enabled(&self) -> Result<bool> {
-        Ok(flags::config_flag(&self.base_path, "preferences", "sound")?.unwrap_or(true))
-    }
-
-    /// Enable or disable sound feedback.
-    pub fn set_sound_enabled(&self, enabled: bool) -> Result<()> {
-        flags::set_config_flag(&self.base_path, "preferences", "sound", enabled)
-    }
-
     /// A simple pre-edit backup is required by.
     pub fn backup_file(&self, config_path: &Path) -> Result<PathBuf> {
         backup::backup_file(&self.backup_root, config_path)
-    }
-
-    /// Check if fastfetch auto-run is enabled via marker file.
-    pub fn has_fastfetch_autorun(&self) -> Result<bool> {
-        Ok(self.base_path.join("autorun-fastfetch").exists())
-    }
-
-    /// Enable fastfetch auto-run by creating marker file atomically.
-    pub fn enable_fastfetch_autorun(&self) -> Result<()> {
-        state_files::write_state_file(&self.base_path.join("autorun-fastfetch"), "")
-    }
-
-    /// Disable fastfetch auto-run by deleting marker file.
-    pub fn disable_fastfetch_autorun(&self) -> Result<()> {
-        let path = self.base_path.join("autorun-fastfetch");
-        match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(err.into()),
-        }
     }
 
     pub fn edit_config_field(&self, config_path: &Path, keys: &[&str], value: &str) -> Result<()> {
@@ -360,26 +142,12 @@ impl ConfigManager {
     pub fn base_path(&self) -> &Path {
         &self.base_path
     }
-
-    /// Check if live preview is enabled for Ghostty reload in config.toml.
-    pub fn is_live_preview_enabled(&self) -> Result<bool> {
-        Ok(flags::config_flag(&self.base_path, "live_preview", "enabled")?.unwrap_or(false))
-    }
-
-    /// Check if live preview permission has been explicitly determined.
-    pub fn is_live_preview_state_known(&self) -> Result<bool> {
-        Ok(flags::config_flag(&self.base_path, "live_preview", "enabled")?.is_some())
-    }
-
-    /// Write live preview permission state to config.toml.
-    pub fn set_live_preview_enabled(&self, enabled: bool) -> Result<()> {
-        flags::set_config_flag(&self.base_path, "live_preview", "enabled", enabled)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SlateError;
     use tempfile::TempDir;
 
     fn test_config_manager(base_path: &Path) -> ConfigManager {
@@ -454,13 +222,14 @@ mod tests {
 
         let shell_file = config_manager.managed_dir("shell").join("env.zsh");
         let content = fs::read_to_string(shell_file).unwrap();
-        let managed_path = config_manager.base_path().join("managed");
-        let expected = crate::detection::shell_quote(&managed_path.to_string_lossy());
-        assert!(content.contains(&format!(
-            "if [ -f {}/zsh/highlight-styles.sh ]; then",
-            expected
-        )));
-        assert!(content.contains(&format!("source {}/zsh/highlight-styles.sh", expected)));
+        let expected = crate::detection::shell_quote(
+            &config_manager
+                .base_path()
+                .join("managed/zsh/highlight-styles.sh")
+                .to_string_lossy(),
+        );
+        assert!(content.contains(&format!("if [ -f {} ]; then", expected)));
+        assert!(content.contains(&format!("source {}", expected)));
     }
 
     #[test]
@@ -477,8 +246,11 @@ mod tests {
 
         let managed_root = base_path.join("managed").to_string_lossy().to_string();
         let xdg_root = base_path.parent().unwrap().to_string_lossy().to_string();
-        let managed_root = crate::detection::shell_quote(&managed_root);
-        let xdg_root = crate::detection::shell_quote(&xdg_root);
+        let eza_config = crate::detection::shell_quote(&format!("{}/eza", managed_root));
+        let lazygit_config = crate::detection::shell_quote(&format!(
+            "{}/lazygit/config.yml:{}/lazygit/config.yml",
+            managed_root, xdg_root
+        ));
         let active_starship = crate::detection::shell_quote(
             &base_path
                 .parent()
@@ -494,12 +266,8 @@ mod tests {
                 .to_string_lossy(),
         );
 
-        assert!(content.contains(&format!("export EZA_CONFIG_DIR={}/eza", managed_root)));
-        assert!(content.contains(&format!(
-            "export LG_CONFIG_FILE={managed}/lazygit/config.yml:{xdg}/lazygit/config.yml",
-            managed = managed_root,
-            xdg = xdg_root
-        )));
+        assert!(content.contains(&format!("export EZA_CONFIG_DIR={}", eza_config)));
+        assert!(content.contains(&format!("export LG_CONFIG_FILE={}", lazygit_config)));
         assert!(content.contains(&format!("export STARSHIP_CONFIG={}", active_starship)));
         assert!(content.contains(&plain_starship));
         assert!(!content.contains("$HOME/.config/slate"));
@@ -517,7 +285,7 @@ mod tests {
         let shell_file = config_manager.managed_dir("shell").join("env.zsh");
         let content = fs::read_to_string(shell_file).unwrap();
         assert!(content.contains("if ! pgrep -f \"slate-dark-mode-notify\" >/dev/null 2>&1; then"));
-        assert!(content.contains("theme --auto --quiet &!"));
+        assert!(content.contains("theme --auto --quiet >/dev/null 2>&1 &"));
         assert!(!content.contains("_SLATE_AUTO_WATCHER"));
     }
 
@@ -686,9 +454,11 @@ format = "..."
         let env_zsh_path = temp.path().join("managed/shell/env.zsh");
         let content = std::fs::read_to_string(&env_zsh_path).unwrap();
 
-        assert!(content.contains("if command -v fastfetch &> /dev/null; then"));
+        assert!(content.contains("if command -v fastfetch >/dev/null 2>&1; then"));
         assert!(content.contains("  fastfetch"));
         assert!(content.contains("fi"));
+        assert!(temp.path().join("managed/shell/env.bash").exists());
+        assert!(temp.path().join("managed/shell/env.fish").exists());
     }
 
     #[test]
@@ -704,7 +474,7 @@ format = "..."
         let env_zsh_path = temp.path().join("managed/shell/env.zsh");
         let content = std::fs::read_to_string(&env_zsh_path).unwrap();
 
-        assert!(!content.contains("if command -v fastfetch &> /dev/null; then"));
+        assert!(!content.contains("if command -v fastfetch >/dev/null 2>&1; then"));
         assert!(!content.contains("  fastfetch\nfi"));
     }
 
@@ -722,6 +492,8 @@ format = "..."
         let content = std::fs::read_to_string(&env_zsh_path).unwrap();
 
         assert!(content.contains("export BAT_THEME='Tokyo Night'"));
+        assert!(temp.path().join("managed/shell/env.bash").exists());
+        assert!(temp.path().join("managed/shell/env.fish").exists());
     }
 
     #[test]
@@ -736,6 +508,37 @@ format = "..."
         let content = std::fs::read_to_string(&env_zsh_path).unwrap();
 
         assert!(content.contains("export BAT_THEME='Catppuccin Mocha'"));
+    }
+
+    #[test]
+    fn test_write_shell_integration_writes_all_shell_files() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = test_config_manager(temp.path());
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+
+        config_manager.write_shell_integration_file(&theme).unwrap();
+
+        assert!(temp.path().join("managed/shell/env.zsh").exists());
+        assert!(temp.path().join("managed/shell/env.bash").exists());
+        assert!(temp.path().join("managed/shell/env.fish").exists());
+    }
+
+    #[test]
+    fn test_refresh_shell_integration_writes_bash_and_fish_content() {
+        let temp = TempDir::new().unwrap();
+        let config_manager = test_config_manager(temp.path());
+
+        config_manager
+            .set_current_theme("catppuccin-mocha")
+            .unwrap();
+        config_manager.refresh_shell_integration().unwrap();
+
+        let env_bash = std::fs::read_to_string(temp.path().join("managed/shell/env.bash")).unwrap();
+        let env_fish = std::fs::read_to_string(temp.path().join("managed/shell/env.fish")).unwrap();
+
+        assert!(env_bash.contains("starship init bash"));
+        assert!(env_fish.contains("starship init fish | source"));
+        assert!(env_fish.contains("set -gx BAT_THEME "));
     }
 
     #[test]

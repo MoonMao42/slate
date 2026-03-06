@@ -70,6 +70,16 @@ fn baseline_snapshot_targets(env: &SlateEnv) -> Vec<SnapshotTarget> {
             path: env.zshrc_path(),
         },
         SnapshotTarget {
+            tool_key: "bashrc",
+            display_tool: "Bash",
+            path: env.bashrc_path(),
+        },
+        SnapshotTarget {
+            tool_key: "fish-loader",
+            display_tool: "Fish",
+            path: env.fish_loader_path(),
+        },
+        SnapshotTarget {
             tool_key: "gitconfig",
             display_tool: "Git",
             path: env.home().join(".gitconfig"),
@@ -123,6 +133,26 @@ fn baseline_snapshot_targets(env: &SlateEnv) -> Vec<SnapshotTarget> {
             tool_key: "slate-fastfetch",
             display_tool: "Slate fastfetch autorun",
             path: env.managed_file("autorun-fastfetch"),
+        },
+        SnapshotTarget {
+            tool_key: "slate-auto-watcher",
+            display_tool: "Slate auto-theme watcher",
+            path: env.config_dir().join("managed/bin/slate-dark-mode-notify"),
+        },
+        SnapshotTarget {
+            tool_key: "slate-shell-zsh",
+            display_tool: "Slate shell env (zsh)",
+            path: env.config_dir().join("managed/shell/env.zsh"),
+        },
+        SnapshotTarget {
+            tool_key: "slate-shell-bash",
+            display_tool: "Slate shell env (bash)",
+            path: env.config_dir().join("managed/shell/env.bash"),
+        },
+        SnapshotTarget {
+            tool_key: "slate-shell-fish",
+            display_tool: "Slate shell env (fish)",
+            path: env.config_dir().join("managed/shell/env.fish"),
         },
     ]
 }

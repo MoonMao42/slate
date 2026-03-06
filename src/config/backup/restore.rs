@@ -1,5 +1,5 @@
 use super::manifest::{read_manifest, validate_restore_point_data};
-use super::snapshot::create_pre_restore_snapshot;
+use super::snapshot::create_pre_restore_snapshot_with_env;
 use super::{
     backup_directory, backup_directory_with_env, manifest_path, restore_point_directory,
     restore_point_directory_with_env, OriginalFileState, RestoreEntry, RestorePoint,
@@ -143,6 +143,16 @@ fn restore_entry(entry: &RestoreEntry, content: Option<&str>) -> Result<()> {
     let original_path = &entry.original_path;
     let content = content.unwrap_or_default();
 
+    if let Some(parent) = original_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            SlateError::BackupFailed(format!(
+                "Failed to create parent directory for {}: {}",
+                original_path.display(),
+                e
+            ))
+        })?;
+    }
+
     let mut file = AtomicWriteFile::open(original_path).map_err(|e| {
         SlateError::BackupFailed(format!(
             "Failed to open config for writing {}: {}",
@@ -237,9 +247,16 @@ pub fn clear_all_restore_points() -> Result<usize> {
 }
 
 pub fn execute_restore(restore_point_id: &str) -> Result<RestoreReceipt> {
-    let restore_point = get_restore_point(restore_point_id)?;
+    let env = SlateEnv::from_process().map_err(|_| {
+        SlateError::Internal("Cannot initialize SlateEnv to execute restore".to_string())
+    })?;
+    execute_restore_with_env(&env, restore_point_id)
+}
+
+pub fn execute_restore_with_env(env: &SlateEnv, restore_point_id: &str) -> Result<RestoreReceipt> {
+    let restore_point = get_restore_point_with_env(env, restore_point_id)?;
     validate_restore_point_data(&restore_point)?;
-    let _pre_restore = create_pre_restore_snapshot(restore_point_id)?;
+    let _pre_restore = create_pre_restore_snapshot_with_env(env, restore_point_id)?;
 
     let mut results = Vec::new();
     for entry in &restore_point.entries {

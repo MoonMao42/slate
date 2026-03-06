@@ -41,8 +41,13 @@ pub(crate) fn disable_auto_theme(config: &ConfigManager) -> Result<()> {
 /// Handle `slate config set <key> <value>` command
 pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
     let env = SlateEnv::from_process()?;
-    let config = ConfigManager::with_env(&env)?;
+    handle_config_set_with_env(key, value, &env)
+}
+
+fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<()> {
+    let config = ConfigManager::with_env(env)?;
     let terminal = TerminalProfile::detect();
+    let appearance_backend = platform::desktop::detect_backend();
 
     match key {
         "opacity" => {
@@ -59,8 +64,14 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
                 }
             };
 
-            // Write to ~/.config/slate/current-opacity
-            config.set_current_opacity_preset(preset)?;
+            crate::cli::apply::apply_opacity(
+                env,
+                preset,
+                crate::cli::apply::OpacityApplyOptions {
+                    persist_state: true,
+                    reload_terminals: true,
+                },
+            )?;
 
             println!("{} Opacity set to '{}'", Symbols::SUCCESS, value);
             Ok(())
@@ -71,11 +82,18 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
                     enable_auto_theme(&config)?;
 
                     println!("{} Auto theme enabled", Symbols::SUCCESS);
-                    if terminal.watcher_shell_autostart_supported() {
+                    println!("  Appearance backend: {}", appearance_backend.label());
+                    if terminal.watcher_shell_autostart_supported()
+                        && appearance_backend.supports_watcher()
+                    {
                         println!("  Ghostty shell sessions can relaunch the watcher automatically");
+                    } else if appearance_backend.supports_watcher() {
+                        println!(
+                            "  Watching is available now, but restart recovery is still fully supported in Ghostty shells"
+                        );
                     } else {
                         println!(
-                            "  Theme switching works now, but automatic relaunch after a restart is Ghostty-only"
+                            "  Automatic watching is unavailable here, but `slate theme --auto` still works on demand"
                         );
                     }
                     println!("  Run 'slate config set auto-theme configure' to customize dark/light pairing");
@@ -144,5 +162,39 @@ pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
             "Unknown config key: '{}'. Known keys: opacity, auto-theme, fastfetch, sound",
             key
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::handle_config_set_with_env;
+    use crate::env::SlateEnv;
+    use tempfile::TempDir;
+
+    fn managed_tool_dir(env: &SlateEnv, tool: &str) -> std::path::PathBuf {
+        env.config_dir().join("managed").join(tool)
+    }
+
+    #[test]
+    fn test_handle_config_set_opacity_applies_managed_files_immediately() {
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+
+        handle_config_set_with_env("opacity", "frosted", &env).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(env.managed_file("current-opacity")).unwrap(),
+            "frosted"
+        );
+        assert!(managed_tool_dir(&env, "ghostty")
+            .join("opacity.conf")
+            .exists());
+        assert!(managed_tool_dir(&env, "ghostty").join("blur.conf").exists());
+        assert!(managed_tool_dir(&env, "kitty")
+            .join("opacity.conf")
+            .exists());
+        assert!(managed_tool_dir(&env, "alacritty")
+            .join("opacity.toml")
+            .exists());
     }
 }

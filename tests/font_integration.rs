@@ -220,15 +220,16 @@ mod font_integration_tests {
     #[test]
     fn test_font_cli_output_is_typography_focused() {
         // Expected output format (from handle_font):
-        // "✓ Updated font to {name} in Ghostty and Alacritty."
-        let expected_copy = "Updated font to JetBrainsMono Nerd Font in Ghostty and Alacritty.";
+        // "✓ Updated font to {name} in Slate-managed terminal configs."
+        let expected_copy =
+            "Updated font to JetBrainsMono Nerd Font in Slate-managed terminal configs.";
         assert!(
             !expected_copy.contains("changed"),
             "Copy should use 'updated' not 'changed'"
         );
         assert!(
-            expected_copy.contains("Ghostty and Alacritty"),
-            "Copy should mention terminal adapters only"
+            expected_copy.contains("Slate-managed terminal configs"),
+            "Copy should describe the managed terminal scope"
         );
     }
 

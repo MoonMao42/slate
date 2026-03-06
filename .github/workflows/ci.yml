@@ -8,8 +8,12 @@ on:
 
 jobs:
   check:
-    name: Check, Lint, Test
-    runs-on: macos-latest
+    name: Check, Lint, Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -23,13 +27,16 @@ jobs:
         run: cargo fmt --check
 
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --locked --release
 
       - name: Test
-        run: cargo test
+        run: cargo test --locked --quiet
+
+      - name: Install script smoke test
+        run: bash tests/install-script-smoke.sh
 
       - name: Binary size check
         run: |
@@ -42,7 +49,8 @@ jobs:
             exit 1
           fi
 
-      - name: Verify no external runtime dependencies (DIST-01)
+      - name: Verify macOS runtime dependencies
+        if: runner.os == 'macOS'
         run: |
           echo "Checking dynamic library dependencies..."
           otool -L target/release/slate
@@ -55,3 +63,13 @@ jobs:
             exit 1
           fi
           echo "OK: Binary has no external runtime dependencies"
+
+      - name: Verify Linux runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          echo "Checking Linux shared library dependencies..."
+          ldd target/release/slate
+          if ldd target/release/slate | grep -q "not found"; then
+            echo "ERROR: missing Linux runtime dependency"
+            exit 1
+          fi

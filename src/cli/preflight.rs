@@ -1,9 +1,10 @@
 use crate::adapter::font::FontAdapter;
+use crate::brand::language::Language;
 use crate::cli::font_selection::FontCatalog;
 use crate::cli::tool_selection::{detect_installed_tools_with_env, ToolCatalog};
-use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::Result;
+use crate::platform::capabilities::{detect_capabilities, CapabilityReport, SupportLevel};
 
 /// Preflight checks before setup
 #[derive(Debug, Clone)]
@@ -24,6 +25,9 @@ pub enum PreflightScenario {
     GuidedSetup,
     QuickSetup,
     RetryInstall,
+    /// Re-run against an existing slate install: no new downloads, just refresh config.
+    /// Relaxes Package Manager blocking — no brew/apt required when nothing needs installing.
+    ConfigOnlyReconfigure,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +44,8 @@ impl PreflightResult {
 
     /// Format results for display
     pub fn format_for_display(&self) -> String {
-        let mut output = String::from("✓ Preflight Checks\n");
+        let mut output = String::from(Language::PREFLIGHT_HEADER);
+        output.push('\n');
         for check in &self.checks {
             let icon = if !check.blocking {
                 "•"
@@ -89,8 +94,6 @@ pub fn run_checks_for_setup_with_env(
     scenario: PreflightScenario,
 ) -> Result<PreflightResult> {
     let mut checks = Vec::new();
-    let homebrew_installed = is_homebrew_installed();
-    let zsh_available = is_zsh_available();
     let network_reachable = check_network_reachable();
     let write_permissions = check_write_permissions_with_env(env);
     let installed = detect_installed_tools_with_env(env);
@@ -99,40 +102,37 @@ pub fn run_checks_for_setup_with_env(
         .unwrap_or_default()
         .len();
     let network_expectation = infer_network_expectation(&installed, installed_nerd_fonts, scenario);
+    let capabilities = detect_capabilities();
+    let terminal_features = crate::detection::TerminalProfile::detect().feature_summary();
 
-    // Check 1: Homebrew is installed (required for tool and font installation)
-    checks.push(PreflightCheck {
-        name: "Homebrew".to_string(),
-        description: if homebrew_installed {
-            "installed — primary install path is ready".to_string()
-        } else {
-            "missing — Slate uses Homebrew as the supported install path on a new Mac".to_string()
-        },
-        passed: homebrew_installed,
-        blocking: true,
-    });
+    checks.push(capability_preflight_check("OS", &capabilities.os, true));
+    checks.push(capability_preflight_check("Arch", &capabilities.arch, true));
+    checks.push(capability_preflight_check(
+        "Shell",
+        &capabilities.shell,
+        true,
+    ));
+    checks.push(capability_preflight_check(
+        "Package Manager",
+        &capabilities.package_manager,
+        downloads_require_package_manager(network_expectation),
+    ));
+    checks.push(capability_preflight_check(
+        "Desktop Appearance",
+        &capabilities.desktop_appearance,
+        false,
+    ));
+    checks.push(capability_preflight_check(
+        "Share Capture",
+        &capabilities.share_capture,
+        false,
+    ));
+    checks.push(capability_preflight_check(
+        "Terminal",
+        &capabilities.terminal,
+        false,
+    ));
 
-    // Check 2: Zsh is available
-    checks.push(PreflightCheck {
-        name: "Zsh".to_string(),
-        description: if zsh_available {
-            "available — zsh shell integration can be written".to_string()
-        } else {
-            "missing — this release only supports shell integration for zsh".to_string()
-        },
-        passed: zsh_available,
-        blocking: true,
-    });
-
-    // Check 3: Network reachable
-    checks.push(PreflightCheck {
-        name: "Network".to_string(),
-        description: network_description(network_reachable, network_expectation),
-        passed: true, // Network is optional — user may be offline
-        blocking: false,
-    });
-
-    // Check 4: Write permissions
     checks.push(PreflightCheck {
         name: "Write Permissions".to_string(),
         description: if write_permissions {
@@ -144,7 +144,14 @@ pub fn run_checks_for_setup_with_env(
         blocking: true,
     });
 
-    // Check 5: Tools available
+    // Advisory checks keep setup honest without blocking local-only runs.
+    checks.push(PreflightCheck {
+        name: "Network".to_string(),
+        description: network_description(network_reachable, network_expectation),
+        passed: true, // Network is optional — user may be offline
+        blocking: false,
+    });
+
     checks.push(PreflightCheck {
         name: "Tools".to_string(),
         description: format!(
@@ -156,41 +163,30 @@ pub fn run_checks_for_setup_with_env(
         blocking: false,
     });
 
-    // Check 6: Fonts available
     checks.push(PreflightCheck {
         name: "Fonts".to_string(),
-        description: if installed_nerd_fonts > 0 {
-            format!(
-                "{} supported Nerd Font(s) already installed",
-                installed_nerd_fonts
-            )
-        } else {
-            format!(
-                "no supported Nerd Font detected yet — setup can install one from {} choices",
-                FontCatalog::all_fonts().len()
-            )
-        },
+        description: fonts_description(installed_nerd_fonts, &capabilities.font_platform),
         passed: true, // Optional — defaults available
+        blocking: false,
+    });
+
+    checks.push(PreflightCheck {
+        name: "Terminal Features".to_string(),
+        description: format!(
+            "this terminal's live-reload {} · preview {} · font {}",
+            terminal_features.reload, terminal_features.live_preview, terminal_features.font_apply
+        ),
+        passed: true,
         blocking: false,
     });
 
     Ok(PreflightResult { checks })
 }
 
-/// Check if Homebrew is installed
-pub fn is_homebrew_installed() -> bool {
-    detection::homebrew_executable().is_some()
-}
-
-/// Check if Zsh is available
-fn is_zsh_available() -> bool {
-    std::path::Path::new("/bin/zsh").exists() || detection::command_path("zsh").is_some()
-}
-
 /// Check if network is reachable (simple DNS check)
 fn check_network_reachable() -> bool {
-    // Try to resolve Homebrew formulae host
-    match std::net::ToSocketAddrs::to_socket_addrs("formulae.brew.sh:443") {
+    // GitHub Releases and Nerd Fonts downloads are common to both supported platforms.
+    match std::net::ToSocketAddrs::to_socket_addrs("github.com:443") {
         Ok(mut addrs) => addrs.next().is_some(),
         Err(_) => false,
     }
@@ -243,6 +239,7 @@ fn infer_network_expectation(
 
     match scenario {
         PreflightScenario::RetryInstall => NetworkExpectation::DownloadsLikely,
+        PreflightScenario::ConfigOnlyReconfigure => NetworkExpectation::LocalConfigOnly,
         PreflightScenario::QuickSetup => {
             if quick_mode_missing_core || installed_nerd_fonts == 0 {
                 NetworkExpectation::DownloadsLikely
@@ -277,30 +274,108 @@ fn network_description(reachable: bool, expectation: NetworkExpectation) -> Stri
     }
 }
 
+fn downloads_require_package_manager(expectation: NetworkExpectation) -> bool {
+    matches!(expectation, NetworkExpectation::DownloadsLikely)
+}
+
+fn capability_preflight_check(
+    name: &str,
+    report: &CapabilityReport,
+    blocking_on_failure: bool,
+) -> PreflightCheck {
+    let passed = capability_allows_setup(report);
+
+    PreflightCheck {
+        name: name.to_string(),
+        description: format_capability_description(report),
+        passed,
+        blocking: blocking_on_failure,
+    }
+}
+
+fn capability_allows_setup(report: &CapabilityReport) -> bool {
+    !matches!(
+        report.level,
+        SupportLevel::Unsupported | SupportLevel::MissingDependency
+    )
+}
+
+fn format_capability_description(report: &CapabilityReport) -> String {
+    let mut description = format!("{} via {}", report.level.label(), report.backend);
+    if let Some(reason) = report.reason.as_deref() {
+        description.push_str(" — ");
+        description.push_str(reason);
+    }
+    description
+}
+
+fn fonts_description(installed_nerd_fonts: usize, font_platform: &CapabilityReport) -> String {
+    let availability = if installed_nerd_fonts > 0 {
+        format!(
+            "{} supported Nerd Font(s) already installed",
+            installed_nerd_fonts
+        )
+    } else {
+        format!(
+            "no supported Nerd Font detected yet — setup can install one from {} choices",
+            FontCatalog::all_fonts().len()
+        )
+    };
+
+    format!(
+        "{} — {}",
+        format_capability_description(font_platform),
+        availability
+    )
+}
+
 fn format_blocking_section(check: &PreflightCheck) -> String {
     match check.name.as_str() {
-        "Homebrew" => [
-            "Homebrew",
-            "  What happened: Homebrew is missing, so Slate has no supported install path on this Mac yet.",
-            "  Completed: Preflight ran and no config was changed.",
-            "  Not completed: Slate cannot install tools or Nerd Fonts until Homebrew exists.",
-            "  Next: Install Homebrew from https://brew.sh, then rerun `slate setup`.",
+        "OS" => [
+            "OS".to_string(),
+            format!("  What happened: {}", check.description),
+            "  Completed: Preflight ran and no config was changed.".to_string(),
+            "  Not completed: Slate only supports macOS and Linux in the current v2.1 baseline."
+                .to_string(),
+            "  Next: Run Slate on a supported OS target, then rerun `slate setup`.".to_string(),
         ]
         .join("\n"),
-        "Zsh" => [
-            "Zsh",
-            "  What happened: zsh was not found in this environment.",
-            "  Completed: Slate checked the rest of the machine and did not modify your files.",
-            "  Not completed: shell integration and Ghostty watcher hooks stay zsh-only in this release.",
-            "  Next: Install or enable zsh, then rerun `slate setup`.",
+        "Arch" => [
+            "Arch".to_string(),
+            format!("  What happened: {}", check.description),
+            "  Completed: Preflight finished safely without touching your files.".to_string(),
+            "  Not completed: this release only targets x86_64 and aarch64 builds.".to_string(),
+            "  Next: Use a supported Slate build for this machine, then rerun `slate setup`."
+                .to_string(),
+        ]
+        .join("\n"),
+        "Shell" => [
+            "Shell".to_string(),
+            format!("  What happened: {}", check.description),
+            "  Completed: Slate checked the machine and did not modify shell files.".to_string(),
+            "  Not completed: shared shell integration only targets zsh, bash, and fish today."
+                .to_string(),
+            "  Next: Switch to zsh, bash, or fish, then rerun `slate setup`.".to_string(),
+        ]
+        .join("\n"),
+        "Package Manager" => [
+            "Package Manager".to_string(),
+            format!("  What happened: {}", check.description),
+            "  Completed: Preflight confirmed the rest of the setup state safely.".to_string(),
+            "  Not completed: this run still needs a supported package install path for missing tools or fonts."
+                .to_string(),
+            "  Next: Install Homebrew on macOS, or use apt on the supported Linux baseline, then rerun `slate setup`."
+                .to_string(),
         ]
         .join("\n"),
         "Write Permissions" => [
-            "Write Permissions",
-            "  What happened: Slate could not write under ~/.config for this user.",
-            "  Completed: Preflight finished and nothing was partially written.",
-            "  Not completed: managed config files, shell integration, and snapshots cannot be created.",
-            "  Next: Fix ownership or permissions for ~/.config, then rerun `slate setup`.",
+            "Write Permissions".to_string(),
+            "  What happened: Slate could not write under ~/.config for this user.".to_string(),
+            "  Completed: Preflight finished and nothing was partially written.".to_string(),
+            "  Not completed: managed config files, shell integration, and snapshots cannot be created."
+                .to_string(),
+            "  Next: Fix ownership or permissions for ~/.config, then rerun `slate setup`."
+                .to_string(),
         ]
         .join("\n"),
         _ => format!(
@@ -367,8 +442,8 @@ mod tests {
     fn test_format_blocking_guidance_is_actionable() {
         let result = PreflightResult {
             checks: vec![PreflightCheck {
-                name: "Homebrew".to_string(),
-                description: "missing".to_string(),
+                name: "Package Manager".to_string(),
+                description: "unsupported via unsupported".to_string(),
                 passed: false,
                 blocking: true,
             }],
@@ -376,7 +451,62 @@ mod tests {
 
         let message = result.format_blocking_guidance();
         assert!(message.contains("Setup paused"));
+        assert!(message.contains("Package Manager"));
         assert!(message.contains("Homebrew"));
-        assert!(message.contains("https://brew.sh"));
+        assert!(message.contains("apt"));
+    }
+
+    #[test]
+    fn test_capability_preflight_check_formats_shared_snapshot_data() {
+        let check = capability_preflight_check(
+            "Package Manager",
+            &CapabilityReport::best_effort("apt", "validated Linux baseline is still landing"),
+            false,
+        );
+
+        assert_eq!(check.name, "Package Manager");
+        assert!(check.description.contains("best effort via apt"));
+        assert!(check
+            .description
+            .contains("validated Linux baseline is still landing"));
+    }
+
+    #[test]
+    fn test_config_only_reconfigure_skips_download_expectation() {
+        // Empty installed map + zero nerd fonts would normally trigger DownloadsLikely
+        // in QuickSetup or GuidedSetup. ConfigOnlyReconfigure must ignore that and stay local.
+        let installed = std::collections::HashMap::new();
+        let expectation =
+            infer_network_expectation(&installed, 0, PreflightScenario::ConfigOnlyReconfigure);
+        assert_eq!(expectation, NetworkExpectation::LocalConfigOnly);
+
+        let quick_same_inputs =
+            infer_network_expectation(&installed, 0, PreflightScenario::QuickSetup);
+        assert_eq!(quick_same_inputs, NetworkExpectation::DownloadsLikely);
+    }
+
+    #[test]
+    fn test_config_only_reconfigure_does_not_block_package_manager() {
+        // On ConfigOnlyReconfigure we expect LocalConfigOnly, which downgrades PM from blocking.
+        let local_expectation = NetworkExpectation::LocalConfigOnly;
+        assert!(!downloads_require_package_manager(local_expectation));
+
+        let download_expectation = NetworkExpectation::DownloadsLikely;
+        assert!(downloads_require_package_manager(download_expectation));
+    }
+
+    #[test]
+    fn test_fonts_description_includes_platform_backend() {
+        let description = fonts_description(
+            0,
+            &CapabilityReport::missing_dependency(
+                "fontconfig",
+                "Install fontconfig (`fc-cache`) so Slate can refresh Linux font caches automatically.",
+            ),
+        );
+
+        assert!(description.contains("missing dependency via fontconfig"));
+        assert!(description.contains("Install fontconfig"));
+        assert!(description.contains("no supported Nerd Font detected yet"));
     }
 }

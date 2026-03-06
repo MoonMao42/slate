@@ -1,4 +1,6 @@
 use assert_cmd::Command;
+use slate_cli::config::{begin_restore_point_baseline_with_env, execute_restore_with_env};
+use slate_cli::env::SlateEnv;
 use tempfile::TempDir;
 
 fn slate_cmd_isolated(tempdir: &TempDir) -> Command {
@@ -132,4 +134,58 @@ fn test_reset_still_works_but_hidden() {
         output.status.success() || stderr.contains("reset") || !stdout.is_empty(),
         "reset should be recognized (even if hidden)"
     );
+}
+
+#[test]
+fn test_shell_loader_restore_recreates_fish_loader_directory() {
+    let tempdir = TempDir::new().unwrap();
+    let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+    let fish_loader = env.fish_loader_path();
+    std::fs::create_dir_all(fish_loader.parent().unwrap()).unwrap();
+    std::fs::write(&fish_loader, "source '/tmp/env.fish'\n").unwrap();
+
+    let baseline = begin_restore_point_baseline_with_env(&env).unwrap();
+
+    std::fs::remove_dir_all(tempdir.path().join(".config/fish")).unwrap();
+    assert!(!fish_loader.exists());
+
+    let receipt = execute_restore_with_env(&env, &baseline.id).unwrap();
+    assert!(receipt.is_fully_successful());
+    assert!(fish_loader.exists());
+    assert!(std::fs::read_to_string(&fish_loader)
+        .unwrap()
+        .contains("source '/tmp/env.fish'"));
+}
+
+#[test]
+fn test_shell_loader_restore_removes_absent_shell_files_from_baseline() {
+    let tempdir = TempDir::new().unwrap();
+    let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+    let baseline = begin_restore_point_baseline_with_env(&env).unwrap();
+
+    let bashrc = env.bashrc_path();
+    let fish_loader = env.fish_loader_path();
+    std::fs::create_dir_all(fish_loader.parent().unwrap()).unwrap();
+    std::fs::write(&bashrc, "# bash after baseline\n").unwrap();
+    std::fs::write(&fish_loader, "source '/tmp/env.fish'\n").unwrap();
+
+    let receipt = execute_restore_with_env(&env, &baseline.id).unwrap();
+    assert!(receipt.is_fully_successful());
+    assert!(!bashrc.exists());
+    assert!(!fish_loader.exists());
+}
+
+#[test]
+fn test_shell_loader_restore_removes_absent_auto_theme_watcher_from_baseline() {
+    let tempdir = TempDir::new().unwrap();
+    let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+    let baseline = begin_restore_point_baseline_with_env(&env).unwrap();
+
+    let watcher = env.config_dir().join("managed/bin/slate-dark-mode-notify");
+    std::fs::create_dir_all(watcher.parent().unwrap()).unwrap();
+    std::fs::write(&watcher, "#!/bin/sh\nexit 0\n").unwrap();
+
+    let receipt = execute_restore_with_env(&env, &baseline.id).unwrap();
+    assert!(receipt.is_fully_successful());
+    assert!(!watcher.exists());
 }

@@ -2,11 +2,23 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os != "macos" {
+        return;
+    }
+
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set by cargo");
     let out_path = PathBuf::from(&out_dir);
 
     // Read the Swift source
     let swift_source_path = "resources/dark-mode-notify.swift";
+
+    // Re-run the build script if the Swift source, the toolchain selection, or the developer
+    // directory changes. This ensures that installing Xcode Command Line Tools after a
+    // stub-watcher build triggers a rebuild instead of silently reusing the 0-byte stub.
+    println!("cargo:rerun-if-changed={}", swift_source_path);
+    println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
+    println!("cargo:rerun-if-env-changed=SDKROOT");
 
     if !std::path::Path::new(swift_source_path).exists() {
         eprintln!("Swift source file not found at {}", swift_source_path);
