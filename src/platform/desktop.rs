@@ -171,7 +171,9 @@ fn detect_gnome_appearance() -> ThemeAppearance {
 
 fn parse_gnome_color_scheme_output(output: &str) -> ThemeAppearance {
     let stdout = output.to_ascii_lowercase();
-    if stdout.contains("prefer-dark") || stdout.contains("dark") {
+    // GNOME emits 'prefer-dark', 'prefer-light', or 'default'; contains("dark") covers
+    // prefer-dark, and anything else (including prefer-light) falls through to Light.
+    if stdout.contains("dark") {
         ThemeAppearance::Dark
     } else {
         ThemeAppearance::Light

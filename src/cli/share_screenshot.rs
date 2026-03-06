@@ -19,7 +19,7 @@ pub fn handle_share() -> Result<()> {
     let uri = build_export_uri(&config)?;
 
     // Determine output path
-    let output_path = output_path();
+    let output_path = output_path(&env);
 
     // Print URI first so it's visible in the screenshot
     println!("{}", share_intro_text(&uri));
@@ -79,9 +79,21 @@ fn build_export_uri(config: &ConfigManager) -> Result<String> {
     ))
 }
 
-fn output_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join("Desktop/slate-share.png")
+fn output_path(env: &SlateEnv) -> PathBuf {
+    // Prefer $XDG_PICTURES_DIR (Linux user-dirs), fall back to ~/Desktop if present,
+    // otherwise drop the file at the home root so the user can still find it.
+    if let Ok(pictures) = std::env::var("XDG_PICTURES_DIR") {
+        if !pictures.is_empty() {
+            return PathBuf::from(pictures).join("slate-share.png");
+        }
+    }
+
+    let desktop = env.home().join("Desktop");
+    if desktop.is_dir() {
+        return desktop.join("slate-share.png");
+    }
+
+    env.home().join("slate-share.png")
 }
 
 fn share_intro_text(uri: &str) -> String {
@@ -109,12 +121,15 @@ fn has_imagemagick() -> bool {
 }
 
 fn add_watermark(image_path: &Path, uri: &str) -> std::result::Result<(), ()> {
-    // Add "✦ slate" watermark + URI at bottom-right
+    // Add "✦ slate" watermark + URI at bottom-right.
+    // Skip silently if the path isn't valid UTF-8 — the watermark is optional polish, not
+    // correctness-critical, and magick won't accept non-UTF-8 args anyway.
+    let path_str = image_path.to_str().ok_or(())?;
     let watermark_text = format!("✦ slate  ·  {}", uri);
 
     let status = Command::new("magick")
         .args([
-            image_path.to_str().unwrap(),
+            path_str,
             "-gravity",
             "SouthEast",
             "-pointsize",
@@ -124,7 +139,7 @@ fn add_watermark(image_path: &Path, uri: &str) -> std::result::Result<(), ()> {
             "-annotate",
             "+20+12",
             &watermark_text,
-            image_path.to_str().unwrap(),
+            path_str,
         ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

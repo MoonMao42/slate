@@ -195,6 +195,13 @@ mod imp {
             on_change(scheme)?;
         }
 
+        // Stream closed — the portal or D-Bus session went away. Shell integration will
+        // relaunch us on next shell start, but surface the exit so users inspecting
+        // `ps` / systemd journal can tell the watcher died rather than being silently
+        // dormant.
+        eprintln!(
+            "slate: portal color-scheme signal stream closed; auto-theme watcher exiting"
+        );
         Ok(())
     }
 
@@ -248,6 +255,10 @@ mod imp {
                         err
                     ))
                 })?;
+                // Portal staging files under /run/user/$UID/doc/.../ persist under some
+                // backends; remove after the copy. Some implementations may not own the
+                // file (or may have already cleaned it); swallow failures.
+                let _ = fs::remove_file(&source_path);
                 Ok(PortalCaptureStatus::Captured)
             }
             1 => Ok(PortalCaptureStatus::Cancelled),

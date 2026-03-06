@@ -17,14 +17,19 @@ fn binary_path(config: &ConfigManager) -> Result<PathBuf> {
 }
 
 fn watcher_stop_succeeded(status: &std::process::ExitStatus) -> bool {
+    // pkill conventions: 0 = at least one process matched and was signalled; 1 = no matches
+    // (which is fine — watcher already gone). Any other exit code is a real failure.
     if status.success() || status.code() == Some(1) {
         return true;
     }
 
+    // Under some test harnesses and process-group setups, pkill itself terminates with
+    // SIGTERM when slate is invoked inside a cascading-kill environment. Treat that as a
+    // successful stop — the watcher was either already gone or signalled before pkill
+    // could report a normal exit.
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
-
         if matches!(status.signal(), Some(libc::SIGTERM)) {
             return true;
         }

@@ -209,13 +209,21 @@ fn apply_imported_tool_flags(config: &ConfigManager, flags: ToolImportFlags) -> 
     let previous_highlighting = config.is_zsh_highlighting_enabled()?;
     let previous_fastfetch = config.has_fastfetch_autorun()?;
 
-    if previous_starship != flags.starship {
+    let starship_changed = previous_starship != flags.starship;
+    let highlighting_changed = previous_highlighting != flags.highlighting;
+    let fastfetch_changed = previous_fastfetch != flags.fastfetch;
+
+    if !starship_changed && !highlighting_changed && !fastfetch_changed {
+        return Ok(());
+    }
+
+    if starship_changed {
         config.set_starship_enabled(flags.starship)?;
     }
-    if previous_highlighting != flags.highlighting {
+    if highlighting_changed {
         config.set_zsh_highlighting_enabled(flags.highlighting)?;
     }
-    if previous_fastfetch != flags.fastfetch {
+    if fastfetch_changed {
         if flags.fastfetch {
             config.enable_fastfetch_autorun()?;
         } else {
@@ -223,23 +231,40 @@ fn apply_imported_tool_flags(config: &ConfigManager, flags: ToolImportFlags) -> 
         }
     }
 
-    if previous_starship == flags.starship
-        && previous_highlighting == flags.highlighting
-        && previous_fastfetch == flags.fastfetch
-    {
-        return Ok(());
-    }
-
     if let Err(err) = config.refresh_shell_integration() {
-        let _ = config.set_starship_enabled(previous_starship);
-        let _ = config.set_zsh_highlighting_enabled(previous_highlighting);
-        if previous_fastfetch {
-            let _ = config.enable_fastfetch_autorun();
-        } else {
-            let _ = config.disable_fastfetch_autorun();
+        let mut rollback_errors: Vec<String> = Vec::new();
+        if starship_changed {
+            if let Err(e) = config.set_starship_enabled(previous_starship) {
+                rollback_errors.push(format!("starship: {}", e));
+            }
         }
-        let _ = config.refresh_shell_integration();
-        return Err(err);
+        if highlighting_changed {
+            if let Err(e) = config.set_zsh_highlighting_enabled(previous_highlighting) {
+                rollback_errors.push(format!("zsh-highlighting: {}", e));
+            }
+        }
+        if fastfetch_changed {
+            let fastfetch_rollback = if previous_fastfetch {
+                config.enable_fastfetch_autorun()
+            } else {
+                config.disable_fastfetch_autorun()
+            };
+            if let Err(e) = fastfetch_rollback {
+                rollback_errors.push(format!("fastfetch: {}", e));
+            }
+        }
+        if let Err(e) = config.refresh_shell_integration() {
+            rollback_errors.push(format!("shell integration refresh: {}", e));
+        }
+
+        if rollback_errors.is_empty() {
+            return Err(err);
+        }
+        return Err(SlateError::InvalidConfig(format!(
+            "{} (rollback also failed: {})",
+            err,
+            rollback_errors.join("; ")
+        )));
     }
 
     Ok(())

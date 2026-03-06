@@ -118,17 +118,28 @@ if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
   exit 1
 fi
 
-tar xzf "$WORK_TMPDIR/$ASSET" -C "$WORK_TMPDIR"
-
-BIN_PATH="$(find "$WORK_TMPDIR" -maxdepth 3 -type f -name "$BIN_NAME" -perm -u+x 2>/dev/null | head -n 1)"
-if [ -z "$BIN_PATH" ]; then
-  # Fallback: some tar layouts lose +x bits; accept any regular file named $BIN_NAME
-  BIN_PATH="$(find "$WORK_TMPDIR" -maxdepth 3 -type f -name "$BIN_NAME" | head -n 1)"
-fi
-if [ -z "$BIN_PATH" ]; then
-  echo "Error: archive did not contain a ${BIN_NAME} binary." >&2
+EXTRACT_DIR="$WORK_TMPDIR/extracted"
+mkdir -p "$EXTRACT_DIR"
+if ! tar xzf "$WORK_TMPDIR/$ASSET" -C "$EXTRACT_DIR" --no-same-owner --no-same-permissions; then
+  echo "Error: failed to extract $ASSET" >&2
   exit 1
 fi
+
+# cargo-dist archives contain a single top-level dir named after the asset; binary lives one level deep.
+# Constrain the search so a crafted archive can't smuggle a sibling binary earlier in find order.
+EXPECTED_DIR="${ASSET%.tar.gz}"
+CANDIDATE="$EXTRACT_DIR/$EXPECTED_DIR/$BIN_NAME"
+if [ -f "$CANDIDATE" ]; then
+  BIN_PATH="$CANDIDATE"
+else
+  # Fallback for archives without the conventional prefix: only accept a match exactly one dir deep.
+  BIN_PATH="$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 2 -type f -name "$BIN_NAME" | head -n 1)"
+fi
+if [ -z "$BIN_PATH" ] || [ ! -f "$BIN_PATH" ]; then
+  echo "Error: archive did not contain a ${BIN_NAME} binary at the expected path." >&2
+  exit 1
+fi
+chmod +x "$BIN_PATH" 2>/dev/null || true
 
 if [ -w "$INSTALL_DIR" ] || { [ ! -e "$INSTALL_DIR" ] && mkdir -p "$INSTALL_DIR" 2>/dev/null; }; then
   install -m 755 "$BIN_PATH" "$INSTALL_DIR/$BIN_NAME"

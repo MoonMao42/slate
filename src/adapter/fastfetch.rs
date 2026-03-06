@@ -98,7 +98,7 @@ impl FastfetchAdapter {
             "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
             "logo": {
                 "type": "builtin",
-                "source": "apple_small",
+                "source": if cfg!(target_os = "macos") { "apple_small" } else { "auto" },
                 "padding": { "top": 1 }
             },
             "display": {

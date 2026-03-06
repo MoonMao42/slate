@@ -93,9 +93,29 @@ impl SlateEnv {
         self.home.join(".zshrc")
     }
 
-    /// Get .bashrc path (for shell integration marker block)
+    /// Get .bashrc path (raw accessor for backup/snapshot code).
     pub fn bashrc_path(&self) -> PathBuf {
         self.home.join(".bashrc")
+    }
+
+    /// Get .bash_profile path (raw accessor).
+    pub fn bash_profile_path(&self) -> PathBuf {
+        self.home.join(".bash_profile")
+    }
+
+    /// Resolve the bash rc file where shell integration should be written.
+    /// On macOS, Terminal.app launches bash as a login shell which sources `.bash_profile`
+    /// (not `.bashrc`) unless the user explicitly chains them. Prefer `.bash_profile` when
+    /// it already exists, or when `.bashrc` is absent. On Linux, always use `.bashrc`.
+    pub fn bash_integration_path(&self) -> PathBuf {
+        if cfg!(target_os = "macos") {
+            let profile = self.bash_profile_path();
+            let rc = self.bashrc_path();
+            if profile.exists() || !rc.exists() {
+                return profile;
+            }
+        }
+        self.bashrc_path()
     }
 
     /// Get fish conf.d directory for managed loader files.

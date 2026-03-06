@@ -27,7 +27,7 @@ pub fn handle_clean() -> Result<()> {
     // Step 2: Remove integration references before deleting managed files
     log::step("Removing integration references...")?;
     remove_marker_block_from_zshrc(env.home())?;
-    remove_marker_block_from_bashrc(env.home())?;
+    remove_marker_blocks_from_bash(&env)?;
     remove_fish_loader(&env)?;
     remove_ghostty_managed_references(&env)?;
     remove_alacritty_managed_references(&env)?;
@@ -64,9 +64,15 @@ fn remove_marker_block_from_zshrc(home: &Path) -> Result<()> {
     crate::adapter::marker_block::remove_managed_blocks_from_file(&zshrc_path)
 }
 
-fn remove_marker_block_from_bashrc(home: &Path) -> Result<()> {
-    let bashrc_path = home.join(".bashrc");
-    crate::adapter::marker_block::remove_managed_blocks_from_file(&bashrc_path)
+/// Remove marker blocks from any bash rc file Slate might have written to.
+/// On macOS we may have written to `.bash_profile` (login-shell convention); on Linux we
+/// write to `.bashrc`. Sweep both so a reinstall/clean across machines or a migration from
+/// an older slate version still leaves no orphaned loaders. `remove_managed_blocks_from_file`
+/// is a no-op on missing files, so unconditional calls are safe.
+fn remove_marker_blocks_from_bash(env: &SlateEnv) -> Result<()> {
+    crate::adapter::marker_block::remove_managed_blocks_from_file(&env.bashrc_path())?;
+    crate::adapter::marker_block::remove_managed_blocks_from_file(&env.bash_profile_path())?;
+    Ok(())
 }
 
 fn remove_fish_loader(env: &SlateEnv) -> Result<()> {

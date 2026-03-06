@@ -79,7 +79,7 @@ pub(crate) fn setup_shell_integration_with_env(
         }
         crate::platform::shell::ShellBackend::Bash => {
             marker_block::upsert_managed_block_file(
-                &env.bashrc_path(),
+                &env.bash_integration_path(),
                 &shell_source_block(&env.config_dir().join("managed/shell/env.bash")),
             )?;
         }

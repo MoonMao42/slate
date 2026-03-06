@@ -493,8 +493,10 @@ fn classify_recovery_category(message: &str) -> Option<RecoveryCategory> {
     } else if lower.contains("homebrew was not found")
         || lower.contains("xcode command line tools")
         || lower.contains("swiftc")
-        || lower.contains("zsh")
-        || lower.contains("not found")
+        || lower.contains("zsh was not found")
+        || lower.contains("zsh is not installed")
+        || lower.contains("command not found")
+        || lower.contains("no such file or directory")
     {
         Some(RecoveryCategory::MissingDependency)
     } else if lower.contains("ghostty-only")

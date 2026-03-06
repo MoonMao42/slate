@@ -4,6 +4,9 @@ use std::process::Command;
 fn main() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os != "macos" {
+        // WATCHER_BINARY is only referenced behind #[cfg(target_os = "macos")] in
+        // src/platform/dark_mode_notify.rs. Bail early on other targets — any non-gated
+        // env!("WATCHER_BINARY") elsewhere would fail the build here, which is the signal.
         return;
     }
 

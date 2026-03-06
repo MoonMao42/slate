@@ -143,12 +143,30 @@ fn test_setup_shell_integration_bash() {
         String::from_utf8_lossy(&output.stderr)
     );
 
+    // On macOS, Terminal.app runs bash as a login shell which reads .bash_profile, so
+    // slate prefers .bash_profile when it exists. On Linux, .bashrc is canonical for
+    // interactive sessions. Either way, .bashrc still retains its user content and
+    // .bash_profile still retains its user content — the marker block lands in exactly
+    // one of them.
     let bashrc = std::fs::read_to_string(tempdir.path().join(".bashrc")).unwrap();
-    assert!(bashrc.contains("slate:start"));
-    assert!(bashrc.contains("managed/shell/env.bash"));
-    assert!(bashrc.contains("# user bash"));
     let bash_profile = std::fs::read_to_string(tempdir.path().join(".bash_profile")).unwrap();
-    assert_eq!(bash_profile, "# bash profile\n");
+    let marker_in_bashrc = bashrc.contains("slate:start");
+    let marker_in_profile = bash_profile.contains("slate:start");
+    assert!(
+        marker_in_bashrc ^ marker_in_profile,
+        "expected slate marker block in exactly one of .bashrc / .bash_profile"
+    );
+    if cfg!(target_os = "macos") {
+        assert!(marker_in_profile, "macOS should write to .bash_profile when it exists");
+        assert!(bash_profile.contains("managed/shell/env.bash"));
+        assert!(bash_profile.contains("# bash profile"));
+        assert_eq!(bashrc, "# user bash\n");
+    } else {
+        assert!(marker_in_bashrc, "Linux should write to .bashrc");
+        assert!(bashrc.contains("managed/shell/env.bash"));
+        assert!(bashrc.contains("# user bash"));
+        assert_eq!(bash_profile, "# bash profile\n");
+    }
     assert!(tempdir
         .path()
         .join(".config/slate/managed/shell/env.zsh")
@@ -1065,7 +1083,7 @@ fn test_version_flag() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
-        stdout.contains("slate") && stdout.contains("2.0"),
+        stdout.contains("slate") && stdout.contains(env!("CARGO_PKG_VERSION")),
         "version should contain crate name and version, got: {}",
         stdout
     );
