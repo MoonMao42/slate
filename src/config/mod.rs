@@ -236,8 +236,16 @@ mod tests {
     fn test_shell_integration_file_uses_injected_managed_and_xdg_paths() {
         let temp = TempDir::new().unwrap();
         let base_path = temp.path().join("custom-xdg/slate");
+        fs::create_dir_all(&base_path).unwrap();
         let config_manager = test_config_manager(&base_path);
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+
+        // Pin a nerd font so should_prefer_plain_starship() returns false regardless of
+        // the host's installed fonts. Without this, CI runners (no nerd font installed)
+        // would take the prefer-plain branch and never emit `export STARSHIP_CONFIG=<active>`.
+        config_manager
+            .set_current_font("JetBrainsMono Nerd Font")
+            .unwrap();
 
         config_manager.write_shell_integration_file(&theme).unwrap();
 
