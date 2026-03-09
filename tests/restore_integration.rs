@@ -164,15 +164,47 @@ fn test_shell_loader_restore_removes_absent_shell_files_from_baseline() {
     let baseline = begin_restore_point_baseline_with_env(&env).unwrap();
 
     let bashrc = env.bashrc_path();
+    let bash_profile = env.bash_profile_path();
     let fish_loader = env.fish_loader_path();
     std::fs::create_dir_all(fish_loader.parent().unwrap()).unwrap();
     std::fs::write(&bashrc, "# bash after baseline\n").unwrap();
+    std::fs::write(&bash_profile, "# bash_profile after baseline\n").unwrap();
     std::fs::write(&fish_loader, "source '/tmp/env.fish'\n").unwrap();
 
     let receipt = execute_restore_with_env(&env, &baseline.id).unwrap();
     assert!(receipt.is_fully_successful());
     assert!(!bashrc.exists());
+    // macOS login bash reads .bash_profile; baseline must know to remove it too when it
+    // wasn't present before slate setup.
+    assert!(!bash_profile.exists());
     assert!(!fish_loader.exists());
+}
+
+#[test]
+fn test_bash_profile_is_restored_from_baseline_when_present_before_slate() {
+    let tempdir = TempDir::new().unwrap();
+    let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+
+    let bash_profile = env.bash_profile_path();
+    let original = "# user-curated bash_profile\nexport FOO=bar\n";
+    std::fs::write(&bash_profile, original).unwrap();
+
+    let baseline = begin_restore_point_baseline_with_env(&env).unwrap();
+
+    // Simulate slate inserting its marker block into .bash_profile (macOS login-shell path).
+    std::fs::write(
+        &bash_profile,
+        format!(
+            "{}# slate:start\nsource ~/.config/slate/managed/shell/env.bash\n# slate:end\n",
+            original
+        ),
+    )
+    .unwrap();
+
+    let receipt = execute_restore_with_env(&env, &baseline.id).unwrap();
+    assert!(receipt.is_fully_successful());
+    let restored = std::fs::read_to_string(&bash_profile).unwrap();
+    assert_eq!(restored, original);
 }
 
 #[test]

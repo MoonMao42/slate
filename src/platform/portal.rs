@@ -184,9 +184,9 @@ mod imp {
     {
         let connection = session_connection()?;
         let proxy = settings_proxy(&connection)?;
-        let mut changes = proxy.receive_setting_changed().map_err(portal_error)?;
+        let changes = proxy.receive_setting_changed().map_err(portal_error)?;
 
-        while let Some(signal) = changes.next() {
+        for signal in changes {
             let args = signal.args().map_err(portal_error)?;
             if *args.namespace() != APPEARANCE_NAMESPACE || *args.key() != COLOR_SCHEME_KEY {
                 continue;
@@ -196,11 +196,16 @@ mod imp {
         }
 
         // Stream closed — the portal or D-Bus session went away. Shell integration will
-        // relaunch us on next shell start, but surface the exit so users inspecting
-        // `ps` / systemd journal can tell the watcher died rather than being silently
-        // dormant.
+        // relaunch us on next shell start, but surface the exit so users inspecting the
+        // watcher log (~/.cache/slate/watcher.log on Linux) can tell the watcher died
+        // rather than being silently dormant.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         eprintln!(
-            "slate: portal color-scheme signal stream closed; auto-theme watcher exiting"
+            "[slate watcher {}] portal color-scheme signal stream closed; exiting",
+            now
         );
         Ok(())
     }
@@ -283,10 +288,8 @@ mod imp {
         #[test]
         fn test_owned_value_to_string_reads_portal_uri_values() {
             let uri = "file:///tmp/slate-share.png".to_string();
-            assert_eq!(
-                owned_value_to_string(&OwnedValue::from(uri.clone())).unwrap(),
-                uri
-            );
+            let value = OwnedValue::try_from(zbus::zvariant::Value::from(uri.clone())).unwrap();
+            assert_eq!(owned_value_to_string(&value).unwrap(), uri);
         }
 
         #[test]

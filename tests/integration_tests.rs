@@ -157,7 +157,10 @@ fn test_setup_shell_integration_bash() {
         "expected slate marker block in exactly one of .bashrc / .bash_profile"
     );
     if cfg!(target_os = "macos") {
-        assert!(marker_in_profile, "macOS should write to .bash_profile when it exists");
+        assert!(
+            marker_in_profile,
+            "macOS should write to .bash_profile when it exists"
+        );
         assert!(bash_profile.contains("managed/shell/env.bash"));
         assert!(bash_profile.contains("# bash profile"));
         assert_eq!(bashrc, "# user bash\n");

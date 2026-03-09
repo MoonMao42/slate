@@ -88,7 +88,7 @@ pub fn list_restore_points_with_env(env: &SlateEnv) -> Result<Vec<RestorePoint>>
         }
     }
 
-    restore_points.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    restore_points.sort_by_key(|rp| std::cmp::Reverse(rp.created_at));
     Ok(restore_points)
 }
 

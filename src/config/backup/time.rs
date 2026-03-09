@@ -83,7 +83,7 @@ fn days_from_unix_epoch(year: u64, month: u64, day: u64) -> Option<u64> {
         return None;
     }
 
-    let is_leap = |y: u64| (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+    let is_leap = |y: u64| (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400);
     let days_in_month = if is_leap(year) {
         [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     } else {
@@ -139,7 +139,7 @@ pub(crate) fn calculate_date(mut days: u64) -> (u64, u64, u64) {
 }
 
 pub(crate) fn is_leap_year(year: u64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 #[cfg(test)]

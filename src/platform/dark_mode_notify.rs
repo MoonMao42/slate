@@ -69,16 +69,37 @@ fn stop_impl() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn spawn_background_watcher(bin_path: &Path) -> Result<()> {
+    // Route watcher stderr to a log file under the slate cache dir so exit messages from
+    // the portal signal stream are actually observable. Falls back to /dev/null if the
+    // log file can't be opened (e.g. read-only cache dir) — we still want the watcher to
+    // start in that case.
+    let log_stderr: std::process::Stdio = match watcher_log_target() {
+        Ok(file) => file.into(),
+        Err(_) => std::process::Stdio::null(),
+    };
+
     std::process::Command::new(bin_path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(log_stderr)
         .spawn()
         .map_err(|e| {
             SlateError::PlatformError(format!("Failed to start watcher process: {}", e))
         })?;
 
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn watcher_log_target() -> std::io::Result<std::fs::File> {
+    let env =
+        SlateEnv::from_process().map_err(|_| std::io::Error::other("SlateEnv unavailable"))?;
+    let log_dir = env.slate_cache_dir();
+    std::fs::create_dir_all(log_dir)?;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(log_dir.join("watcher.log"))
 }
 
 #[cfg(target_os = "linux")]

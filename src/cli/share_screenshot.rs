@@ -80,11 +80,15 @@ fn build_export_uri(config: &ConfigManager) -> Result<String> {
 }
 
 fn output_path(env: &SlateEnv) -> PathBuf {
-    // Prefer $XDG_PICTURES_DIR (Linux user-dirs), fall back to ~/Desktop if present,
-    // otherwise drop the file at the home root so the user can still find it.
+    // Prefer $XDG_PICTURES_DIR (Linux user-dirs) when it falls inside the injected home
+    // this keeps tests and SLATE_HOME-sandboxed runs hermetic. If XDG_PICTURES_DIR is set
+    // but escapes the injected home, ignore it and fall back to ~/Desktop or $HOME root.
     if let Ok(pictures) = std::env::var("XDG_PICTURES_DIR") {
         if !pictures.is_empty() {
-            return PathBuf::from(pictures).join("slate-share.png");
+            let pictures_path = PathBuf::from(pictures);
+            if pictures_path.starts_with(env.home()) {
+                return pictures_path.join("slate-share.png");
+            }
         }
     }
 

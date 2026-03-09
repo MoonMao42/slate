@@ -32,7 +32,7 @@ fn test_baseline_has_correct_metadata() {
     // Baseline should snapshot the fixed target list, including absent files.
     assert_eq!(
         baseline.entries.len(),
-        18,
+        19,
         "Baseline should capture the full pre-slate target set"
     );
     assert!(
@@ -41,6 +41,13 @@ fn test_baseline_has_correct_metadata() {
             .iter()
             .any(|entry| entry.tool_key == "bashrc"),
         "Baseline should track .bashrc"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "bash-profile"),
+        "Baseline should track .bash_profile (macOS login bash)"
     );
     assert!(
         baseline

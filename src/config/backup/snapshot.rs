@@ -74,6 +74,14 @@ fn baseline_snapshot_targets(env: &SlateEnv) -> Vec<SnapshotTarget> {
             display_tool: "Bash",
             path: env.bashrc_path(),
         },
+        // On macOS, login bash reads .bash_profile, so slate writes the marker block there
+        // when it exists. Snapshot both files unconditionally so `restore` can undo the
+        // marker regardless of which file slate wrote to on this machine.
+        SnapshotTarget {
+            tool_key: "bash-profile",
+            display_tool: "Bash (login profile)",
+            path: env.bash_profile_path(),
+        },
         SnapshotTarget {
             tool_key: "fish-loader",
             display_tool: "Fish",

@@ -25,17 +25,12 @@ pub use snapshot::{
 pub(crate) use time::{format_iso8601_timestamp, generate_restore_point_id};
 
 /// Represents a single backup file with persisted metadata.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OriginalFileState {
+    #[default]
     Present,
     Absent,
-}
-
-impl Default for OriginalFileState {
-    fn default() -> Self {
-        Self::Present
-    }
 }
 
 /// Represents a single backup file with persisted metadata.

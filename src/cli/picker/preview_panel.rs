@@ -193,7 +193,7 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
     if !palette.extras.is_empty() {
         output.push_str("Extras: ");
         let mut sorted_extras: Vec<_> = palette.extras.iter().collect();
-        sorted_extras.sort_by(|(left, _), (right, _)| left.cmp(right));
+        sorted_extras.sort_by_key(|(name, _)| *name);
         let mut extra_count = 0;
         for (name, color) in &sorted_extras {
             output.push_str(&bg(color));
