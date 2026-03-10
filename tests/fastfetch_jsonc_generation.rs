@@ -57,10 +57,16 @@ fn test_apple_logo_preserved_in_all_themes() {
             theme.id
         );
 
+        let expected_source = if cfg!(target_os = "macos") {
+            "apple_small"
+        } else {
+            "auto"
+        };
         assert_eq!(
             logo.get("source").and_then(|v| v.as_str()),
-            Some("apple_small"),
-            "Logo source should be 'apple_small' for theme {}",
+            Some(expected_source),
+            "Logo source should be '{}' for theme {} on this platform",
+            expected_source,
             theme.id
         );
 
