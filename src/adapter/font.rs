@@ -339,7 +339,14 @@ mod tests {
         let result = adapter.integration_config_path();
         assert!(result.is_ok());
         let path = result.unwrap();
-        assert!(path.to_string_lossy().contains("Library/Fonts"));
+        let as_str = path.to_string_lossy();
+        // Per-user font dir is OS-specific: Library/Fonts on macOS, .local/share/fonts
+        // on Linux/BSD. Accept either so the test is meaningful cross-platform.
+        assert!(
+            as_str.contains("Library/Fonts") || as_str.contains(".local/share/fonts"),
+            "unexpected user font dir: {}",
+            as_str
+        );
     }
 
     #[test]
