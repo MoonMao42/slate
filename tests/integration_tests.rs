@@ -903,7 +903,10 @@ fn test_import_rejects_invalid_opacity_without_mutating_state() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn test_system_font_switch_uses_plain_starship_profile() {
+    // Menlo is a macOS system font; the slate font registry accepts it only on macOS.
+    // Skip the test on Linux where the font simply isn't a valid target.
     let tempdir = TempDir::new().unwrap();
 
     let output = slate_cmd_isolated(&tempdir)

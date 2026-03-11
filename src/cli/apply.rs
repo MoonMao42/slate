@@ -143,6 +143,11 @@ pub(crate) fn apply_theme_with_options(
 
     let config = ConfigManager::with_env(env)?;
     if report.applied_count() == 0 {
+        // No tool-specific config was written (no ghostty/alacritty/starship found). Still
+        // emit the shared shell-integration env files so the slate loader sourced from
+        // .zshrc / .bash_profile / fish conf.d doesn't reference a missing file. Skip the
+        // `set_current_theme` + reload steps since there's nothing downstream to reload.
+        config.write_shell_integration_file(theme)?;
         return Ok(report);
     }
     config.set_current_theme(&theme.id)?;
