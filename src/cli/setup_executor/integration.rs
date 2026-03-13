@@ -64,18 +64,20 @@ pub(crate) fn setup_shell_integration_with_env(
     use crate::adapter::marker_block;
 
     let selected_theme = resolve_selected_theme(theme, env)?;
+
+    // Write the shared shell env files BEFORE running the tool-apply pass. On a bare host
+    // (CI, fresh box) the tool-apply may Err out or skip entirely, and the marker block
+    // we're about to upsert below references these files — missing them breaks every
+    // future shell startup. Do this early so even a downstream failure can't leave the
+    // loader pointing at nothing.
+    let config = crate::config::ConfigManager::with_env(env)?;
+    config.write_shell_integration_file(&selected_theme)?;
+
     let report = theme_apply::apply_theme_selection_for_tools_with_env(
         &selected_theme,
         env,
         Some(tools_to_configure),
     )?;
-
-    // Always (re)generate the shared shell env files. The downstream apply_theme path only
-    // writes these when at least one tool applied, so on a bare host (CI, fresh box)
-    // the loader block in .zshrc / .bash_profile / fish conf.d would otherwise point at
-    // a missing file. Setup is the one place we can guarantee it happens.
-    let config = crate::config::ConfigManager::with_env(env)?;
-    config.write_shell_integration_file(&selected_theme)?;
 
     match crate::platform::shell::detect_backend() {
         crate::platform::shell::ShellBackend::Zsh => {
