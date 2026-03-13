@@ -20,19 +20,32 @@ impl SlateEnv {
     /// Prefers $XDG_CONFIG_HOME if set, otherwise uses $HOME/.config.
     /// Prefers $XDG_CACHE_HOME if set, otherwise uses $HOME/.cache.
     pub fn from_process() -> Result<Self> {
-        // SLATE_HOME overrides HOME for full isolation (used by integration tests)
-        let home = std::env::var("SLATE_HOME")
-            .or_else(|_| std::env::var("HOME"))
-            .map(PathBuf::from)
-            .map_err(|e| crate::error::SlateError::Internal(format!("HOME not set: {}", e)))?;
+        // SLATE_HOME overrides HOME for full isolation (used by integration tests).
+        // When SLATE_HOME is set, we also force XDG_CONFIG_HOME / XDG_CACHE_HOME to land
+        // inside SLATE_HOME so a host-level XDG override can't leak tests outside the
+        // sandbox. Without this, GHA Ubuntu runners (which set XDG_CONFIG_HOME) had slate
+        // write to /home/runner/.config/slate while tests looked in the tempdir.
+        let slate_home_override = std::env::var("SLATE_HOME").ok().map(PathBuf::from);
+        let home = slate_home_override
+            .clone()
+            .or_else(|| std::env::var("HOME").ok().map(PathBuf::from))
+            .ok_or_else(|| crate::error::SlateError::Internal("HOME not set".to_string()))?;
 
-        let xdg_config_home = std::env::var("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| home.join(".config"));
+        let xdg_config_home = if slate_home_override.is_some() {
+            home.join(".config")
+        } else {
+            std::env::var("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home.join(".config"))
+        };
 
-        let xdg_cache_home = std::env::var("XDG_CACHE_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| home.join(".cache"));
+        let xdg_cache_home = if slate_home_override.is_some() {
+            home.join(".cache")
+        } else {
+            std::env::var("XDG_CACHE_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home.join(".cache"))
+        };
 
         let slate_config_dir = xdg_config_home.join("slate");
         let slate_cache_dir = xdg_cache_home.join("slate");
