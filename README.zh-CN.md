@@ -19,74 +19,56 @@
 <p align="center">
   <a href="https://github.com/MoonMao42/slate/releases"><img src="https://img.shields.io/github/v/release/MoonMao42/slate?style=flat-square&color=585b70" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-585b70?style=flat-square" alt="macOS and Linux" />
+  <img src="https://img.shields.io/badge/built_with-Rust-585b70?style=flat-square&logo=rust&logoColor=white" alt="Built with Rust" />
   <img src="https://img.shields.io/badge/license-MIT-585b70?style=flat-square" alt="MIT license" />
 </p>
 
 <p align="center">
   <img src="./assets/theme-demo.gif" alt="slate theme live preview" width="700" />
   <br />
-  <sub>内置 18 款主题，支持行内预览；在支持的终端里还能实时推送生效。</sub>
+  <sub>实时预览，切换主题时整套终端风格一起更新。</sub>
 </p>
 
 ## 为什么做这个
 
-我一直没找到一款真正顺手的终端美化工具。每次想把终端弄漂亮一点，就得去翻别人的 dotfile 仓库、到处抄配置、叠一堆插件。折腾完界面看着是还行，但留下的环境基本是一团乱：`~/.config` 里散着谁也说不清来源的文件、各种遗留的插件管理器、`.zshrc` 里莫名其妙的启动代码。等哪天想还原，基本找不着怎么下手。
+我一直没找到一款真正顺手的终端美化工具。每次想把终端弄漂亮一点，就得去翻别人的 dotfile 仓库、到处抄配置、叠一堆插件。折腾半天，环境可能一团糟还恢复不过来，必须得去研究到底动了什么。
 
 所以我写了 slate：一条命令把终端、提示符、字体、CLI 工具统一调成一套风格；所有 slate 写的东西都放在它自己管的文件里，想卸载就 `slate clean`，是真的干净。
 
 ## 安装
+
+在 macOS 上，推荐使用 Homebrew：
+
+```bash
+brew install MoonMao42/homebrew-tap/slate
+slate setup
+```
+
+或者直接安装最新 release 二进制：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/MoonMao42/slate/main/install.sh | sh
 slate setup
 ```
 
-macOS 也可以用 Homebrew：
-
-```bash
-brew install MoonMao42/homebrew-tap/slate
-```
-
 卸载：
 
 ```bash
-slate clean && rm "$(which slate)"
+slate clean
+brew uninstall slate
 ```
-
-## 支持情况
-
-官方构建目标：`x86_64-apple-darwin`、`aarch64-apple-darwin`、`x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu`。Linux 主要在 Debian/Ubuntu + GNOME 上验证；slate 会优先走 XDG Desktop Portal，走不通时如实退回到备选方案。
-
-| 层级 | macOS | Linux |
-|------|-------|-------|
-| 桌面外观跟随 | `defaults` + 内建 Swift watcher | 优先 XDG Desktop Portal，其次 GNOME `gsettings` |
-| 分享截图 | `screencapture` | 优先 XDG Desktop Portal，其次 `gnome-screenshot` |
-| 包管理 | Homebrew | `apt` |
-| 字体目录 | `~/Library/Fonts` | `~/.local/share/fonts` + `fc-cache` |
-| Shell 集成 | `.zshrc`、`.bashrc`、`~/.config/fish/conf.d/slate.fish` | 同左 |
-
-| 终端 | 体验 | 说明 |
-|------|------|------|
-| Ghostty | 最佳 | 热重载、透明度、后端支持时可自动拉起 watcher |
-| Kitty | 完整 | 通过 remote control 实时推送，macOS 和 Linux 都可以 |
-| Alacritty | 部分 | 行内预览没问题；热重载尽力而为 |
-| Terminal.app | 部分 | 仅 macOS；字体要手动选，没有模糊/实时推送 |
-| 其他 | 尽力而为 | Shell/工具层主题通用；终端本身视觉效果看其自身能力 |
 
 <p align="center">
   <img src="./assets/setup-demo.gif" alt="slate setup demo" width="600" />
   <br />
-  <sub>自动识别已有环境，缺什么补什么，最后把主题统一应用。</sub>
+  <sub><code>slate setup</code> 一键配置。</sub>
 </p>
 
 ## 它做了什么
 
 - 一套配色同步到 Ghostty、Kitty、Alacritty、Starship、bat、delta、eza、lazygit、fastfetch、tmux、zsh-syntax-highlighting。
-- 自动跟随系统深浅色：macOS 走原生 watcher，Linux 优先走 XDG Desktop Portal（GNOME 可退回 `gsettings`）。
-- 所有支持的平台都能开行内主题选择器；Ghostty 和 Kitty 在条件允许时还能实时推送。
-- 自动识别并安装 Nerd Font，装到平台真实的用户字体目录。
+- 🌓 自动跟随系统深浅色：macOS 走原生 watcher，Linux 优先走 XDG Desktop Portal（GNOME 可退回 `gsettings`）。
 - 不改你的 dotfile：slate 写进自己管的 include 文件里，每次改动前先快照，一条命令可回滚。
-- 可分享：把当前配置导成 URI，换台机器直接导入，支持的平台还能抓一张带水印的截图。
 
 <p align="center">
   <img src="./assets/fastfetch-preview.png" alt="fastfetch themed output" width="600" />
@@ -101,19 +83,21 @@ slate clean && rm "$(which slate)"
 深色模式 → 深色主题 + 匹配的提示符、语法高亮、工具配色
 ```
 
-从主菜单里开启（`slate` → Auto-Theme），或者：
+从主菜单里开启（`slate` → Auto-Theme）。每个主题家族自带深浅色配对，也可以在主菜单里自己重新配对。
 
-```bash
-slate config set auto-theme enable
-```
+## 支持情况
 
-每个主题家族自带深浅色配对，也可以在主菜单里自己重新配对。
+官方构建目标：`x86_64-apple-darwin`、`aarch64-apple-darwin`、`x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu`。Linux 主要在 Debian/Ubuntu + GNOME 上验证。
 
-平台说明：
+| 终端 | 状态 | 说明 |
+|------|------|------|
+| Ghostty | 最推荐 | 完整支持——热重载、透明度、watcher 自动拉起 |
+| Kitty | 完整 | 通过 remote control 实时推送 |
+| Alacritty | 完整 | 行内预览与热重载 |
+| Terminal.app | 部分 | 仅 macOS；不支持 live preview、不支持透明度、字体无法自动更换 |
+| 其他 | 尽力而为 | Shell 与 CLI 工具层主题通用；终端自身视觉效果看其能力 |
 
-- macOS 用内建的 Swift watcher。
-- Linux 优先 XDG Desktop Portal，走不通时用 GNOME `gsettings`。
-- Ghostty 可以在新 shell 会话里自动拉起 watcher；其他终端同样保留主题联动逻辑，但不保证相同的重启行为。
+Shell：`zsh`、`bash`、`fish`。`zsh` 已在本机验证；`bash` 与 `fish` 已接入，尚待更大范围测试。
 
 <details>
 <summary><strong>全部命令</strong></summary>

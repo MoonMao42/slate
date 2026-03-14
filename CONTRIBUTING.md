@@ -1,16 +1,23 @@
 # Contributing to slate
 
-Thanks for your interest in contributing to slate!
+Thanks for your interest in slate.
 
-## Development Environment
+## Supported platforms
 
-slate is a macOS-only project. You'll need:
+slate targets macOS and Linux. Official build targets:
 
-- **macOS** (tested on Sonoma 14+)
-- **Rust** (stable toolchain via rustup)
-- **Xcode Command Line Tools** (provides `swiftc` for the auto-theme watcher binary)
+- `aarch64-apple-darwin`, `x86_64-apple-darwin`
+- `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`
 
-Install Xcode CLT if you haven't:
+Linux is primarily validated on Debian/Ubuntu + GNOME.
+
+## Development environment
+
+- Rust stable (via rustup)
+- macOS: Xcode Command Line Tools (provides `swiftc` for the auto-theme watcher binary)
+- Linux: a working C toolchain and `pkg-config`
+
+On macOS:
 ```
 xcode-select --install
 ```
@@ -21,7 +28,7 @@ xcode-select --install
 cargo build
 ```
 
-The build process compiles a small Swift binary (`dark-mode-notify`) via `build.rs`. This requires `swiftc` to be available in your PATH, which Xcode Command Line Tools provides.
+On macOS, `build.rs` compiles a small Swift helper (`dark-mode-notify`) via `swiftc`. On Linux the Swift step is skipped.
 
 ## Testing
 
@@ -29,27 +36,31 @@ The build process compiles a small Swift binary (`dark-mode-notify`) via `build.
 cargo test
 ```
 
-Integration tests use `SLATE_HOME` environment variable to isolate test runs from your real `~/.config`. No test will modify your actual dotfiles.
+Integration tests use the `SLATE_HOME` environment variable to isolate runs from your real `~/.config`. No test touches your dotfiles.
 
-## Code Quality
+## Code quality
 
 Before submitting changes:
 
 ```
 cargo fmt --check
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-## Architecture
+## Layout
 
-- `src/adapter/` -- Tool adapters (Ghostty, Alacritty, Starship, etc.)
-- `src/cli/` -- CLI command handlers
-- `src/design/` -- Brand symbols and typography
-- `src/brand/` -- Brand language strings
-- `build.rs` -- Swift watcher binary compilation
-- `tests/integration_tests.rs` -- End-to-end CLI tests
+- `src/adapter/` — per-tool adapters (Ghostty, Kitty, Alacritty, Starship, bat, delta, eza, lazygit, fastfetch, tmux, zsh-syntax-highlighting)
+- `src/cli/` — CLI command handlers and the interactive picker
+- `src/config/` — managed config, backups, shell integration
+- `src/platform/` — OS-specific capabilities (appearance, fonts, packages, portal)
+- `src/theme/` — theme registry and palette data
+- `src/design/`, `src/brand/` — visual style and copy
+- `themes/themes.toml` — theme source of truth
+- `tests/` — integration tests
+- `resources/dark-mode-notify.swift` — macOS appearance watcher
+- `build.rs` — Swift build step
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing you agree that your contributions will be licensed under the MIT License.

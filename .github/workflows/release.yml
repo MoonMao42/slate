@@ -147,13 +147,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t binaries < <(find target -type f -path '*/release/slate' | sort)
-          if [ "${#binaries[@]}" -eq 0 ]; then
+          binaries="$(find target -type f \( -path '*/release/slate' -o -path '*/dist/slate' \) | sort)"
+          if [ -z "$binaries" ]; then
             echo "ERROR: no built slate binaries were found under target/"
             exit 1
           fi
 
-          for bin in "${binaries[@]}"; do
+          while IFS= read -r bin; do
             echo "Validating $bin"
             if [ "${{ runner.os }}" = "macOS" ]; then
               otool -L "$bin"
@@ -175,7 +175,7 @@ jobs:
                 readelf -d "$bin"
               fi
             fi
-          done
+          done <<< "$binaries"
       - name: Installer smoke test
         shell: bash
         run: bash tests/install-script-smoke.sh

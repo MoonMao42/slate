@@ -19,74 +19,56 @@
 <p align="center">
   <a href="https://github.com/MoonMao42/slate/releases"><img src="https://img.shields.io/github/v/release/MoonMao42/slate?style=flat-square&color=585b70" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-585b70?style=flat-square" alt="macOS and Linux" />
+  <img src="https://img.shields.io/badge/built_with-Rust-585b70?style=flat-square&logo=rust&logoColor=white" alt="Built with Rust" />
   <img src="https://img.shields.io/badge/license-MIT-585b70?style=flat-square" alt="MIT license" />
 </p>
 
 <p align="center">
   <img src="./assets/theme-demo.gif" alt="slate theme live preview" width="700" />
   <br />
-  <sub>Browse 18 curated themes inline — with live push on terminals that support it.</sub>
+  <sub>Live preview — swap themes and see the whole stack update.</sub>
 </p>
 
 ## Why I built this
 
-I could never find a terminal-beautification tool that actually fit the way I use my machine. Every time I wanted a nice setup, I ended up chasing dotfile repos, copy-pasting snippets from other people's configs, and stacking plugins on top of plugins. The results looked okay, but the state left behind was a mess — scattered files under `~/.config`, orphaned plugin managers, shell startup blocks I couldn't remember installing. When I tried to undo it, I usually couldn't.
+I could never find a terminal-beautification tool that actually fit the way I use my machine. Every time I wanted a nice setup, I ended up chasing dotfile repos, copy-pasting snippets, and stacking plugins on top of plugins. After all that effort the environment would usually end up a mess, and when I needed to recover I had to dig through everything to figure out what had actually been changed.
 
 So I wrote slate. One command sets up a coordinated look across your terminal, prompt, fonts, and CLI tools. Everything slate writes lives in files it owns, so when you want it gone, `slate clean` actually cleans.
 
 ## Install
+
+On macOS, install with Homebrew:
+
+```bash
+brew install MoonMao42/homebrew-tap/slate
+slate setup
+```
+
+Or install the latest release binary directly:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/MoonMao42/slate/main/install.sh | sh
 slate setup
 ```
 
-Or on macOS with Homebrew:
-
-```bash
-brew install MoonMao42/homebrew-tap/slate
-```
-
 Uninstall:
 
 ```bash
-slate clean && rm "$(which slate)"
+slate clean
+brew uninstall slate
 ```
-
-## Support matrix
-
-Official targets: `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`. Linux is validated on Debian/Ubuntu + GNOME; slate prefers XDG Desktop Portal where available and falls back honestly when it can't.
-
-| Layer | macOS | Linux |
-|-------|-------|-------|
-| Desktop appearance | `defaults` + embedded Swift watcher | XDG Desktop Portal first, GNOME `gsettings` fallback |
-| Share capture | `screencapture` | XDG Desktop Portal first, `gnome-screenshot` fallback |
-| Package installs | Homebrew | `apt` |
-| Fonts | `~/Library/Fonts` | `~/.local/share/fonts` + `fc-cache` |
-| Shell loaders | `.zshrc`, `.bashrc`, `~/.config/fish/conf.d/slate.fish` | same |
-
-| Terminal | Status | Notes |
-|----------|--------|-------|
-| Ghostty | Best experience | Live reload, opacity, watcher relaunch where the backend supports it |
-| Kitty | Supported | Live push via remote control, macOS and Linux |
-| Alacritty | Partial | Inline preview works; live reload is best-effort |
-| Terminal.app | Partial | macOS only; manual font selection, no blur or live push |
-| Everything else | Best effort | Shared shell/tool theming works; terminal-specific visuals depend on the app |
 
 <p align="center">
   <img src="./assets/setup-demo.gif" alt="slate setup demo" width="600" />
   <br />
-  <sub>Detects your stack, installs what's missing, applies a coordinated theme.</sub>
+  <sub>One command: <code>slate setup</code>.</sub>
 </p>
 
 ## What it does
 
 - One palette across Ghostty, Kitty, Alacritty, Starship, bat, delta, eza, lazygit, fastfetch, tmux, and zsh-syntax-highlighting.
-- Auto dark/light pairing backed by a native watcher on macOS and XDG Desktop Portal (with GNOME fallback) on Linux.
-- Inline theme picker on every supported platform. Ghostty and Kitty also get live push when available.
-- Nerd Font detection and install, using the platform's real user-font directory.
-- Non-destructive: slate writes into managed include files and never edits your dotfiles in place. It snapshots before every change and can roll back with one command.
-- Shareable: export your setup as a URI, re-apply on another machine, or capture a branded screenshot when the platform backend allows.
+- 🌓 Auto dark/light pairing — native watcher on macOS, XDG Desktop Portal (with GNOME fallback) on Linux.
+- Non-destructive: slate writes into managed include files and never edits your dotfiles in place. Snapshots before every change; one command to roll back.
 
 <p align="center">
   <img src="./assets/fastfetch-preview.png" alt="fastfetch themed output" width="600" />
@@ -101,19 +83,21 @@ Light mode  →  your light theme + matching prompt, syntax, tools
 Dark mode   →  your dark theme + matching prompt, syntax, tools
 ```
 
-Enable from the hub (`slate` → Auto-Theme), or:
+Enable from the hub (`slate` → Auto-Theme). Every theme family ships a built-in dark/light pair, and you can override the pairing there too.
 
-```bash
-slate config set auto-theme enable
-```
+## Support
 
-Every theme family ships a built-in dark/light pair. You can override the pairing from the hub.
+Official targets: `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`. Linux is validated on Debian/Ubuntu + GNOME.
 
-Platform notes:
+| Terminal | Status | Notes |
+|----------|--------|-------|
+| Ghostty | Recommended | Full support — live reload, opacity, watcher relaunch |
+| Kitty | Full | Live push via remote control |
+| Alacritty | Full | Inline preview and reload |
+| Terminal.app | Partial | macOS only — no live preview, no opacity, font cannot be auto-applied |
+| Other | Best effort | Shell and CLI tool theming works; terminal visuals depend on the app |
 
-- macOS uses an embedded Swift watcher.
-- Linux prefers XDG Desktop Portal, with GNOME `gsettings` as fallback.
-- Ghostty can relaunch the watcher from new shell sessions. Other terminals keep the shared theme logic but don't promise the same restart behavior.
+Shells: `zsh`, `bash`, `fish`. `zsh` is locally verified; `bash` and `fish` are wired up but pending broader testing.
 
 <details>
 <summary><strong>All commands</strong></summary>

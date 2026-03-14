@@ -65,6 +65,9 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
+[profile.dist]
+inherits = "release"
+
 [dev-dependencies]
 rstest = "0.18"
 assert_cmd = "2"

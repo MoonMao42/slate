@@ -21,7 +21,7 @@ pub fn detect_system_appearance() -> Result<ThemeAppearance> {
 /// b. If current theme's appearance matches system appearance → keep current
 /// c. If mismatch and current has auto_pair → apply auto_pair
 /// d. If no auto_pair → fall back to brand defaults (Dark→catppuccin-mocha, Light→catppuccin-latte)
-/// On this fallback, print guidance message
+/// On this fallback, print guidance message.
 pub fn resolve_auto_theme(_env: &SlateEnv, config: &ConfigManager) -> Result<String> {
     // Step 1: Detect system appearance
     let system_appearance = detect_system_appearance()?;
