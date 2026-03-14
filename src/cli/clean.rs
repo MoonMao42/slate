@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 
 /// Handle `slate clean` command
-/// Removes managed files, stops the auto-theme watcher, and removes .zshrc marker block
+/// Removes managed files, stops the auto-theme watcher, and removes.zshrc marker block
 /// Clean removes slate-managed assets; see 'slate restore' to recover from snapshot
 pub fn handle_clean() -> Result<()> {
     use cliclack::{intro, log};
@@ -45,7 +45,7 @@ pub fn handle_clean() -> Result<()> {
         log::remark("  (~/.config/slate already removed)")?;
     }
 
-    // Exit message (Clarify clean vs restore boundary)
+    // Exit message: Clarify clean vs restore boundary)
     log::remark("")?;
     log::info(
         "✦ clean removed Slate-owned shell hooks, watcher artifacts, and config state. \
@@ -57,7 +57,7 @@ Use 'slate restore' before cleanup if you want to roll back to a snapshot instea
     Ok(())
 }
 
-/// Remove marker block from .zshrc
+/// Remove marker block from.zshrc
 /// Handles multiple blocks and preserves rest of file content
 fn remove_marker_block_from_zshrc(home: &Path) -> Result<()> {
     let zshrc_path = home.join(".zshrc");

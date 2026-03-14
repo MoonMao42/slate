@@ -1,6 +1,6 @@
 //! Opacity preset infrastructure for terminal transparency.
 //! Provides three discrete opacity presets (Solid/Frosted/Clear) with terminal-specific
-//! configurations. Per ,.
+//! configurations.
 
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
@@ -84,7 +84,7 @@ pub fn recommended_opacity_for_theme(theme: &ThemeVariant) -> OpacityPreset {
 }
 
 /// Check if a translucent opacity would degrade light theme legibility.
-/// Per D-26b: Light themes with Frosted/Clear should warn user.
+/// Light themes with Frosted/Clear should warn user.
 pub fn should_warn_for_translucent_light_theme(
     theme: &ThemeVariant,
     preset: OpacityPreset,

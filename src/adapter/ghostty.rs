@@ -1,8 +1,8 @@
 //! Ghostty adapter with WriteAndInclude strategy.
-//! Per D-05a: Ghostty is one of two locked exceptions to EditInPlace rule,
+//! Ghostty is one of two locked exceptions to EditInPlace rule,
 //! using WriteAndInclude strategy instead. This is because Ghostty's include
 //! directive is a simple key-value line, not complex configuration merging.
-//! D-05b: Idempotent config-file directive insertion ensures running twice
+//! Idempotent config-file directive insertion ensures running twice
 //! produces the same result (no duplicate include lines).
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
@@ -15,7 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Ghostty adapter implementing v2 ToolAdapter trait.
+/// Ghostty adapter implementing the ToolAdapter trait.
 pub struct GhosttyAdapter;
 
 impl GhosttyAdapter {
@@ -26,14 +26,14 @@ impl GhosttyAdapter {
     }
 
     /// Build candidate config paths in priority order.
-    /// Ghostty resolves: XDG config > legacy .ghostty extension > macOS App Support.
+    /// Ghostty resolves: XDG config > legacy.ghostty extension > macOS App Support.
     fn candidate_paths(xdg_dir: &Path, home: Option<&str>) -> Vec<PathBuf> {
         let mut paths = Vec::new();
 
         // Standard Ghostty config path (no extension).
         paths.push(xdg_dir.join("config"));
 
-        // Legacy .ghostty extension (some older setups).
+        // Legacy.ghostty extension (some older setups).
         paths.push(xdg_dir.join("config.ghostty"));
 
         // Legacy macOS App Support location, lowest priority.
@@ -54,7 +54,7 @@ impl GhosttyAdapter {
     }
 
     /// Insert managed path in integration file idempotently.
-    /// Per D-05b: integration file can be created by tool (zero-config setup).
+    /// integration file can be created by tool (zero-config setup).
     /// IMPORTANT: This function does NOT create the integration file if it doesn't exist.
     /// The file must already exist (created by setup wizard or user).
     /// This prevents slate from destructively creating a minimal config that could override
@@ -337,7 +337,7 @@ impl GhosttyAdapter {
             Self::ensure_integration_includes_managed(&integration_path, &font_path)?;
         }
 
-        // Note: Font updates are handled by the FontAdapter (applied in plan 06-06).
+        // Font updates are handled by the FontAdapter.
         // Theme switches should only affect colors, not fonts.
         // Font changes are an orthogonal concern managed separately.
 
@@ -369,7 +369,7 @@ impl GhosttyAdapter {
 }
 
 /// Write opacity configuration to managed Ghostty config file.
-/// Per , Sets background-opacity value based on OpacityPreset.
+/// Sets background-opacity value based on OpacityPreset.
 /// Path: ~/.config/slate/managed/ghostty/opacity.conf
 pub fn write_opacity_config(env: &SlateEnv, opacity: crate::opacity::OpacityPreset) -> Result<()> {
     let config_manager = ConfigManager::with_env(env)?;

@@ -11,13 +11,13 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
-/// Pure data structure for aggregated font discovery 
+/// Pure data structure for aggregated font discovery
 pub struct FontDiscovery {
     pub nerd_fonts: Vec<String>,
     pub system_fonts: Vec<String>,
 }
 
-/// Nerd Font adapter implementing v2 ToolAdapter trait.
+/// Nerd Font adapter implementing the ToolAdapter trait.
 pub struct FontAdapter;
 
 impl FontAdapter {
@@ -93,14 +93,14 @@ impl FontAdapter {
             }
         }
 
-        // Convert to Vec and reorder with recommendation first 
+        // Convert to Vec and reorder with recommendation first
         let mut fonts_vec: Vec<String> = fonts.into_iter().collect();
         Self::apply_recommendation_ordering(&mut fonts_vec);
         Ok(fonts_vec)
     }
 
     /// Apply recommendation ordering: JetBrainsMono Nerd Font first (if installed),
-    /// then all others alphabetically. Per.
+    /// then all others alphabetically.
     fn apply_recommendation_ordering(fonts: &mut Vec<String>) {
         const RECOMMENDED: &str = "JetBrainsMono Nerd Font";
 
@@ -117,7 +117,7 @@ impl FontAdapter {
         fonts[1..].sort();
     }
 
-    /// Helper: Check if filename is a font file (.ttf, .otf, or .ttc per)
+    /// Helper: Check if filename is a font file (.ttf,.otf, or.ttc)
     fn is_font_file(name: &str) -> bool {
         name.ends_with(".ttf") || name.ends_with(".otf") || name.ends_with(".ttc")
     }
@@ -139,7 +139,7 @@ impl FontAdapter {
             if let Ok(entries) = fs::read_dir(&path) {
                 for entry in entries.flatten() {
                     if let Ok(name) = entry.file_name().into_string() {
-                        // Add .ttc extension support
+                        // Add.ttc extension support
                         if Self::is_font_file(&name) && Self::looks_like_nerd_font(&name) {
                             fonts.insert(Self::normalize_font_family(&name));
                         }
@@ -175,7 +175,7 @@ impl FontAdapter {
             if let Ok(entries) = fs::read_dir(&path) {
                 for entry in entries.flatten() {
                     if let Ok(name) = entry.file_name().into_string() {
-                        // Check if file is a font file (include .ttc)
+                        // Check if file is a font file: include.ttc)
                         if Self::is_font_file(&name) {
                             let family = Self::normalize_font_family(&name);
                             // Match against whitelist using canonical key
@@ -266,7 +266,7 @@ impl ToolAdapter for FontAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        // Use nerd-only check per /
+        // Use nerd-only check
         match Self::detect_installed_nerd_fonts() {
             Ok(fonts) => Ok(!fonts.is_empty()),
             Err(_) => {
@@ -340,7 +340,7 @@ mod tests {
         assert!(result.is_ok());
         let path = result.unwrap();
         let as_str = path.to_string_lossy();
-        // Per-user font dir is OS-specific: Library/Fonts on macOS, .local/share/fonts
+        // Per-user font dir is OS-specific: Library/Fonts on macOS,.local/share/fonts
         // on Linux/BSD. Accept either so the test is meaningful cross-platform.
         assert!(
             as_str.contains("Library/Fonts") || as_str.contains(".local/share/fonts"),

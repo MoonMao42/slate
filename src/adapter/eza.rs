@@ -1,5 +1,5 @@
 //! eza adapter with managed YAML theme file and EnvironmentVariable strategy.
-//! Per and eza uses YAML theme files, not TOML. The adapter writes
+//! eza uses YAML theme files, not TOML. The adapter writes
 //! a managed theme.yml to ~/.config/slate/managed/eza/ and expects EZA_CONFIG_DIR
 //! environment variable to be exported by shell init.
 
@@ -11,7 +11,7 @@ use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::path::PathBuf;
 
-/// eza adapter implementing v2 ToolAdapter trait.
+/// eza adapter implementing the ToolAdapter trait.
 pub struct EzaAdapter;
 
 impl EzaAdapter {
@@ -23,8 +23,8 @@ impl EzaAdapter {
 
     /// Render Palette into eza YAML theme structure.
     /// Mapping guided by eza color semantics:
-    /// - foreground/background: text and background colors
-    /// - ANSI colors: map to directory/file/permission categories
+    /// foreground/background: text and background colors
+    /// ANSI colors: map to directory/file/permission categories
     fn render_eza_yaml(theme: &ThemeVariant) -> String {
         let palette = &theme.palette;
 

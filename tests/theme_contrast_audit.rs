@@ -1,7 +1,7 @@
 //! WCAG 2.1 contrast audit test for all registered themes.
-//! Per 08-01: This test FAILS the build if any theme color fails to meet 4.5:1
-//! WCAG AA contrast ratio. Data-driven: iterates `ThemeRegistry::all()` so the
-//! audit stays correct even as themes are added or renamed.
+//! Fails the build if any theme color falls below the 4.5:1 WCAG AA contrast ratio.
+//! Data-driven: iterates `ThemeRegistry::all()` so the audit stays correct as themes
+//! are added or renamed.
 
 use slate_cli::theme::ThemeRegistry;
 use slate_cli::wcag::audit_palette;
@@ -88,7 +88,7 @@ fn test_wcag_strict_audit_all_themes_pass() {
 
 #[test]
 fn test_wcag_audit_registry_size() {
-    // Sanity check: the v2.0 milestone ships 18 themes (per ROADMAP + 06-10).
+    // Sanity check: the v0.1 release ships 18 themes.
     // This number will change if new themes are added — update the expected
     // value alongside that change.
     let registry = ThemeRegistry::new().expect("Registry init");
@@ -105,8 +105,8 @@ fn test_wcag_audit_registry_size() {
 
 #[test]
 fn test_wcag_audit_structure_validation() {
-    // Use the first registered theme instead of hardcoding a name — avoids
-    // the original 07-04 test file's coupling to a specific ID spelling.
+    // Use the first registered theme instead of hardcoding a name, to avoid
+    // coupling this test to a specific ID spelling.
     let registry = ThemeRegistry::new().expect("Registry init");
     let first_id = registry
         .list_ids()

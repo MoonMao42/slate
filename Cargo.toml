@@ -1,12 +1,12 @@
 [package]
 name = "slate-cli"
-version = "2.1.0"
+version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 description = "Cross-platform terminal beautification kit for macOS and Linux"
-homepage = "https://github.com/MoonMao42/slate-dev"
-repository = "https://github.com/MoonMao42/slate-dev"
-documentation = "https://github.com/MoonMao42/slate-dev#readme"
+homepage = "https://github.com/MoonMao42/slate"
+repository = "https://github.com/MoonMao42/slate"
+documentation = "https://github.com/MoonMao42/slate#readme"
 license = "MIT"
 keywords = ["terminal", "theme", "macos", "linux", "cli"]
 categories = ["command-line-utilities"]

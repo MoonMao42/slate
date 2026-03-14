@@ -12,7 +12,7 @@ pub fn detect_system_appearance() -> Result<ThemeAppearance> {
 }
 
 /// Resolve which theme to apply based on system appearance and auto-pairing.
-/// Per , the decision pipeline is:
+/// the decision pipeline is:
 /// 1. Detect system appearance via detect_system_appearance()
 /// 2. Read auto.toml if it exists
 /// 3. If auto.toml has entry for this appearance → use that theme
@@ -60,7 +60,7 @@ pub fn resolve_auto_theme(_env: &SlateEnv, config: &ConfigManager) -> Result<Str
     }
 
     // 4d: Fall back to brand defaults
-    // Print guidance on this path only (per)
+    // Print guidance on this path only
     let default_theme = match system_appearance {
         ThemeAppearance::Dark => "catppuccin-mocha".to_string(),
         ThemeAppearance::Light => "catppuccin-latte".to_string(),
@@ -74,7 +74,7 @@ pub fn resolve_auto_theme(_env: &SlateEnv, config: &ConfigManager) -> Result<Str
 }
 
 /// Interactive configuration flow for auto-theme pairing.
-/// Per D-19b: Guide user to select dark and light theme variants.
+/// Guide user to select dark and light theme variants.
 /// Persists selections to auto.toml (~/.config/slate/auto.toml).
 pub fn configure_auto_theme() -> Result<()> {
     use cliclack::{confirm, log, select};

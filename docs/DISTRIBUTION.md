@@ -32,7 +32,7 @@ slate setup
 
 ### Fallback path
 
-If Homebrew is not available yet on that Mac, download the matching binary from [GitHub Releases](https://github.com/MoonMao42/slate-dev/releases), put `slate` on the user's `PATH`, then run:
+If Homebrew is not available yet on that Mac, download the matching binary from [GitHub Releases](https://github.com/MoonMao42/slate/releases), put `slate` on the user's `PATH`, then run:
 
 ```bash
 slate setup

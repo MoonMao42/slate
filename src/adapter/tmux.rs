@@ -1,5 +1,5 @@
 //! tmux adapter with marker block system for .tmux.conf theming.
-//! Per and tmux uses source-file directive to include managed config.
+//! tmux uses source-file directive to include managed config.
 //! This adapter uses the MarkerBlock module for safe, validated editing.
 //! Detects tmux installation but doesn't require it (optional tool).
 
@@ -12,7 +12,7 @@ use crate::theme::ThemeVariant;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// tmux adapter implementing v2 ToolAdapter trait.
+/// tmux adapter implementing the ToolAdapter trait.
 pub struct TmuxAdapter;
 
 impl TmuxAdapter {

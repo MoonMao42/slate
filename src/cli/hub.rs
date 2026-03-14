@@ -158,7 +158,7 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
 
     menu_builder = menu_builder.item("quit", "Quit", "");
 
-    // Render and handle selection (execute one action and exit)
+    // Render and handle selection: execute one action and exit)
     let selection = menu_builder.interact().map_err(|e| {
         if e.kind() == std::io::ErrorKind::Interrupted {
             crate::error::SlateError::UserCancelled

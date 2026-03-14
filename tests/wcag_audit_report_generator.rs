@@ -1,4 +1,4 @@
-//! Generate detailed WCAG audit report for 
+//! Generate a detailed WCAG audit report for all registered themes.
 //! Run with: cargo test --test wcag_audit_report_generator -- --nocapture
 
 use slate_cli::theme::ThemeRegistry;
@@ -33,8 +33,7 @@ fn generate_wcag_strict_audit_report() {
 
     // Generate markdown report
     let mut report = String::new();
-    report.push_str("# WCAG Strict Audit Report — 2026-04-13\n\n");
-    report.push_str("**Status:**  Safety Net - Audit Report\n");
+    report.push_str("# WCAG Strict Audit Report\n\n");
     report.push_str("**Generated from:** Current theme sources via ThemeRegistry\n\n");
     report.push_str("This report captures all ANSI 0-15 slots and semantic UI colors that fail\n");
     report.push_str(
@@ -65,12 +64,10 @@ fn generate_wcag_strict_audit_report() {
         ));
     }
 
-    // Ensure directory exists
-    let reports_dir = PathBuf::from("");
+    // Write the audit report to Cargo's build artifact directory.
+    let reports_dir = PathBuf::from("target/reports");
     fs::create_dir_all(&reports_dir).expect("Failed to create reports directory");
-
-    // Write report
-    let report_path = reports_dir.join("WCAG_STRICT_AUDIT-2026-04-13.md");
+    let report_path = reports_dir.join("wcag-audit.md");
     fs::write(&report_path, report).expect("Failed to write audit report");
 
     println!("\nAudit report written to: {:?}", report_path);

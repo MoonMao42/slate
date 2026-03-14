@@ -8,10 +8,10 @@ use crate::theme::{ThemeRegistry, ThemeVariant, FAMILY_SORT_ORDER};
 
 /// State machine for 2D picker navigation.
 /// Manages:
-/// - Vertical axis: Theme selection (wraps around registry)
-/// - Horizontal axis: Opacity selection (hard stop at edges)
-/// - Original snapshot for rollback on ESC
-/// - Commit flag for Drop guard behavior
+/// Vertical axis: Theme selection (wraps around registry)
+/// Horizontal axis: Opacity selection (hard stop at edges)
+/// Original snapshot for rollback on ESC
+/// Commit flag for Drop guard behavior
 pub struct PickerState {
     /// Theme IDs in family sort order
     theme_ids: Vec<String>,
@@ -396,7 +396,6 @@ mod tests {
         let state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
 
         // Theme list should start with Catppuccin themes
-        // (assuming registry is populated per 06-02)
         assert!(!state.theme_ids.is_empty());
 
         // Find indices of families to verify order
@@ -410,7 +409,7 @@ mod tests {
             .position(|id| id.starts_with("tokyo"));
 
         if let (Some(cat_idx), Some(tokyo_idx)) = (first_catppuccin, first_tokyo) {
-            // Catppuccin should come before Tokyo Night (per)
+            // Catppuccin should come before Tokyo Night
             assert!(
                 cat_idx < tokyo_idx,
                 "Catppuccin should come before Tokyo Night per FAMILY_SORT_ORDER"

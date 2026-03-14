@@ -1,5 +1,5 @@
 //! Event loop and rendering for the interactive crossterm picker.
-//! Per , and 06-CONTEXT research on crossterm + live preview.
+//! Built on crossterm for live preview support.
 
 use crate::env::SlateEnv;
 use crate::error::Result;

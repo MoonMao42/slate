@@ -44,7 +44,7 @@ fn print_dim_tip() {
 /// 1. Does NOT write current/current-opacity files
 /// 2. Updates terminal opacity/blur via adapters (Ghostty, Alacritty)
 /// 3. Applies theme palette to adapters for visual preview
-/// 4. Attempts Ghostty live reload with permission-aware behavior (per)
+/// 4. Attempts Ghostty live reload with permission-aware behavior
 /// 5. Produces NO stdout output (silent)
 pub fn silent_preview_apply(
     env: &SlateEnv,

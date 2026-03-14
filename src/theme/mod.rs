@@ -33,7 +33,7 @@ const EMBEDDED_THEMES_TOML: &str = include_str!("../../themes/themes.toml");
 static EMBEDDED_THEMES: OnceLock<std::result::Result<EmbeddedThemes, String>> = OnceLock::new();
 
 /// Color palette for a theme.
-/// Per revised: Hybrid design with semantic UI colors (5) + ANSI normal/bright (16) as named fields,
+/// Hybrid design with semantic UI colors (5) + ANSI normal/bright (16) as named fields,
 /// plus extras for theme-specific colors. Zero-allocation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Palette {
@@ -63,7 +63,7 @@ pub struct Palette {
     pub bright_cyan: String,
     pub bright_white: String,
 
-    // Semantic background variants (language-neutral names)
+    // Semantic background variants: language-neutral names)
     pub bg_dim: Option<String>, // Medium background, was "base" in Catppuccin
     pub bg_darker: Option<String>, // Darker background, was "mantle" in Catppuccin
     pub bg_darkest: Option<String>, // Darkest background, was "crust" in Catppuccin
@@ -181,9 +181,9 @@ impl Palette {
 /// without modifying the core type definition (Open/Closed principle).
 /// Each tool uses different naming convention.
 /// Example:
-/// - Ghostty: "Catppuccin Mocha" (Title Case with spaces)
-/// - Alacritty: "catppuccin_mocha" (snake_case)
-/// - bat: "Catppuccin Mocha" (Title Case)
+/// Ghostty: "Catppuccin Mocha" (Title Case with spaces)
+/// Alacritty: "catppuccin_mocha" (snake_case)
+/// bat: "Catppuccin Mocha" (Title Case)
 pub type ToolRefs = HashMap<String, String>;
 
 /// Theme appearance classification for auto-follow detection.
@@ -444,7 +444,7 @@ pub const FAMILY_SORT_ORDER: &[&str] = &[
 ];
 
 /// Get display description for a theme
-/// Used by `slate list` command 
+/// Used by `slate list` command
 pub fn get_theme_description(theme_id: &str) -> Option<&'static str> {
     match theme_id {
         "catppuccin-mocha" => Some("Deep, warm mocha with sophisticated contrast"),

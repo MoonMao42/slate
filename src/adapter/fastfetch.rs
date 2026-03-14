@@ -1,5 +1,5 @@
 //! fastfetch adapter with JSONC config generation and Apple logo theming.
-//! Per , Implements EnvironmentVariable strategy.
+//! Implements EnvironmentVariable strategy.
 //! Generates managed JSONC config with themed colors while preserving Apple logo.
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
@@ -10,7 +10,7 @@ use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::path::PathBuf;
 
-/// fastfetch adapter implementing v2 ToolAdapter trait.
+/// fastfetch adapter implementing the ToolAdapter trait.
 pub struct FastfetchAdapter;
 
 impl FastfetchAdapter {

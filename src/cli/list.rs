@@ -4,7 +4,7 @@ use crate::theme::{get_theme_description, ThemeRegistry, FAMILY_SORT_ORDER};
 use std::collections::HashMap;
 
 /// Handle `slate list` command
-/// Displays themes grouped by family with descriptions and color blocks 
+/// Displays themes grouped by family with descriptions and color blocks
 /// Families displayed in opinionated sort order (Catppuccin → Tokyo Night → Rosé Pine → Kanagawa → Everforest → Dracula → Nord → Gruvbox)
 pub fn handle(_args: &[&str]) -> Result<()> {
     let registry = ThemeRegistry::new()?;

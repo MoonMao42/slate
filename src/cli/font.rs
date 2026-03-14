@@ -102,7 +102,7 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
         }
         Ok(())
     } else {
-        // Picker path: show font picker UI per 
+        // Picker path: show font picker UI
         show_font_picker()
     }
 }

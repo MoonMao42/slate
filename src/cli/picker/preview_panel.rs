@@ -1,5 +1,5 @@
 //! Preview panel showing sample shell output with theme colors and ANSI matrix.
-//! Per , Provides SemanticColor enum mapping and hardcoded
+//! Provides SemanticColor enum mapping and hardcoded
 //! sample token flow for picker inline preview. No rendering logic here; just data structures.
 
 /// Semantic color roles for consistent rendering across adapters.
@@ -133,7 +133,7 @@ pub const SAMPLE_TOKENS: &[PreviewSpan] = &[
 ];
 
 /// Render preview panel showing sample tokens and ANSI color matrices.
-/// Per , Output sample token lines, 16 ANSI matrix, and optional extras matrix.
+/// Output sample token lines, 16 ANSI matrix, and optional extras matrix.
 /// Returns formatted string with ANSI 24-bit escape codes embedded so the output
 /// renders in color when written to a real terminal.
 pub fn render_preview(palette: &crate::theme::Palette) -> String {
@@ -189,7 +189,7 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
     }
     output.push('\n');
 
-    // Render extras matrix if present (conditional)
+    // Render extras matrix if presentconditional)
     if !palette.extras.is_empty() {
         output.push_str("Extras: ");
         let mut sorted_extras: Vec<_> = palette.extras.iter().collect();

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO="${SLATE_REPO:-MoonMao42/slate-dev}"
+REPO="${SLATE_REPO:-MoonMao42/slate}"
 VERSION="${SLATE_VERSION:-latest}"
 BIN_NAME="${SLATE_BIN_NAME:-slate}"
 

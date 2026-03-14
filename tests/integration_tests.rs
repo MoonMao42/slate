@@ -143,10 +143,10 @@ fn test_setup_shell_integration_bash() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // On macOS, Terminal.app runs bash as a login shell which reads .bash_profile, so
-    // slate prefers .bash_profile when it exists. On Linux, .bashrc is canonical for
-    // interactive sessions. Either way, .bashrc still retains its user content and
-    // .bash_profile still retains its user content — the marker block lands in exactly
+    // On macOS, Terminal.app runs bash as a login shell which reads.bash_profile, so
+    // slate prefers.bash_profile when it exists. On Linux,.bashrc is canonical for
+    // interactive sessions. Either way,.bashrc still retains its user content and
+    // bash_profile still retains its user content — the marker block lands in exactly
     // one of them.
     let bashrc = std::fs::read_to_string(tempdir.path().join(".bashrc")).unwrap();
     let bash_profile = std::fs::read_to_string(tempdir.path().join(".bash_profile")).unwrap();
@@ -267,7 +267,7 @@ fn test_list_command_runs() {
     let output = cmd.arg("list").output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    // slate list shows families grouped with separators, sort order
+    // slate list shows families grouped with separatorssort order
     assert!(stdout.contains("Catppuccin")); // First family in  order
     assert!(stdout.contains("Tokyo Night")); // Second family in  order
     assert!(stdout.contains("━━")); // Family separator from 
@@ -299,7 +299,7 @@ fn test_reset_subcommand_is_not_exposed() {
     );
 }
 
-// Setup wizard tests 
+// Setup wizard tests
 
 #[test]
 fn test_setup_wizard_intro_displays() {
@@ -368,7 +368,7 @@ fn test_setup_quick_mode_minimal_interactions() {
     assert!(combined.contains("beautiful") || combined.contains("Step") || output.status.success());
 }
 
-// Tool selection logic tests 
+// Tool selection logic tests
 
 #[cfg(test)]
 mod tool_selection_tests {
@@ -551,7 +551,7 @@ mod tool_selection_tests {
     }
 }
 
-// Full pipeline and adapter output tests 
+// Full pipeline and adapter output tests
 
 #[test]
 fn test_full_pipeline() {
@@ -1095,7 +1095,7 @@ fn test_version_flag() {
     );
 }
 
-// Tests for -03: Preset/Font/Theme Selection & Mapping Logic
+// Tests for Preset/Font/Theme Selection & Mapping Logic
 
 #[cfg(test)]
 mod preset_font_theme_mapping {
@@ -1163,7 +1163,7 @@ mod preset_font_theme_mapping {
 
     #[test]
     fn test_theme_variants_available() {
-        // Per Verify all 18 theme variants across 8 families are available
+        // +: Verify all 18 theme variants across 8 families are available
         let selector = ThemeSelector::new().unwrap();
         let count = selector.theme_count();
         assert_eq!(
@@ -1285,7 +1285,7 @@ mod optional_automations {
             let _padding_x = preset.visuals.padding_x;
             let _padding_y = preset.visuals.padding_y;
             let _cursor = preset.visuals.cursor_style;
-            // All fields are accessible for phase 3 to apply
+            // All fields are accessible for to apply
         }
     }
 
@@ -1336,7 +1336,7 @@ mod optional_automations {
     }
 }
 
-// Tests for -05: Polish and visual hierarchy
+// Tests for Polish and visual hierarchy
 
 #[cfg(test)]
 mod polish_and_clarity {
@@ -1398,7 +1398,7 @@ mod polish_and_clarity {
 
     #[test]
     fn test_completion_activation_guidance_present() {
-        // Per constraint: activation guidance from -04 remains prominent
+        // Per constraint: activation guidance from remains prominent
         let activation = Language::activation_guidance("Ghostty", "new_window");
         assert!(activation.contains("Ghostty"));
         assert!(activation.contains("new_window"));
@@ -1433,7 +1433,7 @@ mod polish_and_clarity {
 
     #[test]
     fn test_polish_preserves_symbol_language() {
-        // Design system: exactly 5 core symbols (pruned set)
+        // Design system: exactly 5 core symbolspruned set)
         assert_eq!(slate_cli::design::symbols::Symbols::BRAND, '✦');
         assert_eq!(slate_cli::design::symbols::Symbols::SUCCESS, '✓');
         assert_eq!(slate_cli::design::symbols::Symbols::FAILURE, '✗');

@@ -1,7 +1,7 @@
-//! delta adapter migrated to v2 with marker block integration.
+//! delta adapter with marker block integration.
 //! delta uses git config [include] blocks to reference managed config.
-//! This adapter uses the MarkerBlock module from for safe, validated editing.
-//! Preserves pager sync logic: synchronizes bat --theme and delta --syntax-theme.
+//! The adapter uses the MarkerBlock module for safe, validated editing,
+//! and synchronizes bat --theme with delta --syntax-theme so the two agree.
 
 use crate::adapter::{marker_block, ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
@@ -11,7 +11,7 @@ use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::path::{Path, PathBuf};
 
-/// delta adapter implementing v2 ToolAdapter trait.
+/// delta adapter implementing the ToolAdapter trait.
 pub struct DeltaAdapter;
 
 impl DeltaAdapter {

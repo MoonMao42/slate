@@ -1,6 +1,6 @@
 //! Curated preset configurations for terminal beautification.
 //! Each preset combines a theme variant with a recommended opacity level,
-//! font family, and visual characteristics. Per.
+//! font family, and visual characteristics.
 
 use crate::error::{Result, SlateError};
 use crate::opacity::OpacityPreset;

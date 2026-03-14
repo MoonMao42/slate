@@ -1,5 +1,5 @@
 //! PaletteRenderer — Converts Palette to multiple output formats
-//! Per through Renders Palette to 5 output formats (TOML, YAML, shell, tmux, JSONC)
+//! Renders Palette to 5 output formats (TOML, YAML, shell, tmux, JSONC)
 //! for use by palette-intensive adapters (Starship, lazygit, fastfetch, etc.).
 //! Semantic mapping pattern: Adapters define a map of palette field names to output field names,
 //! allowing flexible rendering across different tools with different naming conventions.

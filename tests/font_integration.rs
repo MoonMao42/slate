@@ -1,5 +1,5 @@
-//! Regression tests for font decoupling (08-02)
-//! Per through Verifies that font changes are truly localized
+//! Regression tests for font decoupling
+//! Verifies that font changes are truly localized
 //! and do not trigger full theme reapply or shell integration refresh.
 
 #[cfg(test)]

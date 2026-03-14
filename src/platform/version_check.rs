@@ -2,7 +2,7 @@
 use crate::error::Result;
 use std::process::Command;
 
-/// Minimum supported versions for high-confidence tools 
+/// Minimum supported versions for high-confidence tools
 pub struct VersionPolicy;
 
 impl VersionPolicy {
@@ -61,7 +61,7 @@ impl VersionPolicy {
     }
 }
 
-/// Detect tool version via `tool --version` 
+/// Detect tool version via `tool --version`
 pub fn detect_version(tool_id: &str) -> Result<String> {
     let output = Command::new(tool_id)
         .arg("--version")
@@ -90,9 +90,9 @@ pub fn detect_version(tool_id: &str) -> Result<String> {
 
 /// Extract semver from version output
 /// Handles common patterns like:
-/// - "ghostty 1.2.3 (abc123)"
-/// - "Alacritty 0.12.0"
-/// - "starship v1.2.3"
+/// "ghostty 1.2.3 (abc123)"
+/// "Alacritty 0.12.0"
+/// "starship v1.2.3"
 fn extract_version_from_output(output: &str) -> Result<String> {
     let output = output.trim();
 

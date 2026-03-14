@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - 2026-04-XX
+## [0.1.0] - 2026-04-17
 
 ### Added
 - Interactive setup wizard (`slate setup` / `slate setup --quick`)
@@ -22,4 +22,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Three-tier config architecture (managed / integration / user override)
 - Homebrew tap distribution (`brew install MoonMao42/homebrew-tap/slate`)
 
-[2.0.0]: https://github.com/MoonMao42/slate-dev/releases/tag/v2.0.0
+[0.1.0]: https://github.com/MoonMao42/slate/releases/tag/v0.1.0

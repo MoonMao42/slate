@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, Value};
 
-/// Starship adapter implementing v2 ToolAdapter trait.
+/// Starship adapter implementing the ToolAdapter trait.
 pub struct StarshipAdapter;
 
 fn replace_fg_crust_in_value(value: &mut Value) {

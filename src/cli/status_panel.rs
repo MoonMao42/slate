@@ -8,7 +8,7 @@ use crate::error::Result;
 use crate::platform::capabilities::{detect_capabilities, CapabilityReport, CapabilitySnapshot};
 use crate::theme::{Palette, ThemeRegistry};
 
-/// Tool installation status 
+/// Tool installation status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolStatus {
     Themed,       // ✓ Themed
@@ -93,7 +93,7 @@ fn capability_row_text(name: &str, report: &CapabilityReport) -> String {
     format!("{}  {} · {}", name, report.level.label(), report.backend)
 }
 
-/// Render the status dashboard 
+/// Render the status dashboard
 pub fn render() -> Result<()> {
     let config = ConfigManager::new()?;
     let registry = ThemeRegistry::new()?;
@@ -114,7 +114,7 @@ pub fn render() -> Result<()> {
     let terminal_features = terminal.feature_summary();
     let capabilities = detect_capabilities();
 
-    // Print blank line above 
+    // Print blank line above
     println!();
 
     // Rounded panel header
@@ -185,7 +185,7 @@ pub fn render() -> Result<()> {
     // Panel footer
     println!(" ╰─────────────────────────────────────────────────────────────╯");
 
-    // Print blank line below 
+    // Print blank line below
     println!();
 
     Ok(())

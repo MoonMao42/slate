@@ -1,6 +1,6 @@
 //! lazygit adapter with macOS path fix and pager sync logic.
 //! Uses EnvironmentVariable strategy (LG_CONFIG_FILE via slate init).
-//! Per , Fixes macOS path resolution to check LG_CONFIG_FILE first.
+//! Fixes macOS path resolution to check LG_CONFIG_FILE first.
 //! Preserves pager sync logic (bat/delta themes) as competitive advantage.
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
@@ -11,7 +11,7 @@ use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::path::PathBuf;
 
-/// lazygit adapter implementing v2 ToolAdapter trait.
+/// lazygit adapter implementing the ToolAdapter trait.
 pub struct LazygitAdapter;
 
 impl LazygitAdapter {
@@ -38,7 +38,8 @@ impl LazygitAdapter {
         }
     }
 
-    /// Resolve lazygit config path per , /// 1. LG_CONFIG_FILE env var (if set)
+    /// Resolve lazygit config path
+    /// 1. LG_CONFIG_FILE env var (if set)
     /// 2. XDG_CONFIG_HOME/lazygit/config.yml
     /// 3. ~/Library/Application Support/lazygit/ (macOS)
     fn resolve_config_path() -> Result<PathBuf> {

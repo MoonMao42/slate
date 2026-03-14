@@ -115,9 +115,9 @@ pub trait ToolAdapter: Send + Sync {
 
     /// Apply theme to tool's configuration.
     /// Must:
-    /// 1. Write theme data to managed_config_path() 
+    /// 1. Write theme data to managed_config_path()
     /// 2. Ensure integration file includes/references managed path (per apply_strategy)
-    /// 3. Never modify user/ directory 
+    /// 3. Never modify user/ directory
     /// 4. Be idempotent (running twice produces same result)
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome>;
 

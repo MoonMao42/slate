@@ -1,5 +1,5 @@
 //! zsh-syntax-highlighting adapter for shell syntax coloring.
-//! Per and slate generates a managed shell snippet and lets the
+//! slate generates a managed shell snippet and lets the
 //! central shell integration file source it. This avoids competing marker
 //! blocks inside `.zshrc`.
 
@@ -13,7 +13,7 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 
-/// zsh-syntax-highlighting adapter implementing v2 ToolAdapter trait.
+/// zsh-syntax-highlighting adapter implementing the ToolAdapter trait.
 pub struct ZshHighlightAdapter;
 
 impl ZshHighlightAdapter {

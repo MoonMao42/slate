@@ -12,7 +12,7 @@ use crate::theme::ThemeVariant;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Alacritty adapter implementing v2 ToolAdapter trait.
+/// Alacritty adapter implementing the ToolAdapter trait.
 pub struct AlacrittyAdapter;
 
 impl AlacrittyAdapter {
@@ -161,7 +161,7 @@ impl AlacrittyAdapter {
             return Ok(());
         }
 
-        // Atomic write back to file (per)
+        // Atomic write back to file
         use atomic_write_file::AtomicWriteFile;
         use std::io::Write;
         let mut file = AtomicWriteFile::open(integration_path)?;

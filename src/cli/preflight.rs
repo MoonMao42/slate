@@ -335,7 +335,7 @@ fn format_blocking_section(check: &PreflightCheck) -> String {
             "OS".to_string(),
             format!("  What happened: {}", check.description),
             "  Completed: Preflight ran and no config was changed.".to_string(),
-            "  Not completed: Slate only supports macOS and Linux in the current v2.1 baseline."
+            "  Not completed: Slate only supports macOS and Linux in the current v0.1 baseline."
                 .to_string(),
             "  Next: Run Slate on a supported OS target, then rerun `slate setup`.".to_string(),
         ]

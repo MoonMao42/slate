@@ -1,4 +1,4 @@
-//! Integration tests for tmux 7-element color coverage 
+//! Integration tests for tmux 7-element color coverage
 //! Verifies all 10 theme variants render correctly with complete tmux theming
 
 use slate_cli::adapter::tmux::TmuxAdapter;
@@ -153,7 +153,7 @@ fn test_no_status_bar_content_modified() {
     for variant in registry.all() {
         let output = TmuxAdapter::render_tmux_colors(variant);
 
-        // constraint: No status bar content/widgets should be modified
+        // No status bar content/widgets should be modified
         // Only color styles are allowed
         assert!(
             !output.contains("status-left"),
@@ -182,7 +182,7 @@ fn test_no_status_bar_content_modified() {
 fn test_palette_fields_mapped_correctly_per_d17() {
     let registry = ThemeRegistry::new().expect("ThemeRegistry init failed");
 
-    // Per reference catppuccin/tmux, verify color mappings
+    // reference catppuccin/tmux, verify color mappings
     if let Some(variant) = registry.get("catppuccin-mocha") {
         let output = TmuxAdapter::render_tmux_colors(variant);
         let palette = &variant.palette;

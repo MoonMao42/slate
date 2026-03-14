@@ -1,6 +1,6 @@
 use crate::error::Result;
 /// Theme selection for setup wizard.
-/// Per and from 02-.
+/// and
 /// Provides access to 18 theme variants grouped by family.
 use crate::theme::{ThemeRegistry, DEFAULT_THEME_ID};
 use std::collections::HashMap;
@@ -144,7 +144,7 @@ mod tests {
         let selector = ThemeSelector::new().unwrap();
         let families = selector.themes_by_family();
 
-        // Should have 8 families 
+        // Should have 8 families
         assert_eq!(
             families.len(),
             8,

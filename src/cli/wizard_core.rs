@@ -196,7 +196,7 @@ impl Wizard {
     }
 
     fn show_intro(&mut self) -> Result<()> {
-        // Use cliclack's intro frame (per no custom ASCII art)
+        // Use cliclack's intro frame (: no custom ASCII art)
         intro("✦ slate").ok();
         self.context.current_step += 1;
         Ok(())

@@ -33,11 +33,11 @@ versioned_output="$(
   SLATE_INSTALL_DRY_RUN=1 \
   SLATE_OS_OVERRIDE="Linux" \
   SLATE_ARCH_OVERRIDE="x86_64" \
-  SLATE_VERSION="v2.1.0" \
+  SLATE_VERSION="v0.1.0" \
   SLATE_INSTALL_DIR="/tmp/slate-bin" \
   sh "$INSTALL_SCRIPT"
 )"
-[[ "$versioned_output" == *"/releases/download/v2.1.0/slate-x86_64-unknown-linux-gnu.tar.gz"* ]]
+[[ "$versioned_output" == *"/releases/download/v0.1.0/slate-x86_64-unknown-linux-gnu.tar.gz"* ]]
 
 if SLATE_INSTALL_DRY_RUN=1 SLATE_OS_OVERRIDE="FreeBSD" sh "$INSTALL_SCRIPT" >/dev/null 2>&1; then
   echo "install.sh unexpectedly accepted an unsupported OS" >&2

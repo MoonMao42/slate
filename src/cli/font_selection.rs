@@ -1,5 +1,5 @@
 /// Font selection for setup wizard.
-/// Per through from 02-.
+/// through
 /// Font option for wizard selection
 #[derive(Debug, Clone)]
 pub struct FontOption {
@@ -19,7 +19,7 @@ pub struct FontOption {
 pub struct FontCatalog;
 
 impl FontCatalog {
-    /// Get all available font options (per)
+    /// Get all available font options
     pub fn all_fonts() -> Vec<FontOption> {
         vec![
             FontOption {

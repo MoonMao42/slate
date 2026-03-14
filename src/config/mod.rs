@@ -24,7 +24,8 @@ pub use backup::{
 };
 
 /// Three-tier configuration manager.
-/// Manages three tiers per /// 1. Managed tier: ~/.config/slate/managed/{tool}/ — Slate writes here (regenerates freely)
+/// Manages three tiers:
+/// 1. Managed tier: ~/.config/slate/managed/{tool}/ — Slate writes here (regenerates freely)
 /// 2. Integration tier: ~/.config/{tool}/config — User's entry file (slate ensures it includes managed, never modifies content)
 /// 3. User tier: ~/.config/slate/user/{tool}/ — User's custom overrides (slate never touches)
 /// Auto-configuration structure for reading/writing auto.toml.
@@ -109,7 +110,7 @@ impl ConfigManager {
         state_files::write_managed_file(&self.managed_dir(tool), filename, content)
     }
 
-    /// A simple pre-edit backup is required by.
+    /// A simple pre-edit backup is required
     pub fn backup_file(&self, config_path: &Path) -> Result<PathBuf> {
         backup::backup_file(&self.backup_root, config_path)
     }

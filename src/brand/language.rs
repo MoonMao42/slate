@@ -3,7 +3,7 @@
 pub struct Language;
 
 impl Language {
-    // Setup wizard (playful per)
+    // Setup wizard (playful)
     pub const SETUP_WELCOME: &str = "✦ slate — beautiful terminal in 30 seconds";
     pub const SETUP_DETECTING: &str = "Detecting installed tools...";
     pub const SETUP_INSTALLING: &str = "Installing {tool}...";
@@ -15,7 +15,7 @@ impl Language {
     pub const SETUP_QUICK_PENDING: &str = "Quick setup mode lands in .";
     pub const SETUP_INTERACTIVE_PENDING: &str = "Interactive setup wizard lands in .";
 
-    // Receipt and completion polish (for 02-05 polish pass)
+    // Receipt and completion polish
     pub const RECEIPT_HEADER: &str = "Review your setup:";
     pub const RECEIPT_INSTALL_SECTION: &str = "Install";
     pub const RECEIPT_FONT_SECTION: &str = "Font";
@@ -30,7 +30,7 @@ impl Language {
     pub const COMPLETION_CALL_TO_ACTION: &str =
         "Open a fresh terminal to see your new setup shine!";
 
-    // Tool selling points (one-liner visual value per)
+    // Tool selling points (one-liner visual value)
     pub const PITCH_GHOSTTY: &str = "Makes your terminal glow";
     pub const PITCH_STARSHIP: &str = "Transforms your prompt";
     pub const PITCH_BAT: &str = "Beautiful code syntax highlighting";
@@ -43,7 +43,7 @@ impl Language {
     pub const PITCH_ALACRITTY: &str = "GPU-accelerated terminal beauty";
     pub const PITCH_KITTY: &str = "Feature-rich GPU terminal";
 
-    // Daily commands (minimal per)
+    // Daily commands (minimal)
     pub const SET_SUCCESS: &str = "✓ {theme}";
     pub const STATUS_LABEL_CURRENT: &str = "current:";
     pub const STATUS_LABEL_TERMINAL: &str = "terminal:";
@@ -57,12 +57,12 @@ impl Language {
     pub const STATUS_PENDING: &str = "Status display lands in .";
     pub const LIST_PENDING: &str = "Theme listing lands in .";
 
-    // Status indicators (per)
+    // Status indicators
     pub const INSTALLED: &str = "✓ installed";
     pub const NOT_INSTALLED: &str = "○ not installed";
     pub const FAILED: &str = "✗ failed";
 
-    // Error messages (professional + actionable per)
+    // Error messages (professional + actionable)
     pub fn error_tool_not_installed(tool: &str) -> String {
         format!(
             "{} is not installed. Run 'slate setup' to configure it.",
@@ -109,7 +109,7 @@ impl Language {
         format!("{} lands in .", theme)
     }
 
-    // Restore messages (- real restore UX)
+    // Restore messages (real restore UX)
     pub const RESTORE_HEADER: &str = "Restore from a previous snapshot";
     pub const RESTORE_LIST_HEADER: &str = "Available restore points:";
     pub const RESTORE_NO_POINTS: &str = "No restore points found. Run 'slate setup' to create one.";
@@ -166,10 +166,10 @@ impl Language {
     pub const HUB_WHAT_TO_DO: &str = "What would you like to do?";
     pub const AUTO_CONFIGURED: &str = "✓ Auto theme configured. Run slate set --auto to apply.";
 
-    // CLI surface (07-01)
+    // CLI surface
     pub const SLATE_SET_DEPRECATION_TIP: &str = "(i) Tip: 'slate set' is transitioning to 'slate theme'. Try 'slate theme <name>' next time.";
 
-    // Hub menu labels (09-01: flat menu, casual tone per)
+    // Hub menu labels
     pub const HUB_SWITCH_THEME: &str = "✦ Switch Theme";
     pub const HUB_PAUSE_AUTO_PICK: &str = "✦ Pause Auto & Pick Theme";
     pub const HUB_CHANGE_FONT: &str = "✦ Change Font";
@@ -179,12 +179,12 @@ impl Language {
     pub const HUB_QUIT: &str = "Quit";
     pub const HUB_RESUME_AUTO: &str = "✦ Resume Auto";
 
-    // Hub tool toggles (09-01: casual tone)
+    // Hub tool toggles
     pub const HUB_TOGGLE_FASTFETCH_ON: &str = "Fastfetch · on";
     pub const HUB_TOGGLE_FASTFETCH_OFF: &str = "Fastfetch · off";
     pub const HUB_RUN_SETUP: &str = "Run Setup";
 
-    // Status line labels (07-01)
+    // Status line labels
     pub const STATUS_AUTO_WATCHER_RUNNING: &str = "enabled and running";
     pub const STATUS_AUTO_WATCHER_IDLE_GHOSTTY: &str =
         "enabled, waiting for the next Ghostty shell";

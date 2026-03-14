@@ -1,6 +1,6 @@
 /// Style presets for quick-mode setup.
 /// Each preset locks theme + font + terminal visual settings.
-/// Per and from 02-, four locked presets are defined.
+/// and, four locked presets are defined.
 /// Terminal visual settings that bundle with presets
 #[derive(Debug, Clone)]
 pub struct TerminalVisuals {
@@ -32,7 +32,7 @@ pub struct StylePreset {
     pub visuals: TerminalVisuals,
 }
 
-/// Central registry of all style presets (locked per)
+/// Central registry of all style presets (locked)
 pub struct PresetCatalog;
 
 impl PresetCatalog {
@@ -103,7 +103,7 @@ impl PresetCatalog {
         Self::all_presets().into_iter().find(|p| p.id == id)
     }
 
-    /// Get default preset ("modern-dark" per)
+    /// Get default preset ("modern-dark")
     pub fn default_preset() -> StylePreset {
         Self::get_preset("modern-dark").expect("Default preset must exist")
     }
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn test_preset_theme_and_font_locked() {
-        // Verify the locked mappings from 
+        // Verify the locked mappings from
         let modern = PresetCatalog::get_preset("modern-dark").unwrap();
         assert_eq!(modern.theme_id, "catppuccin-mocha");
         assert_eq!(modern.font_id, "jetbrains-mono");

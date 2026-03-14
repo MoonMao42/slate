@@ -1,8 +1,8 @@
 /// Design system color palette.
-/// Strategy
-/// - Structural elements (lines, separators, labels) → GRAY (neutral)
-/// - Brand highlights (logo, key moments) → ACCENT (fixed brand color, not from any theme)
-/// - Theme-specific text → theme colors (populated at runtime)
+/// Strategy:
+/// Structural elements (lines, separators, labels) → GRAY (neutral)
+/// Brand highlights (logo, key moments) → ACCENT (fixed brand color, not from any theme)
+/// Theme-specific text → theme colors (populated at runtime)
 pub struct Colors;
 
 impl Colors {

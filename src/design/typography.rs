@@ -1,6 +1,5 @@
-/// Typography hierarchy helpers for setup wizard output.
-/// Provides reusable text-emphasis primitives to improve visual hierarchy
-/// without noisy decoration. All helpers are optional — Claude discretion on usage.
+/// Typography helpers for setup wizard output.
+/// Reusable text-emphasis primitives for visual hierarchy without noisy decoration.
 use crate::design::colors::Colors;
 use crate::design::symbols::Symbols;
 
@@ -71,14 +70,14 @@ impl Typography {
     }
 }
 
-/// Format a line with 2 spaces left padding 
+/// Format a line with 2 spaces left padding
 /// Used for all non-cliclack output (status, list, afterglow)
 pub fn padded_line(content: &str) -> String {
     format!("  {}", content)
 }
 
 /// Format a section header for panels
-/// Example: "✦ Core Vibe" for status dashboard sections 
+/// Example: "✦ Core Vibe" for status dashboard sections
 pub fn section_header(symbol: &str, title: &str) -> String {
     padded_line(&format!("{} {}", symbol, title))
 }

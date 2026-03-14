@@ -1,5 +1,5 @@
 //! Tests for fastfetch JSONC generation
-//! Per and Verify all theme variants produce valid, consistent output
+//! Verify all theme variants produce valid, consistent output
 
 use slate_cli::adapter::fastfetch::FastfetchAdapter;
 use slate_cli::theme::ThemeRegistry;

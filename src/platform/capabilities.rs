@@ -93,7 +93,7 @@ fn os_capability_report() -> CapabilityReport {
     } else {
         CapabilityReport::unsupported(
             "unsupported",
-            "Slate v2.1 officially supports macOS and Linux only.",
+            "Slate v0.1 officially supports macOS and Linux only.",
         )
     }
 }
@@ -106,7 +106,7 @@ fn arch_capability_report() -> CapabilityReport {
     } else {
         CapabilityReport::unsupported(
             "unsupported",
-            "Slate v2.1 officially supports x86_64 and aarch64 targets only.",
+            "Slate v0.1 officially supports x86_64 and aarch64 targets only.",
         )
     }
 }
@@ -127,8 +127,8 @@ pub fn terminal_capability_report(profile: &TerminalProfile) -> CapabilityReport
     }
 }
 
-// Later portal/D-Bus listeners must stay behind backend seams rather than forcing shared CLI
-// handlers to become async during.
+// Portal/D-Bus listeners must stay behind backend seams rather than forcing shared CLI
+// handlers to become async.
 
 #[cfg(test)]
 mod tests {

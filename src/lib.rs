@@ -5,7 +5,7 @@ pub mod env;
 pub mod opacity;
 pub mod platform;
 
-// Placeholder modules for -02 and later
+// Placeholder modules for and later
 pub mod adapter;
 pub mod cli;
 pub mod config;
