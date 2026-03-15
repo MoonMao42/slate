@@ -14,7 +14,7 @@ This document is the release truth source for how Slate ships, installs, and fai
 
 The following values must always match:
 
-- README install command: `brew install MoonMao42/homebrew-tap/slate`
+- README install command: `brew install MoonMao42/homebrew-tap/slate-cli`
 - `dist-workspace.toml`: `tap = "MoonMao42/homebrew-tap"`
 - release workflow tap checkout: `repository: "MoonMao42/homebrew-tap"`
 - publish token: `HOMEBREW_TAP_TOKEN`
@@ -26,7 +26,7 @@ If one of these changes, update all of them in the same PR.
 ### Primary path
 
 ```bash
-brew install MoonMao42/homebrew-tap/slate
+brew install MoonMao42/homebrew-tap/slate-cli
 slate setup
 ```
 
@@ -42,7 +42,7 @@ slate setup
 
 ```bash
 slate clean
-brew uninstall slate
+brew uninstall slate-cli
 ```
 
 ### Optional purge
@@ -53,14 +53,14 @@ rm -rf ~/.cache/slate
 
 ## Release Checklist
 
-1. Confirm README still uses `brew install MoonMao42/homebrew-tap/slate`.
+1. Confirm README still uses `brew install MoonMao42/homebrew-tap/slate-cli`.
 2. Confirm `dist-workspace.toml` still points at `MoonMao42/homebrew-tap`.
 3. Confirm `.github/workflows/release.yml` still publishes to `MoonMao42/homebrew-tap`.
 4. Run `cargo test`.
 5. Run `cargo package --allow-dirty --list`.
 6. Run `cargo dist plan`.
 7. Run `cargo dist build`.
-8. Smoke-check a fresh-ish macOS install path with `brew install MoonMao42/homebrew-tap/slate`.
+8. Smoke-check a fresh-ish macOS install path with `brew install MoonMao42/homebrew-tap/slate-cli`.
 9. Verify GitHub Releases contains the binary fallback assets for both macOS targets.
 10. Tag the release and let the workflow publish GitHub Releases plus the Homebrew formula update.
 
@@ -69,7 +69,7 @@ rm -rf ~/.cache/slate
 - The tap repository must already exist at `MoonMao42/homebrew-tap`.
 - `HOMEBREW_TAP_TOKEN` must have write access to that repository.
 - The tap repository should contain a `Formula/` directory before the first automated publish.
-- The first release should be watched manually to confirm the generated formula lands in the tap and `brew install MoonMao42/homebrew-tap/slate` resolves correctly.
+- The first release should be watched manually to confirm the generated formula lands in the tap and `brew install MoonMao42/homebrew-tap/slate-cli` resolves correctly.
 
 ## Failure Model
 

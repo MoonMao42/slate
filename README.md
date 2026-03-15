@@ -40,7 +40,7 @@ So I wrote slate. One command sets up a coordinated look across your terminal, p
 On macOS, install with Homebrew:
 
 ```bash
-brew install MoonMao42/homebrew-tap/slate
+brew install MoonMao42/homebrew-tap/slate-cli
 slate setup
 ```
 
@@ -55,7 +55,7 @@ Uninstall:
 
 ```bash
 slate clean
-brew uninstall slate
+brew uninstall slate-cli
 ```
 
 <p align="center">

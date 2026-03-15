@@ -40,7 +40,7 @@
 在 macOS 上，推荐使用 Homebrew：
 
 ```bash
-brew install MoonMao42/homebrew-tap/slate
+brew install MoonMao42/homebrew-tap/slate-cli
 slate setup
 ```
 
@@ -55,7 +55,7 @@ slate setup
 
 ```bash
 slate clean
-brew uninstall slate
+brew uninstall slate-cli
 ```
 
 <p align="center">
