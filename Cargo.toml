@@ -1,6 +1,6 @@
 [package]
 name = "slate-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 build = "build.rs"
 description = "Cross-platform terminal beautification kit for macOS and Linux"
