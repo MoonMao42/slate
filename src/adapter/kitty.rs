@@ -259,7 +259,9 @@ impl ToolAdapter for KittyAdapter {
         Self::ensure_integration_includes_managed(&integration_path, &theme_path)?;
         Self::ensure_integration_includes_managed(&integration_path, &opacity_path)?;
 
-        Ok(ApplyOutcome::Applied)
+        // Kitty pushes colors to running windows via `kitten @ set-colors`
+        // in the reload() path; no new shell required to see the change.
+        Ok(ApplyOutcome::applied_no_shell())
     }
 
     fn reload(&self) -> Result<()> {

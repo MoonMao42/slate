@@ -172,6 +172,24 @@ impl Palette {
             // Text levels
             SemanticColor::Text => self.foreground.clone(),
             SemanticColor::Subtext => self.white.clone(),
+
+            // Syntax highlighting (shared with future editor adapter)
+            SemanticColor::Keyword => self.magenta.clone(),
+            SemanticColor::String => self.green.clone(),
+            SemanticColor::Comment => self.bright_black.clone(),
+            SemanticColor::Function => self.blue.clone(),
+            SemanticColor::Number => self.yellow.clone(),
+            SemanticColor::Type => self.cyan.clone(),
+
+            // File-type classification (shared with LS_COLORS)
+            SemanticColor::FileArchive => self.red.clone(),
+            SemanticColor::FileImage => self.magenta.clone(),
+            SemanticColor::FileMedia => self.magenta.clone(),
+            SemanticColor::FileAudio => self.cyan.clone(),
+            SemanticColor::FileCode => self.yellow.clone(),
+            SemanticColor::FileDocs => self.foreground.clone(),
+            SemanticColor::FileConfig => self.bright_black.clone(),
+            SemanticColor::FileHidden => self.bright_black.clone(),
         }
     }
 }
@@ -660,6 +678,93 @@ mod tests {
             "ghostty tool_refs reference themes missing in {:?}; either Ghostty renamed them or slate theme refs are wrong. Fix: {:?}",
             themes_dir,
             missing
+        );
+    }
+}
+
+#[cfg(test)]
+mod semantic_color_tests {
+    use super::ThemeRegistry;
+    use crate::cli::picker::preview_panel::SemanticColor;
+    use rstest::rstest;
+
+    /// Assert `resolve(variant)` returns the same hex string as directly reading
+    /// the expected palette field. The `expected_slot` param names which palette
+    /// field the variant should map to.
+    /// Three distinct themes (catppuccin-mocha, tokyo-night-dark, gruvbox-dark)
+    /// cover the three palette families (cool, purple, warm) whose cross-family
+    /// precedents drove §Standard Stack. A single-theme palette
+    /// coincidence cannot mask a slot-swap bug.
+    #[rstest]
+    #[case::kw_mocha("catppuccin-mocha", SemanticColor::Keyword, "magenta")]
+    #[case::kw_tokyo("tokyo-night-dark", SemanticColor::Keyword, "magenta")]
+    #[case::kw_gruv("gruvbox-dark", SemanticColor::Keyword, "magenta")]
+    #[case::str_mocha("catppuccin-mocha", SemanticColor::String, "green")]
+    #[case::str_tokyo("tokyo-night-dark", SemanticColor::String, "green")]
+    #[case::str_gruv("gruvbox-dark", SemanticColor::String, "green")]
+    #[case::cmt_mocha("catppuccin-mocha", SemanticColor::Comment, "bright_black")]
+    #[case::cmt_tokyo("tokyo-night-dark", SemanticColor::Comment, "bright_black")]
+    #[case::cmt_gruv("gruvbox-dark", SemanticColor::Comment, "bright_black")]
+    #[case::fn_mocha("catppuccin-mocha", SemanticColor::Function, "blue")]
+    #[case::fn_tokyo("tokyo-night-dark", SemanticColor::Function, "blue")]
+    #[case::fn_gruv("gruvbox-dark", SemanticColor::Function, "blue")]
+    #[case::num_mocha("catppuccin-mocha", SemanticColor::Number, "yellow")]
+    #[case::num_tokyo("tokyo-night-dark", SemanticColor::Number, "yellow")]
+    #[case::num_gruv("gruvbox-dark", SemanticColor::Number, "yellow")]
+    #[case::typ_mocha("catppuccin-mocha", SemanticColor::Type, "cyan")]
+    #[case::typ_tokyo("tokyo-night-dark", SemanticColor::Type, "cyan")]
+    #[case::typ_gruv("gruvbox-dark", SemanticColor::Type, "cyan")]
+    #[case::farch_mocha("catppuccin-mocha", SemanticColor::FileArchive, "red")]
+    #[case::farch_tokyo("tokyo-night-dark", SemanticColor::FileArchive, "red")]
+    #[case::farch_gruv("gruvbox-dark", SemanticColor::FileArchive, "red")]
+    #[case::fimg_mocha("catppuccin-mocha", SemanticColor::FileImage, "magenta")]
+    #[case::fimg_tokyo("tokyo-night-dark", SemanticColor::FileImage, "magenta")]
+    #[case::fimg_gruv("gruvbox-dark", SemanticColor::FileImage, "magenta")]
+    #[case::fmed_mocha("catppuccin-mocha", SemanticColor::FileMedia, "magenta")]
+    #[case::fmed_tokyo("tokyo-night-dark", SemanticColor::FileMedia, "magenta")]
+    #[case::fmed_gruv("gruvbox-dark", SemanticColor::FileMedia, "magenta")]
+    #[case::faud_mocha("catppuccin-mocha", SemanticColor::FileAudio, "cyan")]
+    #[case::faud_tokyo("tokyo-night-dark", SemanticColor::FileAudio, "cyan")]
+    #[case::faud_gruv("gruvbox-dark", SemanticColor::FileAudio, "cyan")]
+    #[case::fcode_mocha("catppuccin-mocha", SemanticColor::FileCode, "yellow")]
+    #[case::fcode_tokyo("tokyo-night-dark", SemanticColor::FileCode, "yellow")]
+    #[case::fcode_gruv("gruvbox-dark", SemanticColor::FileCode, "yellow")]
+    #[case::fdocs_mocha("catppuccin-mocha", SemanticColor::FileDocs, "foreground")]
+    #[case::fdocs_tokyo("tokyo-night-dark", SemanticColor::FileDocs, "foreground")]
+    #[case::fdocs_gruv("gruvbox-dark", SemanticColor::FileDocs, "foreground")]
+    #[case::fcfg_mocha("catppuccin-mocha", SemanticColor::FileConfig, "bright_black")]
+    #[case::fcfg_tokyo("tokyo-night-dark", SemanticColor::FileConfig, "bright_black")]
+    #[case::fcfg_gruv("gruvbox-dark", SemanticColor::FileConfig, "bright_black")]
+    #[case::fhid_mocha("catppuccin-mocha", SemanticColor::FileHidden, "bright_black")]
+    #[case::fhid_tokyo("tokyo-night-dark", SemanticColor::FileHidden, "bright_black")]
+    #[case::fhid_gruv("gruvbox-dark", SemanticColor::FileHidden, "bright_black")]
+    fn resolve_covers_all_new_variants(
+        #[case] theme_id: &str,
+        #[case] variant: SemanticColor,
+        #[case] expected_slot: &str,
+    ) {
+        let registry = ThemeRegistry::new().expect("registry must load");
+        let theme = registry
+            .get(theme_id)
+            .unwrap_or_else(|| panic!("theme '{theme_id}' must exist in embedded registry"));
+        let palette = &theme.palette;
+
+        let expected = match expected_slot {
+            "magenta" => palette.magenta.clone(),
+            "green" => palette.green.clone(),
+            "bright_black" => palette.bright_black.clone(),
+            "blue" => palette.blue.clone(),
+            "yellow" => palette.yellow.clone(),
+            "cyan" => palette.cyan.clone(),
+            "red" => palette.red.clone(),
+            "foreground" => palette.foreground.clone(),
+            other => panic!("unexpected slot name in test case: {other}"),
+        };
+
+        assert_eq!(
+            palette.resolve(variant),
+            expected,
+            "theme {theme_id} variant {variant:?} should resolve to {expected_slot}"
         );
     }
 }

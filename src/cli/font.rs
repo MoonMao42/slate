@@ -95,6 +95,13 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
             Symbols::SUCCESS,
             resolved_font
         );
+        // UX-02 (D-D2 + D-D3): the font adapter is always RequiresNewShell=true
+        // per D-C3, and this handler bypasses `apply_all`, so we emit inline.
+        // Positioned BEFORE the font-specific `activation_hint` line so the
+        // two coexist in the correct order (reveal first, activation-hint
+        // second). `slate font` has no --auto / --quiet flags — both guards
+        // are false.
+        crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
         if font_uses_basic_prompt(&resolved_font) {
             println!("(i) Basic Starship mode enabled for new shells because this font does not include Nerd Font glyphs.");
         } else {
@@ -319,6 +326,30 @@ fn download_catalog_font(font_name: &str, env: &SlateEnv) -> std::result::Result
 mod tests {
     use super::{resolve_font_choice_with_discovery, ResolvedFontChoice};
     use crate::adapter::font::FontDiscovery;
+    use crate::cli::new_shell_reminder::REMINDER_TEST_LOCK;
+
+    /// Mirrors the explicit-name branch emit in `handle_font`: the font
+    /// adapter is always RequiresNewShell=true per D-C3, so the inline
+    /// emission is not gated on an aggregator — every successful apply
+    /// reaches the emitter (which then respects its own auto/quiet guards).
+    fn font_handler_emit() {
+        crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
+    }
+
+    #[test]
+    fn font_handler_emits_reminder_on_success() {
+        let _guard = REMINDER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        crate::cli::new_shell_reminder::reset_reminder_flag_for_tests();
+
+        font_handler_emit();
+
+        assert!(
+            crate::cli::new_shell_reminder::reminder_flag_for_tests(),
+            "font handler must transition the reminder flag after a successful apply"
+        );
+    }
 
     #[test]
     fn test_resolve_font_choice_matches_catalog_id_to_installed_font() {

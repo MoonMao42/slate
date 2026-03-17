@@ -116,7 +116,9 @@ impl ToolAdapter for LazygitAdapter {
 
         // Step 4: Pager sync is handled at generation time via generate_yaml_config
 
-        Ok(ApplyOutcome::Applied)
+        // lazygit reads LG_CONFIG_FILE at launch; the managed config only
+        // reaches a new lazygit process spawned from a fresh shell.
+        Ok(ApplyOutcome::applied_needs_new_shell())
     }
 
     fn get_current_theme(&self) -> Result<Option<String>> {

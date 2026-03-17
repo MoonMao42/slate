@@ -267,7 +267,9 @@ impl ToolAdapter for AlacrittyAdapter {
             let _ = fs::OpenOptions::new().append(true).open(&integration_path);
         }
 
-        Ok(ApplyOutcome::Applied)
+        // Alacritty's live_config_reload picks up the new colors in the
+        // currently-open window — no new shell required.
+        Ok(ApplyOutcome::applied_no_shell())
     }
 
     fn reload(&self) -> Result<()> {

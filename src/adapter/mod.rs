@@ -11,6 +11,7 @@ pub mod font;
 pub mod ghostty;
 pub mod kitty;
 pub mod lazygit;
+pub mod ls_colors;
 pub mod marker_block;
 pub mod palette_renderer;
 pub mod registry;
@@ -28,6 +29,7 @@ pub use font::FontAdapter;
 pub use ghostty::GhosttyAdapter;
 pub use kitty::KittyAdapter;
 pub use lazygit::LazygitAdapter;
+pub use ls_colors::LsColorsAdapter;
 pub use registry::{ToolApplyResult, ToolApplyStatus, ToolRegistry};
 pub use starship::StarshipAdapter;
 pub use tmux::TmuxAdapter;
@@ -59,10 +61,33 @@ pub enum ApplyStrategy {
 }
 
 /// Structured outcome for a single adapter theme application attempt.
+/// The `Applied` variant carries `requires_new_shell: bool` so every adapter can
+/// truthfully declare whether its change becomes visible inside the current shell
+/// session (e.g. Ghostty hot-reload) or only after the user spawns a new shell
+/// (e.g. `BAT_THEME` env var, `EZA_CONFIG_DIR`, starship palette select).
+/// This drives the UX-01 "new-terminal" reminder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyOutcome {
-    Applied,
+    Applied { requires_new_shell: bool },
     Skipped(SkipReason),
+}
+
+impl ApplyOutcome {
+    /// Convenience constructor for adapters whose change is visible in the
+    /// current shell session (no new-terminal reminder needed).
+    pub const fn applied_no_shell() -> Self {
+        Self::Applied {
+            requires_new_shell: false,
+        }
+    }
+
+    /// Convenience constructor for adapters whose change only takes effect
+    /// in a fresh shell session (triggers the new-terminal reminder).
+    pub const fn applied_needs_new_shell() -> Self {
+        Self::Applied {
+            requires_new_shell: true,
+        }
+    }
 }
 
 /// Reason an adapter intentionally skipped theme application.

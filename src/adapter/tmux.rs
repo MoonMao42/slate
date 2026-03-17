@@ -113,7 +113,9 @@ impl ToolAdapter for TmuxAdapter {
         let new_block = Self::render_tmux_block(&managed_colors_path);
         marker_block::upsert_managed_block_file(&tmux_conf_path, &new_block)?;
 
-        Ok(ApplyOutcome::Applied)
+        // tmux source-file is issued in reload() against the running server
+        // so existing sessions pick up the new colors immediately.
+        Ok(ApplyOutcome::applied_no_shell())
     }
 
     fn reload(&self) -> Result<()> {

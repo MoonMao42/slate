@@ -89,7 +89,9 @@ impl ToolAdapter for ZshHighlightAdapter {
         file.write_all(highlight_styles.as_bytes())?;
         file.commit()?;
 
-        Ok(ApplyOutcome::Applied)
+        // zsh-syntax-highlighting styles are sourced during shell init;
+        // already-running shells won't pick up new colors until restart.
+        Ok(ApplyOutcome::applied_needs_new_shell())
     }
 
     fn reload(&self) -> Result<()> {

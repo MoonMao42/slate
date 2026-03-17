@@ -250,7 +250,9 @@ impl ToolAdapter for StarshipAdapter {
             SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string())
         })?;
 
-        Ok(ApplyOutcome::Applied)
+        // Starship reads $STARSHIP_CONFIG / the palette select at shell init;
+        // palette changes only appear in a fresh shell.
+        Ok(ApplyOutcome::applied_needs_new_shell())
     }
 
     fn get_current_theme(&self) -> Result<Option<String>> {

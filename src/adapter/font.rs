@@ -292,8 +292,11 @@ impl ToolAdapter for FontAdapter {
 
     fn apply_theme(&self, _theme: &ThemeVariant) -> Result<ApplyOutcome> {
         // Per design: Nerd Font adapter only handles detection and installation
-        // No theme application needed (fonts are tool-independent)
-        Ok(ApplyOutcome::Applied)
+        // No theme application needed (fonts are tool-independent).
+        // Font availability is visible at next shell/terminal launch — the
+        // font-family switch is not picked up by the currently-running
+        // session.
+        Ok(ApplyOutcome::applied_needs_new_shell())
     }
 
     fn reload(&self) -> Result<()> {

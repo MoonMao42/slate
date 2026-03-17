@@ -180,6 +180,46 @@ pub fn run_checks_for_setup_with_env(
         blocking: false,
     });
 
+    // (LS-03 / D-B1): On macOS, if `gls` (GNU ls from coreutils) is
+    // absent AND the user hasn't been nudged before, push a non-blocking
+    // advisory explaining why the slate-managed LS_COLORS needs GNU `ls`.
+    // The acknowledgement flag is written immediately after emission so
+    // subsequent preflight runs suppress the message — "telling the user
+    // once, in the same tone as other preflight findings" (RESEARCH
+    // §Anti-Patterns: don't nag). Linux is a compile-time no-op.
+    // Scenario gate (RESEARCH §Pattern 3 "scenario gate"): only emit during
+    // first-touch flows (GuidedSetup / QuickSetup). RetryInstall and
+    // ConfigOnlyReconfigure are re-runs against an existing slate install
+    // where the user already saw the message on their first setup; the ack
+    // flag usually already suppresses it, but the scenario gate is defensive
+    // insurance against an edge case where someone's very first run is a
+    // retry/reconfigure (e.g. scripted installs).
+    #[cfg(target_os = "macos")]
+    {
+        let emits_for_scenario = matches!(
+            scenario,
+            PreflightScenario::GuidedSetup | PreflightScenario::QuickSetup
+        );
+        if emits_for_scenario {
+            let config = crate::config::ConfigManager::with_env(env)?;
+            let acknowledged = config.is_ls_capability_acknowledged().unwrap_or(false);
+            let gnu_ls_present = crate::detection::is_gnu_ls_present();
+
+            if !gnu_ls_present && !acknowledged {
+                checks.push(PreflightCheck {
+                    name: "GNU ls".to_string(),
+                    description: Language::ls_capability_message().to_string(),
+                    passed: true, // advisory — never blocks setup
+                    blocking: false,
+                });
+                // Defensive: a failed state-file write (disk full, permissions)
+                // must NOT block setup. Worst case is double emission next run,
+                // not a crash.
+                let _ = config.acknowledge_ls_capability();
+            }
+        }
+    }
+
     Ok(PreflightResult { checks })
 }
 
@@ -508,5 +548,148 @@ mod tests {
         assert!(description.contains("missing dependency via fontconfig"));
         assert!(description.contains("Install fontconfig"));
         assert!(description.contains("no supported Nerd Font detected yet"));
+    }
+
+    // LS-03 BSD-`ls` capability preflight check
+    // The new check lives inside `run_checks_for_setup_with_env` gated by
+    // `#[cfg(target_os = "macos")]`. It must:
+    // - emit a non-blocking `PreflightCheck { name: "GNU ls", ... }` on
+    // macOS when `gls` is absent AND the acknowledgement flag is absent,
+    // - write the flag after emission so subsequent runs are silent,
+    // - stay silent when the flag is already present,
+    // - stay silent when `gls` is on PATH (nothing to nudge about),
+    // - disappear entirely on non-macOS targets (compile-time gate).
+    // `is_gnu_ls_present()` reads the process PATH and is NOT injected via
+    // `SlateEnv`, so host state is what it is. Following the 
+    // convention (see `is_gnu_ls_present_when_gls_on_path` in detection.rs)
+    // the host-conditional tests skip gracefully when the host state doesn't
+    // match their precondition — CI machines without coreutils still pass.
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn preflight_emits_ls_capability_message_when_gls_absent_on_macos() {
+        // Precondition: host must NOT have gls. If the dev machine has
+        // coreutils installed, this positive path is untestable here — the
+        // Linux no-op test plus the skip-when-present test pin the other
+        // branches. The delegation test in detection.rs already proves
+        // is_gnu_ls_present reflects command_path("gls").is_some().
+        if crate::detection::is_gnu_ls_present() {
+            return;
+        }
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+
+        let result = run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
+
+        let ls_check =
+            result.checks.iter().find(|c| c.name == "GNU ls").expect(
+                "preflight must push a 'GNU ls' check when gls is absent and flag is unset",
+            );
+
+        assert_eq!(
+            ls_check.description,
+            Language::ls_capability_message(),
+            "description must be the brand-voiced Language::ls_capability_message()",
+        );
+        assert!(
+            ls_check.passed,
+            "GNU ls check is advisory — must be passed=true"
+        );
+        assert!(
+            !ls_check.blocking,
+            "GNU ls check must be non-blocking (LS-03 is a one-time nudge, not a gate)",
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ls_capability_message_writes_acknowledgement_flag() {
+        if crate::detection::is_gnu_ls_present() {
+            return;
+        }
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+
+        // Sanity: flag does not exist yet.
+        let flag_path = env.config_dir().join("ls-capability-acknowledged");
+        assert!(
+            !flag_path.exists(),
+            "precondition: acknowledgement flag must be absent before preflight"
+        );
+
+        let _ = run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
+
+        assert!(
+            flag_path.exists(),
+            "after emitting the message, the acknowledgement flag must be written \
+             so subsequent preflight runs skip the check",
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn preflight_skips_ls_capability_when_acknowledged() {
+        // This test works regardless of host gls state — the ack gate dominates.
+        let temp = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+
+        // Pre-create the flag, simulating a machine that already saw the nudge.
+        let config = crate::config::ConfigManager::with_env(&env).unwrap();
+        config.acknowledge_ls_capability().unwrap();
+        assert!(
+            env.config_dir().join("ls-capability-acknowledged").exists(),
+            "precondition: flag must be pre-created"
+        );
+
+        let result = run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
+
+        assert!(
+            result.checks.iter().all(|c| c.name != "GNU ls"),
+            "preflight must NOT emit 'GNU ls' check when acknowledgement flag is present \
+             (LS-03 is a one-time nudge — suppressed forever for this machine)",
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn preflight_skips_ls_capability_when_gls_present() {
+        // Positive path — only runs when the host has coreutils's gls. On bare
+        // CI without coreutils we skip (mirrors is_gnu_ls_present_when_gls_on_path
+        // in detection.rs). The skip is acceptable because the combination of
+        // (preflight_emits_ls_capability_message_when_gls_absent_on_macos) +
+        // (preflight_skips_ls_capability_when_acknowledged) already pins the
+        // presence-check and ack-check gates; this test just confirms the gls
+        // branch closes correctly when coreutils happens to be installed.
+        if !crate::detection::is_gnu_ls_present() {
+            return;
+        }
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+
+        let result = run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
+
+        assert!(
+            result.checks.iter().all(|c| c.name != "GNU ls"),
+            "preflight must NOT emit 'GNU ls' check when gls is already on PATH"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn preflight_skips_ls_capability_on_linux() {
+        // Compile-time gate: the whole block is eliminated on non-macOS targets,
+        // so no "GNU ls" check can ever appear regardless of gls presence or flag state.
+        let temp = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+
+        let result = run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
+
+        assert!(
+            result.checks.iter().all(|c| c.name != "GNU ls"),
+            "LS-03 is macOS-only — the check block must be compile-eliminated on Linux"
+        );
     }
 }
