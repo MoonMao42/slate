@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-04-18
+
+### Added
+- `LS_COLORS` and `EZA_COLORS` generated from the active palette, so `ls`, `gls`, `eza`, lazygit, and anything reading those env vars picks up the theme
+- `slate demo` sub-command renders the active palette for a quick visual check
+- `✦ ⌘N for a fresh shell` reminder after operations that change env vars; suppressed under `--auto` / `--quiet`
+- macOS-only: first `slate setup` without GNU coreutils suggests `brew install coreutils` (one-shot, gated by a marker file)
+
+### Changed
+- `slate theme <name> --quiet` is now fully silent
+- Each adapter's `ApplyOutcome` now carries `requires_new_shell` so the shell reminder only fires when something actually changed
+
 ## [0.1.1] - 2026-04-17
 
 ### Fixed
