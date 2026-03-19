@@ -48,12 +48,14 @@ fn install_tool_via_platform(
         crate::platform::packages::PackageManagerBackend::Homebrew => {
             install_tool_via_homebrew(package, kind)
         }
-        crate::platform::packages::PackageManagerBackend::Apt => {
+        crate::platform::packages::PackageManagerBackend::Apt
+        | crate::platform::packages::PackageManagerBackend::Yay
+        | crate::platform::packages::PackageManagerBackend::Pacman => {
             crate::platform::packages::install_tool_package(tool_id, package, env)
         }
         crate::platform::packages::PackageManagerBackend::Unsupported => Err(
             crate::error::SlateError::Internal(
-                "No supported package manager was found. Slate currently supports Homebrew on macOS and apt on Linux.".to_string(),
+                "No supported package manager was found. Slate currently supports Homebrew on macOS, apt on Debian/Ubuntu, and pacman/yay on Arch Linux.".to_string(),
             ),
         ),
     }
