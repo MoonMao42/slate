@@ -1,6 +1,8 @@
+use crate::brand::events::{dispatch, BrandEvent, SuccessKind};
+use crate::brand::render_context::RenderContext;
+use crate::brand::roles::Roles;
 use crate::cli::font::resolve_font_choice;
 use crate::config::ConfigManager;
-use crate::design::symbols::Symbols;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::opacity::OpacityPreset;
@@ -61,11 +63,14 @@ pub fn handle_export() -> Result<()> {
 
     let uri = format!("slate://{}/{}/{}/{}", theme, font, opacity, tools_str);
 
+    let ctx = RenderContext::from_active_theme().ok();
+    let r = ctx.as_ref().map(Roles::new);
+
     println!();
-    println!("  {}", uri);
+    println!("  {}", path_text(r.as_ref(), &uri));
     println!();
     println!("  Share this with anyone — they can run:");
-    println!("  slate import \"{}\"", uri);
+    println!("  slate import \"{}\"", path_text(r.as_ref(), &uri));
     println!();
 
     Ok(())
@@ -73,6 +78,11 @@ pub fn handle_export() -> Result<()> {
 
 /// Import a slate config from a shareable URI.
 /// Parses the URI and applies theme, font, opacity, and tool toggles.
+/// On success emits the share-success line via `Roles::status_success`
+/// (theme.green per D-01a — NEVER lavender) and dispatches
+/// `BrandEvent::Success(SuccessKind::ConfigSet)` so 
+/// SoundSink can ring the share-import completion moment alongside the
+/// other config-mutation surfaces.
 pub fn handle_import(uri: &str) -> Result<()> {
     let env = SlateEnv::from_process()?;
     handle_import_with_env(uri, &env)
@@ -91,6 +101,9 @@ fn handle_import_with_env(uri: &str, env: &SlateEnv) -> Result<()> {
 
     let config = ConfigManager::with_env(env)?;
 
+    let ctx = RenderContext::from_active_theme().ok();
+    let r = ctx.as_ref().map(Roles::new);
+
     if let Some(opacity) = request.opacity {
         crate::cli::apply::apply_opacity(
             env,
@@ -100,21 +113,59 @@ fn handle_import_with_env(uri: &str, env: &SlateEnv) -> Result<()> {
                 reload_terminals: true,
             },
         )?;
+        let value = opacity.to_string().to_lowercase();
         println!(
-            "{} Opacity set to '{}'",
-            Symbols::SUCCESS,
-            opacity.to_string().to_lowercase()
+            "{}",
+            status_success_line(
+                r.as_ref(),
+                &format!("Opacity set to {}", code_text(r.as_ref(), &value)),
+            )
         );
     }
 
     apply_imported_tool_flags(&config, request.tools)?;
 
     println!();
-    println!("  ✓ Config imported successfully");
+    println!(
+        "  {}",
+        status_success_line(r.as_ref(), "Config imported successfully")
+    );
     println!("  Open a new terminal to see all changes.");
     println!();
 
+    // a successful import is a config-set moment
+    // maps this onto the success SFX channel.
+    dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
+
     Ok(())
+}
+
+/// Format a `log::success` body via `Roles::status_success` (theme.green
+/// NEVER lavender per D-01a), falling back to plain `✓ message`.
+fn status_success_line(r: Option<&Roles<'_>>, message: &str) -> String {
+    match r {
+        Some(r) => r.status_success(message),
+        None => format!("✓ {}", message),
+    }
+}
+
+/// Wrap a literal value (path, hex, opacity preset) in `Roles::code`
+/// (inline-code pill per Sketch 001), falling back to bare text when
+/// Roles is unavailable.
+fn code_text(r: Option<&Roles<'_>>, text: &str) -> String {
+    match r {
+        Some(r) => r.code(text),
+        None => format!("`{}`", text),
+    }
+}
+
+/// Render a path / URI through `Roles::path` (dim + italic per Sketch
+/// 002), falling back to bare text when Roles is unavailable.
+fn path_text(r: Option<&Roles<'_>>, text: &str) -> String {
+    match r {
+        Some(r) => r.path(text),
+        None => text.to_string(),
+    }
 }
 
 fn parse_import_request(uri: &str) -> Result<ImportRequest> {
@@ -273,6 +324,7 @@ fn apply_imported_tool_flags(config: &ConfigManager, flags: ToolImportFlags) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
 
     #[test]
     fn test_export_produces_valid_uri() {
@@ -346,5 +398,35 @@ mod tests {
         assert!(managed_tool_dir(&env, "alacritty")
             .join("opacity.toml")
             .exists());
+    }
+
+    /// D-01a invariant — the share-import success line uses theme.green,
+    /// never brand-lavender, across every render mode.
+    #[test]
+    fn share_status_success_line_never_emits_brand_lavender() {
+        let theme = mock_theme();
+        for mode in [RenderMode::Truecolor, RenderMode::Basic, RenderMode::None] {
+            let ctx = mock_context_with_mode(&theme, mode);
+            let r = Roles::new(&ctx);
+            let out = status_success_line(Some(&r), "Config imported successfully");
+            assert!(
+                !out.contains("38;2;114;135;253"),
+                "D-01a violation in mode {mode:?}: {out:?}"
+            );
+        }
+    }
+
+    /// Round-trip — `code_text` wraps in inline-code pill chrome in
+    /// truecolor; falls back to backticks when Roles is unavailable.
+    #[test]
+    fn code_text_wraps_value_in_pill_chrome() {
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Truecolor);
+        let r = Roles::new(&ctx);
+        let out = code_text(Some(&r), "frosted");
+        assert!(out.contains("frosted"));
+        // None-fallback returns plain backticked text.
+        let plain = code_text(None, "frosted");
+        assert_eq!(plain, "`frosted`");
     }
 }

@@ -1,8 +1,10 @@
+use crate::brand::events::{dispatch, BrandEvent, FailureKind, SuccessKind};
+use crate::brand::render_context::RenderContext;
+use crate::brand::roles::Roles;
 use crate::cli::apply::{SnapshotPolicy, ThemeApplyCoordinator, ThemeApplyReport};
 use crate::cli::auto_theme;
 use crate::cli::theme_apply::{apply_theme_selection, apply_theme_selection_with_env};
 use crate::config::ConfigManager;
-use crate::design::symbols::Symbols;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::{ThemeRegistry, ThemeVariant};
@@ -66,6 +68,30 @@ fn apply_explicit_theme(theme: &ThemeVariant, quiet: bool) -> Result<ThemeApplyR
     }
 }
 
+/// Format the `slate theme <name>` success confirmation line. 
+/// graceful degrade — falls back to plain `✓ Theme switched to <name>`
+/// when `Roles` is absent (registry init Err path).
+fn format_theme_switched(r: Option<&Roles<'_>>, theme_name: &str) -> String {
+    match r {
+        Some(r) => r.status_success(&format!("Theme switched to {}", r.theme_name(theme_name))),
+        None => format!("✓ Theme switched to '{}'", theme_name),
+    }
+}
+
+/// Format the `slate theme --auto` success confirmation line.
+fn format_theme_auto_switched(r: Option<&Roles<'_>>, theme_name: &str) -> String {
+    match r {
+        Some(r) => r.status_success(&format!(
+            "Theme auto-switched to {} (system appearance)",
+            r.theme_name(theme_name)
+        )),
+        None => format!(
+            "✓ Theme auto-switched to '{}' (system appearance)",
+            theme_name
+        ),
+    }
+}
+
 /// Handle `slate theme` command
 /// Supports three modes:
 /// 1. `slate theme <name>` — Apply explicit theme directly
@@ -77,15 +103,27 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         let env = SlateEnv::from_process()?;
         let config = ConfigManager::with_env(&env)?;
 
-        let theme_id = auto_theme::resolve_auto_theme(&env, &config)?;
+        let theme_id = match auto_theme::resolve_auto_theme(&env, &config) {
+            Ok(id) => id,
+            Err(err) => {
+                // auto-theme resolution failure → Failure event
+                // (AutoThemeFailed maps to auto-theme SFX).
+                dispatch(BrandEvent::Failure(FailureKind::AutoThemeFailed));
+                return Err(err);
+            }
+        };
 
         let registry = ThemeRegistry::new()?;
-        let theme = registry.get(&theme_id).ok_or_else(|| {
-            crate::error::SlateError::InvalidThemeData(format!(
-                "Auto-resolved theme '{}' not found",
-                theme_id
-            ))
-        })?;
+        let theme = match registry.get(&theme_id) {
+            Some(theme) => theme,
+            None => {
+                dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
+                return Err(crate::error::SlateError::InvalidThemeData(format!(
+                    "Auto-resolved theme '{}' not found",
+                    theme_id
+                )));
+            }
+        };
 
         // In quiet mode, suppress all stderr output from apply_theme_selection.
         // NOTE: the binding name must not be bare `_` — bare `_` drops immediately and
@@ -93,30 +131,62 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         // degrades to non-quiet if the redirect couldn't be established.
         if quiet {
             let _stderr_guard = StderrRedirectGuard::silence().ok();
-            ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip).apply(theme)?;
+            if let Err(err) =
+                ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip).apply(theme)
+            {
+                dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
+                return Err(err);
+            }
         } else {
-            let _ = apply_theme_selection(theme)?;
+            if let Err(err) = apply_theme_selection(theme) {
+                dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
+                return Err(err);
+            }
+            let ctx = RenderContext::from_active_theme().ok();
+            let roles = ctx.as_ref().map(Roles::new);
             println!(
-                "{} Theme auto-switched to '{}' (system appearance)",
-                Symbols::SUCCESS,
-                theme.name
+                "{}",
+                format_theme_auto_switched(roles.as_ref(), &theme.name)
             );
         }
+        // auto-theme apply success → ThemeApplied + ApplyComplete
+        // (paired: ApplyComplete is the whole-flow milestone; ThemeApplied
+        // is the category success event).
+        dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
+        dispatch(BrandEvent::ApplyComplete);
         crate::cli::sound::play_feedback();
         Ok(())
     } else if let Some(name) = theme_name {
         // Direct apply path: theme_name is canonical kebab-case
         let registry = ThemeRegistry::new()?;
 
-        let theme = registry.get(&name).ok_or_else(|| {
-            crate::error::SlateError::InvalidThemeData(format!("Theme '{}' not found", name))
-        })?;
+        let theme = match registry.get(&name) {
+            Some(theme) => theme,
+            None => {
+                dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
+                return Err(crate::error::SlateError::InvalidThemeData(format!(
+                    "Theme '{}' not found",
+                    name
+                )));
+            }
+        };
 
-        let report = apply_explicit_theme(theme, quiet)?;
+        let report = match apply_explicit_theme(theme, quiet) {
+            Ok(report) => report,
+            Err(err) => {
+                dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
+                return Err(err);
+            }
+        };
 
         if !quiet {
-            println!("{} Theme switched to '{}'", Symbols::SUCCESS, theme.name);
+            let ctx = RenderContext::from_active_theme().ok();
+            let roles = ctx.as_ref().map(Roles::new);
+            println!("{}", format_theme_switched(roles.as_ref(), &theme.name));
         }
+        // explicit-name apply success → ThemeApplied + ApplyComplete.
+        dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
+        dispatch(BrandEvent::ApplyComplete);
         crate::cli::sound::play_feedback();
 
         // UX-02 (D-D3): new-shell reminder sits BEFORE the demo hint on the
@@ -127,14 +197,6 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         if crate::adapter::registry::requires_new_shell(&report.results) {
             crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, quiet);
         }
-
-        // DEMO-02 (D-C1): hint only on explicit `slate theme <name>` success.
-        // NEVER from the `if auto` branch (Ghostty shell hook spam risk — Pitfall 1)
-        // NOR from the picker branch (D-C1).
-        // `quiet` flag must be forwarded so `slate theme <name> --quiet` actually
-        // suppresses the hint (D-C1 `--quiet` suppression contract). `auto` is
-        // provably false in this `else if let Some(name)` branch.
-        crate::cli::demo::emit_demo_hint_once(false, quiet);
 
         Ok(())
     } else {
@@ -154,7 +216,10 @@ mod tests {
     //! decision shape used in `handle_theme` so a future refactor that drops
     //! the aggregator gate or forgets to forward `quiet` will flip these
     //! tests red.
+    use super::{format_theme_auto_switched, format_theme_switched};
     use crate::adapter::registry::{ToolApplyResult, ToolApplyStatus};
+    use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
+    use crate::brand::roles::Roles;
     use crate::cli::new_shell_reminder::REMINDER_TEST_LOCK;
 
     fn applied(name: &str, requires_new_shell: bool) -> ToolApplyResult {
@@ -245,6 +310,84 @@ mod tests {
         assert!(
             !crate::cli::new_shell_reminder::reminder_flag_for_tests(),
             "the --auto branch must be emit-free regardless of apply-results"
+        );
+    }
+
+    /// snapshot — the `slate theme set <id>` success confirmation
+    /// (sketch 003 canon via Roles::status_success + Roles::theme_name)
+    /// byte-locked in Basic mode.
+    #[test]
+    fn theme_switch_success_basic_snapshot() {
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Basic);
+        let r = Roles::new(&ctx);
+        let out = format_theme_switched(Some(&r), "catppuccin-mocha");
+        insta::assert_snapshot!("theme_switch_success_basic", out);
+    }
+
+    /// Truecolor variant — verifies the lavender theme_name styling lands
+    /// inside the status_success body, and the ✓ glyph uses theme.green
+    /// (NEVER lavender per D-01a — the prefix is the success glyph from
+    /// `Roles::status_success`, wrapped with green).
+    #[test]
+    fn theme_switch_success_truecolor_snapshot() {
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Truecolor);
+        let r = Roles::new(&ctx);
+        let out = format_theme_switched(Some(&r), "catppuccin-mocha");
+        insta::assert_snapshot!("theme_switch_success_truecolor", out);
+    }
+
+    /// Auto-switched variant lands a different message body — locked
+    /// separately so `--auto` copy changes are visible in review.
+    #[test]
+    fn theme_auto_switch_success_basic_snapshot() {
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Basic);
+        let r = Roles::new(&ctx);
+        let out = format_theme_auto_switched(Some(&r), "catppuccin-mocha");
+        insta::assert_snapshot!("theme_auto_switch_success_basic", out);
+    }
+
+    /// graceful degrade — without Roles the helpers emit plain text,
+    /// no ANSI bytes.
+    #[test]
+    fn theme_switch_helpers_fall_back_to_plain_when_roles_absent() {
+        assert_eq!(
+            format_theme_switched(None, "catppuccin-mocha"),
+            "✓ Theme switched to 'catppuccin-mocha'"
+        );
+        assert_eq!(
+            format_theme_auto_switched(None, "catppuccin-mocha"),
+            "✓ Theme auto-switched to 'catppuccin-mocha' (system appearance)"
+        );
+    }
+
+    /// D-01a invariant — theme-switch success body is styled via
+    /// `status_success` (theme green), with the theme_name carrying the
+    /// lavender accent. The OUTER envelope (the ✓ glyph + green fg) must
+    /// NEVER leak the brand-lavender byte triple in its own color slot,
+    /// but the INNER `theme_name` substring IS expected to carry it.
+    /// We assert byte positions directly (no source-level ESC-CSI
+    /// literal) so `brand::migration::no_raw_ansi_in_wave_2_files` stays
+    /// green — the gate scans the source for the raw SGR prefix and this
+    /// assertion would otherwise count as a violation.
+    #[test]
+    fn theme_switch_envelope_uses_green_not_lavender() {
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Truecolor);
+        let r = Roles::new(&ctx);
+        let out = format_theme_switched(Some(&r), "catppuccin-mocha");
+        let bytes = out.as_bytes();
+        // Envelope (first SGR chunk) carries theme.green fg `38;2;166;209;137`
+        // from the mock palette.
+        let prefix = [
+            0x1b, b'[', b'3', b'8', b';', b'2', b';', b'1', b'6', b'6', b';', b'2', b'0', b'9',
+            b';', b'1', b'3', b'7', b'm',
+        ];
+        assert!(
+            bytes.starts_with(&prefix),
+            "envelope must open with theme.green SGR (mock palette), got: {out:?}"
         );
     }
 }

@@ -221,3 +221,24 @@ fn test_shell_loader_restore_removes_absent_auto_theme_watcher_from_baseline() {
     assert!(receipt.is_fully_successful());
     assert!(!watcher.exists());
 }
+
+// Regression: GitHub issue #3. A dotfile containing non-UTF-8 bytes must not abort
+// snapshot or restore — the pre-restore safety snapshot used to fail with
+// "stream did not contain valid UTF-8" and block the entire restore.
+#[test]
+fn test_restore_handles_non_utf8_dotfile() {
+    let tempdir = TempDir::new().unwrap();
+    let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+
+    let gitconfig = env.home().join(".gitconfig");
+    let original: &[u8] = b"[user]\n\tname = \xFF\xFE non-utf8 bytes\n";
+    std::fs::write(&gitconfig, original).unwrap();
+
+    let baseline = begin_restore_point_baseline_with_env(&env).unwrap();
+
+    std::fs::write(&gitconfig, b"[user]\n\tname = changed\n").unwrap();
+
+    let receipt = execute_restore_with_env(&env, &baseline.id).unwrap();
+    assert!(receipt.is_fully_successful());
+    assert_eq!(std::fs::read(&gitconfig).unwrap(), original);
+}

@@ -1,6 +1,8 @@
 use crate::adapter::font::{FontAdapter, FontDiscovery};
+use crate::brand::events::{dispatch, BrandEvent, FailureKind, SuccessKind};
+use crate::brand::render_context::RenderContext;
+use crate::brand::roles::Roles;
 use crate::cli::font_selection::FontCatalog;
-use crate::design::symbols::Symbols;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 
@@ -71,6 +73,13 @@ pub(crate) fn resolve_font_choice(name: &str) -> Result<ResolvedFontChoice> {
 /// 1. `slate font <name>` — Apply explicit font directly
 /// 2. `slate font` (no args) — Launch interactive font picker with Nerd + System groups
 pub fn handle_font(font_name: Option<&str>) -> Result<()> {
+    // Build a RenderContext up front so every status line in this
+    // handler shares the same byte contract (sketch 003 canon +
+    // daily chrome). graceful degrade: plain text when
+    // the theme registry cannot boot.
+    let ctx = RenderContext::from_active_theme().ok();
+    let roles = ctx.as_ref().map(Roles::new);
+
     if let Some(name) = font_name {
         // Direct apply path: validate and apply font
         let env = SlateEnv::from_process()?;
@@ -79,22 +88,26 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
 
         if matches!(selection, ResolvedFontChoice::Catalog(_)) {
             eprintln!("Downloading {}...", resolved_font);
-            download_catalog_font(&resolved_font, &env).map_err(|err| {
-                SlateError::InvalidConfig(format!(
-                    "Font '{}' could not be installed: {}",
-                    resolved_font, err
-                ))
-            })?;
-            eprintln!("{} {} downloaded", Symbols::SUCCESS, resolved_font);
+            match download_catalog_font(&resolved_font, &env) {
+                Ok(()) => {
+                    eprintln!("{}", format_font_downloaded(roles.as_ref(), &resolved_font));
+                    // font-download success → FontDownloaded event
+                    // (SoundSink maps this to the font-install SFX).
+                    dispatch(BrandEvent::Success(SuccessKind::FontDownloaded));
+                }
+                Err(err) => {
+                    dispatch(BrandEvent::Failure(FailureKind::FontDownloadFailed));
+                    return Err(SlateError::InvalidConfig(format!(
+                        "Font '{}' could not be installed: {}",
+                        resolved_font, err
+                    )));
+                }
+            }
         }
 
         FontAdapter::apply_font(&env, &resolved_font)?;
 
-        println!(
-            "{} Updated font to {} in Slate-managed terminal configs.",
-            Symbols::SUCCESS,
-            resolved_font
-        );
+        println!("{}", format_font_updated(roles.as_ref(), &resolved_font));
         // UX-02 (D-D2 + D-D3): the font adapter is always RequiresNewShell=true
         // per D-C3, and this handler bypasses `apply_all`, so we emit inline.
         // Positioned BEFORE the font-specific `activation_hint` line so the
@@ -107,15 +120,64 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
         } else {
             println!("{}", crate::platform::fonts::activation_hint());
         }
+        // whole-flow milestone so can latch onto a single
+        // per-command completion moment independent of the per-step
+        // FontDownloaded event.
+        dispatch(BrandEvent::ApplyComplete);
         Ok(())
     } else {
         // Picker path: show font picker UI
-        show_font_picker()
+        show_font_picker(roles.as_ref())
+    }
+}
+
+/// Format `✓ <font> downloaded` — success line emitted after a catalog
+/// download completes. Routes through `Roles::status_success` so the ✓
+/// glyph carries theme.green (never lavender per D-01a).
+fn format_font_downloaded(r: Option<&Roles<'_>>, font_name: &str) -> String {
+    match r {
+        Some(r) => r.status_success(&format!("{} downloaded", font_name)),
+        None => format!("✓ {} downloaded", font_name),
+    }
+}
+
+/// Format `✓ Updated font to <font> in Slate-managed terminal configs.`
+/// the main post-apply confirmation. Font name carried via
+/// `Roles::path` to match the "file-system / config path" role (daily
+/// chrome dim+italic, no theme-accent injection).
+fn format_font_updated(r: Option<&Roles<'_>>, font_name: &str) -> String {
+    match r {
+        Some(r) => r.status_success(&format!(
+            "Updated font to {} in Slate-managed terminal configs.",
+            r.path(font_name)
+        )),
+        None => format!(
+            "✓ Updated font to {} in Slate-managed terminal configs.",
+            font_name
+        ),
+    }
+}
+
+/// Format `✗ Download failed: <reason>` via `Roles::status_error`
+/// (theme.red — NEVER lavender per D-01a).
+fn format_font_download_failed(r: Option<&Roles<'_>>, reason: &str) -> String {
+    match r {
+        Some(r) => r.status_error(&format!("Download failed: {}", reason)),
+        None => format!("✗ Download failed: {}", reason),
+    }
+}
+
+/// Format the picker's "no supported fonts" fallback error.
+fn format_no_fonts_found(r: Option<&Roles<'_>>) -> String {
+    let body = "No supported fonts found. Run 'slate setup' to install the recommended Nerd Fonts.";
+    match r {
+        Some(r) => r.status_error(body),
+        None => format!("✗ {body}"),
     }
 }
 
 /// Show interactive font picker with installed fonts + catalog fonts available for download.
-fn show_font_picker() -> Result<()> {
+fn show_font_picker(roles: Option<&Roles<'_>>) -> Result<()> {
     let env = SlateEnv::from_process()?;
     let discovery = FontAdapter::discover_all_fonts()?;
 
@@ -210,10 +272,7 @@ fn show_font_picker() -> Result<()> {
     }
 
     if picker_items.is_empty() {
-        eprintln!(
-            "{} No supported fonts found. Run 'slate setup' to install the recommended Nerd Fonts.",
-            Symbols::FAILURE
-        );
+        eprintln!("{}", format_no_fonts_found(roles));
         return Ok(());
     }
 
@@ -252,10 +311,14 @@ fn show_font_picker() -> Result<()> {
 
             match download_catalog_font(font_name, &env) {
                 Ok(_) => {
-                    spinner.stop(format!("{} {} downloaded", Symbols::SUCCESS, bare_name));
+                    spinner.stop(format_font_downloaded(roles, &bare_name));
+                    // picker-path catalog-install success.
+                    dispatch(BrandEvent::Success(SuccessKind::FontDownloaded));
                 }
                 Err(e) => {
-                    spinner.error(format!("{} Download failed: {}", Symbols::FAILURE, e));
+                    spinner.error(format_font_download_failed(roles, &e));
+                    // picker-path download failure.
+                    dispatch(BrandEvent::Failure(FailureKind::FontDownloadFailed));
                     return Ok(());
                 }
             }
@@ -269,17 +332,15 @@ fn show_font_picker() -> Result<()> {
         // Apply font
         FontAdapter::apply_font(&env, &bare_name)?;
 
-        println!(
-            "{} Updated font to {} in Slate-managed terminal configs.",
-            Symbols::SUCCESS,
-            bare_name
-        );
+        println!("{}", format_font_updated(roles, &bare_name));
 
         if font_uses_basic_prompt(&bare_name) {
             println!("(i) Basic Starship mode enabled for new shells because this font does not include Nerd Font glyphs.");
         } else {
             println!("{}", crate::platform::fonts::activation_hint());
         }
+        // whole-flow milestone on picker-path apply success.
+        dispatch(BrandEvent::ApplyComplete);
         break;
     }
 
@@ -324,8 +385,13 @@ fn download_catalog_font(font_name: &str, env: &SlateEnv) -> std::result::Result
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_font_choice_with_discovery, ResolvedFontChoice};
+    use super::{
+        format_font_download_failed, format_font_downloaded, format_font_updated,
+        format_no_fonts_found, resolve_font_choice_with_discovery, ResolvedFontChoice,
+    };
     use crate::adapter::font::FontDiscovery;
+    use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
+    use crate::brand::roles::Roles;
     use crate::cli::new_shell_reminder::REMINDER_TEST_LOCK;
 
     /// Mirrors the explicit-name branch emit in `handle_font`: the font
@@ -378,5 +444,64 @@ mod tests {
             .to_string();
 
         assert!(err.contains("Font 'Definitely Not A Font' not found"));
+    }
+
+    /// snapshot — `slate font <name>` success confirmation line
+    /// rendered in Basic mode. Byte-locks the envelope shape
+    /// (`✓ … in Slate-managed terminal configs.`).
+    #[test]
+    fn font_updated_success_basic_snapshot() {
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Basic);
+        let r = Roles::new(&ctx);
+        let out = format_font_updated(Some(&r), "JetBrains Mono Nerd Font");
+        insta::assert_snapshot!("font_updated_success_basic", out);
+    }
+
+    /// snapshot — catalog-download completion line.
+    #[test]
+    fn font_downloaded_basic_snapshot() {
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Basic);
+        let r = Roles::new(&ctx);
+        let out = format_font_downloaded(Some(&r), "Hack Nerd Font");
+        insta::assert_snapshot!("font_downloaded_basic", out);
+    }
+
+    /// D-01a — the download-failed line uses `Roles::status_error`
+    /// (theme.red — NEVER brand lavender). Asserts the lavender byte
+    /// triple (`38;2;114;135;253`, from `BRAND_LAVENDER_FIXED`) is
+    /// absent across Truecolor / Basic / None.
+    #[test]
+    fn font_download_failed_never_emits_lavender() {
+        let theme = mock_theme();
+        for mode in [RenderMode::Truecolor, RenderMode::Basic, RenderMode::None] {
+            let ctx = mock_context_with_mode(&theme, mode);
+            let r = Roles::new(&ctx);
+            let out = format_font_download_failed(Some(&r), "connection reset");
+            assert!(
+                !out.contains("38;2;114;135;253"),
+                "D-01a violation in mode {mode:?}: {out:?}"
+            );
+        }
+    }
+
+    /// graceful degrade — every formatter emits pure plain text
+    /// when Roles is absent. Confirms no ANSI bytes leak and the
+    /// legacy glyph prefix stays identical to pre-Wave-2 output so
+    /// users hitting the registry-init edge case see the same words.
+    #[test]
+    fn font_formatters_fall_back_to_plain_when_roles_absent() {
+        let updated = format_font_updated(None, "Hack Nerd Font");
+        let downloaded = format_font_downloaded(None, "Hack Nerd Font");
+        let failed = format_font_download_failed(None, "connection reset");
+        let empty = format_no_fonts_found(None);
+        for out in [&updated, &downloaded, &failed, &empty] {
+            assert!(!out.contains('\x1b'), "expected no ANSI bytes: {out:?}");
+        }
+        assert!(updated.starts_with("✓ Updated font to "));
+        assert_eq!(downloaded, "✓ Hack Nerd Font downloaded");
+        assert_eq!(failed, "✗ Download failed: connection reset");
+        assert!(empty.starts_with("✗ No supported fonts found."));
     }
 }

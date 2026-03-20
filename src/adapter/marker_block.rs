@@ -31,6 +31,16 @@ fn count_marker(content: &str, marker: &str) -> usize {
     content.matches(marker).count()
 }
 
+fn count_marker_bytes(content: &[u8], marker: &[u8]) -> usize {
+    if marker.is_empty() || content.len() < marker.len() {
+        return 0;
+    }
+    content
+        .windows(marker.len())
+        .filter(|w| *w == marker)
+        .count()
+}
+
 /// Validate marker block state before modification.
 /// Accepts only valid states:
 /// - (0 start + 0 end) — no existing managed block
@@ -40,6 +50,22 @@ fn count_marker(content: &str, marker: &str) -> usize {
 pub fn validate_block_state(content: &str) -> Result<(), SlateError> {
     let start_count = count_marker(content, START);
     let end_count = count_marker(content, END);
+
+    match (start_count, end_count) {
+        (0, 0) | (1, 1) => Ok(()),
+        _ => Err(SlateError::InvalidConfig(format!(
+            "Marker block state corrupted: found {} START markers and {} END markers. \
+Expected either (0, 0) or (1, 1). \
+Run: grep -n 'slate:' <config-file> to diagnose. \
+Recovery: Remove markers manually or restore from backup.",
+            start_count, end_count
+        ))),
+    }
+}
+
+fn validate_block_state_bytes(content: &[u8]) -> Result<(), SlateError> {
+    let start_count = count_marker_bytes(content, START.as_bytes());
+    let end_count = count_marker_bytes(content, END.as_bytes());
 
     match (start_count, end_count) {
         (0, 0) | (1, 1) => Ok(()),
@@ -84,6 +110,40 @@ pub fn strip_managed_blocks(content: &str) -> String {
     cleaned
 }
 
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+fn strip_managed_blocks_bytes(content: &[u8]) -> Vec<u8> {
+    let mut cleaned = Vec::with_capacity(content.len());
+    let mut remaining = content;
+
+    while let Some(start) = find_subslice(remaining, START.as_bytes()) {
+        cleaned.extend_from_slice(&remaining[..start]);
+
+        let block_tail = &remaining[start..];
+        let Some(end_rel) = find_subslice(block_tail, END.as_bytes()) else {
+            remaining = &[];
+            break;
+        };
+
+        let after_end = start + end_rel + END.len();
+        remaining = &remaining[after_end..];
+
+        if let Some(rest) = remaining.strip_prefix(b"\r\n") {
+            remaining = rest;
+        } else if let Some(rest) = remaining.strip_prefix(b"\n") {
+            remaining = rest;
+        }
+    }
+
+    cleaned.extend_from_slice(remaining);
+    cleaned
+}
+
 /// Strip old block and append new block at EOF with proper newline handling.
 /// Idempotent: calling with the same block twice produces the same result.
 pub fn upsert_managed_block(content: &str, block: &str) -> String {
@@ -104,9 +164,25 @@ pub fn upsert_managed_block(content: &str, block: &str) -> String {
     cleaned
 }
 
-fn write_atomic(path: &Path, content: &str) -> Result<(), SlateError> {
+fn upsert_managed_block_bytes(content: &[u8], block: &[u8]) -> Vec<u8> {
+    let mut cleaned = strip_managed_blocks_bytes(content);
+
+    if !cleaned.is_empty() && !cleaned.ends_with(b"\n") {
+        cleaned.push(b'\n');
+    }
+
+    cleaned.extend_from_slice(block);
+
+    if !cleaned.ends_with(b"\n") {
+        cleaned.push(b'\n');
+    }
+
+    cleaned
+}
+
+fn write_atomic(path: &Path, content: &[u8]) -> Result<(), SlateError> {
     let mut file = AtomicWriteFile::open(path)?;
-    file.write_all(content.as_bytes())?;
+    file.write_all(content)?;
     file.commit()?;
     Ok(())
 }
@@ -114,13 +190,13 @@ fn write_atomic(path: &Path, content: &str) -> Result<(), SlateError> {
 /// Upsert a managed block in a file, creating the file if it does not exist.
 pub fn upsert_managed_block_file(path: &Path, block: &str) -> Result<(), SlateError> {
     let content = if path.exists() {
-        fs::read_to_string(path)?
+        fs::read(path)?
     } else {
-        String::new()
+        Vec::new()
     };
 
-    validate_block_state(&content)?;
-    let updated = upsert_managed_block(&content, block);
+    validate_block_state_bytes(&content)?;
+    let updated = upsert_managed_block_bytes(&content, block.as_bytes());
     write_atomic(path, &updated)
 }
 
@@ -130,15 +206,16 @@ pub fn remove_managed_blocks_from_file(path: &Path) -> Result<(), SlateError> {
         return Ok(());
     }
 
-    let content = fs::read_to_string(path)?;
-    validate_block_state(&content)?;
-    let cleaned = strip_managed_blocks(&content);
+    let content = fs::read(path)?;
+    validate_block_state_bytes(&content)?;
+    let cleaned = strip_managed_blocks_bytes(&content);
     write_atomic(path, &cleaned)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_strip_managed_blocks_removes_exactly_one_block() {
@@ -210,5 +287,44 @@ mod tests {
             assert!(msg.contains("1 END markers"));
             assert!(msg.contains("grep -n 'slate:'"));
         }
+    }
+
+    #[test]
+    fn upsert_managed_block_file_handles_non_utf8_prefix_bytes() {
+        let td = TempDir::new().unwrap();
+        let path = td.path().join("init.lua");
+        fs::write(&path, [0xff, 0xfe, b'\n']).unwrap();
+
+        let block = "-- # slate:start — managed by slate, do not edit\npcall(require, 'slate')\n-- # slate:end";
+        upsert_managed_block_file(&path, block).unwrap();
+
+        let updated = fs::read(&path).unwrap();
+        assert!(updated.starts_with(&[0xff, 0xfe, b'\n']));
+        assert!(
+            updated.windows(START.len()).any(|w| w == START.as_bytes()),
+            "marker must be appended even when file is not UTF-8"
+        );
+    }
+
+    #[test]
+    fn remove_managed_blocks_from_file_handles_non_utf8_bytes() {
+        let td = TempDir::new().unwrap();
+        let path = td.path().join("init.lua");
+        let mut seed = vec![0xff, b'\n'];
+        seed.extend_from_slice(
+            format!("-- {}\npcall(require, 'slate')\n-- {}\n", START, END).as_bytes(),
+        );
+        seed.extend_from_slice(b"user-tail\n");
+        fs::write(&path, seed).unwrap();
+
+        remove_managed_blocks_from_file(&path).unwrap();
+
+        let cleaned = fs::read(&path).unwrap();
+        assert_eq!(&cleaned[..2], &[0xff, b'\n']);
+        assert!(
+            !cleaned.windows(START.len()).any(|w| w == START.as_bytes()),
+            "marker must be stripped even when file is not UTF-8"
+        );
+        assert!(cleaned.ends_with(b"user-tail\n"));
     }
 }

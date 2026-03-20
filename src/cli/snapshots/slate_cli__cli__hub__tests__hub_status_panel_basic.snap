@@ -1,0 +1,7 @@
+---
+source: src/cli/hub.rs
+expression: "lines.join(\"\\n\")"
+---
+◆ Theme    [1mCatppuccin Mocha[0m
+◆ Opacity  [1m`Frosted`[0m
+◆ Font    [2;3mJetBrains Mono[0m

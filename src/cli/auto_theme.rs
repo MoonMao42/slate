@@ -1,8 +1,12 @@
+use crate::brand::events::{dispatch, BrandEvent, FailureKind, SuccessKind};
+use crate::brand::render_context::RenderContext;
+use crate::brand::roles::Roles;
 use crate::config::ConfigManager;
 use crate::detection::TerminalProfile;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::{ThemeAppearance, ThemeRegistry};
+
 /// Detect the current system appearance through the active platform backend.
 /// macOS uses `defaults`, Linux prefers XDG desktop portal and falls back to
 /// GNOME `gsettings` when needed, and unsupported environments default to Light
@@ -21,8 +25,26 @@ pub fn detect_system_appearance() -> Result<ThemeAppearance> {
 /// b. If current theme's appearance matches system appearance → keep current
 /// c. If mismatch and current has auto_pair → apply auto_pair
 /// d. If no auto_pair → fall back to brand defaults (Dark→catppuccin-mocha, Light→catppuccin-latte)
-/// On this fallback, print guidance message.
-pub fn resolve_auto_theme(_env: &SlateEnv, config: &ConfigManager) -> Result<String> {
+/// On this fallback, print guidance message via `Roles::brand` so the
+/// `✦` glyph carries the brand-lavender anchor (hybrid). Failure of
+/// the inner appearance/registry calls dispatches
+/// `BrandEvent::Failure(FailureKind::AutoThemeFailed)` from the outer
+/// wrapper [`resolve_auto_theme`] so SoundSink can latch onto
+/// the categorical auto-theme failure event.
+pub fn resolve_auto_theme(env: &SlateEnv, config: &ConfigManager) -> Result<String> {
+    match resolve_auto_theme_inner(env, config) {
+        Ok(theme) => Ok(theme),
+        Err(err) => {
+            // any failure inside resolve_auto_theme is an auto-theme
+            // categorical failure (e.g. registry load error, auto.toml IO
+            // error). maps this to its failure SFX.
+            dispatch(BrandEvent::Failure(FailureKind::AutoThemeFailed));
+            Err(err)
+        }
+    }
+}
+
+fn resolve_auto_theme_inner(_env: &SlateEnv, config: &ConfigManager) -> Result<String> {
     // Step 1: Detect system appearance
     let system_appearance = detect_system_appearance()?;
 
@@ -60,14 +82,24 @@ pub fn resolve_auto_theme(_env: &SlateEnv, config: &ConfigManager) -> Result<Str
     }
 
     // 4d: Fall back to brand defaults
-    // Print guidance on this path only
+    // Print guidance on this path only — route through Roles so the ✦
+    // glyph carries the brand-lavender anchor and the body uses
+    // the dim/italic `path` treatment. This message is informational
+    // (we DID resolve a theme), NOT an error path — so D-01a does not
+    // apply here; brand-lavender on the chrome glyph is correct.
     let default_theme = match system_appearance {
         ThemeAppearance::Dark => "catppuccin-mocha".to_string(),
         ThemeAppearance::Light => "catppuccin-latte".to_string(),
     };
 
     if current_theme_id.is_some() {
-        eprintln!("✦ Using built-in auto pairing. Run slate config set auto-theme configure to customize.");
+        let ctx = RenderContext::from_active_theme().ok();
+        let r = ctx.as_ref().map(Roles::new);
+        let glyph = brand_glyph(r.as_ref(), '✦');
+        eprintln!(
+            "{} Using built-in auto pairing. Run slate config set auto-theme configure to customize.",
+            glyph
+        );
     }
 
     Ok(default_theme)
@@ -76,10 +108,35 @@ pub fn resolve_auto_theme(_env: &SlateEnv, config: &ConfigManager) -> Result<Str
 /// Interactive configuration flow for auto-theme pairing.
 /// Guide user to select dark and light theme variants.
 /// Persists selections to auto.toml (~/.config/slate/auto.toml).
+/// On successful save, dispatches `BrandEvent::Success(SuccessKind::ConfigSet)`
+/// so the configure flow rings the same completion-event channel as a
+/// `slate config set` mutation. Any error inside the configure flow is
+/// re-routed through the outer wrapper which dispatches
+/// `BrandEvent::Failure(FailureKind::AutoThemeFailed)`.
 pub fn configure_auto_theme() -> Result<()> {
+    match configure_auto_theme_inner() {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            // Don't dispatch on user-cancel (Ctrl-C) — that's an
+            // expected exit, not a failure of the auto-theme machinery.
+            if !matches!(err, crate::error::SlateError::UserCancelled) {
+                dispatch(BrandEvent::Failure(FailureKind::AutoThemeFailed));
+            }
+            Err(err)
+        }
+    }
+}
+
+fn configure_auto_theme_inner() -> Result<()> {
     use cliclack::{confirm, log, select};
 
-    cliclack::intro("✦ Configure Auto Theme")?;
+    // Bootstrap Roles up-front so every chrome line shares one byte
+    // contract (sketch 003 daily chrome). Graceful degrade per
+    // plain text when the registry fails to load.
+    let ctx = RenderContext::from_active_theme().ok();
+    let r = ctx.as_ref().map(Roles::new);
+
+    cliclack::intro(intro_title(r.as_ref(), "Configure Auto Theme"))?;
     log::info("Match themes to your system appearance .")?;
     let terminal = TerminalProfile::detect();
     let backend = crate::platform::desktop::detect_backend();
@@ -169,8 +226,14 @@ pub fn configure_auto_theme() -> Result<()> {
         .map(|t| t.name.as_str())
         .unwrap_or("?");
 
-    log::info(format!("Dark:  {}", dark_theme_name))?;
-    log::info(format!("Light: {}", light_theme_name))?;
+    log::info(format!(
+        "Dark:  {}",
+        theme_name_text(r.as_ref(), dark_theme_name)
+    ))?;
+    log::info(format!(
+        "Light: {}",
+        theme_name_text(r.as_ref(), light_theme_name)
+    ))?;
     cliclack::log::remark("")?;
 
     let confirm_save = confirm("Save these preferences?")
@@ -186,7 +249,13 @@ pub fn configure_auto_theme() -> Result<()> {
 
     if confirm_save {
         config.write_auto_config(Some(dark_theme_id), Some(light_theme_id))?;
-        cliclack::log::success("Auto-theme preferences saved.")?;
+        cliclack::log::success(status_success_line(
+            r.as_ref(),
+            "Auto-theme preferences saved.",
+        ))?;
+        // a successful auto-theme configure write is a config-set
+        // moment per the broader pattern in `src/cli/config.rs`.
+        dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
     } else {
         cliclack::log::info("Configuration cancelled.")?;
     }
@@ -195,9 +264,50 @@ pub fn configure_auto_theme() -> Result<()> {
     Ok(())
 }
 
+/// Build the intro header title. Always starts with the ✦ brand glyph so
+/// the wordmark keeps the lavender anchor that Sketch 002 locks in.
+fn intro_title(r: Option<&Roles<'_>>, text: &str) -> String {
+    match r {
+        Some(r) => format!("{} {}", r.brand("✦"), text),
+        None => format!("✦ {}", text),
+    }
+}
+
+/// Render a brand-anchor glyph (✦, ★, etc.) via `Roles::brand`, falling
+/// back to the bare glyph when Roles is unavailable (graceful
+/// degrade). Used by informational paths that want the brand lavender
+/// on the chrome but don't need the full intro framing.
+fn brand_glyph(r: Option<&Roles<'_>>, glyph: char) -> String {
+    let s = glyph.to_string();
+    match r {
+        Some(r) => r.brand(&s),
+        None => s,
+    }
+}
+
+/// Format a `log::success` body via `Roles::status_success` (theme.green
+/// NEVER lavender per D-01a), falling back to plain `✓ message`.
+fn status_success_line(r: Option<&Roles<'_>>, message: &str) -> String {
+    match r {
+        Some(r) => r.status_success(message),
+        None => format!("✓ {}", message),
+    }
+}
+
+/// Render a theme display name through `Roles::theme_name` (active
+/// theme's `brand_accent` per daily chrome), falling back to the
+/// bare name when Roles is unavailable.
+fn theme_name_text(r: Option<&Roles<'_>>, name: &str) -> String {
+    match r {
+        Some(r) => r.theme_name(name),
+        None => name.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
 
     #[test]
     fn test_detect_system_appearance_defaults_to_light() {
@@ -324,5 +434,76 @@ mod tests {
 
         // Should resolve to a brand default (catppuccin-mocha or catppuccin-latte)
         assert!(resolved == "catppuccin-mocha" || resolved == "catppuccin-latte");
+    }
+
+    /// D-01a invariant — the `status_success_line` helper used by the
+    /// auto-theme configure flow must use theme.green, never the brand
+    /// lavender RGB triple. Tests every render mode to lock the
+    /// invariant file-wide.
+    #[test]
+    fn status_success_line_never_emits_brand_lavender() {
+        let theme = mock_theme();
+        for mode in [RenderMode::Truecolor, RenderMode::Basic, RenderMode::None] {
+            let ctx = mock_context_with_mode(&theme, mode);
+            let r = Roles::new(&ctx);
+            let out = status_success_line(Some(&r), "Auto-theme preferences saved.");
+            assert!(
+                !out.contains("38;2;114;135;253"),
+                "D-01a violation in mode {mode:?}: {out:?}"
+            );
+        }
+    }
+
+    /// D-01a invariant variant — even though `auto_theme.rs` does not
+    /// emit `Roles::status_error` directly today (errors propagate via
+    /// the outer wrapper to the caller's `error::display`), assert the
+    /// invariant locally so a future refactor that adds an error
+    /// surface here cannot ship lavender bytes inside an error body.
+    #[test]
+    fn d01a_no_lavender_in_error_paths_for_auto_theme() {
+        let theme = mock_theme();
+        for mode in [RenderMode::Truecolor, RenderMode::Basic, RenderMode::None] {
+            let ctx = mock_context_with_mode(&theme, mode);
+            let r = Roles::new(&ctx);
+            // Simulate the byte shape of any error rendering this file
+            // might emit in the future. status_error must NEVER carry
+            // brand-accent lavender bytes (D-01a).
+            let out = r.status_error("dark-mode-notify install failed");
+            assert!(
+                !out.contains("38;2;114;135;253"),
+                "D-01a violation for status_error in mode {mode:?}: {out:?}"
+            );
+        }
+    }
+
+    /// Brand-anchor invariant — `brand_glyph` must carry the
+    /// brand-lavender RGB triple on the ✦ glyph in truecolor mode (the
+    /// `eprintln!` informational guidance message in `resolve_auto_theme_inner`
+    /// is the only Wave-6 production caller).
+    #[test]
+    fn brand_glyph_carries_lavender_in_truecolor() {
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Truecolor);
+        let r = Roles::new(&ctx);
+        let out = brand_glyph(Some(&r), '✦');
+        assert!(
+            out.contains("38;2;114;135;253"),
+            "brand_glyph must carry brand-lavender bytes in truecolor, got: {out:?}"
+        );
+    }
+
+    /// graceful degrade — without Roles every helper falls back to
+    /// the bare glyph / message, with zero ANSI bytes.
+    #[test]
+    fn helpers_fall_back_to_plain_when_roles_absent() {
+        let glyph = brand_glyph(None, '✦');
+        assert_eq!(glyph, "✦");
+        let line = status_success_line(None, "saved");
+        assert_eq!(line, "✓ saved");
+        let theme_name = theme_name_text(None, "catppuccin-mocha");
+        assert_eq!(theme_name, "catppuccin-mocha");
+        for s in [glyph, line, theme_name] {
+            assert!(!s.contains('\x1b'));
+        }
     }
 }

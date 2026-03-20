@@ -1,0 +1,5 @@
+---
+source: src/cli/theme.rs
+expression: out
+---
+[1m✓ Theme auto-switched to [1mcatppuccin-mocha[0m (system appearance)[0m

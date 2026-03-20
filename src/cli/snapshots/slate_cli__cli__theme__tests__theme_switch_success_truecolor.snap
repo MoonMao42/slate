@@ -1,0 +1,5 @@
+---
+source: src/cli/theme.rs
+expression: out
+---
+[38;2;166;209;137m✓ Theme switched to [38;2;114;135;253mcatppuccin-mocha[0m[0m

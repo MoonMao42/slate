@@ -1,0 +1,9 @@
+---
+source: src/cli/restore.rs
+assertion_line: 335
+expression: out
+---
+
+◆ Restored to Catppuccin Mocha
+┃ ├─ 5 file(s) restored successfully
+└─ ★ Back on track

@@ -44,6 +44,12 @@ pub struct Palette {
     pub selection_bg: Option<String>,
     pub selection_fg: Option<String>,
 
+    // designer-picked per-theme brand accent used by the
+    // daily-chrome role surfaces (command pill, theme name, inline `slate`).
+    // Brand anchors (slate logo, ✦, ◆, ★) stay on the fixed lavender
+    // `BRAND_LAVENDER_FIXED` constant regardless of this value.
+    pub brand_accent: String,
+
     // Standard ANSI colors (black/8 colors + bright variants)
     pub black: String,
     pub red: String,
@@ -94,6 +100,7 @@ impl Palette {
     pub fn validate(&self) -> Result<()> {
         validate_hex_color("foreground", &self.foreground)?;
         validate_hex_color("background", &self.background)?;
+        validate_hex_color("brand_accent", &self.brand_accent)?;
         validate_hex_color("black", &self.black)?;
         validate_hex_color("red", &self.red)?;
         validate_hex_color("green", &self.green)?;
@@ -190,6 +197,36 @@ impl Palette {
             SemanticColor::FileDocs => self.foreground.clone(),
             SemanticColor::FileConfig => self.bright_black.clone(),
             SemanticColor::FileHidden => self.bright_black.clone(),
+
+            // Editor theming (consumed by src/adapter/nvim.rs).
+            // Each arm cascades through ≥ 2 fallbacks so even minimalist
+            // palettes (e.g. Solarized) never produce an empty hex.
+            SemanticColor::Background => self.background.clone(),
+            SemanticColor::Surface => self.surface0.clone().unwrap_or_else(|| {
+                self.bg_dim
+                    .clone()
+                    .unwrap_or_else(|| self.background.clone())
+            }),
+            SemanticColor::SurfaceAlt => self.surface1.clone().unwrap_or_else(|| {
+                self.overlay0
+                    .clone()
+                    .unwrap_or_else(|| self.bright_black.clone())
+            }),
+            SemanticColor::Selection => self.selection_bg.clone().unwrap_or_else(|| {
+                self.surface2
+                    .clone()
+                    .unwrap_or_else(|| self.bright_black.clone())
+            }),
+            SemanticColor::Border => self.surface2.clone().unwrap_or_else(|| {
+                self.overlay0
+                    .clone()
+                    .unwrap_or_else(|| self.bright_black.clone())
+            }),
+            SemanticColor::LspParameter => self.flamingo.clone().unwrap_or_else(|| {
+                self.rosewater
+                    .clone()
+                    .unwrap_or_else(|| self.yellow.clone())
+            }),
         }
     }
 }
@@ -498,6 +535,7 @@ mod tests {
             cursor: Some("#ffffff".to_string()),
             selection_bg: Some("#222222".to_string()),
             selection_fg: Some("#eeeeee".to_string()),
+            brand_accent: "#7287fd".to_string(),
             black: "#000000".to_string(),
             red: "#ff0000".to_string(),
             green: "#00ff00".to_string(),
@@ -546,6 +584,30 @@ mod tests {
         palette.surface2 = Some("#98989 2".to_string());
         let err = palette.validate().expect_err("invalid color should fail");
         assert!(err.to_string().contains("surface2"));
+    }
+
+    /// `brand_accent` is a required hex field on every
+    /// palette. A malformed or empty value must surface as a validation error
+    /// that names the field so downstream error frames can point the operator
+    /// at the correct line in `themes/themes.toml`.
+    #[test]
+    fn validate_rejects_missing_brand_accent() {
+        let mut palette = sample_palette();
+        palette.brand_accent = String::new();
+        let err = palette
+            .validate()
+            .expect_err("empty brand_accent should fail validation");
+        assert!(
+            err.to_string().contains("brand_accent"),
+            "error should mention brand_accent field, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_valid_brand_accent_hex() {
+        let mut palette = sample_palette();
+        palette.brand_accent = "#7287fd".to_string();
+        assert!(palette.validate().is_ok());
     }
 
     #[test]
@@ -766,5 +828,46 @@ mod semantic_color_tests {
             expected,
             "theme {theme_id} variant {variant:?} should resolve to {expected_slot}"
         );
+    }
+
+    /// assert each of the 6 new editor-theming variants resolves
+    /// to a well-formed `#RRGGBB` hex string for every embedded theme. This
+    /// guards the cascading-fallback contract: even palettes missing the
+    /// preferred slot (e.g. Solarized has no `surface1`) must still resolve
+    /// through the cascade chain and return a printable hex.
+    #[rstest]
+    #[case::bg(SemanticColor::Background)]
+    #[case::surface(SemanticColor::Surface)]
+    #[case::surface_alt(SemanticColor::SurfaceAlt)]
+    #[case::selection(SemanticColor::Selection)]
+    #[case::border(SemanticColor::Border)]
+    #[case::lsp_parameter(SemanticColor::LspParameter)]
+    fn resolve_editor_variant_returns_valid_hex_for_all_themes(#[case] variant: SemanticColor) {
+        let registry = ThemeRegistry::new().expect("registry init");
+        for theme in registry.all() {
+            let hex = theme.palette.resolve(variant);
+            assert_eq!(
+                hex.len(),
+                7,
+                "theme {} variant {:?}: expected 7-char hex, got {:?}",
+                theme.id,
+                variant,
+                hex
+            );
+            assert!(
+                hex.starts_with('#'),
+                "theme {} variant {:?}: hex must start with #, got {:?}",
+                theme.id,
+                variant,
+                hex
+            );
+            assert!(
+                hex[1..].chars().all(|c| c.is_ascii_hexdigit()),
+                "theme {} variant {:?}: non-hex chars in {:?}",
+                theme.id,
+                variant,
+                hex
+            );
+        }
     }
 }

@@ -6,6 +6,12 @@ use std::path::{Path, PathBuf};
 /// - Dependency injection: all path resolution goes through SlateEnv
 /// - Test isolation: tests can inject a tempdir via with_home()
 /// - Single source of truth: all adapters and config code use SlateEnv methods
+/// `Clone` is derived so `RollbackGuard` (and the companion
+/// `install_rollback_panic_hook` closure) can own an env snapshot
+/// independent of the caller's borrow. All fields are owned `PathBuf`s,
+/// so cloning is O(paths) with no shared state — safe regardless of call
+/// site.
+#[derive(Clone)]
 pub struct SlateEnv {
     home: PathBuf,
     xdg_config_home: PathBuf,
@@ -245,5 +251,52 @@ mod tests {
 
         assert!(env.cache_dir().ends_with(".cache"));
         assert!(env.slate_cache_dir().ends_with(".cache/slate"));
+    }
+}
+
+#[cfg(test)]
+mod slate_cache_dir_tests {
+    //! Task 1: dedicated coverage for `SlateEnv::slate_cache_dir`.
+    //! These tests prove the accessor is XDG-aware (via the `from_process`
+    //! / `with_home` constructors) and stable across calls — without
+    //! mutating `std::env::set_var` (per user preference `feedback_no_tech_debt`,
+    //! pure-function testing, no global env mutation).
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    #[test]
+    fn slate_cache_dir_honors_injected_home() {
+        // Constructor injection (`with_home`) is the pure-function-friendly
+        // test hook: no XDG_CACHE_HOME mutation required. The resolved
+        // path must sit under `<injected-home>/.cache/slate`, regardless
+        // of whatever `XDG_CACHE_HOME` happens to be set to at runtime.
+        let tempdir = TempDir::new().expect("create tempdir");
+        let injected_home: PathBuf = tempdir.path().to_path_buf();
+        let env = SlateEnv::with_home(injected_home.clone());
+
+        let dir = env.slate_cache_dir();
+        assert!(
+            dir.starts_with(&injected_home),
+            "expected slate_cache_dir under injected home {:?}, got {:?}",
+            injected_home,
+            dir
+        );
+        assert!(
+            dir.ends_with(".cache/slate"),
+            "expected path ending with '.cache/slate', got {:?}",
+            dir
+        );
+    }
+
+    #[test]
+    fn slate_cache_dir_is_stable_across_calls() {
+        let tempdir = TempDir::new().expect("create tempdir");
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        assert_eq!(
+            env.slate_cache_dir(),
+            env.slate_cache_dir(),
+            "slate_cache_dir must be deterministic across calls"
+        );
     }
 }

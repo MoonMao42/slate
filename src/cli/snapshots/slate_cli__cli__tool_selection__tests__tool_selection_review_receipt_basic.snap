@@ -1,0 +1,15 @@
+---
+source: src/cli/tool_selection.rs
+expression: out
+---
+◆ Review and confirm
+
+◆ Install
+┃ ├─ • Starship — formula
+┃ ├─ • bat — formula
+
+  → Font: JetBrains Mono
+  → Theme: Catppuccin Mocha
+  → Terminal: Ghostty · best experience
+
+  [2;3mReady to apply? This will create backups first.[0m

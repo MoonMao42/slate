@@ -1,0 +1,5 @@
+---
+source: src/cli/font.rs
+expression: out
+---
+[1m✓ Hack Nerd Font downloaded[0m

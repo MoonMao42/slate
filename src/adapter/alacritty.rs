@@ -86,8 +86,24 @@ impl AlacrittyAdapter {
             return Ok(());
         }
 
-        // Read existing integration file
-        let content = fs::read_to_string(integration_path)?;
+        // Read existing integration file. Byte-first read + explicit UTF-8
+        // check so a stray non-UTF-8 byte in alacritty.toml (issue #3)
+        // produces an actionable "which file, where" error instead of a
+        // bare IO "stream did not contain valid UTF-8".
+        let bytes = fs::read(integration_path).map_err(|e| {
+            SlateError::ConfigReadError(integration_path.display().to_string(), e.to_string())
+        })?;
+        let content = String::from_utf8(bytes).map_err(|e| {
+            SlateError::ConfigReadError(
+                integration_path.display().to_string(),
+                format!(
+                    "contains non-UTF-8 bytes at byte offset {} — slate cannot parse this file. \
+                     Inspect with `xxd {} | head` around that offset and remove the stray bytes.",
+                    e.utf8_error().valid_up_to(),
+                    integration_path.display()
+                ),
+            )
+        })?;
 
         // Parse as TOML AST (preserves comments and formatting)
         let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e| {
@@ -225,7 +241,17 @@ impl ToolAdapter for AlacrittyAdapter {
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
         let env = SlateEnv::from_process()?;
-        let integration_path = self.integration_config_path()?;
+        self.apply_theme_with_env(theme, &env)
+    }
+
+    /// preview-path override. Resolves the integration config and
+    /// the managed config directory via the injected `env`, so tempdir-backed
+    /// test envs actually influence where Alacritty's managed `colors.toml` /
+    /// `opacity.toml` land (previously `apply_theme` called
+    /// `SlateEnv::from_process()` internally, making the `&SlateEnv` in
+    /// `silent_preview_apply`'s signature a no-op for this adapter).
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
+        let integration_path = Self::resolve_config_path_with_env(env);
         if !integration_path.exists() {
             return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
         }
@@ -238,7 +264,7 @@ impl ToolAdapter for AlacrittyAdapter {
 
         // Step 2b: Add font-family — prefer user's saved choice, fallback to detection
         let mut final_colors_content = colors_content;
-        let config_mgr = ConfigManager::with_env(&env)?;
+        let config_mgr = ConfigManager::with_env(env)?;
         let chosen_font = config_mgr.get_current_font().ok().flatten();
         let font_family = chosen_font.or_else(|| {
             crate::adapter::font::FontAdapter::detect_installed_fonts()
@@ -252,7 +278,7 @@ impl ToolAdapter for AlacrittyAdapter {
         // Write managed colors file
         config_mgr.write_managed_file("alacritty", "colors.toml", &final_colors_content)?;
         let current_opacity = config_mgr.get_current_opacity_preset()?;
-        write_opacity_config(&env, current_opacity)?;
+        write_opacity_config(env, current_opacity)?;
 
         // Ensure integration file includes managed colors path
         let managed_colors_path = config_mgr.managed_dir("alacritty").join("colors.toml");
@@ -317,6 +343,7 @@ mod tests {
             cursor: None,
             selection_bg: None,
             selection_fg: None,
+            brand_accent: "#7287fd".to_string(),
             black: "#000000".to_string(),
             red: "#ff0000".to_string(),
             green: "#00ff00".to_string(),
@@ -427,5 +454,49 @@ mod tests {
     fn test_is_installed_when_not_present() {
         let adapter = AlacrittyAdapter;
         let _result = adapter.is_installed();
+    }
+
+    /// contract: the trait-level `apply_theme_with_env` must honor
+    /// the injected env — managed writes and integration import updates MUST
+    /// land inside the tempdir, not the host's real `~/.config/alacritty`.
+    #[test]
+    fn apply_theme_with_env_honors_injected_env_for_managed_writes() {
+        use std::io::Write;
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let adapter = AlacrittyAdapter;
+
+        // Pre-create the Alacritty integration config inside the tempdir so
+        // the apply path doesn't early-return with MissingIntegrationConfig.
+        let integration_path = AlacrittyAdapter::resolve_config_path_with_env(&env);
+        fs::create_dir_all(integration_path.parent().unwrap()).unwrap();
+        let mut file = fs::File::create(&integration_path).unwrap();
+        writeln!(file, "# slate managed").unwrap();
+        drop(file);
+
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+
+        let outcome = ToolAdapter::apply_theme_with_env(&adapter, &theme, &env).unwrap();
+        assert!(matches!(outcome, ApplyOutcome::Applied { .. }));
+
+        // Managed writes MUST have landed inside the tempdir.
+        let managed_colors = tempdir
+            .path()
+            .join(".config/slate/managed/alacritty/colors.toml");
+        assert!(
+            managed_colors.exists(),
+            "expected managed colors.toml inside tempdir at {:?}",
+            managed_colors
+        );
+
+        // Integration import array must reference the tempdir-scoped managed path.
+        let integration_content = fs::read_to_string(&integration_path).unwrap();
+        assert!(
+            integration_content.contains(&managed_colors.display().to_string()),
+            "integration config must include the managed colors.toml under tempdir, got:\n{}",
+            integration_content
+        );
     }
 }

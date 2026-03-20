@@ -142,12 +142,17 @@ pub(crate) fn apply_theme_with_options(
         }
     }
 
+    // route the commit path through `apply_theme_to_tools_with_env`
+    // so the `&SlateEnv` parameter of this coordinator actually reaches the
+    // four preview-path adapters instead of being silently discarded by each
+    // adapter's internal `SlateEnv::from_process()` call. Non-preview adapters
+    // continue to work via the trait's default impl (delegate to `apply_theme`).
     let registry = ToolRegistry::default();
     let results = if let Some(target_tools) = options.target_tools {
         let selected: HashSet<String> = target_tools.iter().cloned().collect();
-        registry.apply_theme_to_tools(theme, &selected)
+        registry.apply_theme_to_tools_with_env(theme, env, Some(&selected))
     } else {
-        registry.apply_theme_to_all(theme)
+        registry.apply_theme_to_tools_with_env(theme, env, None)
     };
     let report = ThemeApplyReport { results };
 
@@ -174,6 +179,25 @@ pub(crate) fn apply_theme_with_options(
                 }
             }
         }
+    }
+
+    // nvim state-file tail hook.
+    // Best-effort, non-fatal. Every successful apply path — explicit set,
+    // picker commit, restore re-apply, auto-follow — funnels through this
+    // coordinator, so writing the state file here guarantees every running
+    // nvim instance sees a single atomic `fs_event` and hot-reloads via the
+    // loader's `vim.uv.fs_event` watcher.
+    // Intentionally placed AFTER `set_current_theme` so the hook does not
+    // fire on the applied_count == 0 early-return path above: a theme that
+    // nothing else applied must not point running nvim at an orphan state.
+    // If the write itself fails (unwritable cache dir, etc.) we log a
+    // warning but do not abort the theme swap — matches the tmux reload
+    // posture documented in 17-RESEARCH §Pattern 3.
+    if let Err(err) = crate::adapter::nvim::write_state_file(env, &theme.id) {
+        eprintln!(
+            "warning: nvim state-file write failed for theme {}: {}",
+            theme.id, err
+        );
     }
 
     reload_theme_targets(&registry, &report);
@@ -218,11 +242,15 @@ pub(crate) fn preview_theme(
     // Live preview only touches adapters the user actually sees in this terminal window.
     // Rewriting starship/bat/delta on every picker keystroke is wasted IO and has no visible
     // effect until the user launches a new shell.
+    // route through `apply_theme_to_tools_with_env` so the injected
+    // `env` (e.g. a tempdir-backed `SlateEnv::with_home(...)` from integration
+    // tests) actually reaches the preview-path adapters. This is what closes
+    // the 19-08 "signature lie" at the `silent_preview_apply(&env, …)` boundary.
     let preview_targets: HashSet<String> = ["ghostty", "alacritty", "kitty"]
         .iter()
         .map(|s| (*s).to_string())
         .collect();
-    let _ = adapter_registry.apply_theme_to_tools(theme, &preview_targets);
+    let _ = adapter_registry.apply_theme_to_tools_with_env(theme, env, Some(&preview_targets));
 
     apply_opacity(
         env,
@@ -442,6 +470,114 @@ mod tests {
         assert_eq!(
             count_restore_points(&env.slate_cache_dir().join("backups")),
             1
+        );
+    }
+
+    #[test]
+    fn slate_theme_set_writes_nvim_state_file_on_successful_apply() {
+        // Contract: after ThemeApplyCoordinator::apply succeeds (at least one
+        // adapter returns Applied), the shared coordinator writes the nvim
+        // state file at `<home>/.cache/slate/current_theme.lua` containing the
+        // applied variant id. The state file is what triggers the nvim loader's
+        // vim.uv.fs_event watcher in any running nvim.
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let theme = catppuccin::catppuccin_mocha().unwrap();
+
+        let report = ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip)
+            .apply(&theme)
+            .unwrap();
+        assert!(
+            report.applied_count() >= 1,
+            "precondition: at least one adapter must apply (ls_colors is always-on)"
+        );
+
+        let state = tempdir.path().join(".cache/slate/current_theme.lua");
+        assert!(
+            state.is_file(),
+            "shared coordinator must write nvim state file at {:?}",
+            state
+        );
+        let got = std::fs::read_to_string(&state).unwrap();
+        assert!(
+            got.contains(&theme.id),
+            "state file must contain applied variant id {:?}, got {:?}",
+            theme.id,
+            got
+        );
+    }
+
+    #[test]
+    fn slate_theme_set_no_state_file_when_no_adapter_applied() {
+        // Contract: if applied_count == 0 (e.g., only a non-existent tool was
+        // targeted), the coordinator must NOT write an orphan state file. This
+        // prevents running nvim instances from hot-reloading to a theme that
+        // nothing else applied.
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let theme = catppuccin::catppuccin_mocha().unwrap();
+
+        let coordinator = ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip);
+        let unreachable_target = vec!["definitely-not-a-real-tool".to_string()];
+        let report = coordinator
+            .apply_to_tools(&theme, &unreachable_target)
+            .unwrap();
+        assert_eq!(report.applied_count(), 0);
+
+        let state = tempdir.path().join(".cache/slate/current_theme.lua");
+        assert!(
+            !state.exists(),
+            "no orphan state file must be written when no adapter applied; found {:?}",
+            state
+        );
+    }
+
+    /// contract: `preview_theme(&env, ...)` must route through
+    /// `ToolRegistry::apply_theme_to_tools_with_env` so the 3 preview-path
+    /// adapters (Ghostty, Alacritty, Kitty) honor the injected env. With a
+    /// tempdir-backed env, managed writes must land inside the tempdir and
+    /// the host's real `~/.config/slate/managed/*` must NOT be touched. This
+    /// is the end-to-end proof that the `silent_preview_apply(&env, ...)`
+    /// signature is no longer a lie.
+    #[test]
+    fn preview_theme_routes_injected_env_all_the_way_to_adapters() {
+        use std::io::Write;
+
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+
+        // Pre-create Ghostty integration config inside tempdir so the apply
+        // path doesn't short-circuit with MissingIntegrationConfig. This is
+        // the "live preview on Ghostty" scenario — picker navigation with a
+        // real Ghostty session running.
+        let ghostty_integration = tempdir.path().join(".config/ghostty/config");
+        std::fs::create_dir_all(ghostty_integration.parent().unwrap()).unwrap();
+        let mut file = std::fs::File::create(&ghostty_integration).unwrap();
+        writeln!(file, "# managed by slate").unwrap();
+        drop(file);
+
+        let theme = catppuccin::catppuccin_mocha().unwrap();
+
+        // Route through the actual `preview_theme` entry point — this is
+        // what `silent_preview_apply` calls.
+        preview_theme(&env, &theme, OpacityPreset::Solid).unwrap();
+
+        // Managed ghostty/theme.conf MUST live inside the tempdir.
+        let managed_ghostty_theme = tempdir
+            .path()
+            .join(".config/slate/managed/ghostty/theme.conf");
+        assert!(
+            managed_ghostty_theme.exists(),
+            "preview_theme must write managed ghostty theme.conf inside tempdir at {:?}",
+            managed_ghostty_theme
+        );
+
+        // Integration config inside tempdir must reference the tempdir managed path.
+        let integration_content = std::fs::read_to_string(&ghostty_integration).unwrap();
+        assert!(
+            integration_content.contains(&managed_ghostty_theme.display().to_string()),
+            "ghostty integration config must include the tempdir-scoped managed theme.conf, got:\n{}",
+            integration_content
         );
     }
 

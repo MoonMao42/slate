@@ -125,7 +125,7 @@ pub fn get_restore_point_with_env(env: &SlateEnv, restore_point_id: &str) -> Res
     Ok(restore_point)
 }
 
-fn restore_entry(entry: &RestoreEntry, content: Option<&str>) -> Result<()> {
+fn restore_entry(entry: &RestoreEntry, content: Option<&[u8]>) -> Result<()> {
     if entry.original_state == OriginalFileState::Absent {
         match fs::remove_file(&entry.original_path) {
             Ok(()) => return Ok(()),
@@ -161,7 +161,7 @@ fn restore_entry(entry: &RestoreEntry, content: Option<&str>) -> Result<()> {
         ))
     })?;
 
-    file.write_all(content.as_bytes()).map_err(|e| {
+    file.write_all(content).map_err(|e| {
         SlateError::BackupFailed(format!(
             "Failed to write restored content to {}: {}",
             original_path.display(),
@@ -273,7 +273,7 @@ pub fn execute_restore_with_env(env: &SlateEnv, restore_point_id: &str) -> Resul
 fn restore_single_entry(entry: &RestoreEntry) -> RestoreFileResult {
     let backup_content = if entry.original_state == OriginalFileState::Present {
         match entry.backup_path.as_ref() {
-            Some(path) => match fs::read_to_string(path) {
+            Some(path) => match fs::read(path) {
                 Ok(content) => Some(content),
                 Err(e) => {
                     return RestoreFileResult {

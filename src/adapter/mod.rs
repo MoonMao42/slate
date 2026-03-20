@@ -1,3 +1,4 @@
+use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeVariant;
 use std::path::PathBuf;
@@ -13,6 +14,7 @@ pub mod kitty;
 pub mod lazygit;
 pub mod ls_colors;
 pub mod marker_block;
+pub mod nvim;
 pub mod palette_renderer;
 pub mod registry;
 pub mod starship;
@@ -30,6 +32,7 @@ pub use ghostty::GhosttyAdapter;
 pub use kitty::KittyAdapter;
 pub use lazygit::LazygitAdapter;
 pub use ls_colors::LsColorsAdapter;
+pub use nvim::NvimAdapter;
 pub use registry::{ToolApplyResult, ToolApplyStatus, ToolRegistry};
 pub use starship::StarshipAdapter;
 pub use tmux::TmuxAdapter;
@@ -145,6 +148,24 @@ pub trait ToolAdapter: Send + Sync {
     /// 3. Never modify user/ directory
     /// 4. Be idempotent (running twice produces same result)
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome>;
+
+    /// Apply theme using an explicitly injected [`SlateEnv`].
+    /// Preview-path adapters (Ghostty, Alacritty, Kitty, Starship) override
+    /// this method so that `silent_preview_apply(&env, …)` can route a
+    /// tempdir-backed env all the way through to per-adapter path resolution
+    /// (`integration_config_path`, `managed_config_path`) without any call to
+    /// `SlateEnv::from_process()`. That in turn lets integration tests assert
+    /// real file-level rollback against the injected env with zero
+    /// `std::env::set_var` — closing the "signature lie" that
+    /// Gemini's review surfaced.
+    /// The default implementation ignores `env` and delegates to `apply_theme`
+    /// so the 10 non-preview-path adapters (font, bat, tmux, delta, eza,
+    /// fastfetch, lazygit, ls_colors, nvim, zsh_highlight) keep working
+    /// unchanged. Migrating those to honor the injected env is a separate
+    /// follow-up.
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, _env: &SlateEnv) -> Result<ApplyOutcome> {
+        self.apply_theme(theme)
+    }
 
     /// Hot-reload mechanism for this tool.
     /// Allows theme changes to take effect without closing terminal.

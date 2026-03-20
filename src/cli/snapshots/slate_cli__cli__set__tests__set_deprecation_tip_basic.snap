@@ -1,0 +1,5 @@
+---
+source: src/cli/set.rs
+expression: out
+---
+[2;3m(i) Tip: 'slate set' is transitioning to 'slate theme'. Try 'slate theme <name>' next time.[0m

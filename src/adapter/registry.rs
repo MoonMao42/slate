@@ -1,4 +1,5 @@
 use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
+use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeVariant;
 use rayon::prelude::*;
@@ -85,11 +86,59 @@ impl ToolRegistry {
         self.apply_theme_with_filter(theme, Some(tool_names))
     }
 
+    /// Env-injecting variant of [`apply_theme_to_tools`] / [`apply_theme_to_all`].
+    /// Dispatches through [`ToolAdapter::apply_theme_with_env`] so the four
+    /// preview-path adapters (Ghostty, Alacritty, Kitty, Starship) resolve all
+    /// paths via the injected `env` instead of `SlateEnv::from_process()`. The
+    /// other 10 adapters inherit the trait's default implementation (which
+    /// simply delegates to `apply_theme`), so their behavior is unchanged.
+    /// Pass `allowed_tools = None` to apply to every themeable adapter (the
+    /// equivalent of `apply_theme_to_all`); pass `Some(&set)` to restrict to a
+    /// caller-selected subset (the equivalent of `apply_theme_to_tools`).
+    pub fn apply_theme_to_tools_with_env(
+        &self,
+        theme: &ThemeVariant,
+        env: &SlateEnv,
+        allowed_tools: Option<&HashSet<String>>,
+    ) -> Vec<ToolApplyResult> {
+        self.apply_theme_with_filter_env(theme, env, allowed_tools)
+    }
+
     fn apply_theme_with_filter(
         &self,
         theme: &ThemeVariant,
         allowed_tools: Option<&HashSet<String>>,
     ) -> Vec<ToolApplyResult> {
+        self.apply_theme_with_filter_inner(allowed_tools, |adapter| adapter.apply_theme(theme))
+    }
+
+    fn apply_theme_with_filter_env(
+        &self,
+        theme: &ThemeVariant,
+        env: &SlateEnv,
+        allowed_tools: Option<&HashSet<String>>,
+    ) -> Vec<ToolApplyResult> {
+        self.apply_theme_with_filter_inner(allowed_tools, |adapter| {
+            adapter.apply_theme_with_env(theme, env)
+        })
+    }
+
+    /// Shared body for the two public apply-with-filter variants.
+    /// WR-03 (review): the non-env and env-aware paths are identical
+    /// aside from which `ToolAdapter` method they invoke. Any future change to
+    /// the filter predicate, `ToolApplyResult` shape, or error-to-status
+    /// mapping only needs to land here. `apply_call` is the per-adapter hook
+    /// that selects `apply_theme` vs `apply_theme_with_env`; it must be `Fn +
+    /// Sync` because rayon parallelises the map. `ToolAdapter: Send + Sync`
+    /// already makes adapter handles thread-safe.
+    fn apply_theme_with_filter_inner<F>(
+        &self,
+        allowed_tools: Option<&HashSet<String>>,
+        apply_call: F,
+    ) -> Vec<ToolApplyResult>
+    where
+        F: Fn(&dyn ToolAdapter) -> Result<ApplyOutcome> + Sync,
+    {
         self.adapters
             .par_iter()
             .filter(|adapter| adapter.apply_strategy() != ApplyStrategy::DetectAndInstall)
@@ -100,7 +149,7 @@ impl ToolRegistry {
                 let tool_name = adapter.tool_name().to_string();
                 let (status, requires_new_shell) = match adapter.is_installed() {
                     Ok(false) => (ToolApplyStatus::Skipped(SkipReason::NotInstalled), false),
-                    Ok(true) => match adapter.apply_theme(theme) {
+                    Ok(true) => match apply_call(adapter.as_ref()) {
                         Ok(ApplyOutcome::Applied { requires_new_shell }) => {
                             (ToolApplyStatus::Applied, requires_new_shell)
                         }
@@ -153,7 +202,7 @@ pub fn requires_new_shell(results: &[ToolApplyResult]) -> bool {
 impl Default for ToolRegistry {
     fn default() -> Self {
         let mut registry = Self::new();
-        // Register all 11 adapters in default instance
+        // Register the default 14-adapter instance (bumps from 13).
         registry.register(Box::new(crate::adapter::GhosttyAdapter));
         registry.register(Box::new(crate::adapter::AlacrittyAdapter));
         registry.register(Box::new(crate::adapter::KittyAdapter));
@@ -167,6 +216,7 @@ impl Default for ToolRegistry {
         registry.register(Box::new(crate::adapter::ZshHighlightAdapter));
         registry.register(Box::new(crate::adapter::TmuxAdapter));
         registry.register(Box::new(crate::adapter::FontAdapter));
+        registry.register(Box::new(crate::adapter::NvimAdapter));
         registry
     }
 }
@@ -242,7 +292,7 @@ mod tests {
     #[test]
     fn test_registry_default() {
         let registry = ToolRegistry::default();
-        assert_eq!(registry.adapters().len(), 13);
+        assert_eq!(registry.adapters().len(), 14);
     }
 
     #[test]

@@ -23,6 +23,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+
       - name: Check formatting
         run: cargo fmt --check
 
@@ -33,7 +39,7 @@ jobs:
         run: cargo build --locked --release
 
       - name: Test
-        run: cargo test --locked --quiet
+        run: cargo test --locked --quiet --features has-nvim
 
       - name: Install script smoke test
         run: bash tests/install-script-smoke.sh

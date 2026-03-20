@@ -29,6 +29,19 @@ fn kitty_socket_listen_on() -> String {
 pub struct KittyAdapter;
 
 impl KittyAdapter {
+    fn trim_ascii(bytes: &[u8]) -> &[u8] {
+        let start = bytes
+            .iter()
+            .position(|b| !b.is_ascii_whitespace())
+            .unwrap_or(bytes.len());
+        let end = bytes
+            .iter()
+            .rposition(|b| !b.is_ascii_whitespace())
+            .map(|idx| idx + 1)
+            .unwrap_or(start);
+        &bytes[start..end]
+    }
+
     pub fn resolve_config_path_with_env(env: &SlateEnv) -> PathBuf {
         env.xdg_config_home().join("kitty").join("kitty.conf")
     }
@@ -39,24 +52,24 @@ impl KittyAdapter {
         if !integration_path.exists() {
             return Ok(());
         }
-        let content = fs::read_to_string(integration_path)?;
+        let content = fs::read(integration_path)?;
 
         let mut additions = String::new();
-        if !content.lines().any(|l| {
-            let t = l.trim();
-            !t.starts_with('#') && t.starts_with("allow_remote_control")
+        if !content.split(|b| *b == b'\n').any(|line| {
+            let t = Self::trim_ascii(line);
+            !t.starts_with(b"#") && t.starts_with(b"allow_remote_control")
         }) {
             additions.push_str("allow_remote_control socket-only\n");
         }
-        if !content.lines().any(|l| {
-            let t = l.trim();
-            !t.starts_with('#') && t.starts_with("listen_on")
+        if !content.split(|b| *b == b'\n').any(|line| {
+            let t = Self::trim_ascii(line);
+            !t.starts_with(b"#") && t.starts_with(b"listen_on")
         }) {
             additions.push_str(&format!("listen_on {}\n", kitty_socket_listen_on()));
         }
-        if !content.lines().any(|l| {
-            let t = l.trim();
-            !t.starts_with('#') && t.starts_with("dynamic_background_opacity")
+        if !content.split(|b| *b == b'\n').any(|line| {
+            let t = Self::trim_ascii(line);
+            !t.starts_with(b"#") && t.starts_with(b"dynamic_background_opacity")
         }) {
             additions.push_str("dynamic_background_opacity yes\n");
         }
@@ -66,7 +79,7 @@ impl KittyAdapter {
         }
 
         // Prepend so these settings take effect before includes
-        let new_content = format!("{}{}", additions, content);
+        let new_content = [additions.as_bytes(), content.as_slice()].concat();
         fs::write(integration_path, new_content)?;
         Ok(())
     }
@@ -140,26 +153,31 @@ impl KittyAdapter {
             return Ok(());
         }
 
-        let content = fs::read_to_string(integration_path)?;
+        let content = fs::read(integration_path)?;
         let managed_str = managed_path.display().to_string();
+        let managed_bytes = managed_str.as_bytes();
 
         // Check if already included (line-by-line, skip comments)
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('#') || trimmed.is_empty() {
+        for line in content.split(|b| *b == b'\n') {
+            let trimmed = Self::trim_ascii(line);
+            if trimmed.starts_with(b"#") || trimmed.is_empty() {
                 continue;
             }
-            if trimmed.starts_with("include") && trimmed.contains(&managed_str) {
+            if trimmed.starts_with(b"include")
+                && trimmed
+                    .windows(managed_bytes.len())
+                    .any(|w| w == managed_bytes)
+            {
                 return Ok(());
             }
         }
 
         // Append include directive
         let include_line = format!("include {}\n", managed_str);
-        let new_content = if content.ends_with('\n') {
-            format!("{}{}", content, include_line)
+        let new_content = if content.ends_with(b"\n") {
+            [content.as_slice(), include_line.as_bytes()].concat()
         } else {
-            format!("{}\n{}", content, include_line)
+            [content.as_slice(), b"\n", include_line.as_bytes()].concat()
         };
         fs::write(integration_path, new_content)?;
 
@@ -210,7 +228,15 @@ impl ToolAdapter for KittyAdapter {
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
         let env = SlateEnv::from_process()?;
-        let integration_path = Self::resolve_config_path_with_env(&env);
+        self.apply_theme_with_env(theme, &env)
+    }
+
+    /// preview-path override. Resolves both the integration config
+    /// (`kitty.conf`) and the managed config directory (`managed/kitty/*`) via
+    /// the injected `env`, so live-preview callers can drive Kitty through a
+    /// tempdir-backed env without any `SlateEnv::from_process()` fallback.
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
+        let integration_path = Self::resolve_config_path_with_env(env);
 
         // Kitty doesn't auto-create its config file. If Kitty is installed
         // but kitty.conf is missing, create it so we can add include directives.
@@ -231,7 +257,7 @@ impl ToolAdapter for KittyAdapter {
 
         let colors_content = Self::render_kitty_colors(theme);
 
-        let config_mgr = ConfigManager::with_env(&env)?;
+        let config_mgr = ConfigManager::with_env(env)?;
 
         // Include font if configured
         let mut final_content = colors_content;
@@ -249,7 +275,7 @@ impl ToolAdapter for KittyAdapter {
 
         // Write opacity config
         let current_opacity = config_mgr.get_current_opacity_preset()?;
-        write_opacity_config(&env, current_opacity)?;
+        write_opacity_config(env, current_opacity)?;
 
         // Ensure integration file includes managed paths
         let managed_base = config_mgr.managed_dir("kitty");
@@ -423,6 +449,7 @@ mod tests {
             cursor: None,
             selection_bg: None,
             selection_fg: None,
+            brand_accent: "#7287fd".to_string(),
             black: "#000000".to_string(),
             red: "#ff0000".to_string(),
             green: "#00ff00".to_string(),
@@ -569,6 +596,41 @@ mod tests {
     }
 
     #[test]
+    fn test_ensure_integration_preserves_non_utf8_prefix_bytes() {
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let temp_path = tempdir.path().join("kitty.conf");
+        let managed_path = PathBuf::from("/home/user/.config/slate/managed/kitty/theme.conf");
+
+        fs::write(&temp_path, [0xff, b'\n']).unwrap();
+
+        KittyAdapter::ensure_integration_includes_managed(&temp_path, &managed_path).unwrap();
+
+        let content = fs::read(&temp_path).unwrap();
+        assert!(content.starts_with(&[0xff, b'\n']));
+        assert!(
+            content.windows(b"include ".len()).any(|w| w == b"include "),
+            "managed include line must still be appended"
+        );
+    }
+
+    #[test]
+    fn test_ensure_remote_control_preserves_non_utf8_prefix_bytes() {
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let temp_path = tempdir.path().join("kitty.conf");
+        fs::write(&temp_path, [0xff, b'\n']).unwrap();
+
+        KittyAdapter::ensure_remote_control(&temp_path).unwrap();
+
+        let content = fs::read(&temp_path).unwrap();
+        assert!(content.starts_with(b"allow_remote_control socket-only\n"));
+        assert!(content.windows(1).any(|w| w == [0xff]));
+    }
+
+    #[test]
     fn test_list_kitty_sockets_is_stably_sorted() {
         let tempdir = tempfile::TempDir::new().unwrap();
         let b = tempdir.path().join("kitty-slate-200");
@@ -617,5 +679,42 @@ mod tests {
 
         assert!(!called);
         assert_eq!(outcome, KittyBroadcastOutcome::NoSockets);
+    }
+
+    /// contract: the trait-level `apply_theme_with_env` must honor
+    /// the injected env — managed kitty theme.conf and kitty.conf includes
+    /// MUST land inside the tempdir, not the host's `~/.config/kitty`.
+    #[test]
+    fn apply_theme_with_env_honors_injected_env_for_managed_writes() {
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let adapter = KittyAdapter;
+
+        let theme = create_test_theme();
+
+        // Kitty auto-creates kitty.conf if missing, so we don't need to pre-create.
+        let outcome = ToolAdapter::apply_theme_with_env(&adapter, &theme, &env).unwrap();
+        assert!(matches!(outcome, ApplyOutcome::Applied { .. }));
+
+        // Managed theme.conf MUST have landed inside the tempdir.
+        let managed_theme = tempdir
+            .path()
+            .join(".config/slate/managed/kitty/theme.conf");
+        assert!(
+            managed_theme.exists(),
+            "expected managed kitty theme.conf inside tempdir at {:?}",
+            managed_theme
+        );
+
+        // Auto-created kitty.conf must reference the tempdir-scoped managed path.
+        let integration_path = KittyAdapter::resolve_config_path_with_env(&env);
+        let integration_content = fs::read_to_string(&integration_path).unwrap();
+        assert!(
+            integration_content.contains(&managed_theme.display().to_string()),
+            "kitty.conf must include the managed theme.conf under tempdir, got:\n{}",
+            integration_content
+        );
     }
 }

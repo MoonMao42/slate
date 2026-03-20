@@ -51,6 +51,14 @@ pub enum SemanticColor {
     FileDocs,
     FileConfig,
     FileHidden,
+
+    // Editor theming (consumed by src/adapter/nvim.rs)
+    Background,
+    Surface,
+    SurfaceAlt,
+    Selection,
+    Border,
+    LspParameter,
 }
 
 /// A single span in the preview sample output with associated semantic color role.
@@ -150,10 +158,65 @@ pub const SAMPLE_TOKENS: &[PreviewSpan] = &[
     },
 ];
 
+/// Render a single self-drawn starship-esque prompt line from [`SAMPLE_TOKENS`]
+/// (Hybrid fallback path). Used by the composer when either
+/// (a) starship-fork is declined because we're in mini-preview mode, or
+/// (b) `starship_fork::fork_starship_prompt` fails in full-preview mode.
+/// Output is ONE visible line (no trailing newline — caller decides) drawn
+/// from the `SAMPLE_TOKENS` prompt prefix: directory, space, branch,
+/// dirty glyph, newline-terminator, prompt sigil.
+/// The body emits 24-bit foreground SGR bytes keyed off the active palette's
+/// semantic slots so the picker mini-preview shows how the user's shell
+/// prompt WOULD look with the selected theme. That's a swatch-renderer
+/// behavior, not user chrome — hence the allowlist marker on the fn.
+/// Returns an empty string if all tokens fail to resolve (paranoia; in
+/// practice `Palette::resolve` always returns a valid hex).
+// SWATCH-RENDERER: intentionally raw ANSI (renders palette semantic slots, not role text)
+pub fn self_draw_prompt_from_sample_tokens(palette: &crate::theme::Palette) -> String {
+    use crate::adapter::palette_renderer::PaletteRenderer;
+
+    const RESET: &str = "\x1b[0m";
+    let fg = |hex: &str| -> String {
+        match PaletteRenderer::hex_to_rgb(hex) {
+            Ok((r, g, b)) => format!("\x1b[38;2;{};{};{}m", r, g, b),
+            Err(_) => String::new(),
+        }
+    };
+
+    let mut out = String::with_capacity(256);
+    // Render the single-line prompt prefix from SAMPLE_TOKENS — stop at the
+    // first "\n" marker so callers get a single line back (they own newline
+    // policy).
+    for span in SAMPLE_TOKENS {
+        if span.text == "\n" {
+            break;
+        }
+        let hex = palette.resolve(span.role);
+        out.push_str(&fg(&hex));
+        out.push_str(span.text);
+        out.push_str(RESET);
+    }
+    // Append a conventional prompt sigil so mini-preview still "reads" as a
+    // prompt even if the user never hits enter — `❯` is the default
+    // Starship prompt glyph and matches sketch 004/005 references.
+    out.push(' ');
+    out.push_str(&fg(&palette.resolve(SemanticColor::Prompt)));
+    out.push('❯');
+    out.push_str(RESET);
+    out
+}
+
 /// Render preview panel showing sample tokens and ANSI color matrices.
 /// Output sample token lines, 16 ANSI matrix, and optional extras matrix.
 /// Returns formatted string with ANSI 24-bit escape codes embedded so the output
 /// renders in color when written to a real terminal.
+/// The entire body of this function is a palette-swatch renderer — every
+/// cell intentionally carries a truecolor background SGR (ESC `[` `4` `8` `;`
+/// `2` `;` R `;` G `;` B m) because the whole point of the preview panel IS
+/// to display theme colors. The `// SWATCH-RENDERER:` marker below drops
+/// this body from the Wave-5 grep gate (same pattern as Wave-3's
+/// `src/cli/status_panel.rs::swatch_cell`).
+// SWATCH-RENDERER: intentionally raw ANSI (renders theme preview colors, not role text)
 pub fn render_preview(palette: &crate::theme::Palette) -> String {
     use crate::adapter::palette_renderer::PaletteRenderer;
 
@@ -166,7 +229,7 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
     let mut output = String::new();
 
     // Render 16 ANSI color matrix using background blocks so every cell
-    // carries an explicit \x1b[48;2;R;G;Bm sequence.
+    // carries an explicit truecolor background SGR.
     // Normal (0-7)
     output.push_str("Normal: ");
     let ansi_normal = [
@@ -207,7 +270,7 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
     }
     output.push('\n');
 
-    // Render extras matrix if presentconditional)
+    // Render extras matrix if present (conditional).
     if !palette.extras.is_empty() {
         output.push_str("Extras: ");
         let mut sorted_extras: Vec<_> = palette.extras.iter().collect();

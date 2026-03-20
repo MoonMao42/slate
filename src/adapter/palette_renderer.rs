@@ -372,6 +372,7 @@ mod tests {
             cursor: None,
             selection_bg: None,
             selection_fg: None,
+            brand_accent: "#7287fd".to_string(),
             black: "#45475a".to_string(),
             red: "#f38ba8".to_string(),
             green: "#a6e3a1".to_string(),

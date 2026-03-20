@@ -13,6 +13,8 @@ impl VersionPolicy {
             "ghostty" => Some("1.1.0"),
             // Alacritty: 0.12.0+
             "alacritty" => Some("0.12.0"),
+            // Neovim: 0.8.0+ (nvim_set_hl API + vim.uv baseline;).
+            "nvim" => Some("0.8.0"),
             // Other tools: not yet gated (future expansion)
             _ => None,
         }
@@ -144,6 +146,26 @@ mod tests {
     #[test]
     fn test_version_policy_alacritty_min() {
         assert_eq!(VersionPolicy::min_version("alacritty"), Some("0.12.0"));
+    }
+
+    #[test]
+    fn version_policy_nvim_min_is_0_8() {
+        assert_eq!(VersionPolicy::min_version("nvim"), Some("0.8.0"));
+    }
+
+    #[test]
+    fn check_version_accepts_nvim_0_12() {
+        assert!(VersionPolicy::check_version("nvim", "0.12.0").is_ok());
+    }
+
+    #[test]
+    fn check_version_accepts_nvim_0_8_floor() {
+        assert!(VersionPolicy::check_version("nvim", "0.8.0").is_ok());
+    }
+
+    #[test]
+    fn check_version_rejects_nvim_0_7() {
+        assert!(VersionPolicy::check_version("nvim", "0.7.2").is_err());
     }
 
     #[test]

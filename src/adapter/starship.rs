@@ -107,18 +107,43 @@ impl ToolAdapter for StarshipAdapter {
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
-        let config_path = self.integration_config_path()?;
+        let env = SlateEnv::from_process()?;
+        self.apply_theme_with_env(theme, &env)
+    }
+
+    /// preview-path override. Resolves `starship.toml` via the
+    /// injected env (so tempdir-backed integration tests can point Starship at
+    /// a sandboxed XDG root) and creates the `ConfigManager` via
+    /// `with_env(env)` rather than `new()` so the managed-file backup area
+    /// also lives inside the injected config dir.
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
+        let config_path = Self::integration_config_path_with_env(env);
         if !config_path.exists() {
             return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
         }
 
         // Step 0: Backup before any modification
-        let config_manager = ConfigManager::new()?;
+        let config_manager = ConfigManager::with_env(env)?;
         let _backup_path = config_manager.backup_file(&config_path)?;
 
-        // Step 1: Read and parse TOML (preserves comments via toml_edit)
-        let content = fs::read_to_string(&config_path).map_err(|e| {
+        // Step 1: Read and parse TOML (preserves comments via toml_edit).
+        // Read as bytes first so we can produce an actionable error when the
+        // user's starship.toml has stray non-UTF-8 bytes (seen in issue #3)
+        // instead of the bare "stream did not contain valid UTF-8" from
+        // read_to_string that leaves users guessing which file and where.
+        let bytes = fs::read(&config_path).map_err(|e| {
             SlateError::ConfigReadError(config_path.display().to_string(), e.to_string())
+        })?;
+        let content = String::from_utf8(bytes).map_err(|e| {
+            SlateError::ConfigReadError(
+                config_path.display().to_string(),
+                format!(
+                    "contains non-UTF-8 bytes at byte offset {} — slate cannot parse this file. \
+                     Inspect with `xxd {} | head` around that offset and remove the stray bytes.",
+                    e.utf8_error().valid_up_to(),
+                    config_path.display()
+                ),
+            )
         })?;
 
         let mut doc: DocumentMut = content.parse().map_err(SlateError::TomlParseError)?;
@@ -272,6 +297,47 @@ mod tests {
     }
 
     #[test]
+    fn apply_theme_reports_non_utf8_bytes_with_file_path_and_offset() {
+        use crate::theme::ThemeRegistry;
+
+        let td = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let starship_path = env.xdg_config_home().join("starship.toml");
+        std::fs::create_dir_all(starship_path.parent().unwrap()).unwrap();
+
+        // Valid TOML prefix + a stray non-UTF-8 byte at a known offset, so
+        // the error message must point at that offset.
+        let mut bytes = b"format = \"$all\"\n".to_vec();
+        let offset = bytes.len();
+        bytes.push(0xff);
+        bytes.extend_from_slice(b"\n");
+        std::fs::write(&starship_path, bytes).unwrap();
+
+        let theme = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let err = StarshipAdapter
+            .apply_theme_with_env(&theme, &env)
+            .expect_err("non-UTF-8 starship.toml must fail");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("starship.toml"),
+            "error should name the offending file, got: {msg}"
+        );
+        assert!(
+            msg.contains(&offset.to_string()),
+            "error should include byte offset {offset}, got: {msg}"
+        );
+        assert!(
+            msg.contains("non-UTF-8"),
+            "error should classify the fault as non-UTF-8, got: {msg}"
+        );
+    }
+
+    #[test]
     fn test_apply_strategy_returns_edit_in_place() {
         let adapter = StarshipAdapter;
         assert_eq!(adapter.apply_strategy(), ApplyStrategy::EditInPlace);
@@ -334,5 +400,64 @@ crust = "#111111"
         let result = adapter.get_current_theme();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
+    }
+
+    /// contract: the trait-level `apply_theme_with_env` must honor
+    /// the injected env — palette selection must be written to the
+    /// `starship.toml` inside the tempdir, not the host's real
+    /// `~/.config/starship.toml`, and the backup must also land inside the
+    /// tempdir's slate cache.
+    #[test]
+    fn apply_theme_with_env_honors_injected_env_for_in_place_edits() {
+        use crate::adapter::ToolAdapter;
+        use std::io::Write;
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let adapter = StarshipAdapter;
+
+        // Pre-create starship.toml inside the tempdir so the EditInPlace path
+        // doesn't early-return with MissingIntegrationConfig.
+        let integration_path = StarshipAdapter::integration_config_path_with_env(&env);
+        fs::create_dir_all(integration_path.parent().unwrap()).unwrap();
+        let mut file = fs::File::create(&integration_path).unwrap();
+        writeln!(file, "# starship managed by slate").unwrap();
+        drop(file);
+
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+
+        let outcome = ToolAdapter::apply_theme_with_env(&adapter, &theme, &env).unwrap();
+        assert!(matches!(outcome, ApplyOutcome::Applied { .. }));
+
+        // The edit must have happened on the tempdir-scoped starship.toml.
+        let content = fs::read_to_string(&integration_path).unwrap();
+        assert!(
+            content.contains("palette = \"slate\""),
+            "tempdir starship.toml must select the slate palette, got:\n{}",
+            content
+        );
+        assert!(
+            content.contains("[palettes.slate]"),
+            "tempdir starship.toml must contain [palettes.slate] table, got:\n{}",
+            content
+        );
+
+        // Confirm NOTHING leaked into the host's ~/.config via the process env.
+        // The tempdir-scoped SlateEnv points config_dir at tempdir/.config/slate,
+        // so the backup must live inside tempdir, not under the real $HOME.
+        let backups_dir = tempdir.path().join(".cache/slate/backups");
+        if backups_dir.exists() {
+            let entries: Vec<_> = fs::read_dir(&backups_dir)
+                .unwrap()
+                .flatten()
+                .map(|e| e.path())
+                .collect();
+            assert!(
+                !entries.is_empty(),
+                "backup must land inside tempdir's slate cache dir at {:?}",
+                backups_dir
+            );
+        }
     }
 }

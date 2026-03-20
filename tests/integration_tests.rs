@@ -267,10 +267,12 @@ fn test_list_command_runs() {
     let output = cmd.arg("list").output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    // slate list shows families grouped with separatorssort order
+    // slate list shows families grouped under tree-narrative headings
+    // (migration replaced the legacy `━━ {family} ━━`
+    // separator with `◆ {family}` via Roles::heading per Sketch 003).
     assert!(stdout.contains("Catppuccin")); // First family in  order
     assert!(stdout.contains("Tokyo Night")); // Second family in  order
-    assert!(stdout.contains("━━")); // Family separator from 
+    assert!(stdout.contains("◆")); // Brand-anchor family heading glyph
 }
 
 #[test]
@@ -368,383 +370,35 @@ fn test_setup_quick_mode_minimal_interactions() {
     assert!(combined.contains("beautiful") || combined.contains("Step") || output.status.success());
 }
 
-// `slate demo` integration tests.
-// Names must match VALIDATION.md task IDs exactly.
-// `demo_touches_all_ansi_slots` enforces the D-B4 16/16 ANSI-slot coverage
-// contract at integration level via `assert_eq!(hit, 16, …)` — not `>=`.
+// `slate demo` integration tests retired in (/).
+// The 4-block renderer continues to be exercised by its unit tests in
+// `src/cli/demo.rs::tests` (migrating to `src/cli/picker/preview/blocks.rs`
+// in). The `slate demo` CLI surface + DEMO-02 hint test gates
+// are superseded by DEMO-03 integration tests (landing in).
 
-/// Strip ANSI CSI sequences so substring assertions aren't broken by the
-/// per-span RESET escapes the renderer emits between adjacent coloured words.
-fn strip_ansi_for_tests(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut iter = s.chars().peekable();
-    while let Some(c) = iter.next() {
-        if c == '\x1b' && iter.peek() == Some(&'[') {
-            iter.next();
-            for nc in iter.by_ref() {
-                if nc == 'm' {
-                    break;
-                }
-            }
-            continue;
-        }
-        out.push(c);
-    }
-    out
-}
-
+/// CLI smoke: the `slate demo` subcommand has been retired.
+/// clap must reject it with a non-zero exit; stderr names the unknown
+/// subcommand. Locks the absence of the command at the CLI surface.
 #[test]
-fn demo_renders_all_blocks() {
-    // Library-level path: call render_to_string directly so we're not blocked
-    // by the size gate under a PTY-less assert_cmd.
-    // The renderer emits each coloured token as its own `<ESC>[38;2;R;G;Bm`
-    // … `<ESC>[0m` span, so literal phrases like "type User" are split by
-    // RESET escapes in the raw output. Strip ANSI first, then assert against
-    // the visible text (same idiom as demo.rs's `render_to_string_contains_all_four_blocks`
-    // unit test).
-    use slate_cli::cli::demo;
-    use slate_cli::theme::ThemeRegistry;
-    let registry = ThemeRegistry::new().expect("registry");
-    let palette = &registry
-        .get("catppuccin-mocha")
-        .expect("catppuccin-mocha must exist")
-        .palette;
-    let out = demo::render_to_string(palette);
-    let visible = strip_ansi_for_tests(&out);
-    assert!(
-        visible.contains("type User"),
-        "code block must be present; visible:\n{visible}"
-    );
-    assert!(
-        visible.contains("my-portfolio"),
-        "tree block must be present; visible:\n{visible}"
-    );
-    assert!(
-        visible.contains("HEAD -> main"),
-        "git-log block must be present; visible:\n{visible}"
-    );
-    assert!(
-        visible.contains("72%"),
-        "progress block must be present; visible:\n{visible}"
-    );
-    assert!(
-        out.contains("\x1b[38;2;"),
-        "must emit ANSI 24-bit foreground escapes"
-    );
-}
-
-#[test]
-#[cfg(unix)]
-fn demo_size_gate_rejects() {
-    // Size-gate contract: when `crossterm::terminal::size()` returns Err (no
-    // controlling TTY) or a size below 80×24, `slate demo` must exit non-zero
-    // and emit the brand-voice "80×24" error.
-    // Naive `assert_cmd::Command::output()` does NOT detach from the parent's
-    // controlling terminal on macOS — crossterm's `size()` opens `/dev/tty`
-    // directly, bypassing the child's piped stdout fd. So we drop to
-    // `std::process::Command` and call `setsid(2)` in `pre_exec` to create a
-    // new session with no controlling terminal. `/dev/tty` then returns ENXIO,
-    // `window_size()` fails, and the size gate fires deterministically — both
-    // locally and in CI.
-    use std::os::unix::process::CommandExt;
-    use std::process::{Command as StdCommand, Stdio};
-
+fn slate_demo_subcommand_is_retired_phase_19() {
     let tempdir = TempDir::new().unwrap();
-    // Seed a theme so theme-load isn't the failure mode.
-    slate_cmd_isolated(&tempdir)
-        .args(["setup", "--quick"])
+    let output = slate_cmd_isolated(&tempdir)
+        .arg("demo")
         .output()
-        .unwrap();
-
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| {
-        if cfg!(target_os = "macos") {
-            "/bin/zsh".to_string()
-        } else {
-            "/bin/bash".to_string()
-        }
-    });
-
-    let bin = env!("CARGO_BIN_EXE_slate");
-    let mut cmd = StdCommand::new(bin);
-    cmd.arg("demo")
-        .env("SLATE_HOME", tempdir.path())
-        .env("SHELL", shell)
-        // crossterm's size() has a `tput` fallback that reads from TERM /
-        // terminfo even when /dev/tty is unavailable. Scrub the terminal
-        // env vars so the fallback can't return a synthesised 80×24 from
-        // the terminfo default. Combined with setsid(2) below, this gives
-        // deterministic size() → Err on both macOS + Linux CI.
-        .env_remove("TERM")
-        .env_remove("COLUMNS")
-        .env_remove("LINES")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // SAFETY: setsid(2) takes no arguments and does not touch this process's
-    // memory; it only affects the about-to-exec child. Safe to call from
-    // pre_exec per the std docs.
-    unsafe {
-        cmd.pre_exec(|| {
-            if libc::setsid() < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let output = cmd.output().unwrap();
-
+        .expect("spawn slate");
     assert!(
         !output.status.success(),
-        "size gate must reject when child has no controlling terminal; stdout={:?} stderr={:?}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        "`slate demo` must exit non-zero after  retirement"
     );
     let combined = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        String::from_utf8_lossy(&output.stderr),
     );
     assert!(
-        combined.contains("80") && combined.contains("slate demo"),
-        "error must mention the 80-col minimum and the failing command; got: {combined}"
-    );
-}
-
-#[test]
-fn demo_size_gate_accepts_minimum() {
-    // Library-level render works regardless of TTY — confirms the renderer is
-    // not coupled to the size gate beyond handle()'s entry check.
-    use slate_cli::cli::demo;
-    use slate_cli::theme::ThemeRegistry;
-    let registry = ThemeRegistry::new().expect("registry");
-    let palette = &registry
-        .get("catppuccin-mocha")
-        .expect("catppuccin-mocha must exist")
-        .palette;
-    let out = demo::render_to_string(palette);
-    assert!(
-        !out.is_empty(),
-        "render_to_string must produce non-empty output"
-    );
-    // Each line fits 80 cols when ANSI escapes are stripped (single-screen promise).
-    for line in out.lines() {
-        let mut visible = String::new();
-        let mut chars = line.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' && chars.peek() == Some(&'[') {
-                chars.next();
-                for nc in chars.by_ref() {
-                    if nc == 'm' {
-                        break;
-                    }
-                }
-                continue;
-            }
-            visible.push(c);
-        }
-        assert!(
-            visible.chars().count() <= 80,
-            "line >80 visible cols: {visible:?}"
-        );
-    }
-}
-
-#[test]
-fn demo_touches_all_ansi_slots() {
-    // D-B4 gate at integration level.
-    // Collect every distinct \x1b[38;2;R;G;Bm and \x1b[48;2;R;G;Bm RGB triplet
-    // across the whole render, then assert it covers ALL 16 of the palette's
-    // ANSI slots (normal 0–7 + bright 8–15). STRICT: assert_eq!(hit, 16, …).
-    // sample data is designed to hit every slot exactly at least
-    // once (see 15-03-PLAN.md §"Locked sample data (D-B4 16/16 coverage table)").
-    // Drift here means the sample data regressed; relaxing the assertion to
-    // `>=` to make it pass is a scope-reduction bug, not a test fix.
-    use slate_cli::adapter::palette_renderer::PaletteRenderer;
-    use slate_cli::cli::demo;
-    use slate_cli::theme::ThemeRegistry;
-    let registry = ThemeRegistry::new().expect("registry");
-    let theme = registry.get("catppuccin-mocha").expect("exists");
-    let palette = &theme.palette;
-    let out = demo::render_to_string(palette);
-
-    let mut emitted: std::collections::HashSet<(u8, u8, u8)> = std::collections::HashSet::new();
-    for prefix in ["\x1b[38;2;", "\x1b[48;2;"] {
-        let mut idx = 0;
-        while let Some(pos) = out[idx..].find(prefix) {
-            let start = idx + pos + prefix.len();
-            if let Some(end) = out[start..].find('m') {
-                let triplet = &out[start..start + end];
-                let parts: Vec<&str> = triplet.split(';').collect();
-                if parts.len() == 3 {
-                    if let (Ok(r), Ok(g), Ok(b)) = (
-                        parts[0].parse::<u8>(),
-                        parts[1].parse::<u8>(),
-                        parts[2].parse::<u8>(),
-                    ) {
-                        emitted.insert((r, g, b));
-                    }
-                }
-                idx = start + end;
-            } else {
-                break;
-            }
-        }
-    }
-
-    let ansi_slots: [(&str, &str); 16] = [
-        ("black", palette.black.as_str()),
-        ("red", palette.red.as_str()),
-        ("green", palette.green.as_str()),
-        ("yellow", palette.yellow.as_str()),
-        ("blue", palette.blue.as_str()),
-        ("magenta", palette.magenta.as_str()),
-        ("cyan", palette.cyan.as_str()),
-        ("white", palette.white.as_str()),
-        ("bright_black", palette.bright_black.as_str()),
-        ("bright_red", palette.bright_red.as_str()),
-        ("bright_green", palette.bright_green.as_str()),
-        ("bright_yellow", palette.bright_yellow.as_str()),
-        ("bright_blue", palette.bright_blue.as_str()),
-        ("bright_magenta", palette.bright_magenta.as_str()),
-        ("bright_cyan", palette.bright_cyan.as_str()),
-        ("bright_white", palette.bright_white.as_str()),
-    ];
-    let mut hit = 0usize;
-    let mut missing: Vec<&str> = Vec::new();
-    for (name, hex) in ansi_slots {
-        let (r, g, b) = PaletteRenderer::hex_to_rgb(hex).expect("valid hex");
-        if emitted.contains(&(r, g, b)) {
-            hit += 1;
-        } else {
-            missing.push(name);
-        }
-    }
-    assert_eq!(
-        hit, 16,
-        "expected all 16 ANSI slots; got {hit}. Missing: {missing:?}. Emitted: {emitted:?}"
-    );
-}
-
-#[test]
-fn demo_hint_setup_emits_once() {
-    let tempdir = TempDir::new().unwrap();
-    let output = slate_cmd_isolated(&tempdir)
-        .args(["setup", "--quick"])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "setup --quick must succeed");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{stdout}{stderr}");
-    let hit_count = combined.matches("slate demo").count();
-    // We expect at least one occurrence from the hint. There may be zero matches
-    // from any other surface. (`slate demo` as a literal command string has no
-    // reason to appear elsewhere in setup output.)
-    assert!(
-        hit_count >= 1,
-        "setup --quick must emit the demo hint containing `slate demo`; got {hit_count} matches in:\n{combined}"
-    );
-}
-
-#[test]
-fn demo_hint_theme_guards() {
-    let tempdir = TempDir::new().unwrap();
-    slate_cmd_isolated(&tempdir)
-        .args(["setup", "--quick"])
-        .output()
-        .unwrap();
-    let output = slate_cmd_isolated(&tempdir)
-        .args(["theme", "catppuccin-mocha"])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "theme <id> must succeed");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("slate demo"),
-        "explicit `slate theme <id>` must emit the demo hint; stdout was:\n{stdout}"
-    );
-}
-
-#[test]
-fn demo_hint_theme_quiet_suppresses() {
-    let tempdir = TempDir::new().unwrap();
-    slate_cmd_isolated(&tempdir)
-        .args(["setup", "--quick"])
-        .output()
-        .unwrap();
-    let output = slate_cmd_isolated(&tempdir)
-        .args(["theme", "catppuccin-mocha", "--quiet"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{stdout}{stderr}");
-    assert!(
-        combined.trim().is_empty(),
-        "--quiet must suppress the explicit theme success line, apply report, and demo hint; got:\n{combined}"
-    );
-}
-
-#[test]
-fn demo_hint_theme_auto_suppresses() {
-    let tempdir = TempDir::new().unwrap();
-    slate_cmd_isolated(&tempdir)
-        .args(["setup", "--quick"])
-        .output()
-        .unwrap();
-    let output = slate_cmd_isolated(&tempdir)
-        .args(["theme", "--auto"])
-        .output()
-        .unwrap();
-    // auto may fail on CI if appearance cannot be resolved; either way,
-    // the hint must not leak (Ghostty hook fires this command repeatedly).
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        !stdout.contains("slate demo"),
-        "--auto must NEVER emit the demo hint (Ghostty shell hook spam risk); got:\n{stdout}"
-    );
-}
-
-#[test]
-fn demo_hint_no_stack_with_set_deprecation() {
-    let tempdir = TempDir::new().unwrap();
-    slate_cmd_isolated(&tempdir)
-        .args(["setup", "--quick"])
-        .output()
-        .unwrap();
-    let output = slate_cmd_isolated(&tempdir)
-        .args(["set", "catppuccin-mocha"])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "`slate set <theme>` must succeed");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("'slate set' is transitioning"),
-        "`slate set` must print the deprecation tip; got:\n{stdout}"
-    );
-    assert!(
-        !stdout.contains("slate demo"),
-        "`slate set` must NOT emit the demo hint (D-C3 non-interference); got:\n{stdout}"
-    );
-}
-
-#[test]
-fn demo_sub_second_budget() {
-    use slate_cli::cli::demo;
-    use slate_cli::theme::ThemeRegistry;
-    use std::time::Instant;
-    let registry = ThemeRegistry::new().expect("registry");
-    let palette = &registry.get("catppuccin-mocha").expect("exists").palette;
-    // Warm-up: first call may trigger registry load / page faults.
-    let _ = demo::render_to_string(palette);
-    let start = Instant::now();
-    for _ in 0..10 {
-        let _ = demo::render_to_string(palette);
-    }
-    let elapsed = start.elapsed();
-    assert!(
-        elapsed.as_millis() < 500,
-        "10× render_to_string took {elapsed:?}; budget is <500ms (well under 1s SLA)"
+        combined.to_lowercase().contains("unrecognized subcommand")
+            || combined.to_lowercase().contains("error:"),
+        "clap must report the missing subcommand; got:\n{combined}"
     );
 }
 
@@ -1721,9 +1375,9 @@ mod optional_automations {
 #[cfg(test)]
 mod polish_and_clarity {
     use slate_cli::brand::language::Language;
+    use slate_cli::brand::Symbols;
     use slate_cli::cli::tool_selection::ReviewReceipt;
     use slate_cli::cli::wizard_core::Wizard;
-    use slate_cli::design::typography::Typography;
 
     #[test]
     fn test_completion_message_contains_dopamine() {
@@ -1759,21 +1413,6 @@ mod polish_and_clarity {
 
         // Receipt footer (activation guidance) must be visible
         assert!(formatted.contains("Ready") || formatted.contains("apply"));
-    }
-
-    #[test]
-    fn test_typography_helpers_maintain_readability() {
-        // Verify typography helpers don't obscure content
-        let section = Typography::section_header("Tool Inventory");
-        assert!(section.contains("Tool Inventory")); // Must be readable
-        assert!(section.contains("✦")); // Brand mark visible
-
-        let strong = Typography::strong_emphasis("Your terminal is now beautiful!");
-        assert!(strong.contains("Your terminal is now beautiful!")); // Content visible
-
-        let item = Typography::list_item('✓', "Ghostty", "Makes your terminal glow");
-        assert!(item.contains("Ghostty")); // Label visible
-        assert!(item.contains("Makes your terminal glow")); // Description visible
     }
 
     #[test]
@@ -1813,21 +1452,13 @@ mod polish_and_clarity {
 
     #[test]
     fn test_polish_preserves_symbol_language() {
-        // Design system: exactly 5 core symbolspruned set)
-        assert_eq!(slate_cli::design::symbols::Symbols::BRAND, '✦');
-        assert_eq!(slate_cli::design::symbols::Symbols::SUCCESS, '✓');
-        assert_eq!(slate_cli::design::symbols::Symbols::FAILURE, '✗');
-        assert_eq!(slate_cli::design::symbols::Symbols::PENDING, '○');
-        assert_eq!(slate_cli::design::symbols::Symbols::DIAMOND, '◆');
-    }
-
-    #[test]
-    fn test_hierarchy_helpers_are_optional_not_required() {
-        // Typography helpers are infrastructure, not requirements for wizard operation
-        // This test verifies the design principle: helpers are optional
-        let _section = Typography::section_header("Test"); // Can be used
-        let _secondary = Typography::secondary_label("label", "value"); // Can be used
-        let _list_item = Typography::list_item('•', "item", "description"); // Can be used
-                                                                            // Wizard can still work without them (backward compatibility implicit)
+        // Brand system: the 5 core symbols live under `src/brand/symbols.rs`
+        // after the migration (moved the table,
+        // deleted the `src/design/symbols.rs` shim).
+        assert_eq!(Symbols::BRAND, '✦');
+        assert_eq!(Symbols::SUCCESS, '✓');
+        assert_eq!(Symbols::FAILURE, '✗');
+        assert_eq!(Symbols::PENDING, '○');
+        assert_eq!(Symbols::DIAMOND, '◆');
     }
 }

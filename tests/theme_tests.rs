@@ -1,5 +1,60 @@
 use slate_cli::theme::ThemeRegistry;
 
+/// `slate demo` command has been retired. Re-adding a Demo
+/// variant to the `Commands` enum (or an `emit_demo_hint_once` call site)
+/// would silently resurrect DEMO-02 and betray the CONTEXT
+/// §domain "Gemini: previewing is a purchasing behavior, not a possession
+/// behavior". This test locks the absence of the symbols at the source
+/// level (sibling to `brand::migration::tests::no_raw_styling_ansi_...`).
+#[test]
+fn slate_demo_surface_stays_retired_post_phase_19() {
+    use std::fs;
+    use std::path::Path;
+
+    fn read_all_rust_files(dir: &Path, out: &mut Vec<String>) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    // Skip target/ and .git/
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if name == "target" || name == ".git" || name.starts_with('.') {
+                        continue;
+                    }
+                    read_all_rust_files(&path, out);
+                } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        out.push(format!("{}\n{}", path.display(), content));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut bundle: Vec<String> = Vec::new();
+    read_all_rust_files(Path::new("src"), &mut bundle);
+    let haystack = bundle.join("\n---FILE---\n");
+
+    // Commands::Demo variant must not reappear (benches + tests allowed
+    // to reference deleted symbols only in *comments* — we scan src/ only).
+    assert!(
+        !haystack.contains("Commands::Demo"),
+        " `Commands::Demo` enum variant must stay retired — found a reference in src/"
+    );
+    assert!(
+        !haystack.contains("emit_demo_hint_once"),
+        " `emit_demo_hint_once` must stay retired — found a reference in src/"
+    );
+    assert!(
+        !haystack.contains("suppress_demo_hint_for_this_process"),
+        " `suppress_demo_hint_for_this_process` must stay retired — found a reference in src/"
+    );
+    assert!(
+        !haystack.contains("Language::DEMO_HINT") && !haystack.contains("pub const DEMO_HINT"),
+        " `DEMO_HINT` Language constant must stay retired"
+    );
+}
+
 #[test]
 fn test_all_themes_load() {
     let registry = ThemeRegistry::new().expect("Failed to create registry");
@@ -191,6 +246,55 @@ fn test_non_catppuccin_themes_have_semantic_bg_fields() {
     assert!(
         dracula.palette.bg_darker.is_some(),
         "Dracula bg_darker should be populated"
+    );
+}
+
+/// · VALIDATION row 1 — PickerState must surface its `theme_ids`
+/// array grouped by `FAMILY_SORT_ORDER`.
+/// We walk the returned ids, resolve each to its family, and assert the
+/// family-index in `FAMILY_SORT_ORDER` is monotonically non-decreasing.
+/// If the order ever regresses — e.g. a Catppuccin variant appearing after
+/// a Tokyo Night one — the family grouping contract is broken.
+/// No filesystem writes; pure data check on in-memory state.
+#[test]
+fn picker_launches_with_family_grouping() {
+    use slate_cli::cli::picker::PickerState;
+    use slate_cli::opacity::OpacityPreset;
+    use slate_cli::theme::{ThemeRegistry, FAMILY_SORT_ORDER};
+
+    let state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid)
+        .expect("picker state must build");
+    let registry = ThemeRegistry::new().expect("registry");
+
+    let mut last_family_idx: Option<usize> = None;
+    let mut distinct_families: std::collections::BTreeSet<usize> =
+        std::collections::BTreeSet::new();
+
+    for id in state.theme_ids() {
+        let theme = registry.get(id).expect("id from registry");
+        let idx = FAMILY_SORT_ORDER
+            .iter()
+            .position(|f| *f == theme.family.as_str())
+            .unwrap_or_else(|| {
+                panic!(
+                    "theme {id} family {:?} must appear in FAMILY_SORT_ORDER",
+                    theme.family
+                )
+            });
+        if let Some(last) = last_family_idx {
+            assert!(
+                idx >= last,
+                "family order violated at {id}: family {} (idx {idx}) came after idx {last}",
+                theme.family
+            );
+        }
+        last_family_idx = Some(idx);
+        distinct_families.insert(idx);
+    }
+
+    assert!(
+        distinct_families.len() >= 2,
+        "picker must surface at least 2 families; got {distinct_families:?}"
     );
 }
 

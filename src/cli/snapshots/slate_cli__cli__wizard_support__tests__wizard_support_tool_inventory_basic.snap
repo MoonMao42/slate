@@ -1,0 +1,16 @@
+---
+source: src/cli/wizard_support.rs
+expression: out
+---
+◆ Tool Inventory
+┃ ├─ ✓ Ghostty — Makes your terminal glow (synced if installed)
+┃ ├─ ○ Starship — Transforms your prompt
+┃ ├─ ○ bat — Beautiful code syntax highlighting
+┃ ├─ ○ delta — Stunning git diffs
+┃ ├─ ○ eza — Colorful file listing
+┃ ├─ ○ lazygit — Git client that shines
+┃ ├─ ○ fastfetch — System info with style
+┃ ├─ ○ zsh-syntax-highlighting — Code highlighting in your shell
+┃ ├─ ◆ Alacritty — GPU-accelerated terminal beauty (synced if installed)
+┃ ├─ ◆ Kitty — Feature-rich GPU terminal (synced if installed)
+┃ ├─ ◆ tmux — Themed terminal multiplexer (synced if installed)
