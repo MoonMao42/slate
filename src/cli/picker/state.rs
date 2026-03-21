@@ -5,6 +5,8 @@
 use crate::error::Result;
 use crate::opacity::OpacityPreset;
 use crate::theme::{ThemeRegistry, ThemeVariant, FAMILY_SORT_ORDER};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// State machine for 2D picker navigation.
 /// Manages:
@@ -24,11 +26,12 @@ pub struct PickerState {
     /// Snapshot of original opacity for rollback
     original_opacity: OpacityPreset,
     /// Has this state been explicitly committed by the user?
-    /// Shared with `RollbackGuard` via `Rc::clone` so both observe the same
-    /// cell — `commit()` flips it to `true` before the guard's Drop runs,
-    /// short-circuiting the managed/* rollback. Single-threaded only;
-    /// picker runs on the main thread.
-    committed: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Shared with `RollbackGuard` and the panic hook via `Arc<AtomicBool>`
+    /// so all rollback paths observe the same commit decision.
+    /// `commit()` flips it to `true` immediately after a successful
+    /// `silent_commit_apply`, which suppresses both the Drop rollback path and
+    /// the panic-hook rollback path for any later panic in the same launch.
+    committed: Arc<AtomicBool>,
     /// Has user explicitly pressed ←→ to override light-theme opacity guard?
     opacity_override_in_session: bool,
     /// Tab-toggled view mode . `false` = list-dominant (default per
@@ -86,7 +89,7 @@ impl PickerState {
             selected_opacity: current_opacity,
             original_theme_id: current_theme_id.to_string(),
             original_opacity: current_opacity,
-            committed: std::rc::Rc::new(std::cell::Cell::new(false)),
+            committed: Arc::new(AtomicBool::new(false)),
             opacity_override_in_session: false,
             preview_mode_full: false, //  default; Tab toggles
             prompt_cache: std::collections::HashMap::new(),
@@ -125,17 +128,15 @@ impl PickerState {
 
     /// Whether the user pressed Enter to commit this selection.
     pub fn is_committed(&self) -> bool {
-        self.committed.get()
+        self.committed.load(Ordering::SeqCst)
     }
 
-    /// Returns a clone of the `Rc<Cell<bool>>` committed flag so the event
-    /// loop can hand it to `RollbackGuard::arm` (so both the guard's Drop
-    /// impl and the panic hook observe the same commit state).
-    /// Currently only consumed by the `committed_flag_shared_with_guard`
-    /// unit test; (event_loop wiring) will wire this into
-    /// `launch_picker` so the `#[allow(dead_code)]` drops there.
+    /// Returns a clone of the shared committed flag so the event loop can hand
+    /// it to both `RollbackGuard::arm` and `install_rollback_panic_hook`.
+    /// The picker still runs on one thread, but the panic hook needs a
+    /// `Send + Sync` flag because it is process-global state.
     #[allow(dead_code)]
-    pub(super) fn committed_flag(&self) -> std::rc::Rc<std::cell::Cell<bool>> {
+    pub(super) fn committed_flag(&self) -> Arc<AtomicBool> {
         self.committed.clone()
     }
 
@@ -209,10 +210,10 @@ impl PickerState {
     }
 
     /// Mark this selection as committed (will skip rollback in Drop).
-    /// Writes through the shared `Rc<Cell<bool>>` so any cloned handle
-    /// (e.g. `RollbackGuard`) sees the flip before its own Drop runs.
+    /// Writes through the shared atomic so every rollback path sees the flip
+    /// before its own Drop / hook branch runs.
     pub fn commit(&mut self) {
-        self.committed.set(true);
+        self.committed.store(true, Ordering::SeqCst);
     }
 
     /// Restore to original snapshot (for rollback)
@@ -225,7 +226,7 @@ impl PickerState {
             self.selected_theme_index = pos;
         }
         self.selected_opacity = self.original_opacity;
-        self.committed.set(false);
+        self.committed.store(false, Ordering::SeqCst);
     }
 
     /// Get current theme variant from registry
@@ -276,7 +277,7 @@ impl Drop for PickerState {
     /// Disk-side rollback (managed/*) is handled by `RollbackGuard` in
     /// `rollback_guard.rs` — parallel Drop structure.
     fn drop(&mut self) {
-        if !self.committed.get() {
+        if !self.committed.load(Ordering::SeqCst) {
             self.revert();
         }
     }
@@ -414,9 +415,9 @@ mod tests {
     fn test_picker_state_commit_flag() {
         let mut state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
 
-        assert!(!state.committed.get());
+        assert!(!state.committed.load(Ordering::SeqCst));
         state.commit();
-        assert!(state.committed.get());
+        assert!(state.committed.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -581,14 +582,17 @@ mod tests {
         assert_eq!(state.cached_prompt("gruvbox-dark"), None);
     }
 
-    /// Task 19-03-01 Test 4 — the committed flag is shared via Rc<Cell<bool>>
-    /// so `RollbackGuard` (Task 19-03-02) can observe commit decisions made
-    /// on the state after it clones the cell.
+    /// Task 19-03-01 Test 4 — the committed flag is shared via
+    /// `Arc<AtomicBool>` so `RollbackGuard` and the panic hook can observe
+    /// commit decisions made on the state after they clone the handle.
     #[test]
     fn committed_flag_shared_with_guard() {
         let mut state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
         let guard_view = state.committed_flag();
-        assert!(!guard_view.get(), "initial commit flag must be false");
+        assert!(
+            !guard_view.load(Ordering::SeqCst),
+            "initial commit flag must be false"
+        );
         assert!(
             !state.is_committed(),
             "is_committed must mirror the cell's initial value"
@@ -597,8 +601,8 @@ mod tests {
         state.commit();
 
         assert!(
-            guard_view.get(),
-            "the guard-held Rc<Cell<bool>> must observe the commit flip"
+            guard_view.load(Ordering::SeqCst),
+            "the guard-held Arc<AtomicBool> must observe the commit flip"
         );
         assert!(
             state.is_committed(),

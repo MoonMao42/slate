@@ -72,7 +72,7 @@ impl ConfigManager {
         Ok(())
     }
 
-    fn should_prefer_plain_starship(&self) -> Result<bool> {
+    pub(crate) fn should_prefer_plain_starship(&self) -> Result<bool> {
         self.has_no_nerd_font()
     }
 

@@ -1,6 +1,5 @@
 use crate::brand::render_context::RenderContext;
 use crate::brand::roles::Roles;
-use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::opacity::OpacityPreset;
 use crate::theme::{ThemeAppearance, ThemeRegistry, ThemeVariant};
@@ -166,7 +165,7 @@ fn render_list_dominant<W: io::Write>(
 
     let current_theme = state.get_current_theme()?;
     if show_preview {
-        let preview_raw = super::preview_panel::render_preview(&current_theme.palette);
+        let preview_raw = compose::compose_mini(&current_theme.palette, roles.as_ref());
         let preview_output = preview_raw.replace('\n', "\r\n  ");
         queue_io(queue!(out, Print("  ")))?;
         queue_io(queue!(out, Print(preview_output)))?;
@@ -412,9 +411,23 @@ pub(super) fn is_ghostty() -> bool {
 // MUST carry the theme's hex for the receipt to land. Chrome glyphs +
 // labels inside this fn flow through the Roles API (brand/heading/path),
 // wrapped by the swatch fg so everything inherits the theme tint.
-pub(super) fn render_afterglow_receipt(state: &PickerState, _env: &SlateEnv) -> Result<()> {
+pub(super) fn render_afterglow_receipt(
+    state: &PickerState,
+    applied_opacity: OpacityPreset,
+) -> Result<()> {
+    let output = build_afterglow_receipt(state, applied_opacity)?;
+    let mut stdout = io::stdout();
+    stdout.write_all(output.as_bytes())?;
+    stdout.flush()?;
+    Ok(())
+}
+
+// SWATCH-RENDERER: intentionally raw ANSI. The afterglow receipt composes
+// terminal-control escapes (`?1049l`, `?25h`) plus a palette-tinted swatch
+// foreground into one `String`; the aggregate migration scanner must ignore
+// this helper body the same way it ignores the write-to-stdout wrapper above.
+fn build_afterglow_receipt(state: &PickerState, applied_opacity: OpacityPreset) -> Result<String> {
     let current_theme = state.get_current_theme()?;
-    let current_opacity = state.get_current_opacity();
     let text_rgb = parse_hex_color(&current_theme.palette.foreground);
 
     let ctx = RenderContext::from_active_theme().ok();
@@ -453,7 +466,7 @@ pub(super) fn render_afterglow_receipt(state: &PickerState, _env: &SlateEnv) -> 
             "  {}  {}   {}\n",
             diamond_glyph,
             opacity_label,
-            opacity_to_label(current_opacity)
+            opacity_to_label(applied_opacity)
         )
     } else {
         String::new()
@@ -470,10 +483,7 @@ pub(super) fn render_afterglow_receipt(state: &PickerState, _env: &SlateEnv) -> 
         output.push_str(&opacity_line);
     }
 
-    let mut stdout = io::stdout();
-    stdout.write_all(output.as_bytes())?;
-    stdout.flush()?;
-    Ok(())
+    Ok(output)
 }
 
 fn render_opacity_slot<W: io::Write>(
@@ -694,6 +704,38 @@ mod tests {
         assert!(
             full_visible.contains("◆ Palette") && full_visible.contains("◆ Code"),
             "full-preview mode must show Palette + Code block headings; got:\n{full_visible}"
+        );
+    }
+
+    #[test]
+    fn list_mode_uses_mini_preview_not_legacy_color_matrix() {
+        let state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
+        let out = render_to_vec(&state, 80, 24);
+        let visible = strip_ansi(&out);
+        assert!(
+            visible.contains('❯'),
+            "list mode should show the mini prompt preview glyph, got:\n{visible}"
+        );
+        assert!(
+            !visible.contains("Normal:") && !visible.contains("Bright:"),
+            "list mode must not render the legacy ANSI matrix preview, got:\n{visible}"
+        );
+    }
+
+    #[test]
+    fn afterglow_receipt_reports_applied_opacity_not_raw_selection() {
+        let state = PickerState::new("catppuccin-latte", OpacityPreset::Clear).unwrap();
+        let receipt = build_afterglow_receipt(&state, OpacityPreset::Solid)
+            .expect("receipt should render for a valid picker state");
+        let visible = strip_ansi(receipt.as_bytes());
+        assert!(
+            visible.contains("Opacity   Solid"),
+            "receipt should report the opacity that actually landed, got:\n{visible}"
+        );
+        assert!(
+            !visible.contains("Opacity   Clear"),
+            "receipt must not echo the pre-guard selection when a light-theme opacity guard \
+             forced a different applied opacity. Got:\n{visible}"
         );
     }
 }

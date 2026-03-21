@@ -1,6 +1,6 @@
 //! Hybrid starship fork for Tab full-preview mode.
 //! Forks the user's `starship prompt` binary with a per-subprocess
-//! `STARSHIP_CONFIG` env override pointed at `managed/starship/active.toml`,
+//! `STARSHIP_CONFIG` env override pointed at a picker-managed preview TOML,
 //! so the preview renders the real theme-aware prompt the user will see
 //! after committing. Never forks on the default browsing path.
 //! Design rules enforced here:
@@ -78,14 +78,18 @@ pub fn fork_starship_prompt(
     }
 
     // 3. Fork with env override + stderr null.
-    // path is a fixed fixture: `/Users/demo/code/slate` produces a
-    // believable [directory] module output without leaking the user's
-    // actual pwd into the picker preview (RESEARCH Open Q2).
+    // Use the user's real cwd when available so directory / git / language
+    // modules match the fresh-shell prompt they will actually see after
+    // commit. If cwd lookup fails, fall back to a stable fixture path rather
+    // than aborting the whole preview.
+    let current_dir =
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/Users/demo/code/slate"));
     let output = Command::new(&resolved)
         .arg("prompt")
         .args(["--status", "0", "--keymap", "viins"])
         .args(["--terminal-width", &width.to_string()])
-        .args(["--path", "/Users/demo/code/slate"])
+        .arg("--path")
+        .arg(current_dir.as_os_str())
         .env("STARSHIP_CONFIG", managed_toml)
         .stderr(Stdio::null())
         .stdout(Stdio::piped())

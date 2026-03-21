@@ -65,28 +65,28 @@ pub fn launch_picker(env: &SlateEnv) -> Result<()> {
         .unwrap_or(OpacityPreset::Solid);
 
     let mut state = PickerState::new(&starting_theme_id, starting_opacity)?;
+    let committed = state.committed_flag();
 
     // layer 3: install the panic hook BEFORE entering the
     // alt-screen so a panic during `TerminalGuard::enter()` itself still
     // triggers a managed/* rollback. The hook is process-global and
-    // captures (env, starting_theme_id, starting_opacity) by value, so
-    // it carries its own snapshot independent of the guard's Drop order.
-    install_rollback_panic_hook(env.clone(), starting_theme_id.clone(), starting_opacity);
+    // shares the same committed flag as `RollbackGuard`, so a panic after a
+    // successful commit will not spuriously restore the original theme.
+    let _panic_hook = install_rollback_panic_hook(
+        env.clone(),
+        starting_theme_id.clone(),
+        starting_opacity,
+        committed.clone(),
+    );
 
     let _guard = TerminalGuard::enter()?;
 
-    // layer 2: arm the RAII rollback guard. It clones the
-    // shared `Rc<Cell<bool>>` from PickerState so `state.commit()` flips
-    // the cell to `true` BEFORE `_rollback` drops → Drop sees the commit
-    // and short-circuits silent_preview_apply. Rust drops locals in
-    // reverse declaration order, so `_rollback` drops AFTER the match
-    // arm below runs `state.commit()`.
-    let _rollback = RollbackGuard::arm(
-        env,
-        &starting_theme_id,
-        starting_opacity,
-        state.committed_flag(),
-    );
+    // layer 2: arm the RAII rollback guard. It shares the
+    // same atomic commit flag as the panic hook, so `state.commit()` flips
+    // one bit that suppresses every rollback path after a successful apply.
+    // Rust drops locals in reverse declaration order, so `_rollback` drops
+    // AFTER the match arm below runs `state.commit()`.
+    let _rollback = RollbackGuard::arm(env, &starting_theme_id, starting_opacity, committed);
 
     let effective = get_effective_opacity_for_rendering(&state);
     let _ = crate::cli::set::silent_preview_apply(env, state.get_current_theme_id(), effective);
@@ -114,11 +114,17 @@ pub fn launch_picker(env: &SlateEnv) -> Result<()> {
 
     match exit_action {
         ExitAction::Commit => {
-            state.commit();
             let theme_id = state.get_current_theme_id().to_string();
             let opacity = get_effective_opacity_for_rendering(&state);
-            crate::cli::set::silent_commit_apply(env, &theme_id, opacity)?;
-            render_afterglow_receipt(&state, env)?;
+            crate::cli::set::silent_commit_apply(
+                env,
+                &theme_id,
+                opacity,
+                state.original_theme_id(),
+                state.original_opacity(),
+            )?;
+            state.commit();
+            render_afterglow_receipt(&state, opacity)?;
             crate::cli::sound::play_feedback();
         }
         ExitAction::Cancel => {
@@ -199,12 +205,7 @@ fn event_loop(env: &SlateEnv, state: &mut PickerState) -> Result<ExitAction> {
             match handle_key(key, state, env, &mut flash)? {
                 KeyOutcome::Continue => {
                     dirty = true;
-                    let effective = get_effective_opacity_for_rendering(state);
-                    let _ = crate::cli::set::silent_preview_apply(
-                        env,
-                        state.get_current_theme_id(),
-                        effective,
-                    );
+                    sync_preview_after_state_change(state, env);
                 }
                 KeyOutcome::Inert => {}
                 KeyOutcome::Commit => return Ok(ExitAction::Commit),
@@ -220,8 +221,20 @@ fn event_loop(env: &SlateEnv, state: &mut PickerState) -> Result<ExitAction> {
             // is a `clear()` — simpler than per-entry width tracking,
             // and correctness > cache hit-rate here.
             state.invalidate_prompt_cache();
+            if state.preview_mode_full {
+                fork_and_cache_prompt(state, env);
+            }
         }
     }
+}
+
+fn sync_preview_after_state_change(state: &mut PickerState, env: &SlateEnv) {
+    if state.preview_mode_full {
+        fork_and_cache_prompt(state, env);
+    }
+
+    let effective = get_effective_opacity_for_rendering(state);
+    let _ = crate::cli::set::silent_preview_apply(env, state.get_current_theme_id(), effective);
 }
 
 enum KeyOutcome {
@@ -237,24 +250,6 @@ fn handle_key(
     env: &SlateEnv,
     flash: &mut Option<Flash>,
 ) -> Result<KeyOutcome> {
-    // Navigation + opacity keys are list-dominant only. In full-preview mode
-    // the picker shows a detailed read-only render of the currently-selected
-    // theme; changing selection from here would be disorienting (no list
-    // cursor visible) so the keys are inert until the user returns to list.
-    if state.preview_mode_full {
-        match key.code {
-            KeyCode::Up
-            | KeyCode::Down
-            | KeyCode::Left
-            | KeyCode::Right
-            | KeyCode::Char('k')
-            | KeyCode::Char('j')
-            | KeyCode::Char('h')
-            | KeyCode::Char('l') => return Ok(KeyOutcome::Inert),
-            _ => {}
-        }
-    }
-
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
             state.move_up();
@@ -322,8 +317,10 @@ fn handle_key(
         }
         KeyCode::Tab => {
             // Tab toggle: flip list-dominant ↔ full-preview mode.
-            // When flipping INTO preview mode, eagerly fork starship so the
-            // preview shows the real theme-aware prompt instead of the
+            // Navigation/opacity keys stay live in both modes; Tab is only
+            // the layout switch, not a mode lock.
+            // When flipping INTO preview mode, eagerly resolve the prompt so
+            // the preview shows the real theme-aware prompt instead of the
             // self-draw fallback. Failure is silent (compose_full falls back
             // to self-draw) per.
             state.preview_mode_full = !state.preview_mode_full;
@@ -340,16 +337,7 @@ fn handle_key(
             dispatch(BrandEvent::Selection(SelectKind::PickerEnter));
             Ok(KeyOutcome::Commit)
         }
-        KeyCode::Esc | KeyCode::Char('q') => {
-            // Esc in full-preview mode returns to the list-dominant view
-            // instead of exiting. To leave the picker, user Escs again from
-            // the list view.
-            if state.preview_mode_full {
-                state.preview_mode_full = false;
-                return Ok(KeyOutcome::Continue);
-            }
-            Ok(KeyOutcome::Cancel)
-        }
+        KeyCode::Esc | KeyCode::Char('q') => Ok(KeyOutcome::Cancel),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Ok(KeyOutcome::Cancel)
         }
@@ -369,21 +357,96 @@ fn fork_and_cache_prompt(state: &mut PickerState, env: &SlateEnv) {
         return;
     }
 
-    let managed_dir = env.config_dir().join("managed").join("starship");
-    // The managed starship config is named `plain.toml` today (single-file
-    // layout). If that changes, update `StarshipAdapter::apply_theme` in
-    // src/adapter/starship.rs — the fork must read the same file slate's
-    // writer writes to.
-    let managed_toml = managed_dir.join("plain.toml");
-    if !managed_toml.exists() {
+    let Ok(config) = crate::config::ConfigManager::with_env(env) else {
+        return;
+    };
+    if !config.is_starship_enabled().unwrap_or(true) {
+        state.cache_prompt(&theme_id, disabled_prompt_preview());
         return;
     }
 
+    let Ok(managed_toml) = prepare_preview_starship_config(state, env) else {
+        return;
+    };
+    let Some(managed_dir) = managed_toml.parent() else {
+        return;
+    };
+
     let width = terminal::size().map(|(c, _)| c).unwrap_or(80);
 
-    if let Ok(prompt) = fork_starship_prompt(&managed_toml, &managed_dir, width, None) {
+    if let Ok(prompt) = fork_starship_prompt(&managed_toml, managed_dir, width, None) {
         state.cache_prompt(&theme_id, prompt);
     }
+}
+
+/// Rewrite a picker-only managed starship preview config for the
+/// currently-selected theme and return the TOML path the full-preview fork
+/// should read.
+/// This intentionally avoids `managed/starship/plain.toml`, which may be
+/// exported as the live `STARSHIP_CONFIG` for plain-starship shells. Full
+/// preview needs a fresh config for the selected row, but mutating the live
+/// shell config would leak preview-only themes after Esc/cancel.
+fn prepare_preview_starship_config(
+    state: &PickerState,
+    env: &SlateEnv,
+) -> Result<std::path::PathBuf> {
+    let theme = state.get_current_theme()?;
+    let config = crate::config::ConfigManager::with_env(env)?;
+    let content = preview_starship_content(&config, env, &theme)?;
+    config.write_managed_file("starship", "picker-preview.toml", &content)?;
+    Ok(env
+        .config_dir()
+        .join("managed")
+        .join("starship")
+        .join("picker-preview.toml"))
+}
+
+fn preview_starship_content(
+    config: &crate::config::ConfigManager,
+    env: &SlateEnv,
+    theme: &crate::theme::ThemeVariant,
+) -> Result<String> {
+    if should_use_plain_starship_preview(config)? {
+        return Ok(crate::config::shell_integration::themed_plain_starship_content(theme));
+    }
+
+    let integration_path = crate::adapter::StarshipAdapter::integration_config_path_with_env(env);
+    if !integration_path.exists() {
+        return Ok(crate::config::shell_integration::themed_plain_starship_content(theme));
+    }
+
+    let bytes = std::fs::read(&integration_path).map_err(|err| {
+        crate::error::SlateError::ConfigReadError(
+            integration_path.display().to_string(),
+            err.to_string(),
+        )
+    })?;
+    let content = String::from_utf8(bytes).map_err(|err| {
+        crate::error::SlateError::ConfigReadError(
+            integration_path.display().to_string(),
+            format!(
+                "contains non-UTF-8 bytes at byte offset {}",
+                err.utf8_error().valid_up_to()
+            ),
+        )
+    })?;
+
+    crate::adapter::starship::themed_config_from_content(&content, theme)
+}
+
+fn should_use_plain_starship_preview(config: &crate::config::ConfigManager) -> Result<bool> {
+    if matches!(
+        std::env::var("TERM_PROGRAM").as_deref(),
+        Ok("Apple_Terminal")
+    ) {
+        return Ok(true);
+    }
+    config.should_prefer_plain_starship()
+}
+
+fn disabled_prompt_preview() -> String {
+    let user = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
+    format!("{user}\n❯ ")
 }
 
 #[cfg(test)]
@@ -405,6 +468,7 @@ mod tests {
     use super::*;
     use crate::brand::events::{set_sink, EventSink};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -668,6 +732,101 @@ mod tests {
         assert!(!state.preview_mode_full);
     }
 
+    #[test]
+    fn esc_cancels_directly_from_full_preview_mode() {
+        let env = dummy_env();
+        let mut state = fresh_state();
+        state.preview_mode_full = true;
+        let mut flash: Option<Flash> = None;
+
+        let outcome = handle_key(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .expect("Esc must stay routable in full-preview mode");
+        assert!(
+            matches!(outcome, KeyOutcome::Cancel),
+            "Esc should cancel the picker directly from full-preview mode"
+        );
+    }
+
+    #[test]
+    fn prepare_preview_starship_config_falls_back_to_plain_profile_when_active_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let env = SlateEnv::with_home(tmp.path().to_path_buf());
+        let state = fresh_state();
+
+        let plain_toml = env
+            .config_dir()
+            .join("managed")
+            .join("starship")
+            .join("plain.toml");
+        fs::create_dir_all(plain_toml.parent().expect("parent"))
+            .expect("managed starship dir should be creatable");
+        fs::write(&plain_toml, "# live shell config\n").expect("seed live shell config");
+
+        let rewritten =
+            prepare_preview_starship_config(&state, &env).expect("preview config should rewrite");
+        let preview_toml = env
+            .config_dir()
+            .join("managed")
+            .join("starship")
+            .join("picker-preview.toml");
+        assert_eq!(
+            rewritten, preview_toml,
+            "preview config helper must target a picker-only managed TOML"
+        );
+
+        let expected = crate::config::shell_integration::themed_plain_starship_content(
+            &state.get_current_theme().expect("theme should resolve"),
+        );
+        let actual = fs::read_to_string(&rewritten).expect("preview TOML should exist");
+        assert_eq!(
+            actual, expected,
+            "full-preview should fall back to the plain starship profile when no active user config is available"
+        );
+        assert_eq!(
+            fs::read_to_string(&plain_toml).expect("live plain.toml should remain readable"),
+            "# live shell config\n",
+            "full-preview must not mutate managed/starship/plain.toml because live shells may read it"
+        );
+    }
+
+    #[test]
+    fn prepare_preview_starship_config_prefers_user_starship_toml_when_available() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let env = SlateEnv::with_home(tmp.path().to_path_buf());
+        let state = fresh_state();
+        let config = crate::config::ConfigManager::with_env(&env).expect("config manager");
+        config
+            .set_current_font("JetBrainsMono Nerd Font")
+            .expect("nerd font should disable plain-starship fallback");
+
+        let active_toml = env.xdg_config_home().join("starship.toml");
+        fs::create_dir_all(active_toml.parent().expect("parent"))
+            .expect("xdg config dir should be creatable");
+        fs::write(
+            &active_toml,
+            "format = \"$directory$git_branch$character\"\n[directory]\nstyle = \"bold blue\"\n",
+        )
+        .expect("seed active starship config");
+
+        let preview_toml =
+            prepare_preview_starship_config(&state, &env).expect("preview config should rewrite");
+        let expected = crate::adapter::starship::themed_config_from_content(
+            &fs::read_to_string(&active_toml).expect("active starship config should stay readable"),
+            &state.get_current_theme().expect("theme should resolve"),
+        )
+        .expect("preview config should reuse the real starship document shape");
+        let actual = fs::read_to_string(&preview_toml).expect("preview config should exist");
+        assert_eq!(
+            actual, expected,
+            "full-preview should derive picker-preview.toml from the user's real starship.toml, not the plain fallback template"
+        );
+    }
+
     /// V-04 BEHAVIOR PROOF: Tab → `KeyOutcome::Continue` → outer loop
     /// sets `dirty = true` → next loop-top iteration renders with the
     /// new `preview_mode_full` value. We replicate that cycle with a
@@ -772,6 +931,35 @@ mod tests {
             None,
             "resize must evict all cached prompts so stale --terminal-width \
              entries don't render at the new window size"
+        );
+    }
+
+    #[test]
+    fn continue_sync_caches_prompt_for_current_theme_in_full_preview() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let env = SlateEnv::with_home(tmp.path().to_path_buf());
+        let config = crate::config::ConfigManager::with_env(&env).expect("config manager");
+        config
+            .set_starship_enabled(false)
+            .expect("starship flag should be writable");
+
+        let mut state = fresh_state();
+        state.preview_mode_full = true;
+        state.move_down();
+
+        let theme_id = state.get_current_theme_id().to_string();
+        assert_eq!(
+            state.cached_prompt(&theme_id),
+            None,
+            "newly-selected theme should start as a cache miss"
+        );
+
+        sync_preview_after_state_change(&mut state, &env);
+
+        assert_eq!(
+            state.cached_prompt(&theme_id),
+            Some(disabled_prompt_preview().as_str()),
+            "full-preview state sync must populate the prompt cache for the current theme"
         );
     }
 }
