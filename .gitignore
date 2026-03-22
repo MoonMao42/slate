@@ -36,7 +36,7 @@ assets/*-poster.png
 assets/*.mp4
 
 # Test scripts (dev-only) — with carve-outs
-scripts/
+scripts/*
 !scripts/curate-sfx.sh
 !scripts/bake-audio.sh
 !scripts/parse_tape_sfx.py
