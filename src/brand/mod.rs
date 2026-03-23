@@ -5,6 +5,7 @@ pub mod migration;
 pub mod palette;
 pub mod render_context;
 pub mod roles;
+pub mod sound_sink;
 pub mod symbols;
 
 pub use events::{
@@ -15,4 +16,5 @@ pub use language::Language;
 pub use palette::BRAND_LAVENDER_FIXED;
 pub use render_context::{detect_render_mode, RenderContext, RenderMode};
 pub use roles::Roles;
+pub use sound_sink::SoundSink;
 pub use symbols::Symbols;
