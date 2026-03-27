@@ -45,8 +45,18 @@ fn phase_20_does_not_mutate_phase_18_dispatch_sites() {
     let mut count = 0;
     let mut per_file: Vec<(String, usize)> = Vec::new();
     for path in &files {
-        // Skip the events module itself — it defines `dispatch`, not callers.
-        if path.file_name().is_some_and(|n| n == "events.rs") {
+        // Skip modules that are part of the brand plumbing rather than
+        // call sites:
+        // - `events.rs` defines `dispatch` itself.
+        // - `sound_sink.rs` is the sink implementation — its
+        // `#[cfg(test)] mod tests` uses `dispatch(BrandEvent::...)`
+        // to exercise the sink. Those are test-only event synthesis,
+        // not Phase-18-planted production call sites, and must not
+        // inflate the freeze count.
+        if path
+            .file_name()
+            .is_some_and(|n| n == "events.rs" || n == "sound_sink.rs")
+        {
             continue;
         }
         let content = fs::read_to_string(path).unwrap_or_default();
