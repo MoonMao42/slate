@@ -10,6 +10,14 @@ use slate_cli::{brand, cli, env::SlateEnv, error};
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+
+    /// Apply auto-resolved theme (system appearance) — also silences SFX
+    #[arg(long, global = true)]
+    auto: bool,
+
+    /// Suppress output (for shell hook usage) — also silences SFX
+    #[arg(long, global = true)]
+    quiet: bool,
 }
 
 #[derive(Subcommand)]
@@ -30,20 +38,11 @@ enum Commands {
     Set {
         /// Theme name (optional; if omitted, launches picker)
         theme: Option<String>,
-        /// Auto-follow system appearance (light/dark)
-        #[arg(long, conflicts_with = "theme")]
-        auto: bool,
     },
     /// Set or pick theme
     Theme {
         /// Theme name (optional; if omitted, launches picker)
         name: Option<String>,
-        /// Apply currently auto-resolved theme based on system appearance
-        #[arg(long, conflicts_with = "name")]
-        auto: bool,
-        /// Suppress output (for shell hook usage)
-        #[arg(long)]
-        quiet: bool,
     },
     /// Set or pick font
     Font {
@@ -139,8 +138,8 @@ fn run() -> Result<()> {
         Some(Commands::Setup { quick, force, only }) => {
             cli::setup::handle_with_env(quick, force, only, &env)
         }
-        Some(Commands::Set { theme, auto }) => cli::set::handle(theme.as_deref(), auto),
-        Some(Commands::Theme { name, auto, quiet }) => cli::theme::handle_theme(name, auto, quiet),
+        Some(Commands::Set { theme }) => cli::set::handle(theme.as_deref(), cli.auto),
+        Some(Commands::Theme { name }) => cli::theme::handle_theme(name, cli.auto, cli.quiet),
         Some(Commands::Font { name }) => cli::font::handle_font(name.as_deref()),
         Some(Commands::Config { subcommand }) => match subcommand {
             ConfigSubcommand::Set { key, value } => cli::config::handle_config_set(&key, &value),
