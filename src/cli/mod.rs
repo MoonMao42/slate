@@ -19,7 +19,6 @@ pub mod setup;
 pub mod setup_executor;
 pub mod share;
 pub mod share_screenshot;
-pub mod sound;
 pub mod status;
 pub mod status_panel;
 pub mod theme;

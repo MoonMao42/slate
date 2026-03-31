@@ -154,7 +154,6 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         // is the category success event).
         dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
         dispatch(BrandEvent::ApplyComplete);
-        crate::cli::sound::play_feedback();
         Ok(())
     } else if let Some(name) = theme_name {
         // Direct apply path: theme_name is canonical kebab-case
@@ -187,7 +186,6 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         // explicit-name apply success → ThemeApplied + ApplyComplete.
         dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
         dispatch(BrandEvent::ApplyComplete);
-        crate::cli::sound::play_feedback();
 
         // UX-02 (D-D3): new-shell reminder sits BEFORE the demo hint on the
         // explicit-name branch only. The `--auto` branch and the picker branch
