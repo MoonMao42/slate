@@ -130,6 +130,12 @@ fn run() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // register the EventSink seam with the real SoundSink
+    // implementation. Must precede any brand-event dispatch (Pitfall 5).
+    // `auto || quiet || config.sound=off || cache-unpack-fail` internally
+    // degrades to NoopSink — this call never panics and never surfaces errors.
+    brand::SoundSink::install(&env, cli.auto, cli.quiet);
+
     let result = match cli.command {
         None => {
             // Bare `slate` invocation routes to hub
