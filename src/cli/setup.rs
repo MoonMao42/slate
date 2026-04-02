@@ -163,8 +163,6 @@ pub fn handle_with_env(
         eprintln!("{}", timing_line);
     }
 
-    crate::cli::sound::play_feedback();
-
     // UX-02 (D-D3): new-shell reminder sits BETWEEN the receipt card and the
     // demo hint. Only fires when at least one successful adapter declared
     // `requires_new_shell=true` (aggregator). `setup` has no

@@ -125,7 +125,6 @@ pub fn launch_picker(env: &SlateEnv) -> Result<()> {
             )?;
             state.commit();
             render_afterglow_receipt(&state, opacity)?;
-            crate::cli::sound::play_feedback();
         }
         ExitAction::Cancel => {
             let _ = crate::cli::set::silent_preview_apply(
@@ -330,10 +329,9 @@ fn handle_key(
             Ok(KeyOutcome::Continue)
         }
         KeyCode::Enter => {
-            // picker Enter → Selection. Fires IN ADDITION to the existing
-            // `crate::cli::sound::play_feedback` call from `launch_picker`'s
-            // Commit branch — does not delete `sound.rs`; 
-            // SoundSink will supersede `play_feedback` once registered.
+            // picker Enter → Selection. SoundSink consumes
+            // this via the EventSink seam and runs its priority-fold over
+            // the Selection(PickerEnter) event to render the commit SFX.
             dispatch(BrandEvent::Selection(SelectKind::PickerEnter));
             Ok(KeyOutcome::Commit)
         }
