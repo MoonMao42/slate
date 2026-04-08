@@ -1201,3 +1201,152 @@ orange = "#ff9e64"
 purple = "#6036a2"
 red = "#9f1f63"
 yellow = "#6b5b1a"
+
+[[theme]]
+id = "solarized-dark"
+name = "Solarized Dark"
+family = "Solarized"
+appearance = "Dark"
+auto_pair = "solarized-light"
+
+[theme.tool_refs]
+alacritty = "solarized_dark"
+bat = "Solarized (dark)"
+delta = "Solarized (dark)"
+eza = "solarized_dark"
+fastfetch = "solarized_dark"
+ghostty = "iTerm2 Solarized Dark"
+lazygit = "solarized_dark"
+starship = "solarized_dark"
+tmux = "solarized_dark"
+zsh_syntax_highlighting = "solarized_dark"
+
+[theme.palette]
+# Schoonover canonical: foreground = base0, background = base03
+foreground = "#839496"
+background = "#002b36"
+cursor = "#cb4b16"
+selection_bg = "#073642"
+selection_fg = "#839496"
+# brand_accent = Solarized violet (.3 — locked on both variants)
+brand_accent = "#6c71c4"
+# ANSI normals — WCAG-repaired per RESEARCH §6 (canonical preserved in [theme.palette.extras] below)
+# WCAG repair: canonical was #073642 (base02, 1.15:1), raised to #a0a0a0 (6.92:1) per Catppuccin Frappé/Macchiato precedent
+black = "#a0a0a0"
+# WCAG repair: canonical was #dc322f (3.25:1), raised to #ea6e60 (5.07:1)
+red = "#ea6e60"
+green = "#859900"
+yellow = "#b58900"
+# WCAG repair: canonical was #268bd2 (4.08:1), raised to #5fafee (6.33:1)
+blue = "#5fafee"
+# WCAG repair: canonical was #d33682 (3.30:1), raised to #e16ba5 (4.90:1)
+magenta = "#e16ba5"
+cyan = "#2aa198"
+white = "#eee8d5"
+# ANSI brights — canonical Schoonover (no audit pressure)
+bright_black = "#586e75"
+bright_red = "#cb4b16"
+bright_green = "#586e75"
+bright_yellow = "#657b83"
+bright_blue = "#839496"
+bright_magenta = "#6c71c4"
+bright_cyan = "#93a1a1"
+bright_white = "#fdf6e3"
+# Background variants per CONTEXT .4 (base02/base01/base00)
+bg_dim = "#073642"
+bg_darker = "#586e75"
+bg_darkest = "#657b83"
+# Extended adapter-coverage palette per RESEARCH §5 / Override #3
+text = "#839496"
+mauve = "#6c71c4"
+overlay1 = "#586e75"
+
+[theme.palette.extras]
+# Canonical Schoonover hex preserved for fidelity-curious consumers (advisory; not read at runtime)
+canonical_red = "#dc322f"
+canonical_blue = "#268bd2"
+canonical_magenta = "#d33682"
+canonical_yellow = "#b58900"
+canonical_green = "#859900"
+canonical_cyan = "#2aa198"
+canonical_orange = "#cb4b16"
+canonical_violet = "#6c71c4"
+# Functional: read by starship "peach" segment fallback chain (src/adapter/starship.rs:77-100)
+orange = "#cb4b16"
+
+[[theme]]
+id = "solarized-light"
+name = "Solarized Light"
+family = "Solarized"
+appearance = "Light"
+auto_pair = "solarized-dark"
+
+[theme.tool_refs]
+alacritty = "solarized_light"
+bat = "Solarized (light)"
+delta = "Solarized (light)"
+eza = "solarized_light"
+fastfetch = "solarized_light"
+ghostty = "iTerm2 Solarized Light"
+lazygit = "solarized_light"
+starship = "solarized_light"
+tmux = "solarized_light"
+zsh_syntax_highlighting = "solarized_light"
+
+[theme.palette]
+# Schoonover canonical: foreground = base00, background = base3 — foreground repaired (4.13:1 fail)
+# WCAG repair: canonical was #657b83 (4.13:1), darkened to #3e4d52 (8.15:1)
+foreground = "#3e4d52"
+background = "#fdf6e3"
+cursor = "#cb4b16"
+selection_bg = "#eee8d5"
+selection_fg = "#3e4d52"
+# brand_accent = Solarized violet (.3 — LOCKED on both variants per CONTEXT, do NOT darken for light bg)
+brand_accent = "#6c71c4"
+# ANSI normals — aggressively darkened per RESEARCH §6 (cream bg eats most colors)
+# WCAG repair: canonical was #eee8d5 (1.14:1), darkened to #3a4d52 (7.82:1)
+black = "#3a4d52"
+# WCAG repair: canonical was #dc322f (4.29:1), darkened to #a00d0d (7.61:1) — mirrors gruvbox-light precedent
+red = "#a00d0d"
+# WCAG repair: canonical was #859900 (2.97:1), darkened to #3a5d00 (7.09:1) — mirrors everforest-light
+green = "#3a5d00"
+# WCAG repair: canonical was #b58900 (2.98:1), darkened to #7a5d00 (5.74:1)
+yellow = "#7a5d00"
+# WCAG repair: canonical was #268bd2 (3.41:1), darkened to #0e5c95 (6.53:1)
+blue = "#0e5c95"
+# WCAG repair: canonical was #d33682 (4.21:1), darkened to #9d2261 (6.87:1)
+magenta = "#9d2261"
+# WCAG repair: canonical was #2aa198 (2.93:1), darkened to #0e6b65 (5.88:1)
+cyan = "#0e6b65"
+white = "#073642"
+# ANSI brights — canonical Schoonover light-variant mapping
+bright_black = "#93a1a1"
+bright_red = "#cb4b16"
+bright_green = "#93a1a1"
+bright_yellow = "#839496"
+bright_blue = "#657b83"
+bright_magenta = "#6c71c4"
+bright_cyan = "#586e75"
+bright_white = "#002b36"
+# Background variants per CONTEXT .4 (base2/base1/base0 — each tier slightly darker, all on the light end)
+bg_dim = "#eee8d5"
+bg_darker = "#93a1a1"
+bg_darkest = "#839496"
+# Extended adapter-coverage palette per RESEARCH §5 / Override #3
+text = "#3e4d52"
+mauve = "#6c71c4"
+overlay1 = "#93a1a1"
+
+[theme.palette.extras]
+# Canonical Schoonover hex preserved for fidelity-curious consumers
+canonical_red = "#dc322f"
+canonical_blue = "#268bd2"
+canonical_magenta = "#d33682"
+canonical_yellow = "#b58900"
+canonical_green = "#859900"
+canonical_cyan = "#2aa198"
+canonical_orange = "#cb4b16"
+canonical_violet = "#6c71c4"
+canonical_foreground = "#657b83"
+# Functional
+orange = "#cb4b16"
