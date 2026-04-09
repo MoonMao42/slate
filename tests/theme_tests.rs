@@ -332,3 +332,45 @@ fn test_catppuccin_extras_mapping() {
         );
     }
 }
+
+/// Regression guard: bat + delta are the two adapters that consume
+/// `tool_refs.<name>` verbatim into shipped configs (BAT_THEME env /
+/// `[delta] syntax-theme`). Their values MUST match the upstream tool's
+/// bundled theme corpus exactly. This test pins the expected strings
+/// against future drift (e.g. someone "tidying"
+/// `Solarized (dark)` to `solarized-dark`).
+/// Verified upstream (21-RESEARCH §3, 2026-04-27):
+/// bat 1337 `Solarized (dark)` / `Solarized (light)`
+/// delta 0.19 `Solarized (dark)` / `Solarized (light)`
+#[test]
+fn test_solarized_bat_delta_match_upstream() {
+    let registry = ThemeRegistry::new().expect("Failed to create registry");
+
+    let dark = registry
+        .get("solarized-dark")
+        .expect("solarized-dark variant must exist");
+    assert_eq!(
+        dark.tool_refs.get("bat").map(String::as_str),
+        Some("Solarized (dark)"),
+        "bat: solarized-dark.tool_refs.bat must be 'Solarized (dark)' to match shipped bat tmTheme upstream corpus"
+    );
+    assert_eq!(
+        dark.tool_refs.get("delta").map(String::as_str),
+        Some("Solarized (dark)"),
+        "delta: solarized-dark.tool_refs.delta must be 'Solarized (dark)' to match shipped delta (bat-backed) syntax-theme upstream corpus"
+    );
+
+    let light = registry
+        .get("solarized-light")
+        .expect("solarized-light variant must exist");
+    assert_eq!(
+        light.tool_refs.get("bat").map(String::as_str),
+        Some("Solarized (light)"),
+        "bat: solarized-light.tool_refs.bat must be 'Solarized (light)' to match shipped bat tmTheme upstream corpus"
+    );
+    assert_eq!(
+        light.tool_refs.get("delta").map(String::as_str),
+        Some("Solarized (light)"),
+        "delta: solarized-light.tool_refs.delta must be 'Solarized (light)' to match shipped delta (bat-backed) syntax-theme upstream corpus"
+    );
+}
