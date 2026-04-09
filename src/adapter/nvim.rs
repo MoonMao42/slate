@@ -460,7 +460,7 @@ pub fn render_loader() -> String {
 pub struct NvimAdapter;
 
 impl NvimAdapter {
-    /// Full install: writes 18 `slate-<id>.lua` shims + the loader
+    /// Full install: writes 20 `slate-<id>.lua` shims + the loader
     /// (`lua/slate/init.lua`) + the initial state file.
     /// Called from the `slate setup` wizard . Idempotent
     /// re-running with the same env+theme produces byte-identical files
@@ -500,7 +500,7 @@ impl NvimAdapter {
     /// without mutating process env vars. The trait's `apply_theme` method
     /// delegates here using `SlateEnv::from_process()`.
     /// Running nvim instances pick up the state-file change via the
-    /// `vim.uv.fs_event` watcher rendered by [`render_loader`]. The 18
+    /// `vim.uv.fs_event` watcher rendered by [`render_loader`]. The 20
     /// shims + loader are in place from [`NvimAdapter::setup`] — the fast
     /// path never re-emits them.
     pub(crate) fn apply_theme_with_env(
@@ -567,7 +567,7 @@ impl ToolAdapter for NvimAdapter {
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
-        // FAST PATH: state-file-only. The 18 shims + loader are written
+        // FAST PATH: state-file-only. The 20 shims + loader are written
         // by `NvimAdapter::setup` during the wizard; running nvim instances
         // hot-reload via the file watcher when the state file changes.
         let env = SlateEnv::from_process()?;
@@ -1002,7 +1002,7 @@ mod tests {
             "loader too small: {} bytes (expected >= 2500)",
             out.len()
         );
-        // 18 variants × ~5-15 KB each + ~3 KB skeleton. Cap at 512 KB.
+        // 20 variants × ~5-15 KB each + ~3 KB skeleton. Cap at 512 KB.
         assert!(
             out.len() <= 512 * 1024,
             "loader too large: {} bytes (expected <= 512KB)",
@@ -1052,7 +1052,7 @@ mod tests {
     fn render_loader_lualine_entries_are_bold_capable() {
         let out = render_loader();
         // Each variant contributes 6 `gui = 'bold'` markers (one per mode).
-        // With 18 variants that gives 108 bolds; the Plan-03 loader itself
+        // With 20 variants that gives 120 bolds; the Plan-03 loader itself
         // contains no bold markers outside the LUALINE_THEMES block.
         let bold_count = out.matches("gui = 'bold'").count();
         assert!(
@@ -1068,7 +1068,7 @@ mod tests {
         // out-of-date assumption that Plan-03's loader was ~15 KB. 
         // own test already asserts `<= 512 KB`, and summary records
         // a baseline of 230 KB. With adding 136 plugin entries (~100 KB
-        // spread across 18 variants) plus 18 spliced lualine tables (~36 KB),
+        // spread across 20 variants) plus 20 spliced lualine tables (~40 KB),
         // the realistic total lands around 370-400 KB. We keep 
         // 512 KB upper bound for consistency; the lower bound moves to 8 KB
         // per the plan's stated intent of shifting the floor up for lualine.

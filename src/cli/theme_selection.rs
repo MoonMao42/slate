@@ -1,7 +1,7 @@
 use crate::error::Result;
 /// Theme selection for setup wizard.
 /// and
-/// Provides access to 18 theme variants grouped by family.
+/// Provides access to 20 theme variants grouped by family.
 use crate::theme::{ThemeRegistry, DEFAULT_THEME_ID};
 use std::collections::HashMap;
 
@@ -19,7 +19,7 @@ impl ThemeSelector {
     }
 
     /// Get all available theme variants
-    /// Should be exactly 18 (Catppuccin 4 + Tokyo Night 2 + Rosé Pine 3 + Kanagawa 3 + Everforest 2 + Dracula + Nord + Gruvbox 2)
+    /// Should be exactly 20 (Catppuccin 4 + Solarized 2 + Tokyo Night 2 + Rosé Pine 3 + Kanagawa 3 + Everforest 2 + Dracula + Nord + Gruvbox 2)
     pub fn all_themes(&self) -> Vec<&crate::theme::ThemeVariant> {
         self.registry.all()
     }
@@ -60,12 +60,12 @@ impl ThemeSelector {
         self.registry.list_ids()
     }
 
-    /// Count themes (should be exactly 18)
+    /// Count themes (should be exactly 20)
     pub fn theme_count(&self) -> usize {
         self.all_themes().len()
     }
 
-    /// Verify all 18 required theme variants are present
+    /// Verify all 20 required theme variants are present
     pub fn verify_all_variants_present(&self) -> Result<()> {
         let themes = self.all_theme_ids();
         let expected = vec![
@@ -87,6 +87,8 @@ impl ThemeSelector {
             "nord",
             "gruvbox-dark",
             "gruvbox-light",
+            "solarized-dark",
+            "solarized-light",
         ];
 
         for theme_id in &expected {
@@ -121,12 +123,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_all_18_themes_available() {
+    fn test_all_20_themes_available() {
         let selector = ThemeSelector::new().unwrap();
         assert_eq!(
             selector.theme_count(),
-            18,
-            "Must have exactly 18 theme variants (, , , )"
+            20,
+            "Must have exactly 20 theme variants (, , , , FAM-01)"
         );
     }
 
@@ -144,11 +146,11 @@ mod tests {
         let selector = ThemeSelector::new().unwrap();
         let families = selector.themes_by_family();
 
-        // Should have 8 families
+        // Should have 9 families
         assert_eq!(
             families.len(),
-            8,
-            "Expected 8 theme families: Catppuccin, Tokyo Night, Rosé Pine, Kanagawa, Everforest, Dracula, Nord, Gruvbox"
+            9,
+            "Expected 9 theme families: Catppuccin, Solarized, Tokyo Night, Rosé Pine, Kanagawa, Everforest, Dracula, Nord, Gruvbox"
         );
 
         // Each family should have the right count
@@ -191,6 +193,11 @@ mod tests {
             families.get("Nord").map(|v| v.len()),
             Some(1),
             "Nord should have 1 variant"
+        );
+        assert_eq!(
+            families.get("Solarized").map(|v| v.len()),
+            Some(2),
+            "Solarized should have 2 variants"
         );
     }
 

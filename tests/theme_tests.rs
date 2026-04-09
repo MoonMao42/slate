@@ -62,8 +62,8 @@ fn test_all_themes_load() {
 
     assert_eq!(
         all_themes.len(),
-        18,
-        "Expected 18 theme variants (4 Catppuccin + 2 Tokyo Night + 3 Rosé Pine + 3 Kanagawa + 2 Everforest + 1 Dracula + 1 Nord + 2 Gruvbox)"
+        20,
+        "Expected 20 theme variants (4 Catppuccin + 2 Tokyo Night + 3 Rosé Pine + 3 Kanagawa + 2 Everforest + 1 Dracula + 1 Nord + 2 Gruvbox + 2 Solarized)"
     );
 }
 

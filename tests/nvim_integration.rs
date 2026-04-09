@@ -52,10 +52,10 @@ fn skip_if_no_nvim(test_name: &str) -> bool {
 
 // Task 1 — nvim_headless_source_all_variants
 
-/// After `NvimAdapter::setup` writes the 18 shims + loader, every
+/// After `NvimAdapter::setup` writes the 20 shims + loader, every
 /// variant's shim must source cleanly via `nvim --headless` and set
 /// `vim.g.colors_name` to `slate-<id>`. This proves the shim + loader +
-/// PALETTES chain end-to-end for all 18 variants. A malformed `{ ... }`
+/// PALETTES chain end-to-end for all 20 variants. A malformed `{ ... }`
 /// sub-table in any variant would surface here with the offending id
 /// named in the failure message.
 #[test]
@@ -569,7 +569,7 @@ fn assert_luafile_ok(path: &std::path::Path, label: &str) {
 /// sub-table spliced from `render_colorscheme`. `luafile`ing the full
 /// loader byte-compiles the lot through LuaJIT — a parse error in any
 /// sub-table aborts with a line-number pointing at the offender. This
-/// IS the 18-variant syntax gate.
+/// IS the 20-variant syntax gate.
 #[test]
 #[cfg(feature = "has-nvim")]
 fn loader_lua_parses_via_luafile() {
@@ -606,7 +606,7 @@ fn loader_lua_parses_via_luafile() {
     assert!(
         out.status.success(),
         "loader Lua failed to parse/execute \
-         (18-variant syntax gate failure):\nstderr={}",
+         (20-variant syntax gate failure):\nstderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
 }

@@ -1197,12 +1197,12 @@ mod preset_font_theme_mapping {
 
     #[test]
     fn test_theme_variants_available() {
-        // +: Verify all 18 theme variants across 8 families are available
+        // +: Verify all 20 theme variants across 9 families are available
         let selector = ThemeSelector::new().unwrap();
         let count = selector.theme_count();
         assert_eq!(
-            count, 18,
-            "Must have exactly 18 theme variants (Catppuccin 4 + Tokyo Night 2 + Rosé Pine 3 + Kanagawa 3 + Everforest 2 + Dracula 1 + Nord 1 + Gruvbox 2)"
+            count, 20,
+            "Must have exactly 20 theme variants (Catppuccin 4 + Tokyo Night 2 + Rosé Pine 3 + Kanagawa 3 + Everforest 2 + Dracula 1 + Nord 1 + Gruvbox 2 + Solarized 2)"
         );
     }
 
@@ -1222,11 +1222,11 @@ mod preset_font_theme_mapping {
 
     #[test]
     fn test_themes_grouped_by_family_count() {
-        // Verify family grouping has correct distribution across all 8 families
+        // Verify family grouping has correct distribution across all 9 families
         let selector = ThemeSelector::new().unwrap();
         let families = selector.themes_by_family();
 
-        assert_eq!(families.len(), 8, "Must have 8 families");
+        assert_eq!(families.len(), 9, "Must have 9 families");
         assert_eq!(families.get("Catppuccin").map(|v| v.len()), Some(4));
         assert_eq!(families.get("Tokyo Night").map(|v| v.len()), Some(2));
         assert_eq!(families.get("Rosé Pine").map(|v| v.len()), Some(3));
@@ -1235,6 +1235,7 @@ mod preset_font_theme_mapping {
         assert_eq!(families.get("Dracula").map(|v| v.len()), Some(1));
         assert_eq!(families.get("Nord").map(|v| v.len()), Some(1));
         assert_eq!(families.get("Gruvbox").map(|v| v.len()), Some(2));
+        assert_eq!(families.get("Solarized").map(|v| v.len()), Some(2));
     }
 
     #[test]

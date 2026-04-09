@@ -81,14 +81,14 @@ fn test_wcag_strict_audit_all_themes_pass() {
     // WCAG STRICT: Fail the build if any color is inaccessible
     assert_eq!(
         total_failures, 0,
-        "WCAG compliance failed: {} color(s) below 4.5:1 threshold. All 18 themes must pass strict audit.",
+        "WCAG compliance failed: {} color(s) below 4.5:1 threshold. All 20 themes must pass strict audit.",
         total_failures
     );
 }
 
 #[test]
 fn test_wcag_audit_registry_size() {
-    // Sanity check: the v0.1 release ships 18 themes.
+    // Sanity check: v2.2 ships 20 themes.
     // This number will change if new themes are added — update the expected
     // value alongside that change.
     let registry = ThemeRegistry::new().expect("Registry init");
@@ -96,8 +96,8 @@ fn test_wcag_audit_registry_size() {
 
     assert_eq!(
         ids.len(),
-        18,
-        "Expected 18 themes registered; got {} ({:?})",
+        20,
+        "Expected 20 themes registered; got {} ({:?})",
         ids.len(),
         ids
     );

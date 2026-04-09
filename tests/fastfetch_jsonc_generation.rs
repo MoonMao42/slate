@@ -10,7 +10,7 @@ fn test_generates_valid_json_for_all_themes() {
     let registry = ThemeRegistry::new().expect("ThemeRegistry init failed");
 
     let all_themes = registry.all();
-    assert_eq!(all_themes.len(), 18, "Expected 18 theme variants");
+    assert_eq!(all_themes.len(), 20, "Expected 20 theme variants");
 
     for theme in all_themes {
         let jsonc = adapter

@@ -134,8 +134,7 @@ fn test_preview_with_dracula_dark() {
 
 #[test]
 fn test_preview_with_gruvbox_light() {
-    // Gruvbox Light (light theme in the registered 18-theme set, stands in
-    // for the earlier Solarized Light fixture which is not registered).
+    // Gruvbox Light (minimalist palette stand-in for fixture coverage).
     let registry = ThemeRegistry::new().expect("Registry init");
     let theme = registry.get("gruvbox-light").expect("gruvbox-light exists");
 
