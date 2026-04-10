@@ -507,6 +507,8 @@ pub fn get_theme_description(theme_id: &str) -> Option<&'static str> {
         "catppuccin-frappe" => Some("Elegant frappé with subtle charm"),
         "catppuccin-macchiato" => Some("Smooth macchiato for balanced aesthetics"),
         "catppuccin-latte" => Some("Bright, airy latte perfect for light mode"),
+        "solarized-dark" => Some("Schoonover's precision-engineered dark — the OG designer palette."),
+        "solarized-light" => Some("Paper-warm light — easy on eyes under bright ambient light."),
         "tokyo-night-dark" => Some("Modern dark with electric blues and purples"),
         "tokyo-night-light" => Some("Crisp light theme with Tokyo Night flair"),
         "rose-pine-main" => Some("Dark, cozy & romantic. Love-inspired palette."),
