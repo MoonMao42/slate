@@ -489,6 +489,7 @@ impl Default for ThemeRegistry {
 /// Guides users toward most popular and well-regarded themes first
 pub const FAMILY_SORT_ORDER: &[&str] = &[
     "Catppuccin",
+    "Solarized",
     "Tokyo Night",
     "Rosé Pine",
     "Kanagawa",
