@@ -573,6 +573,10 @@ impl ToolAdapter for NvimAdapter {
         let env = SlateEnv::from_process()?;
         self.apply_theme_with_env(theme, &env)
     }
+
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
+        NvimAdapter::apply_theme_with_env(self, theme, env)
+    }
 }
 
 #[cfg(test)]

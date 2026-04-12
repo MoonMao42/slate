@@ -99,6 +99,11 @@ impl ToolAdapter for LazygitAdapter {
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
+        let env = SlateEnv::from_process()?;
+        self.apply_theme_with_env(theme, &env)
+    }
+
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
         // Step 1: Extract theme name from tool_refs
         theme.tool_refs.get("lazygit").ok_or_else(|| {
             SlateError::InvalidThemeData(format!(
@@ -111,7 +116,7 @@ impl ToolAdapter for LazygitAdapter {
         let managed_content = self.generate_yaml_config(theme)?;
 
         // Step 3: Write to managed config directory
-        let config_manager = ConfigManager::new()?;
+        let config_manager = ConfigManager::with_env(env)?;
         config_manager.write_managed_file("lazygit", "config.yml", &managed_content)?;
 
         // Step 4: Pager sync is handled at generation time via generate_yaml_config
@@ -147,16 +152,8 @@ impl LazygitAdapter {
             &semantic_map,
         )?;
 
-        // Wrap in gui.theme section
-        let config = format!(
-            "gui:\n  theme:\n{}\npager:\n  commands:\n    theme: \"{}\"\n",
-            yaml_content
-                .lines()
-                .map(|line| format!("  {}", line))
-                .collect::<Vec<_>>()
-                .join("\n"),
-            lazygit_ref
-        );
+        // PaletteRenderer emits the full gui.theme tree; append pager sync below it.
+        let config = format!("{yaml_content}pager:\n  commands:\n    theme: \"{lazygit_ref}\"\n");
 
         Ok(config)
     }
@@ -210,5 +207,18 @@ mod tests {
     #[test]
     fn test_parse_config_paths_rejects_empty_input() {
         assert_eq!(LazygitAdapter::parse_config_paths("   "), None);
+    }
+
+    #[test]
+    fn test_generate_yaml_config_includes_gui_theme_colors() {
+        let adapter = LazygitAdapter;
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        let config = adapter.generate_yaml_config(&theme).unwrap();
+
+        assert!(config.contains("gui:\n  theme:"));
+        assert!(config.contains("activeBorderColor:"));
+        assert!(config.contains("inactiveBorderColor:"));
+        assert!(config.contains("selectedLineBgColor:"));
+        assert!(!config.contains("  theme:\n  gui:"));
     }
 }

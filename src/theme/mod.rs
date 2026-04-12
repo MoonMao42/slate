@@ -456,6 +456,17 @@ impl ThemeRegistry {
         self.embedded.get(id)
     }
 
+    /// Get a theme by canonical ID or display name.
+    pub fn get_by_id_or_name(&self, query: &str) -> Option<&ThemeVariant> {
+        self.get(query).or_else(|| {
+            let normalized_query = normalize_theme_lookup(query);
+            self.embedded.all().find(|theme| {
+                normalize_theme_lookup(&theme.id) == normalized_query
+                    || normalize_theme_lookup(&theme.name) == normalized_query
+            })
+        })
+    }
+
     /// Get all theme variants in their TOML order.
     pub fn all(&self) -> Vec<&ThemeVariant> {
         self.embedded.all().collect()
@@ -477,6 +488,37 @@ impl ThemeRegistry {
         }
         families
     }
+}
+
+fn normalize_theme_lookup(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_separator = false;
+
+    for ch in value.trim().to_lowercase().chars() {
+        let normalized = match ch {
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'á' | 'à' | 'â' | 'ä' => 'a',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'ô' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            ch => ch,
+        };
+
+        if normalized.is_alphanumeric() {
+            out.push(normalized);
+            last_was_separator = false;
+        } else if !last_was_separator {
+            out.push('-');
+            last_was_separator = true;
+        }
+    }
+
+    while out.ends_with('-') {
+        out.pop();
+    }
+
+    out
 }
 
 impl Default for ThemeRegistry {
@@ -507,7 +549,9 @@ pub fn get_theme_description(theme_id: &str) -> Option<&'static str> {
         "catppuccin-frappe" => Some("Elegant frappé with subtle charm"),
         "catppuccin-macchiato" => Some("Smooth macchiato for balanced aesthetics"),
         "catppuccin-latte" => Some("Bright, airy latte perfect for light mode"),
-        "solarized-dark" => Some("Schoonover's precision-engineered dark — the OG designer palette."),
+        "solarized-dark" => {
+            Some("Schoonover's precision-engineered dark — the OG designer palette.")
+        }
         "solarized-light" => Some("Paper-warm light — easy on eyes under bright ambient light."),
         "tokyo-night-dark" => Some("Modern dark with electric blues and purples"),
         "tokyo-night-light" => Some("Crisp light theme with Tokyo Night flair"),

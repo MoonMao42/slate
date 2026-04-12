@@ -46,6 +46,10 @@ impl ZshHighlightAdapter {
     fn render_highlight_styles(theme: &ThemeVariant) -> Result<String> {
         PaletteRenderer::to_shell_vars_from_pairs(&theme.palette, &Self::build_semantic_map())
     }
+
+    fn managed_config_path_with_env(env: &SlateEnv) -> PathBuf {
+        env.config_dir().join("managed").join("zsh")
+    }
 }
 
 impl ToolAdapter for ZshHighlightAdapter {
@@ -76,11 +80,16 @@ impl ToolAdapter for ZshHighlightAdapter {
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
+        let env = SlateEnv::from_process()?;
+        self.apply_theme_with_env(theme, &env)
+    }
+
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
         // Step 1: Build semantic map for ZSH_HIGHLIGHT_STYLES
         let highlight_styles = Self::render_highlight_styles(theme)?;
 
         // Step 3: Write to managed config directory
-        let managed_dir = self.managed_config_path();
+        let managed_dir = Self::managed_config_path_with_env(env);
         fs::create_dir_all(&managed_dir)?;
 
         let highlight_file = managed_dir.join("highlight-styles.sh");

@@ -265,6 +265,11 @@ fn test_list_command_runs() {
     let mut cmd = slate_cmd_isolated(&tempdir);
 
     let output = cmd.arg("list").output().unwrap();
+    assert!(
+        output.status.success(),
+        "slate list failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     // slate list shows families grouped under tree-narrative headings
@@ -273,6 +278,57 @@ fn test_list_command_runs() {
     assert!(stdout.contains("Catppuccin")); // First family in  order
     assert!(stdout.contains("Tokyo Night")); // Second family in  order
     assert!(stdout.contains("◆")); // Brand-anchor family heading glyph
+    assert!(stdout.contains("Solarized Dark"));
+    assert!(stdout.contains("Solarized Light"));
+    assert!(stdout.contains("solarized-dark"));
+    assert!(stdout.contains("solarized-light"));
+
+    let catppuccin = stdout.find("Catppuccin").expect("Catppuccin band");
+    let solarized = stdout.find("Solarized").expect("Solarized band");
+    let tokyo_night = stdout.find("Tokyo Night").expect("Tokyo Night band");
+    assert!(
+        catppuccin < solarized && solarized < tokyo_night,
+        "expected Catppuccin < Solarized < Tokyo Night in list output:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_theme_list_alias_runs() {
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
+
+    let output = cmd.args(["theme", "--list"]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "slate theme --list failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(stdout.contains("◆"));
+    assert!(stdout.contains("Solarized Dark"));
+    assert!(stdout.contains("Solarized Light"));
+    assert!(stdout.contains("solarized-dark"));
+    assert!(stdout.contains("solarized-light"));
+}
+
+#[test]
+fn test_theme_set_alias_accepts_phase21_form() {
+    let tempdir = TempDir::new().unwrap();
+    let mut cmd = slate_cmd_isolated(&tempdir);
+
+    let output = cmd
+        .args(["theme", "set", "solarized-dark"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "slate theme set solarized-dark failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(stdout.contains("Solarized Dark"));
 }
 
 #[test]

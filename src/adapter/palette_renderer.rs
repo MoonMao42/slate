@@ -91,37 +91,44 @@ impl PaletteRenderer {
         }
 
         let colors = Self::extract_palette_colors(palette);
-        let mut yaml_lines = Vec::new();
-        let mut last_prefix = String::new();
-
         let mut sorted_entries: Vec<_> = semantic_map.iter().collect();
         sorted_entries.sort_by_key(|&(_, output)| *output);
 
-        for (_palette_key, output_key) in sorted_entries {
-            let parts: Vec<&str> = output_key.split('.').collect();
+        let mut yaml_lines = Vec::new();
+        let mut active_parent_path: Vec<&str> = Vec::new();
+
+        for (palette_key, output_key) in sorted_entries {
+            let Some(color) = colors.get(*palette_key) else {
+                continue;
+            };
+
+            let parts: Vec<&str> = output_key
+                .split('.')
+                .filter(|part| !part.is_empty())
+                .collect();
             if parts.is_empty() {
                 continue;
             }
 
-            let prefix = if parts.len() > 1 {
-                parts[0]
-            } else {
-                *output_key
-            };
+            let (parents, field) = parts.split_at(parts.len() - 1);
+            let field = field[0];
+            let common_prefix_len = active_parent_path
+                .iter()
+                .zip(parents.iter())
+                .take_while(|(a, b)| a == b)
+                .count();
 
-            if prefix != last_prefix {
-                yaml_lines.push(format!("{}:", prefix));
-                last_prefix = prefix.to_string();
+            for (level, parent) in parents.iter().enumerate().skip(common_prefix_len) {
+                yaml_lines.push(format!("{}{}:", "  ".repeat(level), parent));
             }
 
-            let field = parts[parts.len() - 1];
-
-            for (palette_key, color) in colors.iter() {
-                if output_key.ends_with(&format!(".{}", palette_key)) || output_key == palette_key {
-                    yaml_lines.push(format!("  {}: '{}'", field, color));
-                    break;
-                }
-            }
+            yaml_lines.push(format!(
+                "{}{}: '{}'",
+                "  ".repeat(parents.len()),
+                field,
+                color
+            ));
+            active_parent_path = parents.to_vec();
         }
 
         let output = yaml_lines.join("\n");
@@ -473,6 +480,21 @@ mod tests {
 
         let result = PaletteRenderer::to_yaml(&palette, &semantic_map).unwrap();
         assert!(result.contains("colors:"));
+        assert!(result.contains("  red: '#f38ba8'"));
+        assert!(result.contains("  green: '#a6e3a1'"));
+    }
+
+    #[test]
+    fn test_to_yaml_honors_palette_key_when_output_name_differs() {
+        let palette = create_test_palette();
+        let mut semantic_map = HashMap::new();
+        semantic_map.insert("text", "gui.theme.inactiveBorderColor");
+        semantic_map.insert("foreground", "gui.theme.activeBorderColor");
+
+        let result = PaletteRenderer::to_yaml(&palette, &semantic_map).unwrap();
+        assert!(result.contains("gui:\n  theme:"));
+        assert!(result.contains("    activeBorderColor: '#cdd6f4'"));
+        assert!(result.contains("    inactiveBorderColor: '#cdd6f4'"));
     }
 
     #[test]

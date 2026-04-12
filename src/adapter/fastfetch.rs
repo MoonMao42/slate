@@ -49,6 +49,11 @@ impl ToolAdapter for FastfetchAdapter {
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
+        let env = SlateEnv::from_process()?;
+        self.apply_theme_with_env(theme, &env)
+    }
+
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
         // Step 1: Extract theme name from tool_refs
         let _fastfetch_theme = theme
             .tool_refs
@@ -65,7 +70,7 @@ impl ToolAdapter for FastfetchAdapter {
         let managed_content = self.generate_jsonc_config(theme)?;
 
         // Step 3: Write to managed config directory
-        let config_manager = ConfigManager::new()?;
+        let config_manager = ConfigManager::with_env(env)?;
         config_manager.write_managed_file("fastfetch", "config.jsonc", &managed_content)?;
 
         // fastfetch is invoked at shell startup via the managed wrapper;

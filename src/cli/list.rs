@@ -40,14 +40,15 @@ pub fn handle(_args: &[&str]) -> Result<()> {
             println!("  {}", heading_text(r.as_ref(), family_name));
 
             for theme in themes {
-                // Each line: 4 color blocks + theme-id + description.
-                // Theme id renders through `r.theme_name(...)` so it
-                // carries the active theme's `brand_accent` ; the
-                // description routes through `r.path(...)` for the dim
-                // italic treatment.
+                // Each line: 4 color blocks + display name + id + description.
+                // The display name renders through `r.theme_name(...)` so it
+                // carries the active theme's `brand_accent` ; the id and
+                // description route through `r.path(...)` for the dim italic
+                // treatment.
                 print!("{}  ", " ".repeat(2)); // 4 spaces indent per 
                 print_color_blocks(&theme.palette);
-                print!("  {}", theme_name_text(r.as_ref(), &theme.id));
+                print!("  {}", theme_name_text(r.as_ref(), &theme.name));
+                print!("  {}", path_text(r.as_ref(), &theme.id));
 
                 // Description from get_theme_description
                 if let Some(desc) = get_theme_description(&theme.id) {

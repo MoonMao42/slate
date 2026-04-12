@@ -41,8 +41,12 @@ enum Commands {
     },
     /// Set or pick theme
     Theme {
-        /// Theme name (optional; if omitted, launches picker)
-        name: Option<String>,
+        /// List available themes grouped by family
+        #[arg(long)]
+        list: bool,
+        /// Theme ID/display name, or `set <theme>` for compatibility with documented examples
+        #[arg(value_name = "THEME", num_args = 0..=2)]
+        args: Vec<String>,
     },
     /// Set or pick font
     Font {
@@ -145,7 +149,9 @@ fn run() -> Result<()> {
             cli::setup::handle_with_env(quick, force, only, &env)
         }
         Some(Commands::Set { theme }) => cli::set::handle(theme.as_deref(), cli.auto),
-        Some(Commands::Theme { name }) => cli::theme::handle_theme(name, cli.auto, cli.quiet),
+        Some(Commands::Theme { list, args }) => {
+            handle_theme_command(list, args, cli.auto, cli.quiet)
+        }
         Some(Commands::Font { name }) => cli::font::handle_font(name.as_deref()),
         Some(Commands::Config { subcommand }) => match subcommand {
             ConfigSubcommand::Set { key, value } => cli::config::handle_config_set(&key, &value),
@@ -181,5 +187,32 @@ fn run() -> Result<()> {
             std::process::exit(130);
         }
         other => Ok(other?),
+    }
+}
+
+fn handle_theme_command(
+    list: bool,
+    args: Vec<String>,
+    auto: bool,
+    quiet: bool,
+) -> error::Result<()> {
+    if list {
+        if !args.is_empty() {
+            return Err(error::SlateError::InvalidConfig(
+                "`slate theme --list` does not accept a theme argument".to_string(),
+            ));
+        }
+        return cli::list::handle(&[]);
+    }
+
+    match args.as_slice() {
+        [] => cli::theme::handle_theme(None, auto, quiet),
+        [name] => cli::theme::handle_theme(Some(name.clone()), auto, quiet),
+        [verb, name] if verb == "set" => cli::theme::handle_theme(Some(name.clone()), auto, quiet),
+        [verb, _] => Err(error::SlateError::InvalidConfig(format!(
+            "unknown `slate theme {}` form. Use `slate theme <theme>`, `slate theme set <theme>`, or `slate theme --list`.",
+            verb
+        ))),
+        _ => unreachable!("clap limits theme args to at most 2 values"),
     }
 }

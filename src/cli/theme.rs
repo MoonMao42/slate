@@ -156,10 +156,10 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         dispatch(BrandEvent::ApplyComplete);
         Ok(())
     } else if let Some(name) = theme_name {
-        // Direct apply path: theme_name is canonical kebab-case
+        // Direct apply path: accept canonical kebab-case IDs and display-name aliases.
         let registry = ThemeRegistry::new()?;
 
-        let theme = match registry.get(&name) {
+        let theme = match registry.get_by_id_or_name(&name) {
             Some(theme) => theme,
             None => {
                 dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));

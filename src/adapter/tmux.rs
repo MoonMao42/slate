@@ -19,8 +19,11 @@ impl TmuxAdapter {
     /// Path to ~/.tmux.conf (integration file)
     fn tmux_conf_path() -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
-        Ok(PathBuf::from(home).join(".tmux.conf"))
+        Ok(Self::tmux_conf_path_with_env(&env))
+    }
+
+    fn tmux_conf_path_with_env(env: &SlateEnv) -> PathBuf {
+        env.home().join(".tmux.conf")
     }
 
     /// Render tmux status bar color configuration
@@ -98,6 +101,11 @@ impl ToolAdapter for TmuxAdapter {
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
+        let env = SlateEnv::from_process()?;
+        self.apply_theme_with_env(theme, &env)
+    }
+
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
         // Validate theme has palette data
         theme.palette.validate()?;
 
@@ -105,11 +113,11 @@ impl ToolAdapter for TmuxAdapter {
         let tmux_colors = Self::render_tmux_colors(theme);
 
         // Write managed colors file
-        let config_mgr = ConfigManager::new()?;
+        let config_mgr = ConfigManager::with_env(env)?;
         config_mgr.write_managed_file("tmux", "colors.conf", &tmux_colors)?;
 
-        let tmux_conf_path = Self::tmux_conf_path()?;
-        let managed_colors_path = self.managed_config_path().join("colors.conf");
+        let tmux_conf_path = Self::tmux_conf_path_with_env(env);
+        let managed_colors_path = config_mgr.managed_dir("tmux").join("colors.conf");
         let new_block = Self::render_tmux_block(&managed_colors_path);
         marker_block::upsert_managed_block_file(&tmux_conf_path, &new_block)?;
 

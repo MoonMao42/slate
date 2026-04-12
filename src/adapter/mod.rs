@@ -158,11 +158,9 @@ pub trait ToolAdapter: Send + Sync {
     /// real file-level rollback against the injected env with zero
     /// `std::env::set_var` — closing the "signature lie" that
     /// Gemini's review surfaced.
-    /// The default implementation ignores `env` and delegates to `apply_theme`
-    /// so the 10 non-preview-path adapters (font, bat, tmux, delta, eza,
-    /// fastfetch, lazygit, ls_colors, nvim, zsh_highlight) keep working
-    /// unchanged. Migrating those to honor the injected env is a separate
-    /// follow-up.
+    /// Adapters that write files must override this method. The default is
+    /// only appropriate for pure signal/no-op adapters that do not resolve
+    /// user paths during apply.
     fn apply_theme_with_env(&self, theme: &ThemeVariant, _env: &SlateEnv) -> Result<ApplyOutcome> {
         self.apply_theme(theme)
     }

@@ -82,6 +82,26 @@ fn test_theme_ids_correct() {
     assert!(ids.contains(&"nord".to_string()));
     assert!(ids.contains(&"gruvbox-dark".to_string()));
     assert!(ids.contains(&"gruvbox-light".to_string()));
+    assert!(ids.contains(&"solarized-dark".to_string()));
+    assert!(ids.contains(&"solarized-light".to_string()));
+}
+
+#[test]
+fn test_theme_lookup_accepts_display_name_aliases() {
+    let registry = ThemeRegistry::new().expect("Failed to create registry");
+
+    assert_eq!(
+        registry
+            .get_by_id_or_name("Solarized Dark")
+            .map(|theme| theme.id.as_str()),
+        Some("solarized-dark")
+    );
+    assert_eq!(
+        registry
+            .get_by_id_or_name("catppuccin frappe")
+            .map(|theme| theme.id.as_str()),
+        Some("catppuccin-frappe")
+    );
 }
 
 #[test]
@@ -249,6 +269,22 @@ fn test_non_catppuccin_themes_have_semantic_bg_fields() {
     );
 }
 
+#[test]
+fn test_solarized_bg_darkest_uses_anchor_dark_for_starship_crust() {
+    let registry = ThemeRegistry::new().expect("Failed to create registry");
+
+    for theme_id in ["solarized-dark", "solarized-light"] {
+        let theme = registry
+            .get(theme_id)
+            .unwrap_or_else(|| panic!("{theme_id} not found"));
+        assert_eq!(
+            theme.palette.bg_darkest.as_deref(),
+            Some("#002b36"),
+            "{theme_id} bg_darkest should use Solarized base03 so starship crust/powerline foreground remains high contrast"
+        );
+    }
+}
+
 /// · VALIDATION row 1 — PickerState must surface its `theme_ids`
 /// array grouped by `FAMILY_SORT_ORDER`.
 /// We walk the returned ids, resolve each to its family, and assert the
@@ -295,6 +331,14 @@ fn picker_launches_with_family_grouping() {
     assert!(
         distinct_families.len() >= 2,
         "picker must surface at least 2 families; got {distinct_families:?}"
+    );
+    assert!(
+        state.theme_ids().iter().any(|id| id == "solarized-dark"),
+        "picker theme ids must include solarized-dark"
+    );
+    assert!(
+        state.theme_ids().iter().any(|id| id == "solarized-light"),
+        "picker theme ids must include solarized-light"
     );
 }
 

@@ -2,8 +2,8 @@ use crate::error::Result;
 /// Theme selection for setup wizard.
 /// and
 /// Provides access to 20 theme variants grouped by family.
-use crate::theme::{ThemeRegistry, DEFAULT_THEME_ID};
-use std::collections::HashMap;
+use crate::theme::{ThemeRegistry, DEFAULT_THEME_ID, FAMILY_SORT_ORDER};
+use std::collections::{HashMap, HashSet};
 
 /// Theme choice helper: groups themes by family with descriptions
 pub struct ThemeSelector {
@@ -21,7 +21,29 @@ impl ThemeSelector {
     /// Get all available theme variants
     /// Should be exactly 20 (Catppuccin 4 + Solarized 2 + Tokyo Night 2 + Rosé Pine 3 + Kanagawa 3 + Everforest 2 + Dracula + Nord + Gruvbox 2)
     pub fn all_themes(&self) -> Vec<&crate::theme::ThemeVariant> {
-        self.registry.all()
+        let by_family = self.registry.by_family();
+        let mut themes = Vec::new();
+        let mut seen = HashSet::new();
+
+        for family_name in FAMILY_SORT_ORDER {
+            if let Some(themes_in_family) = by_family.get(*family_name) {
+                let mut family_themes = themes_in_family.clone();
+                family_themes.sort_by(|a, b| a.id.cmp(&b.id));
+                seen.extend(family_themes.iter().map(|theme| theme.id.as_str()));
+                themes.extend(family_themes);
+            }
+        }
+
+        let mut remaining_themes = self
+            .registry
+            .all()
+            .into_iter()
+            .filter(|theme| !seen.contains(theme.id.as_str()))
+            .collect::<Vec<_>>();
+        remaining_themes.sort_by(|a, b| a.family.cmp(&b.family).then_with(|| a.id.cmp(&b.id)));
+        themes.extend(remaining_themes);
+
+        themes
     }
 
     /// Get themes grouped by family (for manual mode step)
@@ -45,6 +67,7 @@ impl ThemeSelector {
         match family {
             "Catppuccin" => "Cozy, colorful community-driven palettes",
             "Tokyo Night" => "Vibrant Japanese-inspired themes",
+            "Solarized" => "Precision warm/cool classics for bright and dark rooms",
             "Rosé Pine" => "Modern, cozy design. Love-inspired palettes.",
             "Kanagawa" => "Japanese ukiyo-e inspired. Serene aesthetics.",
             "Everforest" => "Nature-inspired, earthy alternatives.",
@@ -202,6 +225,31 @@ mod tests {
     }
 
     #[test]
+    fn test_all_themes_uses_family_sort_order() {
+        let selector = ThemeSelector::new().unwrap();
+        let ids = selector
+            .all_themes()
+            .into_iter()
+            .map(|theme| theme.id.as_str())
+            .collect::<Vec<_>>();
+
+        let catppuccin = ids
+            .iter()
+            .position(|id| id.starts_with("catppuccin-"))
+            .expect("catppuccin theme present");
+        let solarized = ids
+            .iter()
+            .position(|id| id.starts_with("solarized-"))
+            .expect("solarized theme present");
+        let tokyo_night = ids
+            .iter()
+            .position(|id| id.starts_with("tokyo-night-"))
+            .expect("tokyo night theme present");
+
+        assert!(catppuccin < solarized && solarized < tokyo_night);
+    }
+
+    #[test]
     fn test_default_theme_exists() {
         let selector = ThemeSelector::new().unwrap();
         let default_id = ThemeSelector::default_theme_id();
@@ -220,6 +268,7 @@ mod tests {
             "Rosé Pine",
             "Kanagawa",
             "Everforest",
+            "Solarized",
             "Dracula",
             "Nord",
             "Gruvbox",

@@ -92,6 +92,10 @@ impl ToolAdapter for EzaAdapter {
         self.apply_theme_with_env(theme, &env)
     }
 
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
+        EzaAdapter::apply_theme_with_env(self, theme, env)
+    }
+
     fn reload(&self) -> Result<()> {
         // eza doesn't support hot-reload; manual restart required
         Err(SlateError::ReloadFailed(
@@ -162,6 +166,23 @@ mod tests {
 
         let result = adapter.apply_theme_with_env(&theme, &env);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_trait_apply_theme_with_env_writes_inside_injected_env() {
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let adapter = EzaAdapter;
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+
+        let result = ToolAdapter::apply_theme_with_env(&adapter, &theme, &env);
+        assert!(result.is_ok());
+        assert!(tempdir
+            .path()
+            .join(".config/slate/managed/eza/theme.yml")
+            .exists());
     }
 
     #[test]
