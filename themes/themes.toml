@@ -1252,10 +1252,14 @@ bright_blue = "#839496"
 bright_magenta = "#6c71c4"
 bright_cyan = "#93a1a1"
 bright_white = "#fdf6e3"
-# Background variants per CONTEXT .4 (base02/base01/base00)
+# Background variants — Solarized's base hierarchy is INVERTED relative to slate's
+# bg_dim/bg_darker/bg_darkest naming convention (base00 is mid-gray, NOT the darkest
+# tone). Anchor bg_darkest at base03 (== background) so starship `crust` and the
+# adaptive `powerline_fg` resolve to crisp dark teal rather than mid-gray, which
+# made pill text wash out against bright accent segments.
 bg_dim = "#073642"
-bg_darker = "#586e75"
-bg_darkest = "#657b83"
+bg_darker = "#002b36"
+bg_darkest = "#002b36"
 # Extended adapter-coverage palette per RESEARCH §5 / Override #3
 text = "#839496"
 mauve = "#6c71c4"
@@ -1328,10 +1332,14 @@ bright_blue = "#657b83"
 bright_magenta = "#6c71c4"
 bright_cyan = "#586e75"
 bright_white = "#002b36"
-# Background variants per CONTEXT .4 (base2/base1/base0 — each tier slightly darker, all on the light end)
+# Background variants — `bg_dim` / `bg_darker` step down from the cream background
+# along base2 → base1 → base0. `bg_darkest` jumps to base03 (Solarized's anchor dark)
+# so `crust` carries a true dark color: starship's `fg:powerline_fg` → `fg:crust`
+# substitution path, and any user format string referencing `bg:crust` directly,
+# both want the darkest available tone, not mid-gray.
 bg_dim = "#eee8d5"
-bg_darker = "#93a1a1"
-bg_darkest = "#839496"
+bg_darker = "#586e75"
+bg_darkest = "#002b36"
 # Extended adapter-coverage palette per RESEARCH §5 / Override #3
 text = "#3e4d52"
 mauve = "#6c71c4"
