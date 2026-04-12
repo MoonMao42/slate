@@ -7,7 +7,7 @@ use crate::adapter::{marker_block, ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::detection;
 use crate::env::SlateEnv;
-use crate::error::{Result, SlateError};
+use crate::error::Result;
 use crate::theme::ThemeVariant;
 use std::path::{Path, PathBuf};
 
@@ -18,8 +18,11 @@ impl DeltaAdapter {
     /// Path to ~/.gitconfig (integration file)
     fn gitconfig_path() -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
-        Ok(PathBuf::from(home).join(".gitconfig"))
+        Self::gitconfig_path_with_env(&env)
+    }
+
+    fn gitconfig_path_with_env(env: &SlateEnv) -> Result<PathBuf> {
+        Ok(env.home().join(".gitconfig"))
     }
 
     /// Format include path for gitconfig
@@ -43,19 +46,28 @@ impl DeltaAdapter {
         )
     }
 
-    /// Render delta color theme settings (for managed config file)
+    /// Render delta color theme settings (for managed config file).
+    /// `dark` / `light` mirrors the active theme's appearance so delta picks
+    /// the right default `+`/`-` line backgrounds and context-line styling.
+    /// Hard-coding `dark = true` made every light-theme diff render with
+    /// dark-terminal-tuned defaults — context lines washed out against the
+    /// cream bg.
     fn render_delta_colors(theme: &ThemeVariant) -> String {
         let syntax_theme = theme
             .tool_refs
             .get("delta")
             .map(|s| s.as_str())
             .unwrap_or("catppuccin-mocha");
+        let appearance_flag = match theme.appearance {
+            crate::theme::ThemeAppearance::Light => "light = true",
+            crate::theme::ThemeAppearance::Dark => "dark = true",
+        };
         format!(
             "[delta]\n\
              syntax-theme = {}\n\
-             dark = true\n\
+             {}\n\
              line-numbers = true\n",
-            syntax_theme
+            syntax_theme, appearance_flag
         )
     }
 }
@@ -87,6 +99,11 @@ impl ToolAdapter for DeltaAdapter {
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
+        let env = SlateEnv::from_process()?;
+        self.apply_theme_with_env(theme, &env)
+    }
+
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
         // Validate theme has palette data
         theme.palette.validate()?;
 
@@ -94,11 +111,11 @@ impl ToolAdapter for DeltaAdapter {
         let delta_colors = Self::render_delta_colors(theme);
 
         // Write managed config
-        let config_mgr = ConfigManager::new()?;
+        let config_mgr = ConfigManager::with_env(env)?;
         config_mgr.write_managed_file("delta", "colors", &delta_colors)?;
 
-        let gitconfig_path = Self::gitconfig_path()?;
-        let managed_path = self.managed_config_path().join("colors");
+        let gitconfig_path = Self::gitconfig_path_with_env(env)?;
+        let managed_path = config_mgr.managed_dir("delta").join("colors");
         let new_block = Self::render_delta_config(theme, &managed_path);
         marker_block::upsert_managed_block_file(&gitconfig_path, &new_block)?;
 
@@ -218,6 +235,26 @@ mod tests {
         assert!(output.contains("[delta]"));
         assert!(output.contains("syntax-theme = test"));
         assert!(output.contains("dark = true"));
+        assert!(
+            !output.contains("light = true"),
+            "Dark theme must not emit light = true"
+        );
+    }
+
+    #[test]
+    fn test_render_delta_colors_emits_light_for_light_themes() {
+        let mut theme = create_test_theme();
+        theme.appearance = crate::theme::ThemeAppearance::Light;
+        let output = DeltaAdapter::render_delta_colors(&theme);
+
+        assert!(
+            output.contains("light = true"),
+            "Light theme must emit light = true so delta picks light-bg defaults; got:\n{output}"
+        );
+        assert!(
+            !output.contains("dark = true"),
+            "Light theme must not emit dark = true (was the bug — washed out context lines on cream Ghostty bg); got:\n{output}"
+        );
     }
 
     #[test]
