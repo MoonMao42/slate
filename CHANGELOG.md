@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-28
+
+### Added
+- Solarized Dark and Solarized Light — Ethan Schoonover's precision-engineered
+  palette joins as slate's 19th and 20th built-in themes, with full coverage
+  across all 10 tool backends. `slate theme set solarized-dark` /
+  `solarized-light`; auto-pair flips between them when system appearance
+  changes.
+- Theme listing now groups variants by family across both `slate theme --list`
+  and the live browser — Solarized lands at index 1 right after Catppuccin so
+  the new band is impossible to miss. Run `slate theme --list` to see the
+  9-band layout in the terminal.
+- Subtle interaction sound — short, brand-coherent SFX on theme apply, menu
+  navigation, setup completion, and errors. Default on, opt-out via
+  `slate config set sound off`. Respects `--quiet` and `--auto`. (v0.3.0
+  ships with placeholder samples; the curated SFX library lands in v2.2.x.)
+
+### Changed
+- Unified visual language across every command via the new `Roles<'a>`
+  text-role system — headings, severity markers, paths, shortcuts, and tree
+  receipts share one render contract. Brand glyphs use the signature
+  lavender; errors and success route through the active theme's red and
+  green. Every user-facing surface (setup wizard, `slate theme`, status,
+  clean, restore, config, share, demo, browse chrome, error and reminder
+  paths) emits through the same API.
+- 12 WCAG contrast repairs across the Solarized variants (4 dark + 8 light).
+  Every theme-token pair now clears the 4.5:1 readability bar; the canonical
+  Schoonover hex stays preserved alongside the repaired ANSI slots.
+- README rewritten for v2.2 — new hero recording, 9-family theme gallery,
+  Tier 1 / 2 / 3 platform matrix, and an honest accounting of what is and
+  isn't supported.
+
+### Fixed
+- **Solarized powerline contrast**: `bg_darkest` now anchors at Solarized's
+  `base03` instead of inheriting from a brighter slot, so starship powerline
+  pills render crisp text on both Dark and Light variants.
+- **delta light/dark drift**: the delta adapter now writes the
+  appearance-correct flag per theme, instead of hard-coding `dark = true`.
+  Solarized Light syntax now renders correctly out of the box.
+- **`slate theme --list` ergonomics**: the listing surface picked up an
+  explicit `--list` flag and a display-name lookup, plus a few small
+  adapter cleanups discovered during Solarized UAT.
+
 ## [0.2.0] - 2026-04-20
 
 ### Added
@@ -63,5 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Three-tier config architecture (managed / integration / user override)
 - Homebrew tap distribution (`brew install MoonMao42/homebrew-tap/slate-cli`)
 
+[0.3.0]: https://github.com/MoonMao42/slate/releases/tag/v0.3.0
+[0.2.0]: https://github.com/MoonMao42/slate/releases/tag/v0.2.0
+[0.1.2]: https://github.com/MoonMao42/slate/releases/tag/v0.1.2
 [0.1.1]: https://github.com/MoonMao42/slate/releases/tag/v0.1.1
 [0.1.0]: https://github.com/MoonMao42/slate/releases/tag/v0.1.0
