@@ -1,3 +1,4 @@
+use crate::adapter::{GhosttyAdapter, ToolAdapter};
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::{config::ConfigManager, platform};
@@ -14,6 +15,24 @@ pub fn handle_clean() -> Result<()> {
 
     let env = SlateEnv::from_process()?;
     let config = ConfigManager::with_env(&env)?;
+
+    // Step 0: Snapshot the current state so the user can undo this clean. Without this
+    // the only restore point after clean is the pre-slate baseline, which is the wrong
+    // target if the user just wants to roll back the clean itself. Best-effort — we don't
+    // want a backup hiccup to block the clean.
+    {
+        let label = config
+            .get_current_theme()
+            .ok()
+            .flatten()
+            .map(|theme| format!("pre-clean-{}", theme))
+            .unwrap_or_else(|| "pre-clean".to_string());
+        if let Err(err) = crate::config::snapshot_current_state_with_env(&env, &label) {
+            log::remark(format!("  (couldn't create pre-clean snapshot: {})", err))?;
+        } else {
+            log::success(format!("✓ Saved pre-clean snapshot ({})", label))?;
+        }
+    }
 
     // Step 1: Stop watcher + clear config flag
     log::step("Stopping auto-theme watcher...")?;
@@ -44,6 +63,13 @@ pub fn handle_clean() -> Result<()> {
     } else {
         log::remark("  (~/.config/slate already removed)")?;
     }
+
+    // Step 4: Reload running terminals so the theme actually drops.
+    // Removing the config-file line from ~/.config/ghostty/config only takes effect on the
+    // next reload; without this, users see "clean succeeded" but the background + palette
+    // stay applied until they restart Ghostty themselves. Best-effort — if the terminal
+    // isn't running we silently move on.
+    let _ = GhosttyAdapter.reload();
 
     // Exit message: Clarify clean vs restore boundary)
     log::remark("")?;

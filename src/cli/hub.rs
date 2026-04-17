@@ -39,6 +39,14 @@ fn toggle_fastfetch_from_preferences(config: &ConfigManager) -> Result<()> {
         config.disable_fastfetch_autorun()?;
     } else {
         config.enable_fastfetch_autorun()?;
+        // Warn when fastfetch isn't on the user's actual PATH — the shell wrapper runs
+        // `command -v fastfetch`, which skips binaries sitting only in a homebrew fallback.
+        // Checking is_tier1 mirrors what the autorun guard will resolve at shell startup.
+        if !crate::detection::detect_tool_presence("fastfetch").is_tier1() {
+            let _ = cliclack::log::warning(
+                "fastfetch is not on PATH — run `brew install fastfetch` (or add it to PATH) to see the banner on shell startup.",
+            );
+        }
     }
 
     if let Err(err) = config.refresh_shell_integration() {

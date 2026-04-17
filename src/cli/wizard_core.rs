@@ -270,23 +270,30 @@ impl Wizard {
         // 2. Tier 2 candidates: installed but not in PATH (need user opt-in to configure)
         let install_candidates = compute_install_candidates(&installed);
 
-        // Tier 2 candidates include detect-only terminals (ghostty/alacritty in /Applications)
-        // so users can explicitly opt in to configure them
+        // Terminal apps are the user's primary workspace — if slate detects the .app on disk
+        // (including /Applications/Ghostty.app which tiers as "fallback"), treat it as auto-
+        // configure. Restricting this to tier-1 broke the common macOS case where casks land
+        // in /Applications and is_tier1() returns false.
+        let is_terminal_app = |id: &str| matches!(id, "ghostty" | "alacritty" | "kitty");
+
+        // Tier 2 candidates: installed but not in PATH, AND not a detected terminal app
+        // (those go to auto-configure instead of the opt-in list).
         let tier2_candidates: Vec<&crate::cli::tool_selection::ToolMetadata> =
             crate::cli::tool_selection::ToolCatalog::all_tools()
                 .iter()
                 .filter(|tool| {
                     installed
                         .get(tool.id)
-                        .map(|p| p.installed && !p.in_path)
+                        .map(|p| p.installed && !p.in_path && !is_terminal_app(tool.id))
                         .unwrap_or(false)
                 })
                 .collect();
 
-        // Tier 1 tools: always configure (they're in PATH, user actively uses them)
+        // Tier 1 tools: always configure. Include detected terminal apps even when tiered
+        // as fallback, since the user's terminal is the whole point of slate.
         let tier1_ids: Vec<String> = installed
             .iter()
-            .filter(|(_, p)| p.is_tier1())
+            .filter(|(id, p)| p.is_tier1() || (p.installed && is_terminal_app(id)))
             .map(|(id, _)| id.clone())
             .collect();
 
@@ -517,6 +524,30 @@ impl Wizard {
             .initial_value(false) // Per D-30: Default N (disabled)
             .interact()
             .map_err(handle_cliclack_error)?;
+
+        // If the user wants autorun but fastfetch isn't on the actual PATH, schedule the
+        // install. The shell wrapper guards on `command -v fastfetch`, which only sees
+        // tier-1 entries — a fastfetch sitting in /opt/homebrew/bin but outside the user's
+        // PATH would still make the autorun silently print nothing. Checking `is_tier1`
+        // matches what the runtime guard will resolve.
+        if enable_fastfetch {
+            let env = SlateEnv::from_process()?;
+            let presence =
+                crate::detection::detect_tool_presence_with_env("fastfetch", &env);
+            if !presence.is_tier1()
+                && !self.context.selected_tools.iter().any(|t| t == "fastfetch")
+            {
+                self.context.selected_tools.push("fastfetch".to_string());
+                if !self
+                    .context
+                    .tools_to_configure
+                    .iter()
+                    .any(|t| t == "fastfetch")
+                {
+                    self.context.tools_to_configure.push("fastfetch".to_string());
+                }
+            }
+        }
 
         self.context.fastfetch_enabled = Some(enable_fastfetch);
         self.context.current_step += 1;
