@@ -67,7 +67,7 @@ jobs:
         run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh | sh"
       - name: Verify release metadata matches tap
         run: |
-          grep -q 'brew install MoonMao42/homebrew-tap/slate' README.md
+          grep -q 'brew install MoonMao42/homebrew-tap/slate-cli' README.md
           grep -q 'tap = "MoonMao42/homebrew-tap"' dist-workspace.toml
           grep -q 'repository: "MoonMao42/homebrew-tap"' .github/workflows/release.yml
           grep -q 'x86_64-unknown-linux-gnu' dist-workspace.toml
