@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="518" height="513" viewBox="369 289 518 513" fill="none">
+  <defs>
+    <linearGradient id="slate-fill" x1="369" y1="289" x2="887" y2="802" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2B2D32"/>
+      <stop offset="0.48" stop-color="#222429"/>
+      <stop offset="1" stop-color="#1A1C20"/>
+    </linearGradient>
+
+    <filter id="icon-shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="-2" dy="4" stdDeviation="2.8" flood-color="#000000" flood-opacity="0.28"/>
+      <feDropShadow dx="0" dy="1.4" stdDeviation="0.8" flood-color="#000000" flood-opacity="0.2"/>
+    </filter>
+
+    <filter id="slate-noise" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.028 0.22" numOctaves="4" seed="11" stitchTiles="stitch" result="noise"/>
+      <feColorMatrix
+        in="noise"
+        type="matrix"
+        values="
+          0 0 0 0 0.78
+          0 0 0 0 0.78
+          0 0 0 0 0.78
+          0 0 0 0.35 0
+        "
+      />
+    </filter>
+
+    <filter id="slate-relief" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.015 0.07" numOctaves="3" seed="7" stitchTiles="stitch" result="relief-noise"/>
+      <feDiffuseLighting in="relief-noise" surfaceScale="2.4" lighting-color="#FFFFFF" result="relief-light">
+        <feDistantLight azimuth="228" elevation="34"/>
+      </feDiffuseLighting>
+      <feColorMatrix
+        in="relief-light"
+        type="matrix"
+        values="
+          0 0 0 0 0.9
+          0 0 0 0 0.9
+          0 0 0 0 0.9
+          0 0 0 0.16 0
+        "
+      />
+    </filter>
+
+    <path id="slate-left" d="M 369 289 L 768 289 L 768 294 L 762 299 L 756 304 L 749 309 L 742 314 L 736 319 L 730 324 L 723 329 L 717 334 L 711 339 L 704 344 L 697 349 L 691 354 L 684 359 L 678 364 L 671 369 L 665 374 L 658 379 L 652 384 L 645 389 L 639 394 L 632 399 L 626 404 L 620 409 L 614 414 L 607 419 L 601 424 L 594 429 L 587 434 L 581 439 L 575 444 L 568 449 L 562 454 L 556 459 L 549 464 L 543 469 L 536 474 L 536 479 L 541 484 L 547 489 L 552 494 L 558 499 L 563 504 L 569 509 L 574 514 L 579 519 L 585 524 L 590 529 L 596 534 L 601 539 L 607 544 L 612 549 L 617 554 L 623 559 L 628 564 L 633 569 L 639 574 L 644 579 L 650 584 L 655 589 L 660 594 L 666 599 L 671 604 L 676 609 L 682 614 L 687 619 L 692 624 L 692 629 L 687 634 L 681 639 L 675 644 L 669 649 L 663 654 L 656 659 L 650 664 L 644 669 L 638 674 L 631 679 L 626 684 L 620 689 L 614 694 L 607 699 L 601 704 L 594 709 L 588 714 L 582 719 L 576 724 L 569 729 L 564 734 L 557 739 L 551 744 L 544 749 L 538 754 L 532 759 L 526 764 L 519 769 L 513 774 L 507 779 L 501 784 L 495 789 L 489 794 L 482 799 L 481 800 L 480 801 L 479 802 L 369 802 Z"/>
+    <path id="slate-right" d="M 829 289 L 887 289 L 887 802 L 546 802 L 545 801 L 545 800 L 545 799 L 549 794 L 554 789 L 559 784 L 565 779 L 570 774 L 576 769 L 582 764 L 587 759 L 593 754 L 599 749 L 604 744 L 610 739 L 616 734 L 622 729 L 628 724 L 634 719 L 640 714 L 646 709 L 652 704 L 659 699 L 665 694 L 671 689 L 677 684 L 683 679 L 689 674 L 695 669 L 702 664 L 708 659 L 714 654 L 720 649 L 726 644 L 732 639 L 739 634 L 745 629 L 751 624 L 757 619 L 763 614 L 769 609 L 771 604 L 765 599 L 760 594 L 754 589 L 749 584 L 744 579 L 738 574 L 733 569 L 727 564 L 722 559 L 717 554 L 711 549 L 705 544 L 700 539 L 695 534 L 689 529 L 684 524 L 678 519 L 673 514 L 667 509 L 662 504 L 657 499 L 651 494 L 645 489 L 640 484 L 635 479 L 629 474 L 624 469 L 619 464 L 613 459 L 617 454 L 623 449 L 629 444 L 635 439 L 641 434 L 648 429 L 654 424 L 660 419 L 666 414 L 672 409 L 679 404 L 685 399 L 691 394 L 698 389 L 704 384 L 710 379 L 717 374 L 723 369 L 730 364 L 736 359 L 743 354 L 749 349 L 756 344 L 762 339 L 769 334 L 776 329 L 782 324 L 789 319 L 796 314 L 803 309 L 809 304 L 816 299 L 822 294 L 829 289 Z"/>
+
+    <clipPath id="icon-clip">
+      <use href="#slate-left"/>
+      <use href="#slate-right"/>
+    </clipPath>
+  </defs>
+
+  <g filter="url(#icon-shadow)">
+    <use href="#slate-left" fill="url(#slate-fill)"/>
+    <use href="#slate-right" fill="url(#slate-fill)"/>
+
+    <g clip-path="url(#icon-clip)" opacity="0.9">
+      <rect x="369" y="289" width="518" height="513" fill="#FFFFFF" filter="url(#slate-noise)" opacity="0.1"/>
+      <rect x="369" y="289" width="518" height="513" fill="#FFFFFF" filter="url(#slate-relief)" opacity="0.24"/>
+    </g>
+  </g>
+</svg>

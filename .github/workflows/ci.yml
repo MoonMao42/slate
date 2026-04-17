@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Check, Lint, Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --locked --release
+
+      - name: Test
+        run: cargo test --locked --quiet
+
+      - name: Install script smoke test
+        run: bash tests/install-script-smoke.sh
+
+      - name: Binary size check
+        run: |
+          ls -lh target/release/slate
+          SIZE=$(stat -f%z target/release/slate 2>/dev/null || stat -c%s target/release/slate)
+          echo "Binary size: $SIZE bytes"
+          # Fail if binary exceeds 10MB
+          if [ "$SIZE" -gt 10485760 ]; then
+            echo "ERROR: Binary exceeds 10MB limit"
+            exit 1
+          fi
+
+      - name: Verify macOS runtime dependencies
+        if: runner.os == 'macOS'
+        run: |
+          echo "Checking dynamic library dependencies..."
+          otool -L target/release/slate
+          # Count non-system dylibs (exclude /usr/lib, /System, self-reference)
+          EXTERNAL=$(otool -L target/release/slate | tail -n +2 | grep -v '/usr/lib\|/System\|target/release' | wc -l | tr -d ' ')
+          echo "External dependencies: $EXTERNAL"
+          if [ "$EXTERNAL" -gt 0 ]; then
+            echo "ERROR: Binary has external runtime dependencies:"
+            otool -L target/release/slate | tail -n +2 | grep -v '/usr/lib\|/System\|target/release'
+            exit 1
+          fi
+          echo "OK: Binary has no external runtime dependencies"
+
+      - name: Verify Linux runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          echo "Checking Linux shared library dependencies..."
+          ldd target/release/slate
+          if ldd target/release/slate | grep -q "not found"; then
+            echo "ERROR: missing Linux runtime dependency"
+            exit 1
+          fi

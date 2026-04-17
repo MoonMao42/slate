@@ -1,0 +1,32 @@
+pub(crate) mod apply;
+pub mod aura;
+pub mod auto_theme;
+pub mod clean;
+pub mod config;
+pub mod failure_handler;
+pub mod font;
+pub mod font_detection;
+pub mod font_selection;
+pub mod hub;
+pub mod list;
+pub mod picker;
+pub mod preflight;
+pub mod preset_selection;
+pub mod restore;
+pub mod set;
+pub mod setup;
+pub mod setup_executor;
+pub mod share;
+pub mod share_screenshot;
+pub mod sound;
+pub mod status;
+pub mod status_panel;
+pub mod theme;
+pub mod theme_apply;
+pub mod theme_selection;
+pub mod tool_selection;
+#[cfg(target_os = "linux")]
+pub mod watch;
+pub mod wizard_core;
+
+mod wizard_support;
