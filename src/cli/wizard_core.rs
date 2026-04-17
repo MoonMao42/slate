@@ -532,10 +532,8 @@ impl Wizard {
         // matches what the runtime guard will resolve.
         if enable_fastfetch {
             let env = SlateEnv::from_process()?;
-            let presence =
-                crate::detection::detect_tool_presence_with_env("fastfetch", &env);
-            if !presence.is_tier1()
-                && !self.context.selected_tools.iter().any(|t| t == "fastfetch")
+            let presence = crate::detection::detect_tool_presence_with_env("fastfetch", &env);
+            if !presence.is_tier1() && !self.context.selected_tools.iter().any(|t| t == "fastfetch")
             {
                 self.context.selected_tools.push("fastfetch".to_string());
                 if !self
@@ -544,7 +542,9 @@ impl Wizard {
                     .iter()
                     .any(|t| t == "fastfetch")
                 {
-                    self.context.tools_to_configure.push("fastfetch".to_string());
+                    self.context
+                        .tools_to_configure
+                        .push("fastfetch".to_string());
                 }
             }
         }
