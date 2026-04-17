@@ -37,26 +37,18 @@
 
 ## 安装
 
-在 macOS 上，推荐使用 Homebrew：
-
 ```bash
+# macOS · Homebrew
 brew install MoonMao42/homebrew-tap/slate-cli
-slate setup
-```
 
-或者直接安装最新 release 二进制：
-
-```bash
+# macOS 或 Linux · 一键脚本
 curl -fsSL https://raw.githubusercontent.com/MoonMao42/slate/main/install.sh | sh
-slate setup
+
+# Rust 用户
+cargo install slate-cli
 ```
 
-卸载：
-
-```bash
-slate clean
-brew uninstall slate-cli
-```
+然后运行 `slate setup`。
 
 <p align="center">
   <img src="./assets/setup-demo.gif" alt="slate setup demo" width="600" />

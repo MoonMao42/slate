@@ -37,26 +37,18 @@ So I wrote slate. One command sets up a coordinated look across your terminal, p
 
 ## Install
 
-On macOS, install with Homebrew:
-
 ```bash
+# macOS — Homebrew
 brew install MoonMao42/homebrew-tap/slate-cli
-slate setup
-```
 
-Or install the latest release binary directly:
-
-```bash
+# macOS or Linux — install script
 curl -fsSL https://raw.githubusercontent.com/MoonMao42/slate/main/install.sh | sh
-slate setup
+
+# Rust users
+cargo install slate-cli
 ```
 
-Uninstall:
-
-```bash
-slate clean
-brew uninstall slate-cli
-```
+Then run `slate setup`.
 
 <p align="center">
   <img src="./assets/setup-demo.gif" alt="slate setup demo" width="600" />
