@@ -14,6 +14,8 @@
 //! files. See 17-RESEARCH.md §Pattern 4.1 for the full list.
 
 use crate::cli::picker::preview_panel::SemanticColor;
+use crate::theme::Palette;
+use std::fmt::Write as _;
 
 /// Visual style modifiers exposed in nvim's `nvim_set_hl` API. Combined with
 /// fg/bg/link in [`HighlightSpec`].
@@ -803,7 +805,528 @@ pub static HIGHLIGHT_GROUPS: &[(&str, HighlightSpec)] = &[
         "@lsp.typemod.variable.static",
         HighlightSpec::fg(SemanticColor::Number),
     ),
+    // ── Plugin coverage — Plan 17-04 (~130 entries) ───────────────────
+    // Source: 17-RESEARCH §Pattern 5. Role mappings are verbatim from the
+    // research; each block lifts the plugin's canonical group names and
+    // translates a "link" directive into `HighlightSpec::linked(...)`.
+    //
+    //   • Telescope          — 13 entries
+    //   • Neo-tree           — 30 entries
+    //   • GitSigns           — 10 entries
+    //   • Which-key          — 6 entries
+    //   • blink.cmp          — 39 entries (14 base + 25 kinds)
+    //   • nvim-cmp           — 32 entries (6 base + 26 kinds)
+    //
+    // Total: 130 plugin entries. Plan 01's 262-entry base + this plan's
+    // 130 = 392 total. Exceeds D-06's "~300" parity target because D-06
+    // targets BASE coverage only; plugin coverage (D-08) is additive.
+
+    // ── Telescope (13 entries) ────────────────────────────────────────
+    (
+        "TelescopeNormal",
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::Background),
+    ),
+    (
+        "TelescopeResultsNormal",
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::Background),
+    ),
+    (
+        "TelescopePreviewNormal",
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::Surface),
+    ),
+    (
+        "TelescopePromptNormal",
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::SurfaceAlt),
+    ),
+    ("TelescopeBorder", HighlightSpec::linked("FloatBorder")),
+    (
+        "TelescopePromptBorder",
+        HighlightSpec::linked("FloatBorder"),
+    ),
+    (
+        "TelescopePreviewBorder",
+        HighlightSpec::linked("FloatBorder"),
+    ),
+    (
+        "TelescopeResultsBorder",
+        HighlightSpec::linked("FloatBorder"),
+    ),
+    (
+        "TelescopeTitle",
+        HighlightSpec::fg_bg(SemanticColor::Background, SemanticColor::Accent),
+    ),
+    (
+        "TelescopePromptTitle",
+        HighlightSpec::fg_bg(SemanticColor::Background, SemanticColor::Accent),
+    ),
+    (
+        "TelescopePreviewTitle",
+        HighlightSpec::fg_bg(SemanticColor::Background, SemanticColor::Accent),
+    ),
+    (
+        "TelescopeResultsTitle",
+        HighlightSpec::fg_bg(SemanticColor::Background, SemanticColor::Accent),
+    ),
+    (
+        "TelescopeMatching",
+        HighlightSpec::styled(SemanticColor::Warning, Style::Bold),
+    ),
+    (
+        "TelescopeSelection",
+        HighlightSpec {
+            fg: None,
+            bg: Some(SemanticColor::Selection),
+            style: Style::None,
+            link: None,
+        },
+    ),
+    (
+        "TelescopeSelectionCaret",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "TelescopePromptPrefix",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    // ── Neo-tree (30 entries) ─────────────────────────────────────────
+    (
+        "NeoTreeDirectoryName",
+        HighlightSpec::fg(SemanticColor::FileDir),
+    ),
+    (
+        "NeoTreeDirectoryIcon",
+        HighlightSpec::fg(SemanticColor::FileDir),
+    ),
+    (
+        "NeoTreeRootName",
+        HighlightSpec::styled(SemanticColor::FileDir, Style::Bold),
+    ),
+    (
+        "NeoTreeSymbolicLinkTarget",
+        HighlightSpec::fg(SemanticColor::FileSymlink),
+    ),
+    ("NeoTreeNormal", HighlightSpec::linked("Normal")),
+    ("NeoTreeNormalNC", HighlightSpec::linked("Normal")),
+    ("NeoTreeFloatBorder", HighlightSpec::linked("FloatBorder")),
+    ("NeoTreeFloatTitle", HighlightSpec::linked("FloatTitle")),
+    (
+        "NeoTreeTitleBar",
+        HighlightSpec::fg_bg(SemanticColor::Background, SemanticColor::Accent),
+    ),
+    (
+        "NeoTreeFileNameOpened",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    ("NeoTreeModified", HighlightSpec::fg(SemanticColor::Accent)),
+    ("NeoTreeDimText", HighlightSpec::fg(SemanticColor::Muted)),
+    ("NeoTreeExpander", HighlightSpec::fg(SemanticColor::Muted)),
+    (
+        "NeoTreeIndentMarker",
+        HighlightSpec::fg(SemanticColor::Muted),
+    ),
+    (
+        "NeoTreeFilterTerm",
+        HighlightSpec::styled(SemanticColor::Accent, Style::Bold),
+    ),
+    (
+        "NeoTreeGitAdded",
+        HighlightSpec::fg(SemanticColor::GitAdded),
+    ),
+    (
+        "NeoTreeGitStaged",
+        HighlightSpec::fg(SemanticColor::GitAdded),
+    ),
+    (
+        "NeoTreeGitModified",
+        HighlightSpec::fg(SemanticColor::GitModified),
+    ),
+    (
+        "NeoTreeGitUnstaged",
+        HighlightSpec::fg(SemanticColor::GitModified),
+    ),
+    ("NeoTreeGitDeleted", HighlightSpec::fg(SemanticColor::Error)),
+    (
+        "NeoTreeGitConflict",
+        HighlightSpec::fg(SemanticColor::Error),
+    ),
+    (
+        "NeoTreeGitUntracked",
+        HighlightSpec::fg(SemanticColor::GitUntracked),
+    ),
+    ("NeoTreeGitIgnored", HighlightSpec::fg(SemanticColor::Muted)),
+    (
+        "NeoTreeTabActive",
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::Background),
+    ),
+    (
+        "NeoTreeTabInactive",
+        HighlightSpec::fg_bg(SemanticColor::Muted, SemanticColor::Surface),
+    ),
+    (
+        "NeoTreeTabSeparatorActive",
+        HighlightSpec::fg(SemanticColor::Border),
+    ),
+    (
+        "NeoTreeTabSeparatorInactive",
+        HighlightSpec::fg(SemanticColor::Border),
+    ),
+    ("NeoTreeVertSplit", HighlightSpec::linked("VertSplit")),
+    ("NeoTreeWinSeparator", HighlightSpec::linked("WinSeparator")),
+    ("NeoTreeStatusLineNC", HighlightSpec::linked("StatusLineNC")),
+    // ── GitSigns (10 entries) ─────────────────────────────────────────
+    ("GitSignsAdd", HighlightSpec::fg(SemanticColor::GitAdded)),
+    (
+        "GitSignsChange",
+        HighlightSpec::fg(SemanticColor::GitModified),
+    ),
+    ("GitSignsDelete", HighlightSpec::fg(SemanticColor::Error)),
+    (
+        "GitSignsCurrentLineBlame",
+        HighlightSpec::styled(SemanticColor::Muted, Style::Italic),
+    ),
+    (
+        "GitSignsAddPreview",
+        HighlightSpec::bg_only(SemanticColor::GitAdded),
+    ),
+    (
+        "GitSignsAddInline",
+        HighlightSpec::bg_only(SemanticColor::GitAdded),
+    ),
+    (
+        "GitSignsChangeInline",
+        HighlightSpec::bg_only(SemanticColor::GitModified),
+    ),
+    (
+        "GitSignsDeletePreview",
+        HighlightSpec::bg_only(SemanticColor::Error),
+    ),
+    (
+        "GitSignsDeleteInline",
+        HighlightSpec::bg_only(SemanticColor::Error),
+    ),
+    (
+        "GitSignsDeleteVirtLn",
+        HighlightSpec::bg_only(SemanticColor::Error),
+    ),
+    // ── Which-key (6 entries) ─────────────────────────────────────────
+    ("WhichKey", HighlightSpec::fg(SemanticColor::Accent)),
+    ("WhichKeyBorder", HighlightSpec::linked("FloatBorder")),
+    ("WhichKeyGroup", HighlightSpec::fg(SemanticColor::Keyword)),
+    ("WhichKeySeparator", HighlightSpec::fg(SemanticColor::Muted)),
+    ("WhichKeyDesc", HighlightSpec::fg(SemanticColor::Text)),
+    ("WhichKeyValue", HighlightSpec::fg(SemanticColor::Muted)),
+    // ── blink.cmp (14 base + 25 kinds = 39 entries) ───────────────────
+    ("BlinkCmpLabel", HighlightSpec::fg(SemanticColor::Text)),
+    (
+        "BlinkCmpLabelDeprecated",
+        HighlightSpec::styled(SemanticColor::Muted, Style::Undercurl),
+    ),
+    (
+        "BlinkCmpLabelMatch",
+        HighlightSpec::styled(SemanticColor::Accent, Style::Bold),
+    ),
+    (
+        "BlinkCmpLabelDescription",
+        HighlightSpec::fg(SemanticColor::Muted),
+    ),
+    (
+        "BlinkCmpLabelDetail",
+        HighlightSpec::fg(SemanticColor::Muted),
+    ),
+    ("BlinkCmpKind", HighlightSpec::fg(SemanticColor::Type)),
+    ("BlinkCmpMenu", HighlightSpec::linked("Pmenu")),
+    ("BlinkCmpMenuBorder", HighlightSpec::linked("FloatBorder")),
+    ("BlinkCmpMenuSelection", HighlightSpec::linked("PmenuSel")),
+    ("BlinkCmpDoc", HighlightSpec::linked("NormalFloat")),
+    ("BlinkCmpDocBorder", HighlightSpec::linked("FloatBorder")),
+    (
+        "BlinkCmpScrollBarGutter",
+        HighlightSpec::linked("PmenuSbar"),
+    ),
+    (
+        "BlinkCmpScrollBarThumb",
+        HighlightSpec::linked("PmenuThumb"),
+    ),
+    (
+        "BlinkCmpSignatureHelpBorder",
+        HighlightSpec::linked("FloatBorder"),
+    ),
+    // blink.cmp kind sub-variants (25 entries)
+    ("BlinkCmpKindText", HighlightSpec::fg(SemanticColor::Text)),
+    (
+        "BlinkCmpKindMethod",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "BlinkCmpKindFunction",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "BlinkCmpKindConstructor",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "BlinkCmpKindField",
+        HighlightSpec::fg(SemanticColor::LspParameter),
+    ),
+    (
+        "BlinkCmpKindVariable",
+        HighlightSpec::fg(SemanticColor::Text),
+    ),
+    ("BlinkCmpKindClass", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "BlinkCmpKindInterface",
+        HighlightSpec::fg(SemanticColor::Type),
+    ),
+    ("BlinkCmpKindModule", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "BlinkCmpKindProperty",
+        HighlightSpec::fg(SemanticColor::LspParameter),
+    ),
+    ("BlinkCmpKindUnit", HighlightSpec::fg(SemanticColor::Number)),
+    (
+        "BlinkCmpKindValue",
+        HighlightSpec::fg(SemanticColor::Number),
+    ),
+    ("BlinkCmpKindEnum", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "BlinkCmpKindKeyword",
+        HighlightSpec::fg(SemanticColor::Keyword),
+    ),
+    (
+        "BlinkCmpKindSnippet",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "BlinkCmpKindColor",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "BlinkCmpKindFile",
+        HighlightSpec::fg(SemanticColor::FileDocs),
+    ),
+    (
+        "BlinkCmpKindReference",
+        HighlightSpec::fg(SemanticColor::Muted),
+    ),
+    (
+        "BlinkCmpKindFolder",
+        HighlightSpec::fg(SemanticColor::FileDir),
+    ),
+    (
+        "BlinkCmpKindEnumMember",
+        HighlightSpec::fg(SemanticColor::Number),
+    ),
+    (
+        "BlinkCmpKindConstant",
+        HighlightSpec::fg(SemanticColor::Number),
+    ),
+    ("BlinkCmpKindStruct", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "BlinkCmpKindEvent",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "BlinkCmpKindOperator",
+        HighlightSpec::fg(SemanticColor::Keyword),
+    ),
+    (
+        "BlinkCmpKindTypeParameter",
+        HighlightSpec::fg(SemanticColor::Type),
+    ),
+    (
+        "BlinkCmpKindCopilot",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    // ── nvim-cmp (6 base + 26 kinds = 32 entries) ─────────────────────
+    ("CmpItemAbbr", HighlightSpec::fg(SemanticColor::Text)),
+    (
+        "CmpItemAbbrDeprecated",
+        HighlightSpec::styled(SemanticColor::Muted, Style::Undercurl),
+    ),
+    (
+        "CmpItemAbbrMatch",
+        HighlightSpec::styled(SemanticColor::Accent, Style::Bold),
+    ),
+    (
+        "CmpItemAbbrMatchFuzzy",
+        HighlightSpec::styled(SemanticColor::Accent, Style::Bold),
+    ),
+    ("CmpItemKind", HighlightSpec::fg(SemanticColor::Type)),
+    ("CmpItemMenu", HighlightSpec::fg(SemanticColor::Muted)),
+    // nvim-cmp kind sub-variants (26 entries — blink parity + TabNine/Codeium)
+    ("CmpItemKindText", HighlightSpec::fg(SemanticColor::Text)),
+    (
+        "CmpItemKindMethod",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "CmpItemKindFunction",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "CmpItemKindConstructor",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "CmpItemKindField",
+        HighlightSpec::fg(SemanticColor::LspParameter),
+    ),
+    (
+        "CmpItemKindVariable",
+        HighlightSpec::fg(SemanticColor::Text),
+    ),
+    ("CmpItemKindClass", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "CmpItemKindInterface",
+        HighlightSpec::fg(SemanticColor::Type),
+    ),
+    ("CmpItemKindModule", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "CmpItemKindProperty",
+        HighlightSpec::fg(SemanticColor::LspParameter),
+    ),
+    ("CmpItemKindUnit", HighlightSpec::fg(SemanticColor::Number)),
+    ("CmpItemKindValue", HighlightSpec::fg(SemanticColor::Number)),
+    ("CmpItemKindEnum", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "CmpItemKindKeyword",
+        HighlightSpec::fg(SemanticColor::Keyword),
+    ),
+    (
+        "CmpItemKindSnippet",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    ("CmpItemKindColor", HighlightSpec::fg(SemanticColor::Accent)),
+    (
+        "CmpItemKindFile",
+        HighlightSpec::fg(SemanticColor::FileDocs),
+    ),
+    (
+        "CmpItemKindReference",
+        HighlightSpec::fg(SemanticColor::Muted),
+    ),
+    (
+        "CmpItemKindFolder",
+        HighlightSpec::fg(SemanticColor::FileDir),
+    ),
+    (
+        "CmpItemKindEnumMember",
+        HighlightSpec::fg(SemanticColor::Number),
+    ),
+    (
+        "CmpItemKindConstant",
+        HighlightSpec::fg(SemanticColor::Number),
+    ),
+    ("CmpItemKindStruct", HighlightSpec::fg(SemanticColor::Type)),
+    ("CmpItemKindEvent", HighlightSpec::fg(SemanticColor::Accent)),
+    (
+        "CmpItemKindOperator",
+        HighlightSpec::fg(SemanticColor::Keyword),
+    ),
+    (
+        "CmpItemKindTypeParameter",
+        HighlightSpec::fg(SemanticColor::Type),
+    ),
+    (
+        "CmpItemKindCopilot",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "CmpItemKindTabNine",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "CmpItemKindCodeium",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
 ];
+
+/// Render the lualine theme table as a Lua literal, ready for splicing into
+/// `render_loader`'s `LUALINE_THEMES` block.
+///
+/// Shape (per the lualine "writing a theme" docs, 17-RESEARCH §Pattern 6):
+///
+/// ```text
+/// {
+///     normal   = { a = { fg = '#..', bg = '#..', gui = 'bold' },
+///                  b = { fg = '#..', bg = '#..' },
+///                  c = { fg = '#..', bg = '#..' } },
+///     insert   = { ... },
+///     visual   = { ... },
+///     replace  = { ... },
+///     command  = { ... },
+///     inactive = { ... },
+/// }
+/// ```
+///
+/// Per-mode accent color is applied to the `a` section (the mode "pill"):
+///
+/// | Mode     | `a` fg     | `a` bg  |
+/// | -------- | ---------- | ------- |
+/// | normal   | Background | Accent  |
+/// | insert   | Background | String  |
+/// | visual   | Background | Warning |
+/// | replace  | Background | Error   |
+/// | command  | Background | Keyword |
+/// | inactive | Muted      | Surface |
+///
+/// `b` section is `Text on Surface` (muted mid-bar); `c` section is
+/// `Text on Background` (the rightmost statusline fill).
+///
+/// Output is deterministic — two calls on the same palette return byte-
+/// identical strings. Indentation is 4 spaces so the table sits cleanly
+/// inside `render_loader`'s 2-space-indented `LUALINE_THEMES` block.
+pub fn lualine_theme(palette: &Palette) -> String {
+    let mut out = String::with_capacity(2_048);
+    out.push_str("{\n");
+
+    // Helper: emit one `<mode> = { a = { .. }, b = { .. }, c = { .. } },`
+    // line with the mode's accent applied to `a`. `b` and `c` are shared
+    // "mid-bar" and "fill" sections — same across all active modes.
+    let emit_active = |out: &mut String, mode: &str, accent_bg: SemanticColor| {
+        let a_fg = palette.resolve(SemanticColor::Background);
+        let a_bg = palette.resolve(accent_bg);
+        let b_fg = palette.resolve(SemanticColor::Text);
+        let b_bg = palette.resolve(SemanticColor::Surface);
+        let c_fg = palette.resolve(SemanticColor::Text);
+        let c_bg = palette.resolve(SemanticColor::Background);
+        let _ = writeln!(
+            out,
+            "    {mode} = {{ \
+             a = {{ fg = '{a_fg}', bg = '{a_bg}', gui = 'bold' }}, \
+             b = {{ fg = '{b_fg}', bg = '{b_bg}' }}, \
+             c = {{ fg = '{c_fg}', bg = '{c_bg}' }} }},",
+        );
+    };
+
+    emit_active(&mut out, "normal", SemanticColor::Accent);
+    emit_active(&mut out, "insert", SemanticColor::String);
+    emit_active(&mut out, "visual", SemanticColor::Warning);
+    emit_active(&mut out, "replace", SemanticColor::Error);
+    emit_active(&mut out, "command", SemanticColor::Keyword);
+
+    // Inactive mode: muted fg across all sections, surface bg on `a` and
+    // `b`, background on `c`. Still bolded on `a` for visual parity with
+    // active modes (lualine renders an inactive window's left pill in
+    // the same visual weight — just dimmer color).
+    let i_fg = palette.resolve(SemanticColor::Muted);
+    let i_bg = palette.resolve(SemanticColor::Surface);
+    let b_fg = palette.resolve(SemanticColor::Muted);
+    let b_bg = palette.resolve(SemanticColor::Surface);
+    let c_fg = palette.resolve(SemanticColor::Muted);
+    let c_bg = palette.resolve(SemanticColor::Background);
+    let _ = writeln!(
+        &mut out,
+        "    inactive = {{ \
+         a = {{ fg = '{i_fg}', bg = '{i_bg}', gui = 'bold' }}, \
+         b = {{ fg = '{b_fg}', bg = '{b_bg}' }}, \
+         c = {{ fg = '{c_fg}', bg = '{c_bg}' }} }},",
+    );
+
+    out.push_str("  }");
+    out
+}
 
 #[cfg(test)]
 mod tests {
@@ -812,12 +1335,18 @@ mod tests {
     use std::collections::HashSet;
 
     /// Plan 01 floor: 80 base + 40 diff/LSP-attr + 100 treesitter + 42 LSP = 262.
-    /// Plan 04 will add ~130 plugin entries on top to hit the D-06 ~300 target.
+    /// Plan 04 adds 6-plugin coverage (telescope + neo-tree + GitSigns +
+    /// which-key + blink.cmp + nvim-cmp) for ≥ 130 entries on top = ≥ 392.
+    ///
+    /// D-06 reconciliation: CONTEXT.md D-06 targets ~300 groups as parity
+    /// against catppuccin/tokyonight BASE coverage. Plugin groups (D-08)
+    /// are counted additively in this same table. 262 (Plan 01 base/ts/lsp)
+    /// + 130 (Plan 04 6-plugin) = 392 is the correct final target.
     #[test]
     fn group_count_meets_coverage_floor() {
         assert!(
-            HIGHLIGHT_GROUPS.len() >= 262,
-            "Plan 01 floor: expected ≥ 262 entries, got {}",
+            HIGHLIGHT_GROUPS.len() >= 392,
+            "coverage floor (262 base + 130 plugin): expected ≥ 392 entries, got {}",
             HIGHLIGHT_GROUPS.len()
         );
     }
@@ -985,12 +1514,21 @@ mod tests {
             "Normal",
             "Comment",
             "FloatBorder",
+            "FloatTitle",
             "Visual",
             "DiffAdd",
             "DiffChange",
             "DiffDelete",
             "Cursor",
             "CursorLine",
+            "VertSplit",
+            "WinSeparator",
+            "StatusLineNC",
+            "NormalFloat",
+            "Pmenu",
+            "PmenuSel",
+            "PmenuSbar",
+            "PmenuThumb",
         ]
         .into_iter()
         .collect();
@@ -1004,5 +1542,293 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── Plan 17-04 Task 1: plugin coverage tests ───────────────────────
+
+    #[test]
+    fn plugin_telescope_groups_present() {
+        let names: HashSet<&str> = HIGHLIGHT_GROUPS.iter().map(|(n, _)| *n).collect();
+        for required in [
+            "TelescopeBorder",
+            "TelescopeNormal",
+            "TelescopePromptNormal",
+            "TelescopePreviewNormal",
+            "TelescopeResultsNormal",
+            "TelescopeTitle",
+            "TelescopeSelection",
+            "TelescopeSelectionCaret",
+            "TelescopeMatching",
+            "TelescopePromptPrefix",
+            "TelescopePromptTitle",
+            "TelescopePreviewTitle",
+            "TelescopeResultsTitle",
+        ] {
+            assert!(
+                names.contains(required),
+                "missing telescope group: {}",
+                required
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_neotree_groups_present() {
+        let names: HashSet<&str> = HIGHLIGHT_GROUPS.iter().map(|(n, _)| *n).collect();
+        for required in [
+            "NeoTreeDirectoryName",
+            "NeoTreeDirectoryIcon",
+            "NeoTreeNormal",
+            "NeoTreeRootName",
+            "NeoTreeGitAdded",
+            "NeoTreeGitModified",
+            "NeoTreeGitDeleted",
+            "NeoTreeGitUntracked",
+            "NeoTreeGitIgnored",
+            "NeoTreeFloatBorder",
+            "NeoTreeModified",
+            "NeoTreeDimText",
+            "NeoTreeSymbolicLinkTarget",
+        ] {
+            assert!(
+                names.contains(required),
+                "missing neo-tree group: {}",
+                required
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_gitsigns_groups_present() {
+        let gitsigns_count = HIGHLIGHT_GROUPS
+            .iter()
+            .filter(|(n, _)| n.starts_with("GitSigns"))
+            .count();
+        assert!(
+            gitsigns_count >= 10,
+            "expected ≥ 10 GitSigns groups, got {}",
+            gitsigns_count
+        );
+    }
+
+    #[test]
+    fn plugin_which_key_groups_present() {
+        let whichkey_count = HIGHLIGHT_GROUPS
+            .iter()
+            .filter(|(n, _)| n.starts_with("WhichKey"))
+            .count();
+        assert!(
+            whichkey_count >= 6,
+            "expected ≥ 6 WhichKey groups, got {}",
+            whichkey_count
+        );
+    }
+
+    #[test]
+    fn plugin_blink_and_cmp_both_emit_kind_parity() {
+        // Both families must be present — blink.cmp is LazyVim 2026 default;
+        // nvim-cmp is the historical default. Per CONTEXT.md D-08, we emit
+        // BOTH sets so users on either backend see correct colors.
+        let names: HashSet<&str> = HIGHLIGHT_GROUPS.iter().map(|(n, _)| *n).collect();
+        for required_blink in [
+            "BlinkCmpLabel",
+            "BlinkCmpLabelDeprecated",
+            "BlinkCmpKind",
+            "BlinkCmpMenu",
+            "BlinkCmpLabelMatch",
+            "BlinkCmpMenuSelection",
+        ] {
+            assert!(
+                names.contains(required_blink),
+                "missing blink.cmp base group: {}",
+                required_blink
+            );
+        }
+        for required_cmp in [
+            "CmpItemAbbr",
+            "CmpItemAbbrDeprecated",
+            "CmpItemKind",
+            "CmpItemMenu",
+            "CmpItemAbbrMatch",
+        ] {
+            assert!(
+                names.contains(required_cmp),
+                "missing nvim-cmp base group: {}",
+                required_cmp
+            );
+        }
+        let blink_kind_count = HIGHLIGHT_GROUPS
+            .iter()
+            .filter(|(n, _)| n.starts_with("BlinkCmpKind") && *n != "BlinkCmpKind")
+            .count();
+        let cmp_kind_count = HIGHLIGHT_GROUPS
+            .iter()
+            .filter(|(n, _)| n.starts_with("CmpItemKind") && *n != "CmpItemKind")
+            .count();
+        assert!(
+            blink_kind_count >= 18,
+            "expected ≥ 18 BlinkCmpKind* sub-variants, got {}",
+            blink_kind_count
+        );
+        assert!(
+            cmp_kind_count >= 18,
+            "expected ≥ 18 CmpItemKind* sub-variants, got {}",
+            cmp_kind_count
+        );
+    }
+
+    #[test]
+    fn deprecated_groups_use_undercurl() {
+        // nvim_set_hl has no `strikethrough` attribute; the documented
+        // substitute for "deprecated completion item" is Undercurl.
+        for name in ["BlinkCmpLabelDeprecated", "CmpItemAbbrDeprecated"] {
+            let (_, spec) = HIGHLIGHT_GROUPS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .unwrap_or_else(|| panic!("deprecated group {} missing", name));
+            assert_eq!(
+                spec.style,
+                Style::Undercurl,
+                "{} must use Style::Undercurl",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn match_groups_use_bold() {
+        // TelescopeMatching, BlinkCmpLabelMatch, CmpItemAbbrMatch,
+        // CmpItemAbbrMatchFuzzy all indicate a fuzzy-match hit and use Bold.
+        for name in [
+            "TelescopeMatching",
+            "BlinkCmpLabelMatch",
+            "CmpItemAbbrMatch",
+            "CmpItemAbbrMatchFuzzy",
+        ] {
+            let (_, spec) = HIGHLIGHT_GROUPS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .unwrap_or_else(|| panic!("match group {} missing", name));
+            assert_eq!(spec.style, Style::Bold, "{} must use Style::Bold", name);
+        }
+    }
+
+    // ── Plan 17-04 Task 2: lualine_theme tests ─────────────────────────
+
+    #[test]
+    fn lualine_theme_contains_all_six_modes() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        for mode in &[
+            "normal", "insert", "visual", "replace", "command", "inactive",
+        ] {
+            assert!(
+                out.contains(&format!("{} = {{", mode)),
+                "missing mode {} in output\n---\n{}",
+                mode,
+                out
+            );
+        }
+    }
+
+    #[test]
+    fn lualine_theme_each_mode_has_abc_sections() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        let a_count = out.matches("a = {").count();
+        let b_count = out.matches("b = {").count();
+        let c_count = out.matches("c = {").count();
+        assert_eq!(a_count, 6, "expected 6 'a' sections, got {}", a_count);
+        assert_eq!(b_count, 6, "expected 6 'b' sections, got {}", b_count);
+        assert_eq!(c_count, 6, "expected 6 'c' sections, got {}", c_count);
+    }
+
+    #[test]
+    fn lualine_theme_a_sections_are_bold() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        // Every 'a = {' block should contain `gui = 'bold'` — 6 modes, 6 bolds.
+        let bold_count = out.matches("gui = 'bold'").count();
+        assert_eq!(
+            bold_count, 6,
+            "expected 6 bold a-sections, got {}",
+            bold_count
+        );
+    }
+
+    #[test]
+    fn lualine_theme_is_deterministic() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("tokyo-night-dark")
+            .unwrap()
+            .clone();
+        assert_eq!(lualine_theme(&v.palette), lualine_theme(&v.palette));
+    }
+
+    #[test]
+    fn lualine_theme_hex_values_are_7_chars() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        // Every string between single quotes that starts with '#' must be a 7-char hex.
+        for substr in out.split('\'') {
+            if substr.starts_with('#') {
+                assert_eq!(
+                    substr.len(),
+                    7,
+                    "hex literal has wrong length: {:?}",
+                    substr
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lualine_theme_wraps_with_braces() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        assert!(out.starts_with('{'), "output must start with '{{'");
+        assert!(out.trim_end().ends_with('}'), "output must end with '}}'");
+    }
+
+    #[test]
+    fn lualine_theme_inactive_uses_muted_fg() {
+        // Per 17-RESEARCH §Pattern 6: inactive mode uses Muted fg + Surface bg
+        // rather than an accent color. The test verifies the Muted hex shows up
+        // at least once inside the `inactive = { ... }` block.
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        let muted_hex = v.palette.resolve(SemanticColor::Muted);
+        let inactive_start = out.find("inactive = {").expect("inactive block present");
+        let inactive_block = &out[inactive_start..];
+        assert!(
+            inactive_block.contains(&format!("fg = '{}'", muted_hex)),
+            "inactive block must reference Muted fg {}",
+            muted_hex
+        );
     }
 }
