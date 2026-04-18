@@ -812,12 +812,18 @@ mod tests {
     use std::collections::HashSet;
 
     /// Plan 01 floor: 80 base + 40 diff/LSP-attr + 100 treesitter + 42 LSP = 262.
-    /// Plan 04 will add ~130 plugin entries on top to hit the D-06 ~300 target.
+    /// Plan 04 adds 6-plugin coverage (telescope + neo-tree + GitSigns +
+    /// which-key + blink.cmp + nvim-cmp) for ≥ 130 entries on top = ≥ 392.
+    ///
+    /// D-06 reconciliation: CONTEXT.md D-06 targets ~300 groups as parity
+    /// against catppuccin/tokyonight BASE coverage. Plugin groups (D-08)
+    /// are counted additively in this same table. 262 (Plan 01 base/ts/lsp)
+    /// + 130 (Plan 04 6-plugin) = 392 is the correct final target.
     #[test]
     fn group_count_meets_coverage_floor() {
         assert!(
-            HIGHLIGHT_GROUPS.len() >= 262,
-            "Plan 01 floor: expected ≥ 262 entries, got {}",
+            HIGHLIGHT_GROUPS.len() >= 392,
+            "coverage floor (262 base + 130 plugin): expected ≥ 392 entries, got {}",
             HIGHLIGHT_GROUPS.len()
         );
     }
@@ -985,12 +991,21 @@ mod tests {
             "Normal",
             "Comment",
             "FloatBorder",
+            "FloatTitle",
             "Visual",
             "DiffAdd",
             "DiffChange",
             "DiffDelete",
             "Cursor",
             "CursorLine",
+            "VertSplit",
+            "WinSeparator",
+            "StatusLineNC",
+            "NormalFloat",
+            "Pmenu",
+            "PmenuSel",
+            "PmenuSbar",
+            "PmenuThumb",
         ]
         .into_iter()
         .collect();
@@ -1003,6 +1018,175 @@ mod tests {
                     target
                 );
             }
+        }
+    }
+
+    // ── Plan 17-04 Task 1: plugin coverage tests ───────────────────────
+
+    #[test]
+    fn plugin_telescope_groups_present() {
+        let names: HashSet<&str> = HIGHLIGHT_GROUPS.iter().map(|(n, _)| *n).collect();
+        for required in [
+            "TelescopeBorder",
+            "TelescopeNormal",
+            "TelescopePromptNormal",
+            "TelescopePreviewNormal",
+            "TelescopeResultsNormal",
+            "TelescopeTitle",
+            "TelescopeSelection",
+            "TelescopeSelectionCaret",
+            "TelescopeMatching",
+            "TelescopePromptPrefix",
+            "TelescopePromptTitle",
+            "TelescopePreviewTitle",
+            "TelescopeResultsTitle",
+        ] {
+            assert!(
+                names.contains(required),
+                "missing telescope group: {}",
+                required
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_neotree_groups_present() {
+        let names: HashSet<&str> = HIGHLIGHT_GROUPS.iter().map(|(n, _)| *n).collect();
+        for required in [
+            "NeoTreeDirectoryName",
+            "NeoTreeDirectoryIcon",
+            "NeoTreeNormal",
+            "NeoTreeRootName",
+            "NeoTreeGitAdded",
+            "NeoTreeGitModified",
+            "NeoTreeGitDeleted",
+            "NeoTreeGitUntracked",
+            "NeoTreeGitIgnored",
+            "NeoTreeFloatBorder",
+            "NeoTreeModified",
+            "NeoTreeDimText",
+            "NeoTreeSymbolicLinkTarget",
+        ] {
+            assert!(
+                names.contains(required),
+                "missing neo-tree group: {}",
+                required
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_gitsigns_groups_present() {
+        let gitsigns_count = HIGHLIGHT_GROUPS
+            .iter()
+            .filter(|(n, _)| n.starts_with("GitSigns"))
+            .count();
+        assert!(
+            gitsigns_count >= 10,
+            "expected ≥ 10 GitSigns groups, got {}",
+            gitsigns_count
+        );
+    }
+
+    #[test]
+    fn plugin_which_key_groups_present() {
+        let whichkey_count = HIGHLIGHT_GROUPS
+            .iter()
+            .filter(|(n, _)| n.starts_with("WhichKey"))
+            .count();
+        assert!(
+            whichkey_count >= 6,
+            "expected ≥ 6 WhichKey groups, got {}",
+            whichkey_count
+        );
+    }
+
+    #[test]
+    fn plugin_blink_and_cmp_both_emit_kind_parity() {
+        // Both families must be present — blink.cmp is LazyVim 2026 default;
+        // nvim-cmp is the historical default. Per CONTEXT.md D-08, we emit
+        // BOTH sets so users on either backend see correct colors.
+        let names: HashSet<&str> = HIGHLIGHT_GROUPS.iter().map(|(n, _)| *n).collect();
+        for required_blink in [
+            "BlinkCmpLabel",
+            "BlinkCmpLabelDeprecated",
+            "BlinkCmpKind",
+            "BlinkCmpMenu",
+            "BlinkCmpLabelMatch",
+            "BlinkCmpMenuSelection",
+        ] {
+            assert!(
+                names.contains(required_blink),
+                "missing blink.cmp base group: {}",
+                required_blink
+            );
+        }
+        for required_cmp in [
+            "CmpItemAbbr",
+            "CmpItemAbbrDeprecated",
+            "CmpItemKind",
+            "CmpItemMenu",
+            "CmpItemAbbrMatch",
+        ] {
+            assert!(
+                names.contains(required_cmp),
+                "missing nvim-cmp base group: {}",
+                required_cmp
+            );
+        }
+        let blink_kind_count = HIGHLIGHT_GROUPS
+            .iter()
+            .filter(|(n, _)| n.starts_with("BlinkCmpKind") && *n != "BlinkCmpKind")
+            .count();
+        let cmp_kind_count = HIGHLIGHT_GROUPS
+            .iter()
+            .filter(|(n, _)| n.starts_with("CmpItemKind") && *n != "CmpItemKind")
+            .count();
+        assert!(
+            blink_kind_count >= 18,
+            "expected ≥ 18 BlinkCmpKind* sub-variants, got {}",
+            blink_kind_count
+        );
+        assert!(
+            cmp_kind_count >= 18,
+            "expected ≥ 18 CmpItemKind* sub-variants, got {}",
+            cmp_kind_count
+        );
+    }
+
+    #[test]
+    fn deprecated_groups_use_undercurl() {
+        // nvim_set_hl has no `strikethrough` attribute; the documented
+        // substitute for "deprecated completion item" is Undercurl.
+        for name in ["BlinkCmpLabelDeprecated", "CmpItemAbbrDeprecated"] {
+            let (_, spec) = HIGHLIGHT_GROUPS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .unwrap_or_else(|| panic!("deprecated group {} missing", name));
+            assert_eq!(
+                spec.style,
+                Style::Undercurl,
+                "{} must use Style::Undercurl",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn match_groups_use_bold() {
+        // TelescopeMatching, BlinkCmpLabelMatch, CmpItemAbbrMatch,
+        // CmpItemAbbrMatchFuzzy all indicate a fuzzy-match hit and use Bold.
+        for name in [
+            "TelescopeMatching",
+            "BlinkCmpLabelMatch",
+            "CmpItemAbbrMatch",
+            "CmpItemAbbrMatchFuzzy",
+        ] {
+            let (_, spec) = HIGHLIGHT_GROUPS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .unwrap_or_else(|| panic!("match group {} missing", name));
+            assert_eq!(spec.style, Style::Bold, "{} must use Style::Bold", name);
         }
     }
 }
