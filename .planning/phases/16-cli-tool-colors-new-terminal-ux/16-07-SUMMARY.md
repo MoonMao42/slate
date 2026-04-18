@@ -98,23 +98,26 @@ Anti-pattern sweep (`grep '38;5;' src/adapter/ls_colors.rs src/config/shell_inte
 
 None. The plan executed exactly as written: two integration-test files, one empirical smoke test, one human UAT checkpoint. No Rule 1 / 2 / 3 fixes were needed — the base already had all prerequisites (Plans 16-01 through 16-06) merged.
 
-## UAT: pending orchestrator
+## UAT: signed off
 
-Task 3 is a human-verification checkpoint (`type="checkpoint:human-verify"`). This executor stops at that boundary per `autonomous: false`. The orchestrator will:
-
-1. Prompt the user to run the UAT checklist from `16-07-PLAN.md` §Task 3 (steps 1–8: theme switch with reminder ordering, `gls` / `eza` palette check, `--auto --quiet` suppression, picker suppression, `config set` emission, BSD-`ls` one-shot flag, smoke-test replay, phase-gate replay).
-2. Capture the user's verbatim response (one of: "approved — phase 16 ships as specified" / "approved with eza contingency — execute fallback plan" / issue descriptions).
-3. Append that response and any screenshot / pasted-output evidence under the **UAT evidence** section below.
+Task 3 is a human-verification checkpoint (`type="checkpoint:human-verify"`). The user exercised the core UAT checklist on their macOS dev host (arm64, 26.4, eza v0.23.4) and signed off with **"ok"** after a polish pass.
 
 ### UAT evidence
 
-> **Placeholder — to be filled by orchestrator after human UAT.**
->
-> Expected content:
-> - User's verbatim sign-off line.
-> - Pasted output from the `ls` / `gls` / `eza` side-by-side check (or screenshots).
-> - Noted platform (macOS tab opened via ⌘N, Ghostty / Terminal.app / iTerm2, shell variant).
-> - Any issues raised + follow-up disposition.
+**User sign-off:** "ok" (2026-04-18, after post-UAT polish commits).
+
+**Post-UAT polish (user-authored, committed as part of Phase 16):**
+
+| Commit    | Fix                                                                                                   |
+|-----------|-------------------------------------------------------------------------------------------------------|
+| `e121590` | Register `LsColorsAdapter` in `ToolRegistry::default()` (missing registration made the adapter dead code in the apply pipeline) and filter its row out of the user-facing apply log since it is an internal shell-integration layer, not a user-selected tool. |
+| `70347d6` | Make `slate theme <name> --quiet` fully silent (was still printing the success line + per-tool ✓ rows). Simplify setup's reminder trigger from the adapter-level `requires_new_shell` aggregator to a direct `theme_applied` check — setup always rewrites the managed shell env files, so the aggregator was redundant for that one call site. The aggregator still governs theme/font/config handlers per D-D6. |
+
+**Platform:** macOS 26.4 arm64 · Ghostty · zsh · eza v0.23.4.
+
+**Assumption A1 (RESEARCH §Pitfall 3):** eza accepts `38;2;R;G;B` truecolor in `EZA_COLORS` — empirically confirmed by `tests/eza_truecolor_smoke.rs` and reconfirmed during UAT. The theme.yml fallback contingency is NOT required.
+
+**Disposition:** Phase 16 ships as specified. No follow-up gaps opened.
 
 ## Plan-level metrics
 
