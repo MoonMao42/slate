@@ -27,15 +27,16 @@
 #![allow(dead_code)]
 
 use crate::adapter::palette_renderer::PaletteRenderer;
+use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::cli::picker::preview_panel::SemanticColor;
 use crate::design::nvim_highlights::{lualine_theme, HighlightSpec, Style, HIGHLIGHT_GROUPS};
 use crate::env::SlateEnv;
 use crate::error::Result;
-use crate::theme::{Palette, ThemeRegistry};
+use crate::theme::{Palette, ThemeRegistry, ThemeVariant};
 use atomic_write_file::AtomicWriteFile;
 use std::fmt::Write as FmtWrite;
 use std::io::Write as IoWrite;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Render ONE variant's highlight-group table as a Lua sub-table literal.
 ///
@@ -449,6 +450,147 @@ pub fn render_loader() -> String {
     }
     out.push_str(LOADER_TEMPLATE_TAIL);
     out
+}
+
+// ── Plan 17-05 Task 2: NvimAdapter — ToolAdapter impl + setup ──────────
+
+/// Neovim colorscheme adapter.
+///
+/// Two entry points:
+///
+/// - [`NvimAdapter::setup`] (slow path) — writes the full install (one
+///   `slate-<id>.lua` shim per built-in variant + the loader module + the
+///   initial state file). Called from the `slate setup` wizard; idempotent.
+///
+/// - [`ToolAdapter::apply_theme`] (fast path) — writes only the state file
+///   at `~/.cache/slate/current_theme.lua`. The loader's `vim.uv.fs_event`
+///   watcher (rendered by [`render_loader`]) picks up the change and
+///   hot-reloads the colorscheme in every running nvim instance.
+///
+/// `apply_theme` (trait impl) obtains a [`SlateEnv`] via
+/// `SlateEnv::from_process()` and delegates to
+/// [`NvimAdapter::apply_theme_with_env`]. The helper exists so unit tests
+/// can inject a tempdir-backed `SlateEnv::with_home(...)` without mutating
+/// process env vars anywhere in the test suite.
+pub struct NvimAdapter;
+
+impl NvimAdapter {
+    /// Full install: writes 18 `slate-<id>.lua` shims + the loader
+    /// (`lua/slate/init.lua`) + the initial state file.
+    ///
+    /// Called from the `slate setup` wizard (Plan 06). Idempotent —
+    /// re-running with the same env+theme produces byte-identical files
+    /// via `AtomicWriteFile`.
+    pub fn setup(env: &SlateEnv, initial_theme: &ThemeVariant) -> Result<()> {
+        let nvim_home = env.home().join(".config/nvim");
+        let colors_dir = nvim_home.join("colors");
+        let lua_slate_dir = nvim_home.join("lua").join("slate");
+
+        std::fs::create_dir_all(&colors_dir)?;
+        std::fs::create_dir_all(&lua_slate_dir)?;
+
+        // 1. Write one `slate-<id>.lua` shim per built-in variant.
+        //    Iterating the registry keeps future variants automatic.
+        let registry = ThemeRegistry::new()?;
+        for variant in registry.all() {
+            let shim_path = colors_dir.join(format!("slate-{}.lua", variant.id));
+            let shim_content = render_shim(&variant.id);
+            write_atomic(&shim_path, &shim_content)?;
+        }
+
+        // 2. Write the loader file. `render_loader` splices every variant's
+        //    palette + lualine theme so the generated Lua is self-contained.
+        let loader_path = lua_slate_dir.join("init.lua");
+        let loader_content = render_loader();
+        write_atomic(&loader_path, &loader_content)?;
+
+        // 3. Seed the state file so a nvim instance that starts after
+        //    `slate setup` picks up the initial theme immediately.
+        write_state_file(env, &initial_theme.id)?;
+
+        Ok(())
+    }
+
+    /// Fast-path apply: writes only the state file.
+    ///
+    /// Crate-private so unit tests can inject a tempdir-backed `SlateEnv`
+    /// without mutating process env vars. The trait's `apply_theme` method
+    /// delegates here using `SlateEnv::from_process()`.
+    ///
+    /// Running nvim instances pick up the state-file change via the
+    /// `vim.uv.fs_event` watcher rendered by [`render_loader`]. The 18
+    /// shims + loader are in place from [`NvimAdapter::setup`] — the fast
+    /// path never re-emits them.
+    pub(crate) fn apply_theme_with_env(
+        &self,
+        theme: &ThemeVariant,
+        env: &SlateEnv,
+    ) -> Result<ApplyOutcome> {
+        write_state_file(env, &theme.id)?;
+        Ok(ApplyOutcome::Applied {
+            requires_new_shell: false,
+        })
+    }
+}
+
+/// Atomic write helper: fsync + rename semantics guarantee exactly one
+/// `fs_event` fire on the Lua watcher (same load-bearing property as
+/// [`write_state_file`]).
+fn write_atomic(path: &Path, content: &str) -> Result<()> {
+    let mut file = AtomicWriteFile::open(path)?;
+    file.write_all(content.as_bytes())?;
+    file.commit()?;
+    Ok(())
+}
+
+impl ToolAdapter for NvimAdapter {
+    fn tool_name(&self) -> &'static str {
+        "nvim"
+    }
+
+    fn is_installed(&self) -> Result<bool> {
+        // Exclude-only pattern (Phase 7 Decision 11, Phase 17 D-01):
+        // - binary missing → Ok(false) (not an error).
+        // - version < 0.8.0 → Ok(false) (not an error).
+        // - version parse failure → Ok(false) (conservative: we don't
+        //   write files for an nvim we can't verify).
+        let presence = crate::detection::detect_tool_presence("nvim");
+        if !presence.installed {
+            return Ok(false);
+        }
+        let ver = match crate::platform::version_check::detect_version("nvim") {
+            Ok(v) => v,
+            Err(_) => return Ok(false),
+        };
+        Ok(crate::platform::version_check::VersionPolicy::check_version("nvim", &ver).is_ok())
+    }
+
+    fn integration_config_path(&self) -> Result<PathBuf> {
+        let env = SlateEnv::from_process()?;
+        Ok(env.home().join(".config/nvim/init.lua"))
+    }
+
+    fn managed_config_path(&self) -> PathBuf {
+        // Per Phase 17 D-03: slate writes DIRECTLY to ~/.config/nvim/
+        // (nvim's runtimepath), NOT ~/.config/slate/managed/nvim/. The
+        // three-tier contract still holds — we just place the managed
+        // tier where nvim expects it.
+        SlateEnv::from_process()
+            .map(|env| env.home().join(".config/nvim"))
+            .unwrap_or_else(|_| PathBuf::from(".config/nvim"))
+    }
+
+    fn apply_strategy(&self) -> ApplyStrategy {
+        ApplyStrategy::WriteAndInclude
+    }
+
+    fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
+        // FAST PATH: state-file-only. The 18 shims + loader are written
+        // by `NvimAdapter::setup` during the wizard; running nvim instances
+        // hot-reload via the file watcher when the state file changes.
+        let env = SlateEnv::from_process()?;
+        self.apply_theme_with_env(theme, &env)
+    }
 }
 
 #[cfg(test)]
