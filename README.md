@@ -137,6 +137,10 @@ For Ghostty: `config-file = ...`. For Kitty/Alacritty: managed `include`/`import
 
 18 variants across 8 families: Catppuccin · Tokyo Night · Rosé Pine · Kanagawa · Everforest · Dracula · Nord · Gruvbox.
 
+## Development
+
+Built with AI assistance, with every change reviewed and tested by a human before it lands.
+
 ## License
 
 MIT.
