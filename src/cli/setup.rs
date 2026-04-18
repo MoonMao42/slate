@@ -124,6 +124,17 @@ pub fn handle_with_env(
 
     crate::cli::sound::play_feedback();
 
+    // UX-02 (D-D3): new-shell reminder sits BETWEEN the receipt card and the
+    // demo hint. Only fires when at least one successful adapter declared
+    // `requires_new_shell=true` (Plan 16-04 aggregator). `setup` has no
+    // --auto / --quiet flags at this surface, so both guards are false.
+    // `summary.theme_results` is populated by
+    // setup_executor/integration.rs (`summary.set_theme_results(report.results)`)
+    // — no plumbing change required here.
+    if crate::adapter::registry::requires_new_shell(&summary.theme_results) {
+        crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
+    }
+
     // DEMO-02 (D-C1): single-line hint pointing at `slate demo`. setup has no
     // --auto / --quiet flags at this surface, so both guards are false.
     crate::cli::demo::emit_demo_hint_once(false, false);
@@ -231,6 +242,9 @@ fn format_completion_timing(start_time: Option<Instant>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapter::registry::{ToolApplyResult, ToolApplyStatus};
+    use crate::adapter::SkipReason;
+    use crate::cli::new_shell_reminder::REMINDER_TEST_LOCK;
     use crate::opacity::OpacityPreset;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -278,6 +292,85 @@ mod tests {
     #[test]
     fn test_format_completion_timing_none() {
         assert!(format_completion_timing(None).is_none());
+    }
+
+    /// Build a successful apply result (helper for the reminder-wiring tests).
+    fn applied(name: &str, requires_new_shell: bool) -> ToolApplyResult {
+        ToolApplyResult {
+            tool_name: name.to_string(),
+            status: ToolApplyStatus::Applied,
+            requires_new_shell,
+        }
+    }
+
+    fn skipped(name: &str) -> ToolApplyResult {
+        ToolApplyResult {
+            tool_name: name.to_string(),
+            status: ToolApplyStatus::Skipped(SkipReason::NotInstalled),
+            requires_new_shell: false,
+        }
+    }
+
+    /// Simulate the decision point in `handle_with_env` that guards the
+    /// `emit_new_shell_reminder_once` call. This isolates the wiring
+    /// (aggregator → emitter) from wizard + preflight + stdin-TTY coupling
+    /// that makes the full handler untestable in-process.
+    fn setup_emit_branch(results: &[ToolApplyResult]) {
+        if crate::adapter::registry::requires_new_shell(results) {
+            crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
+        }
+    }
+
+    #[test]
+    fn setup_handler_emits_reminder_when_requires_new_shell_true() {
+        let _guard = REMINDER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        crate::cli::new_shell_reminder::reset_reminder_flag_for_tests();
+        assert!(!crate::cli::new_shell_reminder::reminder_flag_for_tests());
+
+        let results = vec![applied("bat", true), applied("ghostty", false)];
+        setup_emit_branch(&results);
+
+        assert!(
+            crate::cli::new_shell_reminder::reminder_flag_for_tests(),
+            "setup handler must transition the reminder flag when any Applied result requires a new shell"
+        );
+    }
+
+    #[test]
+    fn setup_handler_skips_reminder_when_all_false() {
+        let _guard = REMINDER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        crate::cli::new_shell_reminder::reset_reminder_flag_for_tests();
+
+        let results = vec![
+            applied("ghostty", false),
+            applied("alacritty", false),
+            skipped("tmux"),
+        ];
+        setup_emit_branch(&results);
+
+        assert!(
+            !crate::cli::new_shell_reminder::reminder_flag_for_tests(),
+            "setup handler must leave the flag untouched when no Applied result requires a new shell"
+        );
+    }
+
+    #[test]
+    fn setup_handler_skips_reminder_when_empty_results() {
+        let _guard = REMINDER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        crate::cli::new_shell_reminder::reset_reminder_flag_for_tests();
+
+        setup_emit_branch(&[]);
+
+        assert!(
+            !crate::cli::new_shell_reminder::reminder_flag_for_tests(),
+            "empty results must not emit"
+        );
     }
 
     #[test]
