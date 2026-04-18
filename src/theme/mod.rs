@@ -173,23 +173,23 @@ impl Palette {
             SemanticColor::Text => self.foreground.clone(),
             SemanticColor::Subtext => self.white.clone(),
 
-            // Syntax highlighting (Phase 15 — PLACEHOLDER; Plan 01 fills real slots)
-            SemanticColor::Keyword => self.foreground.clone(),
-            SemanticColor::String => self.foreground.clone(),
-            SemanticColor::Comment => self.foreground.clone(),
-            SemanticColor::Function => self.foreground.clone(),
-            SemanticColor::Number => self.foreground.clone(),
-            SemanticColor::Type => self.foreground.clone(),
+            // Syntax highlighting (Phase 15 — shared with future editor adapter)
+            SemanticColor::Keyword => self.magenta.clone(),
+            SemanticColor::String => self.green.clone(),
+            SemanticColor::Comment => self.bright_black.clone(),
+            SemanticColor::Function => self.blue.clone(),
+            SemanticColor::Number => self.yellow.clone(),
+            SemanticColor::Type => self.cyan.clone(),
 
-            // File-type classification (Phase 15 — PLACEHOLDER; Plan 01 fills real slots)
-            SemanticColor::FileArchive => self.foreground.clone(),
-            SemanticColor::FileImage => self.foreground.clone(),
-            SemanticColor::FileMedia => self.foreground.clone(),
-            SemanticColor::FileAudio => self.foreground.clone(),
-            SemanticColor::FileCode => self.foreground.clone(),
+            // File-type classification (Phase 15 — shared with Phase 16 LS_COLORS)
+            SemanticColor::FileArchive => self.red.clone(),
+            SemanticColor::FileImage => self.magenta.clone(),
+            SemanticColor::FileMedia => self.magenta.clone(),
+            SemanticColor::FileAudio => self.cyan.clone(),
+            SemanticColor::FileCode => self.yellow.clone(),
             SemanticColor::FileDocs => self.foreground.clone(),
-            SemanticColor::FileConfig => self.foreground.clone(),
-            SemanticColor::FileHidden => self.foreground.clone(),
+            SemanticColor::FileConfig => self.bright_black.clone(),
+            SemanticColor::FileHidden => self.bright_black.clone(),
         }
     }
 }
