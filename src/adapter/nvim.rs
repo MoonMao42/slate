@@ -29,8 +29,13 @@
 use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::cli::picker::preview_panel::SemanticColor;
 use crate::design::nvim_highlights::{HighlightSpec, Style, HIGHLIGHT_GROUPS};
-use crate::theme::Palette;
+use crate::env::SlateEnv;
+use crate::error::Result;
+use crate::theme::{Palette, ThemeRegistry};
+use atomic_write_file::AtomicWriteFile;
 use std::fmt::Write as FmtWrite;
+use std::io::Write as IoWrite;
+use std::path::PathBuf;
 
 /// Render ONE variant's highlight-group table as a Lua sub-table literal.
 ///
@@ -207,6 +212,232 @@ fn resolve_with_fallback(palette: &Palette, role: SemanticColor) -> String {
     } else {
         String::from("NONE")
     }
+}
+
+// ── Plan 17-03 Task 2: state-file plumbing ─────────────────────────────
+
+/// Atomically write the active-variant state file observed by the Lua
+/// watcher registered by `render_loader` (Plan 03 Task 3).
+///
+/// Path: `<env.slate_cache_dir()>/current_theme.lua`.
+/// Content: `return "<variant-id>"\n` — a minimal Lua string literal so
+/// `dofile(path)` / `pcall(dofile, path)` returns the variant id.
+///
+/// Atomicity: `AtomicWriteFile::commit()` performs `fsync → rename`,
+/// which fires EXACTLY ONE `fs_event` on the Lua watcher side — this
+/// is the load-bearing behaviour D-04 depends on. Never replace this
+/// with `std::fs::write` or a manual `.tmp` + rename dance; they can
+/// fire multiple events (Plan 07 Task 2 has an fs-event counter that
+/// would catch the regression).
+///
+/// The parent directory is created if missing (first-run safety).
+pub fn write_state_file(env: &SlateEnv, variant_id: &str) -> Result<()> {
+    let path = state_file_path(env);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = format!("return {}\n", lua_string_literal(variant_id));
+    let mut file = AtomicWriteFile::open(&path)?;
+    file.write_all(content.as_bytes())?;
+    file.commit()?;
+    Ok(())
+}
+
+/// Compute the canonical state-file path for a given env.
+///
+/// `pub(crate)` so Plan 05's adapter and Plan 06's clean helper can
+/// reach it without duplicating the join.
+pub(crate) fn state_file_path(env: &SlateEnv) -> PathBuf {
+    env.slate_cache_dir().join("current_theme.lua")
+}
+
+/// Escape a variant id for embedding inside a Lua double-quoted string
+/// literal. Variant ids are kebab-case ASCII in practice (no trigger),
+/// but defensive escaping keeps the contract safe for any future id
+/// scheme that could reach this code path.
+fn lua_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+// ── Plan 17-03 Task 3: Lua loader template ─────────────────────────────
+//
+// The three `LOADER_TEMPLATE_*` constants below, sandwiched around the
+// spliced per-variant PALETTES entries produced by `render_colorscheme`
+// and an (empty in this plan) `LUALINE_THEMES` block, form the complete
+// `~/.config/nvim/lua/slate/init.lua` module Plan 05 ships through
+// `NvimAdapter::apply_setup`.
+//
+// Six load-bearing details from 17-RESEARCH.md §Pitfalls are inlined
+// inside these strings — every unit test in this file's `mod tests`
+// block guards one of them:
+//
+//   1. `local uv = vim.uv or vim.loop` (Pitfall 1 — nvim 0.8/0.9 compat)
+//   2. 100 ms debounce via `uv.new_timer()` (Pitfall 2 — APFS multi-fire)
+//   3. Watcher re-arm inside callback (Pitfall 6 — driver-specific close)
+//   4. `VimLeavePre` cleanup autocmd (no orphan libuv handles)
+//   5. `package.loaded['lualine']` guard (Pitfall 5 — never force-require)
+//   6. `doautocmd ColorScheme slate-<variant>` (downstream plugin hook)
+//
+// The strings are intentionally verbatim copies of 17-RESEARCH §Pattern 2
+// lines 329-446. Do not paraphrase: Plan 07's integration tests parse
+// these bytes directly via `nvim --headless -c 'luafile %'`, so any
+// syntactic drift breaks the syntax gate.
+
+/// Head of the loader: module prelude, uv shim, open PALETTES table.
+const LOADER_TEMPLATE_HEAD: &str = "\
+-- slate-managed: do not edit. Regenerate via `slate setup`.
+local M = {}
+local uv = vim.uv or vim.loop  -- nvim 0.8 compat (Pitfall 1)
+
+-- Per-variant highlight tables. Populated by slate setup from HIGHLIGHT_GROUPS.
+local PALETTES = {
+";
+
+/// Separator between PALETTES and LUALINE_THEMES tables.
+const LOADER_TEMPLATE_MID: &str = "\
+}
+
+-- Per-variant lualine theme tables. Plan 04 populates; empty stub now.
+local LUALINE_THEMES = {
+";
+
+/// Tail of the loader: close LUALINE_THEMES, define M.load / M.setup,
+/// wire the fs_event watcher with 100 ms debounce, register VimLeavePre
+/// cleanup, bootstrap via `M.setup()`, and return M.
+const LOADER_TEMPLATE_TAIL: &str = r#"}
+
+function M.load(variant)
+  local pal = PALETTES[variant]
+  if not pal then return end
+  vim.cmd('hi clear')
+  if vim.fn.exists('syntax_on') == 1 then vim.cmd('syntax reset') end
+  vim.g.colors_name = 'slate-' .. variant
+
+  for name, spec in pairs(pal) do
+    vim.api.nvim_set_hl(0, name, spec)
+  end
+
+  -- Lualine refresh guard (Pitfall 5)
+  if package.loaded['lualine'] and LUALINE_THEMES[variant] then
+    local ok, lualine = pcall(require, 'lualine')
+    if ok then
+      local cfg = lualine.get_config()
+      cfg.options.theme = LUALINE_THEMES[variant]
+      lualine.setup(cfg)
+      lualine.refresh({ force = true })
+    end
+  end
+
+  vim.cmd('doautocmd ColorScheme ' .. vim.g.colors_name)
+end
+
+local STATE_PATH = vim.fn.expand('~/.cache/slate/current_theme.lua')
+
+local function read_state()
+  local ok, mod = pcall(dofile, STATE_PATH)
+  if ok and type(mod) == 'string' then return mod end
+  return nil
+end
+
+local watcher
+local debounce_timer
+
+local function schedule_reload()
+  if debounce_timer then debounce_timer:stop() end
+  debounce_timer = uv.new_timer()
+  debounce_timer:start(100, 0, vim.schedule_wrap(function()  -- Pitfall 2: 100ms debounce
+    local variant = read_state()
+    if variant then M.load(variant) end
+    debounce_timer:close()
+    debounce_timer = nil
+  end))
+end
+
+function M.setup(opts)
+  opts = opts or {}
+  local variant = read_state()
+  if variant then M.load(variant) end
+
+  watcher = uv.new_fs_event()
+  watcher:start(STATE_PATH, {}, vim.schedule_wrap(function(err, _fname, _events)
+    if err then return end
+    schedule_reload()
+    -- Pitfall 6: re-arm watcher (some FS drivers close on first fire)
+    watcher:stop()
+    local ok = pcall(function()
+      watcher:start(STATE_PATH, {}, vim.schedule_wrap(schedule_reload))
+    end)
+    if not ok then watcher = nil end
+  end))
+
+  -- VimLeavePre cleanup -- prevents orphan libuv handles
+  vim.api.nvim_create_autocmd('VimLeavePre', {
+    callback = function()
+      if debounce_timer then pcall(function() debounce_timer:close() end) end
+      if watcher then pcall(function() watcher:close() end) end
+    end,
+  })
+end
+
+M.setup()
+
+return M
+"#;
+
+/// Render the complete `~/.config/nvim/lua/slate/init.lua` loader module.
+///
+/// Structure:
+///   1. LOADER_TEMPLATE_HEAD — module prelude + `local PALETTES = {`
+///   2. one `['<id>'] = <sub-table>,\n` line per built-in variant, the
+///      sub-table produced by [`render_colorscheme`] with its leading
+///      `-- slate-managed palette for …` comment stripped (the spliced
+///      form must be a bare `{ ... }` expression, not a prefixed one).
+///   3. LOADER_TEMPLATE_MID — close PALETTES + open LUALINE_THEMES.
+///   4. (empty in Plan 03 — Plan 04 splices per-variant lualine themes)
+///   5. LOADER_TEMPLATE_TAIL — close LUALINE_THEMES + M.load / M.setup
+///      / watcher / debounce / cleanup / `return M`.
+///
+/// Deterministic: iteration order is `ThemeRegistry::all()` order, which
+/// is the TOML declaration order (stable). Two calls yield byte-identical
+/// strings.
+pub fn render_loader() -> String {
+    let registry =
+        ThemeRegistry::new().expect("ThemeRegistry must initialise — validated at phase-load time");
+
+    let mut out = String::with_capacity(32 * 1024);
+    out.push_str(LOADER_TEMPLATE_HEAD);
+
+    for variant in registry.all() {
+        // `render_colorscheme` produces:
+        //   -- slate-managed palette for <id>\n{ ... }
+        // We need the bare table `{ ... }` keyed by the variant id inside
+        // the PALETTES block; strip the leading comment line by slicing
+        // after the first newline.
+        let sub = render_colorscheme(&variant.palette, &variant.id);
+        let body = sub.split_once('\n').map(|x| x.1).unwrap_or(&sub);
+
+        out.push_str("  ['");
+        out.push_str(&variant.id);
+        out.push_str("'] = ");
+        out.push_str(body);
+        out.push_str(",\n");
+    }
+
+    out.push_str(LOADER_TEMPLATE_MID);
+    // Plan 04 splices lualine theme entries here; Plan 03 leaves it empty.
+    out.push_str(LOADER_TEMPLATE_TAIL);
+    out
 }
 
 #[cfg(test)]
@@ -428,5 +659,230 @@ mod tests {
             .clone();
         let out = render_colorscheme(&v.palette, &v.id);
         insta::assert_snapshot!("nvim_render_colorscheme_catppuccin_mocha", out);
+    }
+
+    // ── write_state_file — Plan 17-03 Task 2 ──────────────────────────
+
+    #[test]
+    fn write_state_file_writes_exact_content() {
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        write_state_file(&env, "catppuccin-mocha").expect("write ok");
+        let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
+        assert_eq!(got, "return \"catppuccin-mocha\"\n");
+    }
+
+    #[test]
+    fn write_state_file_creates_parent_directory() {
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let path = state_file_path(&env);
+        // Precondition: cache dir must be absent before the call.
+        assert!(
+            !path.parent().expect("has parent").exists(),
+            "precondition: cache dir must be absent before write_state_file"
+        );
+        write_state_file(&env, "tokyo-night-dark").expect("creates parent");
+        assert!(path.exists(), "state file should exist after write");
+    }
+
+    #[test]
+    fn write_state_file_is_overwrite_not_append() {
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        write_state_file(&env, "a").expect("write a");
+        write_state_file(&env, "b").expect("write b");
+        let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
+        assert_eq!(got, "return \"b\"\n");
+    }
+
+    #[test]
+    fn lua_string_literal_escapes_metachars() {
+        assert_eq!(lua_string_literal("simple"), "\"simple\"");
+        assert_eq!(lua_string_literal("has\"quote"), "\"has\\\"quote\"");
+        assert_eq!(lua_string_literal("has\\back"), "\"has\\\\back\"");
+    }
+
+    #[test]
+    fn write_state_file_escapes_quote_metachar() {
+        // Defensive: even though variant ids are kebab-case ASCII in
+        // practice, the escaping contract must hold for any input that
+        // could ever reach this call path (future id schemes).
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        write_state_file(&env, "has\"quote").expect("write escapes quote");
+        let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
+        assert_eq!(got, "return \"has\\\"quote\"\n");
+    }
+
+    #[test]
+    fn write_state_file_escapes_backslash_metachar() {
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        write_state_file(&env, "has\\back").expect("write escapes backslash");
+        let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
+        assert_eq!(got, "return \"has\\\\back\"\n");
+    }
+
+    #[test]
+    fn write_state_file_loop_yields_final_variant_content() {
+        // Atomicity is a structural property of AtomicWriteFile::commit
+        // (fsync+rename). We can't observe mid-write partial state in
+        // pure Rust, so the practical proof is: N writes in a tight
+        // loop produce a file whose final content matches the last
+        // write exactly (no appends, no partial writes surviving).
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        for i in 0..25 {
+            write_state_file(&env, &format!("variant-{i:02}")).expect("write");
+        }
+        let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
+        assert_eq!(got, "return \"variant-24\"\n");
+    }
+
+    // ── render_loader — Plan 17-03 Task 3 ──────────────────────────────
+
+    #[test]
+    fn render_loader_includes_uv_compat_shim() {
+        // Pitfall 1 (17-RESEARCH §Pitfall 1): nvim 0.8–0.9 ship only
+        // `vim.loop`; `vim.uv` alias arrives in 0.10. The compat shim
+        // keeps the watcher working across supported versions.
+        let out = render_loader();
+        assert!(
+            out.contains("local uv = vim.uv or vim.loop"),
+            "Pitfall 1: missing uv compat shim"
+        );
+    }
+
+    #[test]
+    fn render_loader_includes_100ms_debounce() {
+        // Pitfall 2: macOS APFS fires 2–3 fs_events on an atomic rename;
+        // the 100 ms debounce collapses them so M.load runs once.
+        let out = render_loader();
+        assert!(
+            out.contains("start(100, 0,"),
+            "Pitfall 2: missing 100ms debounce timer start"
+        );
+    }
+
+    #[test]
+    fn render_loader_registers_vim_leave_pre_cleanup() {
+        // Prevents orphan libuv handles leaking past nvim exit.
+        let out = render_loader();
+        assert!(out.contains("VimLeavePre"), "missing VimLeavePre autocmd");
+        assert!(
+            out.contains("watcher:close"),
+            "missing watcher close inside cleanup"
+        );
+    }
+
+    #[test]
+    fn render_loader_guards_lualine_package_load() {
+        // Pitfall 5: only refresh lualine when it's already loaded — we
+        // must never force-require it.
+        let out = render_loader();
+        let single_quoted = out.contains("package.loaded['lualine']");
+        let double_quoted = out.contains("package.loaded[\"lualine\"]");
+        assert!(
+            single_quoted || double_quoted,
+            "Pitfall 5: lualine must be package.loaded-guarded"
+        );
+    }
+
+    #[test]
+    fn render_loader_fires_colorscheme_autocmd() {
+        let out = render_loader();
+        assert!(
+            out.contains("doautocmd ColorScheme"),
+            "missing doautocmd ColorScheme fire"
+        );
+    }
+
+    #[test]
+    fn render_loader_includes_palettes_for_all_builtin_variants() {
+        let out = render_loader();
+        let registry = ThemeRegistry::new().expect("registry init");
+        for v in registry.all() {
+            let key = format!("['{}']", v.id);
+            assert!(
+                out.contains(&key),
+                "missing PALETTES entry for variant id {} (key {:?})",
+                v.id,
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn render_loader_declares_lualine_themes_table() {
+        // Plan 03 ships an EMPTY `LUALINE_THEMES = {}`; Plan 04 fills it.
+        let out = render_loader();
+        assert!(
+            out.contains("local LUALINE_THEMES = {"),
+            "missing LUALINE_THEMES table declaration"
+        );
+    }
+
+    #[test]
+    fn render_loader_ends_with_return_m() {
+        let out = render_loader();
+        let tail = &out[out.len().saturating_sub(80)..];
+        assert!(
+            out.trim_end().ends_with("return M"),
+            "loader must end with `return M`, got tail: {:?}",
+            tail
+        );
+    }
+
+    #[test]
+    fn render_loader_is_deterministic() {
+        let a = render_loader();
+        let b = render_loader();
+        assert_eq!(a, b, "render_loader must be deterministic");
+    }
+
+    #[test]
+    fn render_loader_uses_lf_line_endings() {
+        let out = render_loader();
+        assert!(!out.contains('\r'), "loader must use LF only");
+    }
+
+    #[test]
+    fn render_loader_size_is_bounded() {
+        let out = render_loader();
+        assert!(
+            out.len() >= 2_500,
+            "loader too small: {} bytes (expected >= 2500)",
+            out.len()
+        );
+        // 18 variants × ~5-15 KB each + ~3 KB skeleton. Cap at 512 KB.
+        assert!(
+            out.len() <= 512 * 1024,
+            "loader too large: {} bytes (expected <= 512KB)",
+            out.len()
+        );
+    }
+
+    #[test]
+    fn render_loader_calls_nvim_set_hl() {
+        // D-05: M.load applies groups via the Lua API, never via
+        // `:highlight` command strings.
+        let out = render_loader();
+        assert!(
+            out.contains("vim.api.nvim_set_hl"),
+            "M.load must call nvim_set_hl per D-05"
+        );
     }
 }
