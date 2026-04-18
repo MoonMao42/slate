@@ -248,6 +248,11 @@ struct SharedShellModel {
     bat_theme: String,
     eza_config_dir: String,
     lg_config_file: String,
+    // Plan 16-04 (D-A6): shell-quoted LS_COLORS / EZA_COLORS strings,
+    // rendered from the active palette by `ls_colors::render_strings` and
+    // emitted from render_shared_exports (POSIX) / render_fish_shell (fish).
+    ls_colors: String,
+    eza_colors: String,
     fastfetch_config_path: String,
     plain_starship_path: String,
     active_starship_path: String,
@@ -297,6 +302,13 @@ impl SharedShellModel {
             });
         }
 
+        // Plan 16-04 D-A6: project the active palette into shell-ready
+        // LS_COLORS / EZA_COLORS strings. The renderer lives in
+        // `src/adapter/ls_colors.rs`; we shell-quote the results once so the
+        // two env var exports can be interpolated into POSIX `export X={}` /
+        // fish `set -gx X {}` lines without further escaping.
+        let (raw_ls, raw_eza) = crate::adapter::ls_colors::render_strings(&theme.palette);
+
         Self {
             path_entries,
             bat_theme: shell_quote(
@@ -311,6 +323,8 @@ impl SharedShellModel {
                 "{}/lazygit/config.yml:{}/lazygit/config.yml",
                 options.managed_root, options.user_config_root
             )),
+            ls_colors: shell_quote(&raw_ls),
+            eza_colors: shell_quote(&raw_eza),
             fastfetch_config_path: shell_quote(&format!(
                 "{}/fastfetch/config.jsonc",
                 options.managed_root
@@ -360,6 +374,8 @@ fn render_shared_exports(content: &mut String, model: &SharedShellModel) {
     content.push_str(&format!("export BAT_THEME={}\n", model.bat_theme));
     content.push_str(&format!("export EZA_CONFIG_DIR={}\n", model.eza_config_dir));
     content.push_str(&format!("export LG_CONFIG_FILE={}\n", model.lg_config_file));
+    content.push_str(&format!("export LS_COLORS={}\n", model.ls_colors));
+    content.push_str(&format!("export EZA_COLORS={}\n", model.eza_colors));
 }
 
 fn render_posix_fastfetch_wrapper(content: &mut String, model: &SharedShellModel) {
@@ -477,6 +493,8 @@ fn render_fish_shell(model: &SharedShellModel) -> String {
         "set -gx LG_CONFIG_FILE {}\n",
         model.lg_config_file
     ));
+    content.push_str(&format!("set -gx LS_COLORS {}\n", model.ls_colors));
+    content.push_str(&format!("set -gx EZA_COLORS {}\n", model.eza_colors));
     content.push_str(&format!(
         "function fastfetch\n  command fastfetch -c {} $argv\nend\n",
         model.fastfetch_config_path
@@ -772,8 +790,142 @@ mod tests {
 
         assert!(files.fish.contains("set -gx BAT_THEME "));
         assert!(files.fish.contains("set -gx EZA_CONFIG_DIR "));
+        assert!(files.fish.contains("set -gx LS_COLORS "));
+        assert!(files.fish.contains("set -gx EZA_COLORS "));
         assert!(files.fish.contains("function fastfetch"));
         assert!(files.fish.contains("starship init fish | source"));
+    }
+
+    // --- Plan 16-04 tests: LS_COLORS / EZA_COLORS env-var wiring ---
+
+    fn sample_theme() -> crate::theme::ThemeVariant {
+        crate::theme::catppuccin::catppuccin_mocha().unwrap()
+    }
+
+    fn sample_model() -> SharedShellModel {
+        SharedShellModel::new(&sample_theme(), &sample_options())
+    }
+
+    /// Strip the surrounding single quotes that `shell_quote` adds, so tests
+    /// can inspect the raw rendered `LS_COLORS` / `EZA_COLORS` body.
+    fn strip_shell_quotes(value: &str) -> &str {
+        value
+            .strip_prefix('\'')
+            .and_then(|s| s.strip_suffix('\''))
+            .unwrap_or(value)
+    }
+
+    #[test]
+    fn shared_shell_model_has_ls_colors_field() {
+        let model = sample_model();
+        let raw = strip_shell_quotes(&model.ls_colors);
+        assert!(
+            !raw.is_empty(),
+            "ls_colors should be populated (got empty string)",
+        );
+        assert!(
+            raw.contains("rs=0"),
+            "ls_colors should start with `rs=0` sentinel; got={raw}",
+        );
+    }
+
+    #[test]
+    fn shared_shell_model_has_eza_colors_field() {
+        let model = sample_model();
+        let raw = strip_shell_quotes(&model.eza_colors);
+        assert!(
+            raw.starts_with("reset"),
+            "eza_colors should start with `reset` sentinel; got={raw}",
+        );
+    }
+
+    #[test]
+    fn render_shared_exports_includes_ls_colors_line() {
+        let mut content = String::new();
+        let model = sample_model();
+        render_shared_exports(&mut content, &model);
+        assert!(
+            content.contains("export LS_COLORS="),
+            "expected `export LS_COLORS=` line; got content={content}",
+        );
+    }
+
+    #[test]
+    fn render_shared_exports_includes_eza_colors_line() {
+        let mut content = String::new();
+        let model = sample_model();
+        render_shared_exports(&mut content, &model);
+        assert!(
+            content.contains("export EZA_COLORS="),
+            "expected `export EZA_COLORS=` line; got content={content}",
+        );
+    }
+
+    #[test]
+    fn render_shared_exports_ls_colors_is_shell_quoted() {
+        let mut content = String::new();
+        let model = sample_model();
+        render_shared_exports(&mut content, &model);
+        // Match `export LS_COLORS='<body>'\n` — single-quoted value + newline.
+        let pattern = regex::Regex::new(r"export LS_COLORS='[^']+'\n").expect("regex");
+        assert!(
+            pattern.is_match(&content),
+            "LS_COLORS export must be single-quoted; content={content}",
+        );
+        let eza_pattern = regex::Regex::new(r"export EZA_COLORS='[^']+'\n").expect("regex");
+        assert!(
+            eza_pattern.is_match(&content),
+            "EZA_COLORS export must be single-quoted; content={content}",
+        );
+    }
+
+    #[test]
+    fn render_fish_shell_uses_set_gx_for_ls_colors() {
+        let fish = render_fish_shell(&sample_model());
+        assert!(
+            fish.contains("set -gx LS_COLORS "),
+            "fish renderer must emit `set -gx LS_COLORS ` line; got fish={fish}",
+        );
+    }
+
+    #[test]
+    fn render_fish_shell_uses_set_gx_for_eza_colors() {
+        let fish = render_fish_shell(&sample_model());
+        assert!(
+            fish.contains("set -gx EZA_COLORS "),
+            "fish renderer must emit `set -gx EZA_COLORS ` line; got fish={fish}",
+        );
+    }
+
+    #[test]
+    fn fish_does_not_use_export_syntax_for_ls_eza() {
+        let fish = render_fish_shell(&sample_model());
+        assert!(
+            !fish.contains("export LS_COLORS"),
+            "fish renderer must not use POSIX `export LS_COLORS` syntax (D-A2)",
+        );
+        assert!(
+            !fish.contains("export EZA_COLORS"),
+            "fish renderer must not use POSIX `export EZA_COLORS` syntax (D-A2)",
+        );
+    }
+
+    #[test]
+    fn ls_colors_string_contains_truecolor_code() {
+        // Confirms the end-to-end truecolor pipeline: palette → render_strings
+        // → shell-quoted field → ready-to-emit string.
+        let model = sample_model();
+        let raw_ls = strip_shell_quotes(&model.ls_colors);
+        let raw_eza = strip_shell_quotes(&model.eza_colors);
+        let pattern = regex::Regex::new(r"38;2;\d+;\d+;\d+").expect("regex");
+        assert!(
+            pattern.is_match(raw_ls),
+            "ls_colors must contain 24-bit truecolor code; got={raw_ls}",
+        );
+        assert!(
+            pattern.is_match(raw_eza),
+            "eza_colors must contain 24-bit truecolor code; got={raw_eza}",
+        );
     }
 
     #[test]

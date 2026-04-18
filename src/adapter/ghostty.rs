@@ -345,7 +345,9 @@ impl GhosttyAdapter {
         // Theme switches should only affect colors, not fonts.
         // Font changes are an orthogonal concern managed separately.
 
-        Ok(ApplyOutcome::Applied)
+        // Ghostty hot-reloads the current window via its AppleScript API;
+        // the theme change is visible without spawning a new shell.
+        Ok(ApplyOutcome::applied_no_shell())
     }
 
     pub fn integration_config_path_with_env(&self, env: &SlateEnv) -> Result<PathBuf> {

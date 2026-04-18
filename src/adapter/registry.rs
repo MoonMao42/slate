@@ -13,10 +13,16 @@ pub enum ToolApplyStatus {
 }
 
 /// Structured adapter result emitted by ToolRegistry.
+///
+/// `requires_new_shell` is captured from `ApplyOutcome::Applied` when the adapter
+/// succeeds; it is `false` for `Skipped` / `Failed` outcomes since no change was
+/// made that would need a new shell. Plan 16-04 aggregates this field across the
+/// per-run result set to drive the Phase 16 UX-01 new-terminal reminder.
 #[derive(Debug)]
 pub struct ToolApplyResult {
     pub tool_name: String,
     pub status: ToolApplyStatus,
+    pub requires_new_shell: bool,
 }
 
 /// Registry for all tool adapters.
@@ -93,17 +99,25 @@ impl ToolRegistry {
             })
             .map(|adapter| {
                 let tool_name = adapter.tool_name().to_string();
-                let status = match adapter.is_installed() {
-                    Ok(false) => ToolApplyStatus::Skipped(SkipReason::NotInstalled),
+                let (status, requires_new_shell) = match adapter.is_installed() {
+                    Ok(false) => (ToolApplyStatus::Skipped(SkipReason::NotInstalled), false),
                     Ok(true) => match adapter.apply_theme(theme) {
-                        Ok(ApplyOutcome::Applied) => ToolApplyStatus::Applied,
-                        Ok(ApplyOutcome::Skipped(reason)) => ToolApplyStatus::Skipped(reason),
-                        Err(err) => ToolApplyStatus::Failed(err),
+                        Ok(ApplyOutcome::Applied { requires_new_shell }) => {
+                            (ToolApplyStatus::Applied, requires_new_shell)
+                        }
+                        Ok(ApplyOutcome::Skipped(reason)) => {
+                            (ToolApplyStatus::Skipped(reason), false)
+                        }
+                        Err(err) => (ToolApplyStatus::Failed(err), false),
                     },
-                    Err(err) => ToolApplyStatus::Failed(err),
+                    Err(err) => (ToolApplyStatus::Failed(err), false),
                 };
 
-                ToolApplyResult { tool_name, status }
+                ToolApplyResult {
+                    tool_name,
+                    status,
+                    requires_new_shell,
+                }
             })
             .collect()
     }
@@ -120,6 +134,25 @@ impl ToolRegistry {
     }
 }
 
+/// Aggregate `requires_new_shell` across a batch of adapter results.
+///
+/// Plan 16-04 / D-D6: returns `true` iff at least one result is a successful
+/// apply (`ToolApplyStatus::Applied`) **and** carries `requires_new_shell ==
+/// true`. `Failed` and `Skipped` results never contribute — the aggregator
+/// reflects changes that actually landed, so it only counts successes.
+///
+/// Intended consumer: the four CLI command handlers (`setup`, `theme`, `font`,
+/// `config`) in Plan 16-06. Each handler reads this bool once at the end of
+/// its run and decides whether to emit the platform-aware new-terminal
+/// reminder. Keeping the aggregator as a free function (not a method on
+/// `ToolRegistry` / `ToolApplyResult`) matches RESEARCH §Pattern 5 Option A
+/// and keeps call sites to a single one-liner.
+pub fn requires_new_shell(results: &[ToolApplyResult]) -> bool {
+    results
+        .iter()
+        .any(|r| matches!(r.status, ToolApplyStatus::Applied) && r.requires_new_shell)
+}
+
 impl Default for ToolRegistry {
     fn default() -> Self {
         let mut registry = Self::new();
@@ -133,6 +166,7 @@ impl Default for ToolRegistry {
         registry.register(Box::new(crate::adapter::EzaAdapter));
         registry.register(Box::new(crate::adapter::LazygitAdapter));
         registry.register(Box::new(crate::adapter::FastfetchAdapter));
+        registry.register(Box::new(crate::adapter::LsColorsAdapter));
         registry.register(Box::new(crate::adapter::ZshHighlightAdapter));
         registry.register(Box::new(crate::adapter::TmuxAdapter));
         registry.register(Box::new(crate::adapter::FontAdapter));
@@ -173,7 +207,9 @@ mod tests {
         }
 
         fn apply_theme(&self, _theme: &ThemeVariant) -> Result<ApplyOutcome> {
-            Ok(ApplyOutcome::Applied)
+            Ok(ApplyOutcome::Applied {
+                requires_new_shell: false,
+            })
         }
     }
 
@@ -209,7 +245,7 @@ mod tests {
     #[test]
     fn test_registry_default() {
         let registry = ToolRegistry::default();
-        assert_eq!(registry.adapters().len(), 12);
+        assert_eq!(registry.adapters().len(), 13);
     }
 
     #[test]
@@ -274,5 +310,82 @@ mod registry_extended_tests {
         assert!(registry.get_adapter("alacritty").is_some());
         assert!(registry.get_adapter("delta").is_some());
         assert!(registry.get_adapter("tmux").is_some());
+    }
+}
+
+#[cfg(test)]
+mod requires_new_shell_tests {
+    //! Plan 16-04 Task 2: D-D6-compliant aggregator — only successful
+    //! `Applied` results with `requires_new_shell == true` contribute;
+    //! `Failed` / `Skipped` never do.
+
+    use super::*;
+    use crate::adapter::SkipReason;
+    use crate::error::SlateError;
+
+    fn applied(name: &str, needs_new_shell: bool) -> ToolApplyResult {
+        ToolApplyResult {
+            tool_name: name.to_string(),
+            status: ToolApplyStatus::Applied,
+            requires_new_shell: needs_new_shell,
+        }
+    }
+
+    fn failed(name: &str, needs_new_shell: bool) -> ToolApplyResult {
+        ToolApplyResult {
+            tool_name: name.to_string(),
+            status: ToolApplyStatus::Failed(SlateError::Internal("test failure".into())),
+            requires_new_shell: needs_new_shell,
+        }
+    }
+
+    fn skipped(name: &str, needs_new_shell: bool) -> ToolApplyResult {
+        ToolApplyResult {
+            tool_name: name.to_string(),
+            status: ToolApplyStatus::Skipped(SkipReason::NotInstalled),
+            requires_new_shell: needs_new_shell,
+        }
+    }
+
+    #[test]
+    fn requires_new_shell_true_when_any_applied_with_flag() {
+        let results = vec![applied("bat", true)];
+        assert!(requires_new_shell(&results));
+    }
+
+    #[test]
+    fn requires_new_shell_false_when_all_applied_without_flag() {
+        let results = vec![
+            applied("ghostty", false),
+            applied("alacritty", false),
+            applied("kitty", false),
+        ];
+        assert!(!requires_new_shell(&results));
+    }
+
+    #[test]
+    fn requires_new_shell_ignores_failed_adapters() {
+        // D-D6: failures never contribute even if the failed adapter set the
+        // signal bool to true.
+        let results = vec![failed("bat", true)];
+        assert!(!requires_new_shell(&results));
+    }
+
+    #[test]
+    fn requires_new_shell_ignores_skipped_adapters() {
+        let results = vec![skipped("ls_colors", true)];
+        assert!(!requires_new_shell(&results));
+    }
+
+    #[test]
+    fn requires_new_shell_mixed_succeed_and_fail() {
+        let results = vec![applied("bat", true), failed("tmux", false)];
+        assert!(requires_new_shell(&results));
+    }
+
+    #[test]
+    fn requires_new_shell_empty_vec_is_false() {
+        let results: Vec<ToolApplyResult> = Vec::new();
+        assert!(!requires_new_shell(&results));
     }
 }

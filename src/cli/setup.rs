@@ -8,6 +8,13 @@ use crate::error::Result;
 use std::io::IsTerminal;
 use std::time::Instant;
 
+fn should_emit_new_shell_reminder_after_setup(theme_applied: bool) -> bool {
+    // Setup always rewrites the managed shell env files before it wires the
+    // loader, so a successful shell-integration phase always leaves at least
+    // one change that becomes visible in a fresh shell.
+    theme_applied
+}
+
 /// Handle `slate setup` command with injected SlateEnv (preferred for testability)
 pub fn handle_with_env(
     quick: bool,
@@ -124,6 +131,21 @@ pub fn handle_with_env(
 
     crate::cli::sound::play_feedback();
 
+    // UX-02 (D-D3): new-shell reminder sits BETWEEN the receipt card and the
+    // demo hint. Only fires when at least one successful adapter declared
+    // `requires_new_shell=true` (Plan 16-04 aggregator). `setup` has no
+    // --auto / --quiet flags at this surface, so both guards are false.
+    // `summary.theme_results` is populated by
+    // setup_executor/integration.rs (`summary.set_theme_results(report.results)`)
+    // — no plumbing change required here.
+    if should_emit_new_shell_reminder_after_setup(summary.theme_applied) {
+        crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
+    }
+
+    // DEMO-02 (D-C1): single-line hint pointing at `slate demo`. setup has no
+    // --auto / --quiet flags at this surface, so both guards are false.
+    crate::cli::demo::emit_demo_hint_once(false, false);
+
     Ok(())
 }
 
@@ -227,6 +249,7 @@ fn format_completion_timing(start_time: Option<Instant>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::new_shell_reminder::REMINDER_TEST_LOCK;
     use crate::opacity::OpacityPreset;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -274,6 +297,47 @@ mod tests {
     #[test]
     fn test_format_completion_timing_none() {
         assert!(format_completion_timing(None).is_none());
+    }
+
+    /// Simulate the decision point in `handle_with_env` that guards the
+    /// `emit_new_shell_reminder_once` call. This isolates the wiring
+    /// (successful shell-integration phase → emitter) from wizard + preflight
+    /// + stdin-TTY coupling that makes the full handler untestable in-process.
+    fn setup_emit_branch(theme_applied: bool) {
+        if should_emit_new_shell_reminder_after_setup(theme_applied) {
+            crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
+        }
+    }
+
+    #[test]
+    fn setup_handler_emits_reminder_when_shell_integration_succeeds() {
+        let _guard = REMINDER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        crate::cli::new_shell_reminder::reset_reminder_flag_for_tests();
+        assert!(!crate::cli::new_shell_reminder::reminder_flag_for_tests());
+
+        setup_emit_branch(true);
+
+        assert!(
+            crate::cli::new_shell_reminder::reminder_flag_for_tests(),
+            "setup handler must transition the reminder flag after the shell-integration phase succeeds"
+        );
+    }
+
+    #[test]
+    fn setup_handler_skips_reminder_when_shell_integration_fails() {
+        let _guard = REMINDER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        crate::cli::new_shell_reminder::reset_reminder_flag_for_tests();
+
+        setup_emit_branch(false);
+
+        assert!(
+            !crate::cli::new_shell_reminder::reminder_flag_for_tests(),
+            "setup handler must leave the flag untouched when shell integration did not complete"
+        );
     }
 
     #[test]

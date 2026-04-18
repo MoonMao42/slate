@@ -169,6 +169,58 @@ impl Language {
     // CLI surface
     pub const SLATE_SET_DEPRECATION_TIP: &str = "(i) Tip: 'slate set' is transitioning to 'slate theme'. Try 'slate theme <name>' next time.";
 
+    /// Demo hint shown once per process after `slate setup` or `slate theme <id>`
+    /// success (per D-C4). Brand-voiced, curiosity-lure — NOT `(i) Tip:` advisory tone.
+    /// Start with the ✦ glyph; keep ≤76 chars so `Typography::explanation`
+    /// (2-space indent) doesn't wrap at 80 cols.
+    pub const DEMO_HINT: &str = "✦ See this palette come alive — run `slate demo`";
+
+    /// Brand-voiced size-gate rejection for `slate demo`. Reports both the
+    /// minimum required (80×24) and the actual terminal (cols, rows) so the
+    /// user understands the gap.
+    pub fn demo_size_error(cols: u16, rows: u16) -> String {
+        format!(
+            "✦ slate demo needs an 80×24 window to breathe. Your terminal is {cols}×{rows}. Resize and try again."
+        )
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Phase 16 (LS-03 / UX-03) — brand-voiced shell-integration copy
+    // ────────────────────────────────────────────────────────────
+
+    /// macOS variant of the reveal-framed new-shell reminder.
+    /// Points to `⌘N` as the canvas where the new palette lives. Active voice;
+    /// no "please"; no "you need to". ≤76 chars so 2-space indent fits 80 cols.
+    pub const NEW_SHELL_REMINDER_MACOS: &str =
+        "✦ ⌘N for a fresh shell — your new palette lives there";
+
+    /// Non-macOS variant. Frames the new terminal (not "this one") as the
+    /// canvas. Active voice; no "please"; no "you need to". ≤76 chars.
+    pub const NEW_SHELL_REMINDER_LINUX: &str =
+        "✦ Open a new terminal — your new palette lives there";
+
+    /// UX-03 (D-D7): platform-aware reveal-framed reminder emitted at the tail
+    /// of `slate setup` / `theme` / `font` / `config` when any successful
+    /// adapter declared `RequiresNewShell`. Compile-time branch per RESEARCH
+    /// §Pattern 7 — simpler than routing through `platform::packages` and
+    /// keeps `Language` self-contained.
+    pub fn new_shell_reminder() -> &'static str {
+        if cfg!(target_os = "macos") {
+            Self::NEW_SHELL_REMINDER_MACOS
+        } else {
+            Self::NEW_SHELL_REMINDER_LINUX
+        }
+    }
+
+    /// LS-03 (D-B4): one-time macOS BSD-`ls` capability message emitted from
+    /// the setup preflight when `gls` (GNU ls from coreutils) is absent.
+    /// Shape: observation → consequence → `brew install coreutils`. Tone
+    /// mirrors `demo_size_error`: gentle, brand-voiced, ends with the fix.
+    /// Multi-line so it breathes inside the preflight printout block.
+    pub fn ls_capability_message() -> &'static str {
+        "✦ This macOS ships with BSD `ls`; the slate-managed LS_COLORS needs GNU `ls` to render.\n  Install it with `brew install coreutils` and your next shell lights up."
+    }
+
     // Hub menu labels
     pub const HUB_SWITCH_THEME: &str = "✦ Switch Theme";
     pub const HUB_PAUSE_AUTO_PICK: &str = "✦ Pause Auto & Pick Theme";
@@ -254,5 +306,157 @@ mod tests {
         assert!(summary.contains("2026-04-09T10-00-00Z"));
         assert!(summary.contains("Catppuccin Mocha"));
         assert!(summary.contains("5"));
+    }
+
+    #[test]
+    fn test_demo_hint_format() {
+        let hint = Language::DEMO_HINT;
+        assert!(hint.starts_with('✦'), "hint must start with ✦ glyph");
+        assert!(
+            hint.contains("slate demo"),
+            "hint must mention `slate demo`"
+        );
+        assert!(
+            !hint.starts_with("(i)"),
+            "hint must NOT use `(i) Tip:` advisory tone per D-C4"
+        );
+        assert!(
+            hint.chars().count() <= 76,
+            "hint is {} chars; must be ≤76 so 2-space-indent output doesn't wrap at 80 cols",
+            hint.chars().count()
+        );
+    }
+
+    #[test]
+    fn test_demo_size_error_mentions_required_and_actual() {
+        let msg = Language::demo_size_error(79, 23);
+        assert!(msg.contains("80"), "error must mention minimum cols");
+        assert!(msg.contains("79"), "error must include actual cols");
+        assert!(msg.contains("23"), "error must include actual rows");
+        assert!(
+            msg.contains("slate demo"),
+            "error must name the failing command"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Phase 16 Plan 03 — LS-03 / UX-03 brand-voice contract
+    // ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn ls_capability_message_shape() {
+        let msg = Language::ls_capability_message();
+        // Observation: mentions BSD or macOS
+        let obs_ok = msg.contains("BSD") || msg.contains("macOS");
+        assert!(
+            obs_ok,
+            "capability message must observe the macOS BSD ls situation: {msg:?}"
+        );
+        // Consequence: mentions LS_COLORS / coreutils / GNU
+        let consequence_ok =
+            msg.contains("LS_COLORS") || msg.contains("coreutils") || msg.contains("GNU");
+        assert!(
+            consequence_ok,
+            "capability message must name the consequence (LS_COLORS / GNU / coreutils): {msg:?}"
+        );
+        // Fix: ends with actionable brew command
+        assert!(
+            msg.contains("brew install coreutils"),
+            "capability message must end with the brew install command: {msg:?}"
+        );
+
+        // Order check: observation → consequence → fix
+        let obs_idx = msg
+            .find("BSD")
+            .or_else(|| msg.find("macOS"))
+            .expect("observation token present");
+        let consequence_idx = msg
+            .find("LS_COLORS")
+            .or_else(|| msg.find("coreutils"))
+            .or_else(|| msg.find("GNU"))
+            .expect("consequence token present");
+        let fix_idx = msg
+            .find("brew install coreutils")
+            .expect("fix token present");
+        assert!(
+            obs_idx <= consequence_idx,
+            "observation must come before consequence"
+        );
+        assert!(
+            consequence_idx <= fix_idx,
+            "consequence must come before fix"
+        );
+    }
+
+    #[test]
+    fn ls_capability_message_brand_voice() {
+        let msg = Language::ls_capability_message();
+        assert!(
+            msg.starts_with('✦'),
+            "capability message must start with ✦: {msg:?}"
+        );
+        let lower = msg.to_lowercase();
+        assert!(
+            !lower.contains("please"),
+            "capability message must not contain 'please': {msg:?}"
+        );
+        assert!(
+            !lower.contains("you need to"),
+            "capability message must not contain 'you need to': {msg:?}"
+        );
+    }
+
+    #[test]
+    fn new_shell_reminder_copy_brand_voice() {
+        let msg = Language::new_shell_reminder();
+        assert!(msg.starts_with('✦'), "reminder must start with ✦: {msg:?}");
+        let lower = msg.to_lowercase();
+        assert!(
+            !lower.contains("please"),
+            "reminder must not contain 'please': {msg:?}"
+        );
+        assert!(
+            !lower.contains("you need to"),
+            "reminder must not contain 'you need to': {msg:?}"
+        );
+        let width = msg.chars().count();
+        assert!(
+            width <= 76,
+            "reminder is {width} chars; must be ≤76 so 2-space indent fits 80 cols: {msg:?}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn new_shell_reminder_platform_aware_macos() {
+        let msg = Language::new_shell_reminder();
+        assert!(
+            msg.contains("⌘N"),
+            "macOS reminder must contain ⌘N: {msg:?}"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn new_shell_reminder_platform_aware_linux() {
+        let msg = Language::new_shell_reminder();
+        let lower = msg.to_lowercase();
+        assert!(
+            lower.contains("terminal"),
+            "non-macOS reminder must mention 'terminal': {msg:?}"
+        );
+        assert!(
+            !msg.contains("⌘N"),
+            "non-macOS reminder must not contain ⌘N: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn new_shell_reminder_constants_differ() {
+        assert_ne!(
+            Language::NEW_SHELL_REMINDER_MACOS,
+            Language::NEW_SHELL_REMINDER_LINUX,
+            "platform reminder constants must differ"
+        );
     }
 }
