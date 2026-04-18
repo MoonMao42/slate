@@ -134,6 +134,25 @@ impl ToolRegistry {
     }
 }
 
+/// Aggregate `requires_new_shell` across a batch of adapter results.
+///
+/// Plan 16-04 / D-D6: returns `true` iff at least one result is a successful
+/// apply (`ToolApplyStatus::Applied`) **and** carries `requires_new_shell ==
+/// true`. `Failed` and `Skipped` results never contribute — the aggregator
+/// reflects changes that actually landed, so it only counts successes.
+///
+/// Intended consumer: the four CLI command handlers (`setup`, `theme`, `font`,
+/// `config`) in Plan 16-06. Each handler reads this bool once at the end of
+/// its run and decides whether to emit the platform-aware new-terminal
+/// reminder. Keeping the aggregator as a free function (not a method on
+/// `ToolRegistry` / `ToolApplyResult`) matches RESEARCH §Pattern 5 Option A
+/// and keeps call sites to a single one-liner.
+pub fn requires_new_shell(results: &[ToolApplyResult]) -> bool {
+    results
+        .iter()
+        .any(|r| matches!(r.status, ToolApplyStatus::Applied) && r.requires_new_shell)
+}
+
 impl Default for ToolRegistry {
     fn default() -> Self {
         let mut registry = Self::new();
