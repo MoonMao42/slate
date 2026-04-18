@@ -169,6 +169,21 @@ impl Language {
     // CLI surface
     pub const SLATE_SET_DEPRECATION_TIP: &str = "(i) Tip: 'slate set' is transitioning to 'slate theme'. Try 'slate theme <name>' next time.";
 
+    /// Demo hint shown once per process after `slate setup` or `slate theme <id>`
+    /// success (per D-C4). Brand-voiced, curiosity-lure — NOT `(i) Tip:` advisory tone.
+    /// Start with the ✦ glyph; keep ≤76 chars so `Typography::explanation`
+    /// (2-space indent) doesn't wrap at 80 cols.
+    pub const DEMO_HINT: &str = "✦ See this palette come alive — run `slate demo`";
+
+    /// Brand-voiced size-gate rejection for `slate demo`. Reports both the
+    /// minimum required (80×24) and the actual terminal (cols, rows) so the
+    /// user understands the gap.
+    pub fn demo_size_error(cols: u16, rows: u16) -> String {
+        format!(
+            "✦ slate demo needs an 80×24 window to breathe. Your terminal is {cols}×{rows}. Resize and try again."
+        )
+    }
+
     // Hub menu labels
     pub const HUB_SWITCH_THEME: &str = "✦ Switch Theme";
     pub const HUB_PAUSE_AUTO_PICK: &str = "✦ Pause Auto & Pick Theme";
