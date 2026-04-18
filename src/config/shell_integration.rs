@@ -248,6 +248,11 @@ struct SharedShellModel {
     bat_theme: String,
     eza_config_dir: String,
     lg_config_file: String,
+    // Plan 16-04 (D-A6): shell-quoted LS_COLORS / EZA_COLORS strings,
+    // rendered from the active palette by `ls_colors::render_strings` and
+    // emitted from render_shared_exports (POSIX) / render_fish_shell (fish).
+    ls_colors: String,
+    eza_colors: String,
     fastfetch_config_path: String,
     plain_starship_path: String,
     active_starship_path: String,
@@ -297,6 +302,13 @@ impl SharedShellModel {
             });
         }
 
+        // Plan 16-04 D-A6: project the active palette into shell-ready
+        // LS_COLORS / EZA_COLORS strings. The renderer lives in
+        // `src/adapter/ls_colors.rs`; we shell-quote the results once so the
+        // two env var exports can be interpolated into POSIX `export X={}` /
+        // fish `set -gx X {}` lines without further escaping.
+        let (raw_ls, raw_eza) = crate::adapter::ls_colors::render_strings(&theme.palette);
+
         Self {
             path_entries,
             bat_theme: shell_quote(
@@ -311,6 +323,8 @@ impl SharedShellModel {
                 "{}/lazygit/config.yml:{}/lazygit/config.yml",
                 options.managed_root, options.user_config_root
             )),
+            ls_colors: shell_quote(&raw_ls),
+            eza_colors: shell_quote(&raw_eza),
             fastfetch_config_path: shell_quote(&format!(
                 "{}/fastfetch/config.jsonc",
                 options.managed_root
@@ -360,6 +374,8 @@ fn render_shared_exports(content: &mut String, model: &SharedShellModel) {
     content.push_str(&format!("export BAT_THEME={}\n", model.bat_theme));
     content.push_str(&format!("export EZA_CONFIG_DIR={}\n", model.eza_config_dir));
     content.push_str(&format!("export LG_CONFIG_FILE={}\n", model.lg_config_file));
+    content.push_str(&format!("export LS_COLORS={}\n", model.ls_colors));
+    content.push_str(&format!("export EZA_COLORS={}\n", model.eza_colors));
 }
 
 fn render_posix_fastfetch_wrapper(content: &mut String, model: &SharedShellModel) {
@@ -477,6 +493,8 @@ fn render_fish_shell(model: &SharedShellModel) -> String {
         "set -gx LG_CONFIG_FILE {}\n",
         model.lg_config_file
     ));
+    content.push_str(&format!("set -gx LS_COLORS {}\n", model.ls_colors));
+    content.push_str(&format!("set -gx EZA_COLORS {}\n", model.eza_colors));
     content.push_str(&format!(
         "function fastfetch\n  command fastfetch -c {} $argv\nend\n",
         model.fastfetch_config_path
