@@ -28,7 +28,7 @@
 
 use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::cli::picker::preview_panel::SemanticColor;
-use crate::design::nvim_highlights::{HighlightSpec, Style, HIGHLIGHT_GROUPS};
+use crate::design::nvim_highlights::{lualine_theme, HighlightSpec, Style, HIGHLIGHT_GROUPS};
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::{Palette, ThemeRegistry};
@@ -435,7 +435,18 @@ pub fn render_loader() -> String {
     }
 
     out.push_str(LOADER_TEMPLATE_MID);
-    // Plan 04 splices lualine theme entries here; Plan 03 leaves it empty.
+    // Plan 04: splice one lualine theme table per variant into the
+    // LUALINE_THEMES block. `lualine_theme` returns a Lua table literal
+    // starting with `{` and ending with `}` (no trailing newline), so we
+    // wrap each entry as `  ['<id>'] = <table>,\n` exactly like the
+    // PALETTES splice above.
+    for variant in registry.all() {
+        out.push_str("  ['");
+        out.push_str(&variant.id);
+        out.push_str("'] = ");
+        out.push_str(&lualine_theme(&variant.palette));
+        out.push_str(",\n");
+    }
     out.push_str(LOADER_TEMPLATE_TAIL);
     out
 }
