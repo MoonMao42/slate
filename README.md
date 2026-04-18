@@ -58,7 +58,7 @@ Then run `slate setup`.
 
 ## What it does
 
-- One palette across Ghostty, Kitty, Alacritty, Starship, bat, delta, eza, lazygit, fastfetch, tmux, and zsh-syntax-highlighting.
+- One palette across Ghostty, Kitty, Alacritty, Starship, bat, delta, ls, eza, lazygit, fastfetch, tmux, and zsh-syntax-highlighting.
 - 🌓 Auto dark/light pairing — native watcher on macOS, XDG Desktop Portal (with GNOME fallback) on Linux.
 - Non-destructive: slate writes into managed include files and never edits your dotfiles in place. Snapshots before every change; one command to roll back.
 

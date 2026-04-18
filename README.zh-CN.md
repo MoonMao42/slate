@@ -58,7 +58,7 @@ cargo install slate-cli
 
 ## 它做了什么
 
-- 一套配色同步到 Ghostty、Kitty、Alacritty、Starship、bat、delta、eza、lazygit、fastfetch、tmux、zsh-syntax-highlighting。
+- 一套配色同步到 Ghostty、Kitty、Alacritty、Starship、bat、delta、ls、eza、lazygit、fastfetch、tmux、zsh-syntax-highlighting。
 - 🌓 自动跟随系统深浅色：macOS 走原生 watcher，Linux 优先走 XDG Desktop Portal（GNOME 可退回 `gsettings`）。
 - 不改你的 dotfile：slate 写进自己管的 include 文件里，每次改动前先快照，一条命令可回滚。
 
