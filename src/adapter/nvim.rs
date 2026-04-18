@@ -960,4 +960,143 @@ mod tests {
             out.len()
         );
     }
+
+    // ── Plan 17-05 Task 2: NvimAdapter ─────────────────────────────────
+
+    #[test]
+    fn nvim_adapter_tool_name() {
+        assert_eq!(NvimAdapter.tool_name(), "nvim");
+    }
+
+    #[test]
+    fn nvim_adapter_apply_strategy_is_write_and_include() {
+        assert!(matches!(
+            NvimAdapter.apply_strategy(),
+            ApplyStrategy::WriteAndInclude
+        ));
+    }
+
+    #[test]
+    fn nvim_adapter_apply_theme_with_env_writes_state_file_only() {
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let registry = ThemeRegistry::new().unwrap();
+        let theme = registry.get("catppuccin-mocha").unwrap().clone();
+
+        // (a) Fast-path returns Applied { requires_new_shell: false }.
+        let outcome = NvimAdapter
+            .apply_theme_with_env(&theme, &env)
+            .expect("apply_theme_with_env must succeed");
+        assert!(
+            matches!(
+                outcome,
+                ApplyOutcome::Applied {
+                    requires_new_shell: false
+                }
+            ),
+            "fast path must return Applied with requires_new_shell=false, got {:?}",
+            outcome
+        );
+
+        // (b) State file exists with the expected variant string.
+        let state = td.path().join(".cache/slate/current_theme.lua");
+        assert!(state.is_file(), "state file must exist at {:?}", state);
+        let content = std::fs::read_to_string(&state).unwrap();
+        assert!(
+            content.contains("catppuccin-mocha"),
+            "state file must contain variant id, got {:?}",
+            content
+        );
+
+        // (c) NO other slate files touched — the fast path is state-only.
+        let colors_dir = td.path().join(".config/nvim/colors");
+        assert!(
+            !colors_dir.exists(),
+            "fast path must NOT create colors/ dir; found {:?}",
+            colors_dir
+        );
+        let lua_slate_dir = td.path().join(".config/nvim/lua/slate");
+        assert!(
+            !lua_slate_dir.exists(),
+            "fast path must NOT create lua/slate/ dir; found {:?}",
+            lua_slate_dir
+        );
+    }
+
+    #[test]
+    fn nvim_adapter_setup_writes_full_install() {
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let registry = ThemeRegistry::new().unwrap();
+        let theme = registry.get("catppuccin-mocha").unwrap().clone();
+
+        NvimAdapter::setup(&env, &theme).expect("setup ok");
+
+        let colors_dir = td.path().join(".config/nvim/colors");
+        assert!(colors_dir.is_dir(), "colors dir must exist");
+
+        // Count slate-<id>.lua files — should equal registry.all().count().
+        let shim_count = std::fs::read_dir(&colors_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("slate-"))
+            .count();
+        assert_eq!(
+            shim_count,
+            registry.all().len(),
+            "one shim per built-in variant"
+        );
+
+        let loader = td.path().join(".config/nvim/lua/slate/init.lua");
+        assert!(loader.is_file(), "loader must exist");
+
+        let state = td.path().join(".cache/slate/current_theme.lua");
+        assert!(state.is_file(), "initial state file must exist");
+    }
+
+    #[test]
+    fn nvim_adapter_setup_is_idempotent() {
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let registry = ThemeRegistry::new().unwrap();
+        let theme = registry.get("catppuccin-mocha").unwrap().clone();
+
+        NvimAdapter::setup(&env, &theme).unwrap();
+        let loader1 =
+            std::fs::read_to_string(td.path().join(".config/nvim/lua/slate/init.lua")).unwrap();
+        let shim1 = std::fs::read_to_string(
+            td.path()
+                .join(".config/nvim/colors/slate-catppuccin-mocha.lua"),
+        )
+        .unwrap();
+
+        NvimAdapter::setup(&env, &theme).unwrap();
+        let loader2 =
+            std::fs::read_to_string(td.path().join(".config/nvim/lua/slate/init.lua")).unwrap();
+        let shim2 = std::fs::read_to_string(
+            td.path()
+                .join(".config/nvim/colors/slate-catppuccin-mocha.lua"),
+        )
+        .unwrap();
+
+        assert_eq!(loader1, loader2, "loader setup must be idempotent");
+        assert_eq!(shim1, shim2, "shim setup must be idempotent");
+    }
+
+    #[test]
+    fn nvim_adapter_managed_path_points_at_nvim_home() {
+        let path = NvimAdapter.managed_config_path();
+        let s = path.display().to_string();
+        assert!(
+            s.ends_with(".config/nvim") || s == ".config/nvim",
+            "managed path should be ~/.config/nvim, got {}",
+            s
+        );
+    }
 }
