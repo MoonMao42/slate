@@ -581,4 +581,138 @@ mod tests {
         let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
         assert_eq!(got, "return \"variant-24\"\n");
     }
+
+    // ── render_loader — Plan 17-03 Task 3 ──────────────────────────────
+
+    #[test]
+    fn render_loader_includes_uv_compat_shim() {
+        // Pitfall 1 (17-RESEARCH §Pitfall 1): nvim 0.8–0.9 ship only
+        // `vim.loop`; `vim.uv` alias arrives in 0.10. The compat shim
+        // keeps the watcher working across supported versions.
+        let out = render_loader();
+        assert!(
+            out.contains("local uv = vim.uv or vim.loop"),
+            "Pitfall 1: missing uv compat shim"
+        );
+    }
+
+    #[test]
+    fn render_loader_includes_100ms_debounce() {
+        // Pitfall 2: macOS APFS fires 2–3 fs_events on an atomic rename;
+        // the 100 ms debounce collapses them so M.load runs once.
+        let out = render_loader();
+        assert!(
+            out.contains("start(100, 0,"),
+            "Pitfall 2: missing 100ms debounce timer start"
+        );
+    }
+
+    #[test]
+    fn render_loader_registers_vim_leave_pre_cleanup() {
+        // Prevents orphan libuv handles leaking past nvim exit.
+        let out = render_loader();
+        assert!(out.contains("VimLeavePre"), "missing VimLeavePre autocmd");
+        assert!(
+            out.contains("watcher:close"),
+            "missing watcher close inside cleanup"
+        );
+    }
+
+    #[test]
+    fn render_loader_guards_lualine_package_load() {
+        // Pitfall 5: only refresh lualine when it's already loaded — we
+        // must never force-require it.
+        let out = render_loader();
+        let single_quoted = out.contains("package.loaded['lualine']");
+        let double_quoted = out.contains("package.loaded[\"lualine\"]");
+        assert!(
+            single_quoted || double_quoted,
+            "Pitfall 5: lualine must be package.loaded-guarded"
+        );
+    }
+
+    #[test]
+    fn render_loader_fires_colorscheme_autocmd() {
+        let out = render_loader();
+        assert!(
+            out.contains("doautocmd ColorScheme"),
+            "missing doautocmd ColorScheme fire"
+        );
+    }
+
+    #[test]
+    fn render_loader_includes_palettes_for_all_builtin_variants() {
+        let out = render_loader();
+        let registry = ThemeRegistry::new().expect("registry init");
+        for v in registry.all() {
+            let key = format!("['{}']", v.id);
+            assert!(
+                out.contains(&key),
+                "missing PALETTES entry for variant id {} (key {:?})",
+                v.id,
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn render_loader_declares_lualine_themes_table() {
+        // Plan 03 ships an EMPTY `LUALINE_THEMES = {}`; Plan 04 fills it.
+        let out = render_loader();
+        assert!(
+            out.contains("local LUALINE_THEMES = {"),
+            "missing LUALINE_THEMES table declaration"
+        );
+    }
+
+    #[test]
+    fn render_loader_ends_with_return_m() {
+        let out = render_loader();
+        let tail = &out[out.len().saturating_sub(80)..];
+        assert!(
+            out.trim_end().ends_with("return M"),
+            "loader must end with `return M`, got tail: {:?}",
+            tail
+        );
+    }
+
+    #[test]
+    fn render_loader_is_deterministic() {
+        let a = render_loader();
+        let b = render_loader();
+        assert_eq!(a, b, "render_loader must be deterministic");
+    }
+
+    #[test]
+    fn render_loader_uses_lf_line_endings() {
+        let out = render_loader();
+        assert!(!out.contains('\r'), "loader must use LF only");
+    }
+
+    #[test]
+    fn render_loader_size_is_bounded() {
+        let out = render_loader();
+        assert!(
+            out.len() >= 2_500,
+            "loader too small: {} bytes (expected >= 2500)",
+            out.len()
+        );
+        // 18 variants × ~5-15 KB each + ~3 KB skeleton. Cap at 512 KB.
+        assert!(
+            out.len() <= 512 * 1024,
+            "loader too large: {} bytes (expected <= 512KB)",
+            out.len()
+        );
+    }
+
+    #[test]
+    fn render_loader_calls_nvim_set_hl() {
+        // D-05: M.load applies groups via the Lua API, never via
+        // `:highlight` command strings.
+        let out = render_loader();
+        assert!(
+            out.contains("vim.api.nvim_set_hl"),
+            "M.load must call nvim_set_hl per D-05"
+        );
+    }
 }
