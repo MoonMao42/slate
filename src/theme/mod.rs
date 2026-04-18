@@ -190,6 +190,16 @@ impl Palette {
             SemanticColor::FileDocs => self.foreground.clone(),
             SemanticColor::FileConfig => self.bright_black.clone(),
             SemanticColor::FileHidden => self.bright_black.clone(),
+
+            // Editor theming (Phase 17 — consumed by src/adapter/nvim.rs).
+            // Temporary RED-stage stubs: tests must fail until cascading
+            // fallbacks land in the GREEN step.
+            SemanticColor::Background => String::new(),
+            SemanticColor::Surface => String::new(),
+            SemanticColor::SurfaceAlt => String::new(),
+            SemanticColor::Selection => String::new(),
+            SemanticColor::Border => String::new(),
+            SemanticColor::LspParameter => String::new(),
         }
     }
 }
@@ -771,5 +781,46 @@ mod semantic_color_tests {
             expected,
             "theme {theme_id} variant {variant:?} should resolve to {expected_slot}"
         );
+    }
+
+    /// Phase 17 — assert each of the 6 new editor-theming variants resolves
+    /// to a well-formed `#RRGGBB` hex string for every embedded theme. This
+    /// guards the cascading-fallback contract: even palettes missing the
+    /// preferred slot (e.g. Solarized has no `surface1`) must still resolve
+    /// through the cascade chain and return a printable hex.
+    #[rstest]
+    #[case::bg(SemanticColor::Background)]
+    #[case::surface(SemanticColor::Surface)]
+    #[case::surface_alt(SemanticColor::SurfaceAlt)]
+    #[case::selection(SemanticColor::Selection)]
+    #[case::border(SemanticColor::Border)]
+    #[case::lsp_parameter(SemanticColor::LspParameter)]
+    fn resolve_editor_variant_returns_valid_hex_for_all_themes(#[case] variant: SemanticColor) {
+        let registry = ThemeRegistry::new().expect("registry init");
+        for theme in registry.all() {
+            let hex = theme.palette.resolve(variant);
+            assert_eq!(
+                hex.len(),
+                7,
+                "theme {} variant {:?}: expected 7-char hex, got {:?}",
+                theme.id,
+                variant,
+                hex
+            );
+            assert!(
+                hex.starts_with('#'),
+                "theme {} variant {:?}: hex must start with #, got {:?}",
+                theme.id,
+                variant,
+                hex
+            );
+            assert!(
+                hex[1..].chars().all(|c| c.is_ascii_hexdigit()),
+                "theme {} variant {:?}: non-hex chars in {:?}",
+                theme.id,
+                variant,
+                hex
+            );
+        }
     }
 }

@@ -52,6 +52,14 @@ pub enum SemanticColor {
     FileDocs,
     FileConfig,
     FileHidden,
+
+    // Editor theming (Phase 17 — consumed by src/adapter/nvim.rs)
+    Background,
+    Surface,
+    SurfaceAlt,
+    Selection,
+    Border,
+    LspParameter,
 }
 
 /// A single span in the preview sample output with associated semantic color role.
