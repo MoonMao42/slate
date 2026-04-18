@@ -301,4 +301,128 @@ mod tests {
             "error must name the failing command"
         );
     }
+
+    // ────────────────────────────────────────────────────────────
+    // Phase 16 Plan 03 — LS-03 / UX-03 brand-voice contract
+    // ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn ls_capability_message_shape() {
+        let msg = Language::ls_capability_message();
+        // Observation: mentions BSD or macOS
+        let obs_ok = msg.contains("BSD") || msg.contains("macOS");
+        assert!(
+            obs_ok,
+            "capability message must observe the macOS BSD ls situation: {msg:?}"
+        );
+        // Consequence: mentions LS_COLORS / coreutils / GNU
+        let consequence_ok =
+            msg.contains("LS_COLORS") || msg.contains("coreutils") || msg.contains("GNU");
+        assert!(
+            consequence_ok,
+            "capability message must name the consequence (LS_COLORS / GNU / coreutils): {msg:?}"
+        );
+        // Fix: ends with actionable brew command
+        assert!(
+            msg.contains("brew install coreutils"),
+            "capability message must end with the brew install command: {msg:?}"
+        );
+
+        // Order check: observation → consequence → fix
+        let obs_idx = msg
+            .find("BSD")
+            .or_else(|| msg.find("macOS"))
+            .expect("observation token present");
+        let consequence_idx = msg
+            .find("LS_COLORS")
+            .or_else(|| msg.find("coreutils"))
+            .or_else(|| msg.find("GNU"))
+            .expect("consequence token present");
+        let fix_idx = msg
+            .find("brew install coreutils")
+            .expect("fix token present");
+        assert!(
+            obs_idx <= consequence_idx,
+            "observation must come before consequence"
+        );
+        assert!(
+            consequence_idx <= fix_idx,
+            "consequence must come before fix"
+        );
+    }
+
+    #[test]
+    fn ls_capability_message_brand_voice() {
+        let msg = Language::ls_capability_message();
+        assert!(
+            msg.starts_with('✦'),
+            "capability message must start with ✦: {msg:?}"
+        );
+        let lower = msg.to_lowercase();
+        assert!(
+            !lower.contains("please"),
+            "capability message must not contain 'please': {msg:?}"
+        );
+        assert!(
+            !lower.contains("you need to"),
+            "capability message must not contain 'you need to': {msg:?}"
+        );
+    }
+
+    #[test]
+    fn new_shell_reminder_copy_brand_voice() {
+        let msg = Language::new_shell_reminder();
+        assert!(
+            msg.starts_with('✦'),
+            "reminder must start with ✦: {msg:?}"
+        );
+        let lower = msg.to_lowercase();
+        assert!(
+            !lower.contains("please"),
+            "reminder must not contain 'please': {msg:?}"
+        );
+        assert!(
+            !lower.contains("you need to"),
+            "reminder must not contain 'you need to': {msg:?}"
+        );
+        let width = msg.chars().count();
+        assert!(
+            width <= 76,
+            "reminder is {width} chars; must be ≤76 so 2-space indent fits 80 cols: {msg:?}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn new_shell_reminder_platform_aware_macos() {
+        let msg = Language::new_shell_reminder();
+        assert!(
+            msg.contains("⌘N"),
+            "macOS reminder must contain ⌘N: {msg:?}"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn new_shell_reminder_platform_aware_linux() {
+        let msg = Language::new_shell_reminder();
+        let lower = msg.to_lowercase();
+        assert!(
+            lower.contains("terminal"),
+            "non-macOS reminder must mention 'terminal': {msg:?}"
+        );
+        assert!(
+            !msg.contains("⌘N"),
+            "non-macOS reminder must not contain ⌘N: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn new_shell_reminder_constants_differ() {
+        assert_ne!(
+            Language::NEW_SHELL_REMINDER_MACOS,
+            Language::NEW_SHELL_REMINDER_LINUX,
+            "platform reminder constants must differ"
+        );
+    }
 }

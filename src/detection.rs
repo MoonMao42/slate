@@ -364,6 +364,12 @@ pub fn command_path(command: &str) -> Option<PathBuf> {
     search_paths(command, &normalized_path_dirs())
 }
 
+/// GNU `ls` is installed as `gls` by Homebrew's coreutils formula.
+/// Used by the macOS preflight BSD-`ls` capability message (Phase 16, D-B1).
+pub fn is_gnu_ls_present() -> bool {
+    command_path("gls").is_some()
+}
+
 pub fn command_path_with_env(command: &str, env: &SlateEnv) -> Option<PathBuf> {
     search_paths(command, &normalized_path_dirs_for_home(Some(env.home())))
 }
@@ -646,5 +652,29 @@ mod tests {
         assert!(summary.reload.contains("remote control"));
         assert!(summary.live_preview.contains("supported"));
         assert!(summary.font_apply.contains("localized"));
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Phase 16 Plan 03 — is_gnu_ls_present helper (LS-03)
+    // ────────────────────────────────────────────────────────────
+
+    /// Pure-delegation check. `is_gnu_ls_present` must equal `command_path("gls").is_some()`
+    /// by construction; any future divergence should fail here loudly.
+    #[test]
+    fn is_gnu_ls_present_delegates_to_command_path() {
+        assert_eq!(is_gnu_ls_present(), command_path("gls").is_some());
+    }
+
+    /// Positive path — covered when the dev machine has brew's coreutils installed.
+    /// Skipped automatically on hosts without `gls` so CI on bare Linux/macOS images
+    /// isn't forced to install coreutils.
+    #[test]
+    fn is_gnu_ls_present_when_gls_on_path() {
+        if command_path("gls").is_none() {
+            // No gls on host; positive path is untestable here. Negative path is
+            // already covered by the delegation test above.
+            return;
+        }
+        assert!(is_gnu_ls_present());
     }
 }
