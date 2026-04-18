@@ -100,10 +100,7 @@ impl ToolRegistry {
             .map(|adapter| {
                 let tool_name = adapter.tool_name().to_string();
                 let (status, requires_new_shell) = match adapter.is_installed() {
-                    Ok(false) => (
-                        ToolApplyStatus::Skipped(SkipReason::NotInstalled),
-                        false,
-                    ),
+                    Ok(false) => (ToolApplyStatus::Skipped(SkipReason::NotInstalled), false),
                     Ok(true) => match adapter.apply_theme(theme) {
                         Ok(ApplyOutcome::Applied { requires_new_shell }) => {
                             (ToolApplyStatus::Applied, requires_new_shell)

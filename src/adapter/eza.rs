@@ -49,7 +49,9 @@ impl EzaAdapter {
         let config_manager = ConfigManager::with_env(env)?;
         config_manager.write_managed_file("eza", "theme.yml", &yaml_content)?;
 
-        Ok(ApplyOutcome::Applied)
+        // eza picks up EZA_CONFIG_DIR at process launch — already-running
+        // shells won't see the new theme until they re-exec.
+        Ok(ApplyOutcome::applied_needs_new_shell())
     }
 }
 

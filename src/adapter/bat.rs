@@ -62,7 +62,8 @@ impl ToolAdapter for BatAdapter {
         // bat uses BAT_THEME env var, not file writes.
         // env.zsh exports this during shell init.
         // This method is no-op; write happens in shell integration.
-        Ok(ApplyOutcome::Applied)
+        // env var changes only take effect in a fresh shell.
+        Ok(ApplyOutcome::applied_needs_new_shell())
     }
 }
 
