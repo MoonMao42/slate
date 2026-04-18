@@ -112,7 +112,10 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         // DEMO-02 (D-C1): hint only on explicit `slate theme <name>` success.
         // NEVER from the `if auto` branch (Ghostty shell hook spam risk — Pitfall 1)
         // NOR from the picker branch (D-C1).
-        crate::cli::demo::emit_demo_hint_once(false, false);
+        // `quiet` flag must be forwarded so `slate theme <name> --quiet` actually
+        // suppresses the hint (D-C1 `--quiet` suppression contract). `auto` is
+        // provably false in this `else if let Some(name)` branch.
+        crate::cli::demo::emit_demo_hint_once(false, quiet);
 
         Ok(())
     } else {
