@@ -10,6 +10,7 @@ pub mod font_detection;
 pub mod font_selection;
 pub mod hub;
 pub mod list;
+pub mod new_shell_reminder;
 pub mod picker;
 pub mod preflight;
 pub mod preset_selection;
