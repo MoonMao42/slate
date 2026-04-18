@@ -885,4 +885,68 @@ mod tests {
             "M.load must call nvim_set_hl per D-05"
         );
     }
+
+    // ── Plan 17-04 Task 3: lualine theme splice ────────────────────────
+
+    #[test]
+    fn render_loader_populates_lualine_themes_for_all_variants() {
+        let out = render_loader();
+        let registry = ThemeRegistry::new().expect("registry init");
+        // Locate the LUALINE_THEMES block between its declaration and the
+        // start of the TAIL (the `function M.load` line). Every variant id
+        // must appear as a `['<id>']` key inside that window.
+        let lualine_block_start = out
+            .find("local LUALINE_THEMES = {")
+            .expect("LUALINE_THEMES block must exist");
+        let rel_tail = out[lualine_block_start..]
+            .find("\nfunction M.load")
+            .expect("TAIL must follow LUALINE_THEMES");
+        let lualine_block = &out[lualine_block_start..lualine_block_start + rel_tail];
+        for v in registry.all() {
+            let key = format!("['{}']", v.id);
+            assert!(
+                lualine_block.contains(&key),
+                "LUALINE_THEMES missing entry for variant id {} (key {:?})",
+                v.id,
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn render_loader_lualine_entries_are_bold_capable() {
+        let out = render_loader();
+        // Each variant contributes 6 `gui = 'bold'` markers (one per mode).
+        // With 18 variants that gives 108 bolds; the Plan-03 loader itself
+        // contains no bold markers outside the LUALINE_THEMES block.
+        let bold_count = out.matches("gui = 'bold'").count();
+        assert!(
+            bold_count >= 60,
+            "expected >= 60 bold markers across spliced lualine themes, got {}",
+            bold_count
+        );
+    }
+
+    #[test]
+    fn render_loader_size_adjusted_for_lualine() {
+        // Rule 3 deviation: the plan's 256 KB upper bound was drafted on an
+        // out-of-date assumption that Plan-03's loader was ~15 KB. Plan 03's
+        // own test already asserts `<= 512 KB`, and Plan 03's summary records
+        // a baseline of 230 KB. With Plan 04 adding 136 plugin entries (~100 KB
+        // spread across 18 variants) plus 18 spliced lualine tables (~36 KB),
+        // the realistic total lands around 370-400 KB. We keep Plan 03's
+        // 512 KB upper bound for consistency; the lower bound moves to 8 KB
+        // per the plan's stated intent of shifting the floor up for lualine.
+        let out = render_loader();
+        assert!(
+            out.len() >= 8_000,
+            "loader with lualine data must be >= 8KB, got {} bytes",
+            out.len()
+        );
+        assert!(
+            out.len() <= 512 * 1024,
+            "loader too large: {} bytes",
+            out.len()
+        );
+    }
 }
