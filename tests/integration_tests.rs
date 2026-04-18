@@ -368,6 +368,92 @@ fn test_setup_quick_mode_minimal_interactions() {
     assert!(combined.contains("beautiful") || combined.contains("Step") || output.status.success());
 }
 
+// Phase 15 `slate demo` integration test stubs — Wave 0 scaffolding.
+// All tests are #[ignore]; Plan 05 (Wave 4) fills real assertions.
+// Names must match VALIDATION.md task IDs exactly.
+
+#[test]
+#[ignore]
+fn demo_renders_all_blocks() {
+    let tempdir = TempDir::new().unwrap();
+    let _ = slate_cmd_isolated(&tempdir).args(["demo"]).output();
+    // Plan 05 Wave 4 fills assertions.
+}
+
+#[test]
+#[ignore]
+fn demo_size_gate_rejects() {
+    let tempdir = TempDir::new().unwrap();
+    let _ = slate_cmd_isolated(&tempdir).args(["demo"]).output();
+    // Plan 05 Wave 4 fills assertions (simulate <80 cols by setting COLUMNS/LINES env).
+}
+
+#[test]
+#[ignore]
+fn demo_size_gate_accepts_minimum() {
+    let tempdir = TempDir::new().unwrap();
+    let _ = slate_cmd_isolated(&tempdir).args(["demo"]).output();
+}
+
+#[test]
+#[ignore]
+fn demo_touches_all_ansi_slots() {
+    let tempdir = TempDir::new().unwrap();
+    let _ = slate_cmd_isolated(&tempdir).args(["demo"]).output();
+}
+
+#[test]
+#[ignore]
+fn demo_hint_setup_emits_once() {
+    let tempdir = TempDir::new().unwrap();
+    let _ = slate_cmd_isolated(&tempdir)
+        .args(["setup", "--quick"])
+        .output();
+}
+
+#[test]
+#[ignore]
+fn demo_hint_theme_guards() {
+    let tempdir = TempDir::new().unwrap();
+    let _ = slate_cmd_isolated(&tempdir)
+        .args(["theme", "catppuccin-mocha"])
+        .output();
+}
+
+#[test]
+#[ignore]
+fn demo_hint_theme_quiet_suppresses() {
+    let tempdir = TempDir::new().unwrap();
+    let _ = slate_cmd_isolated(&tempdir)
+        .args(["theme", "catppuccin-mocha", "--quiet"])
+        .output();
+}
+
+#[test]
+#[ignore]
+fn demo_hint_theme_auto_suppresses() {
+    let tempdir = TempDir::new().unwrap();
+    let _ = slate_cmd_isolated(&tempdir)
+        .args(["theme", "--auto"])
+        .output();
+}
+
+#[test]
+#[ignore]
+fn demo_hint_no_stack_with_set_deprecation() {
+    let tempdir = TempDir::new().unwrap();
+    let _ = slate_cmd_isolated(&tempdir)
+        .args(["set", "catppuccin-mocha"])
+        .output();
+}
+
+#[test]
+#[ignore]
+fn demo_sub_second_budget() {
+    let tempdir = TempDir::new().unwrap();
+    let _ = slate_cmd_isolated(&tempdir).args(["demo"]).output();
+}
+
 // Tool selection logic tests
 
 #[cfg(test)]

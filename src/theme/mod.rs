@@ -172,6 +172,24 @@ impl Palette {
             // Text levels
             SemanticColor::Text => self.foreground.clone(),
             SemanticColor::Subtext => self.white.clone(),
+
+            // Syntax highlighting (Phase 15 — PLACEHOLDER; Plan 01 fills real slots)
+            SemanticColor::Keyword => self.foreground.clone(),
+            SemanticColor::String => self.foreground.clone(),
+            SemanticColor::Comment => self.foreground.clone(),
+            SemanticColor::Function => self.foreground.clone(),
+            SemanticColor::Number => self.foreground.clone(),
+            SemanticColor::Type => self.foreground.clone(),
+
+            // File-type classification (Phase 15 — PLACEHOLDER; Plan 01 fills real slots)
+            SemanticColor::FileArchive => self.foreground.clone(),
+            SemanticColor::FileImage => self.foreground.clone(),
+            SemanticColor::FileMedia => self.foreground.clone(),
+            SemanticColor::FileAudio => self.foreground.clone(),
+            SemanticColor::FileCode => self.foreground.clone(),
+            SemanticColor::FileDocs => self.foreground.clone(),
+            SemanticColor::FileConfig => self.foreground.clone(),
+            SemanticColor::FileHidden => self.foreground.clone(),
         }
     }
 }
