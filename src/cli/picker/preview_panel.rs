@@ -34,6 +34,24 @@ pub enum SemanticColor {
     // Text levels
     Text,    // Default text color
     Subtext, // Secondary text (metadata)
+
+    // Syntax highlighting (Phase 15 — consumed by `slate demo` and future editor adapter)
+    Keyword,
+    String,
+    Comment,
+    Function,
+    Number,
+    Type,
+
+    // File-type classification (Phase 15 — shared with Phase 16 LS_COLORS/EZA_COLORS)
+    FileArchive,
+    FileImage,
+    FileMedia,
+    FileAudio,
+    FileCode,
+    FileDocs,
+    FileConfig,
+    FileHidden,
 }
 
 /// A single span in the preview sample output with associated semantic color role.
