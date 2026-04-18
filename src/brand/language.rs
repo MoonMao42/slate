@@ -255,4 +255,32 @@ mod tests {
         assert!(summary.contains("Catppuccin Mocha"));
         assert!(summary.contains("5"));
     }
+
+    #[test]
+    fn test_demo_hint_format() {
+        let hint = Language::DEMO_HINT;
+        assert!(hint.starts_with('✦'), "hint must start with ✦ glyph");
+        assert!(hint.contains("slate demo"), "hint must mention `slate demo`");
+        assert!(
+            !hint.starts_with("(i)"),
+            "hint must NOT use `(i) Tip:` advisory tone per D-C4"
+        );
+        assert!(
+            hint.chars().count() <= 76,
+            "hint is {} chars; must be ≤76 so 2-space-indent output doesn't wrap at 80 cols",
+            hint.chars().count()
+        );
+    }
+
+    #[test]
+    fn test_demo_size_error_mentions_required_and_actual() {
+        let msg = Language::demo_size_error(79, 23);
+        assert!(msg.contains("80"), "error must mention minimum cols");
+        assert!(msg.contains("79"), "error must include actual cols");
+        assert!(msg.contains("23"), "error must include actual rows");
+        assert!(
+            msg.contains("slate demo"),
+            "error must name the failing command"
+        );
+    }
 }
