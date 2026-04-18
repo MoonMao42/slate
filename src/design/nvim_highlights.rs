@@ -14,6 +14,8 @@
 //! files. See 17-RESEARCH.md §Pattern 4.1 for the full list.
 
 use crate::cli::picker::preview_panel::SemanticColor;
+use crate::theme::Palette;
+use std::fmt::Write as _;
 
 /// Visual style modifiers exposed in nvim's `nvim_set_hl` API. Combined with
 /// fg/bg/link in [`HighlightSpec`].
@@ -1239,6 +1241,92 @@ pub static HIGHLIGHT_GROUPS: &[(&str, HighlightSpec)] = &[
         HighlightSpec::fg(SemanticColor::Accent),
     ),
 ];
+
+/// Render the lualine theme table as a Lua literal, ready for splicing into
+/// `render_loader`'s `LUALINE_THEMES` block.
+///
+/// Shape (per the lualine "writing a theme" docs, 17-RESEARCH §Pattern 6):
+///
+/// ```text
+/// {
+///     normal   = { a = { fg = '#..', bg = '#..', gui = 'bold' },
+///                  b = { fg = '#..', bg = '#..' },
+///                  c = { fg = '#..', bg = '#..' } },
+///     insert   = { ... },
+///     visual   = { ... },
+///     replace  = { ... },
+///     command  = { ... },
+///     inactive = { ... },
+/// }
+/// ```
+///
+/// Per-mode accent color is applied to the `a` section (the mode "pill"):
+///
+/// | Mode     | `a` fg     | `a` bg  |
+/// | -------- | ---------- | ------- |
+/// | normal   | Background | Accent  |
+/// | insert   | Background | String  |
+/// | visual   | Background | Warning |
+/// | replace  | Background | Error   |
+/// | command  | Background | Keyword |
+/// | inactive | Muted      | Surface |
+///
+/// `b` section is `Text on Surface` (muted mid-bar); `c` section is
+/// `Text on Background` (the rightmost statusline fill).
+///
+/// Output is deterministic — two calls on the same palette return byte-
+/// identical strings. Indentation is 4 spaces so the table sits cleanly
+/// inside `render_loader`'s 2-space-indented `LUALINE_THEMES` block.
+pub fn lualine_theme(palette: &Palette) -> String {
+    let mut out = String::with_capacity(2_048);
+    out.push_str("{\n");
+
+    // Helper: emit one `<mode> = { a = { .. }, b = { .. }, c = { .. } },`
+    // line with the mode's accent applied to `a`. `b` and `c` are shared
+    // "mid-bar" and "fill" sections — same across all active modes.
+    let emit_active = |out: &mut String, mode: &str, accent_bg: SemanticColor| {
+        let a_fg = palette.resolve(SemanticColor::Background);
+        let a_bg = palette.resolve(accent_bg);
+        let b_fg = palette.resolve(SemanticColor::Text);
+        let b_bg = palette.resolve(SemanticColor::Surface);
+        let c_fg = palette.resolve(SemanticColor::Text);
+        let c_bg = palette.resolve(SemanticColor::Background);
+        let _ = writeln!(
+            out,
+            "    {mode} = {{ \
+             a = {{ fg = '{a_fg}', bg = '{a_bg}', gui = 'bold' }}, \
+             b = {{ fg = '{b_fg}', bg = '{b_bg}' }}, \
+             c = {{ fg = '{c_fg}', bg = '{c_bg}' }} }},",
+        );
+    };
+
+    emit_active(&mut out, "normal", SemanticColor::Accent);
+    emit_active(&mut out, "insert", SemanticColor::String);
+    emit_active(&mut out, "visual", SemanticColor::Warning);
+    emit_active(&mut out, "replace", SemanticColor::Error);
+    emit_active(&mut out, "command", SemanticColor::Keyword);
+
+    // Inactive mode: muted fg across all sections, surface bg on `a` and
+    // `b`, background on `c`. Still bolded on `a` for visual parity with
+    // active modes (lualine renders an inactive window's left pill in
+    // the same visual weight — just dimmer color).
+    let i_fg = palette.resolve(SemanticColor::Muted);
+    let i_bg = palette.resolve(SemanticColor::Surface);
+    let b_fg = palette.resolve(SemanticColor::Muted);
+    let b_bg = palette.resolve(SemanticColor::Surface);
+    let c_fg = palette.resolve(SemanticColor::Muted);
+    let c_bg = palette.resolve(SemanticColor::Background);
+    let _ = writeln!(
+        &mut out,
+        "    inactive = {{ \
+         a = {{ fg = '{i_fg}', bg = '{i_bg}', gui = 'bold' }}, \
+         b = {{ fg = '{b_fg}', bg = '{b_bg}' }}, \
+         c = {{ fg = '{c_fg}', bg = '{c_bg}' }} }},",
+    );
+
+    out.push_str("  }");
+    out
+}
 
 #[cfg(test)]
 mod tests {
