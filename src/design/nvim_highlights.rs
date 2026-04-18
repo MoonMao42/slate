@@ -803,6 +803,441 @@ pub static HIGHLIGHT_GROUPS: &[(&str, HighlightSpec)] = &[
         "@lsp.typemod.variable.static",
         HighlightSpec::fg(SemanticColor::Number),
     ),
+    // ── Plugin coverage — Plan 17-04 (~130 entries) ───────────────────
+    // Source: 17-RESEARCH §Pattern 5. Role mappings are verbatim from the
+    // research; each block lifts the plugin's canonical group names and
+    // translates a "link" directive into `HighlightSpec::linked(...)`.
+    //
+    //   • Telescope          — 13 entries
+    //   • Neo-tree           — 30 entries
+    //   • GitSigns           — 10 entries
+    //   • Which-key          — 6 entries
+    //   • blink.cmp          — 39 entries (14 base + 25 kinds)
+    //   • nvim-cmp           — 32 entries (6 base + 26 kinds)
+    //
+    // Total: 130 plugin entries. Plan 01's 262-entry base + this plan's
+    // 130 = 392 total. Exceeds D-06's "~300" parity target because D-06
+    // targets BASE coverage only; plugin coverage (D-08) is additive.
+
+    // ── Telescope (13 entries) ────────────────────────────────────────
+    (
+        "TelescopeNormal",
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::Background),
+    ),
+    (
+        "TelescopeResultsNormal",
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::Background),
+    ),
+    (
+        "TelescopePreviewNormal",
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::Surface),
+    ),
+    (
+        "TelescopePromptNormal",
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::SurfaceAlt),
+    ),
+    ("TelescopeBorder", HighlightSpec::linked("FloatBorder")),
+    (
+        "TelescopePromptBorder",
+        HighlightSpec::linked("FloatBorder"),
+    ),
+    (
+        "TelescopePreviewBorder",
+        HighlightSpec::linked("FloatBorder"),
+    ),
+    (
+        "TelescopeResultsBorder",
+        HighlightSpec::linked("FloatBorder"),
+    ),
+    (
+        "TelescopeTitle",
+        HighlightSpec::fg_bg(SemanticColor::Background, SemanticColor::Accent),
+    ),
+    (
+        "TelescopePromptTitle",
+        HighlightSpec::fg_bg(SemanticColor::Background, SemanticColor::Accent),
+    ),
+    (
+        "TelescopePreviewTitle",
+        HighlightSpec::fg_bg(SemanticColor::Background, SemanticColor::Accent),
+    ),
+    (
+        "TelescopeResultsTitle",
+        HighlightSpec::fg_bg(SemanticColor::Background, SemanticColor::Accent),
+    ),
+    (
+        "TelescopeMatching",
+        HighlightSpec::styled(SemanticColor::Warning, Style::Bold),
+    ),
+    (
+        "TelescopeSelection",
+        HighlightSpec {
+            fg: None,
+            bg: Some(SemanticColor::Selection),
+            style: Style::None,
+            link: None,
+        },
+    ),
+    (
+        "TelescopeSelectionCaret",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "TelescopePromptPrefix",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    // ── Neo-tree (30 entries) ─────────────────────────────────────────
+    (
+        "NeoTreeDirectoryName",
+        HighlightSpec::fg(SemanticColor::FileDir),
+    ),
+    (
+        "NeoTreeDirectoryIcon",
+        HighlightSpec::fg(SemanticColor::FileDir),
+    ),
+    (
+        "NeoTreeRootName",
+        HighlightSpec::styled(SemanticColor::FileDir, Style::Bold),
+    ),
+    (
+        "NeoTreeSymbolicLinkTarget",
+        HighlightSpec::fg(SemanticColor::FileSymlink),
+    ),
+    ("NeoTreeNormal", HighlightSpec::linked("Normal")),
+    ("NeoTreeNormalNC", HighlightSpec::linked("Normal")),
+    ("NeoTreeFloatBorder", HighlightSpec::linked("FloatBorder")),
+    ("NeoTreeFloatTitle", HighlightSpec::linked("FloatTitle")),
+    (
+        "NeoTreeTitleBar",
+        HighlightSpec::fg_bg(SemanticColor::Background, SemanticColor::Accent),
+    ),
+    (
+        "NeoTreeFileNameOpened",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    ("NeoTreeModified", HighlightSpec::fg(SemanticColor::Accent)),
+    ("NeoTreeDimText", HighlightSpec::fg(SemanticColor::Muted)),
+    ("NeoTreeExpander", HighlightSpec::fg(SemanticColor::Muted)),
+    (
+        "NeoTreeIndentMarker",
+        HighlightSpec::fg(SemanticColor::Muted),
+    ),
+    (
+        "NeoTreeFilterTerm",
+        HighlightSpec::styled(SemanticColor::Accent, Style::Bold),
+    ),
+    (
+        "NeoTreeGitAdded",
+        HighlightSpec::fg(SemanticColor::GitAdded),
+    ),
+    (
+        "NeoTreeGitStaged",
+        HighlightSpec::fg(SemanticColor::GitAdded),
+    ),
+    (
+        "NeoTreeGitModified",
+        HighlightSpec::fg(SemanticColor::GitModified),
+    ),
+    (
+        "NeoTreeGitUnstaged",
+        HighlightSpec::fg(SemanticColor::GitModified),
+    ),
+    ("NeoTreeGitDeleted", HighlightSpec::fg(SemanticColor::Error)),
+    (
+        "NeoTreeGitConflict",
+        HighlightSpec::fg(SemanticColor::Error),
+    ),
+    (
+        "NeoTreeGitUntracked",
+        HighlightSpec::fg(SemanticColor::GitUntracked),
+    ),
+    ("NeoTreeGitIgnored", HighlightSpec::fg(SemanticColor::Muted)),
+    (
+        "NeoTreeTabActive",
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::Background),
+    ),
+    (
+        "NeoTreeTabInactive",
+        HighlightSpec::fg_bg(SemanticColor::Muted, SemanticColor::Surface),
+    ),
+    (
+        "NeoTreeTabSeparatorActive",
+        HighlightSpec::fg(SemanticColor::Border),
+    ),
+    (
+        "NeoTreeTabSeparatorInactive",
+        HighlightSpec::fg(SemanticColor::Border),
+    ),
+    ("NeoTreeVertSplit", HighlightSpec::linked("VertSplit")),
+    ("NeoTreeWinSeparator", HighlightSpec::linked("WinSeparator")),
+    ("NeoTreeStatusLineNC", HighlightSpec::linked("StatusLineNC")),
+    // ── GitSigns (10 entries) ─────────────────────────────────────────
+    ("GitSignsAdd", HighlightSpec::fg(SemanticColor::GitAdded)),
+    (
+        "GitSignsChange",
+        HighlightSpec::fg(SemanticColor::GitModified),
+    ),
+    ("GitSignsDelete", HighlightSpec::fg(SemanticColor::Error)),
+    (
+        "GitSignsCurrentLineBlame",
+        HighlightSpec::styled(SemanticColor::Muted, Style::Italic),
+    ),
+    (
+        "GitSignsAddPreview",
+        HighlightSpec::bg_only(SemanticColor::GitAdded),
+    ),
+    (
+        "GitSignsAddInline",
+        HighlightSpec::bg_only(SemanticColor::GitAdded),
+    ),
+    (
+        "GitSignsChangeInline",
+        HighlightSpec::bg_only(SemanticColor::GitModified),
+    ),
+    (
+        "GitSignsDeletePreview",
+        HighlightSpec::bg_only(SemanticColor::Error),
+    ),
+    (
+        "GitSignsDeleteInline",
+        HighlightSpec::bg_only(SemanticColor::Error),
+    ),
+    (
+        "GitSignsDeleteVirtLn",
+        HighlightSpec::bg_only(SemanticColor::Error),
+    ),
+    // ── Which-key (6 entries) ─────────────────────────────────────────
+    ("WhichKey", HighlightSpec::fg(SemanticColor::Accent)),
+    ("WhichKeyBorder", HighlightSpec::linked("FloatBorder")),
+    ("WhichKeyGroup", HighlightSpec::fg(SemanticColor::Keyword)),
+    ("WhichKeySeparator", HighlightSpec::fg(SemanticColor::Muted)),
+    ("WhichKeyDesc", HighlightSpec::fg(SemanticColor::Text)),
+    ("WhichKeyValue", HighlightSpec::fg(SemanticColor::Muted)),
+    // ── blink.cmp (14 base + 25 kinds = 39 entries) ───────────────────
+    ("BlinkCmpLabel", HighlightSpec::fg(SemanticColor::Text)),
+    (
+        "BlinkCmpLabelDeprecated",
+        HighlightSpec::styled(SemanticColor::Muted, Style::Undercurl),
+    ),
+    (
+        "BlinkCmpLabelMatch",
+        HighlightSpec::styled(SemanticColor::Accent, Style::Bold),
+    ),
+    (
+        "BlinkCmpLabelDescription",
+        HighlightSpec::fg(SemanticColor::Muted),
+    ),
+    (
+        "BlinkCmpLabelDetail",
+        HighlightSpec::fg(SemanticColor::Muted),
+    ),
+    ("BlinkCmpKind", HighlightSpec::fg(SemanticColor::Type)),
+    ("BlinkCmpMenu", HighlightSpec::linked("Pmenu")),
+    ("BlinkCmpMenuBorder", HighlightSpec::linked("FloatBorder")),
+    ("BlinkCmpMenuSelection", HighlightSpec::linked("PmenuSel")),
+    ("BlinkCmpDoc", HighlightSpec::linked("NormalFloat")),
+    ("BlinkCmpDocBorder", HighlightSpec::linked("FloatBorder")),
+    (
+        "BlinkCmpScrollBarGutter",
+        HighlightSpec::linked("PmenuSbar"),
+    ),
+    (
+        "BlinkCmpScrollBarThumb",
+        HighlightSpec::linked("PmenuThumb"),
+    ),
+    (
+        "BlinkCmpSignatureHelpBorder",
+        HighlightSpec::linked("FloatBorder"),
+    ),
+    // blink.cmp kind sub-variants (25 entries)
+    ("BlinkCmpKindText", HighlightSpec::fg(SemanticColor::Text)),
+    (
+        "BlinkCmpKindMethod",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "BlinkCmpKindFunction",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "BlinkCmpKindConstructor",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "BlinkCmpKindField",
+        HighlightSpec::fg(SemanticColor::LspParameter),
+    ),
+    (
+        "BlinkCmpKindVariable",
+        HighlightSpec::fg(SemanticColor::Text),
+    ),
+    ("BlinkCmpKindClass", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "BlinkCmpKindInterface",
+        HighlightSpec::fg(SemanticColor::Type),
+    ),
+    ("BlinkCmpKindModule", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "BlinkCmpKindProperty",
+        HighlightSpec::fg(SemanticColor::LspParameter),
+    ),
+    ("BlinkCmpKindUnit", HighlightSpec::fg(SemanticColor::Number)),
+    (
+        "BlinkCmpKindValue",
+        HighlightSpec::fg(SemanticColor::Number),
+    ),
+    ("BlinkCmpKindEnum", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "BlinkCmpKindKeyword",
+        HighlightSpec::fg(SemanticColor::Keyword),
+    ),
+    (
+        "BlinkCmpKindSnippet",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "BlinkCmpKindColor",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "BlinkCmpKindFile",
+        HighlightSpec::fg(SemanticColor::FileDocs),
+    ),
+    (
+        "BlinkCmpKindReference",
+        HighlightSpec::fg(SemanticColor::Muted),
+    ),
+    (
+        "BlinkCmpKindFolder",
+        HighlightSpec::fg(SemanticColor::FileDir),
+    ),
+    (
+        "BlinkCmpKindEnumMember",
+        HighlightSpec::fg(SemanticColor::Number),
+    ),
+    (
+        "BlinkCmpKindConstant",
+        HighlightSpec::fg(SemanticColor::Number),
+    ),
+    ("BlinkCmpKindStruct", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "BlinkCmpKindEvent",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "BlinkCmpKindOperator",
+        HighlightSpec::fg(SemanticColor::Keyword),
+    ),
+    (
+        "BlinkCmpKindTypeParameter",
+        HighlightSpec::fg(SemanticColor::Type),
+    ),
+    (
+        "BlinkCmpKindCopilot",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    // ── nvim-cmp (6 base + 26 kinds = 32 entries) ─────────────────────
+    ("CmpItemAbbr", HighlightSpec::fg(SemanticColor::Text)),
+    (
+        "CmpItemAbbrDeprecated",
+        HighlightSpec::styled(SemanticColor::Muted, Style::Undercurl),
+    ),
+    (
+        "CmpItemAbbrMatch",
+        HighlightSpec::styled(SemanticColor::Accent, Style::Bold),
+    ),
+    (
+        "CmpItemAbbrMatchFuzzy",
+        HighlightSpec::styled(SemanticColor::Accent, Style::Bold),
+    ),
+    ("CmpItemKind", HighlightSpec::fg(SemanticColor::Type)),
+    ("CmpItemMenu", HighlightSpec::fg(SemanticColor::Muted)),
+    // nvim-cmp kind sub-variants (26 entries — blink parity + TabNine/Codeium)
+    ("CmpItemKindText", HighlightSpec::fg(SemanticColor::Text)),
+    (
+        "CmpItemKindMethod",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "CmpItemKindFunction",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "CmpItemKindConstructor",
+        HighlightSpec::fg(SemanticColor::Function),
+    ),
+    (
+        "CmpItemKindField",
+        HighlightSpec::fg(SemanticColor::LspParameter),
+    ),
+    (
+        "CmpItemKindVariable",
+        HighlightSpec::fg(SemanticColor::Text),
+    ),
+    ("CmpItemKindClass", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "CmpItemKindInterface",
+        HighlightSpec::fg(SemanticColor::Type),
+    ),
+    ("CmpItemKindModule", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "CmpItemKindProperty",
+        HighlightSpec::fg(SemanticColor::LspParameter),
+    ),
+    ("CmpItemKindUnit", HighlightSpec::fg(SemanticColor::Number)),
+    ("CmpItemKindValue", HighlightSpec::fg(SemanticColor::Number)),
+    ("CmpItemKindEnum", HighlightSpec::fg(SemanticColor::Type)),
+    (
+        "CmpItemKindKeyword",
+        HighlightSpec::fg(SemanticColor::Keyword),
+    ),
+    (
+        "CmpItemKindSnippet",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    ("CmpItemKindColor", HighlightSpec::fg(SemanticColor::Accent)),
+    (
+        "CmpItemKindFile",
+        HighlightSpec::fg(SemanticColor::FileDocs),
+    ),
+    (
+        "CmpItemKindReference",
+        HighlightSpec::fg(SemanticColor::Muted),
+    ),
+    (
+        "CmpItemKindFolder",
+        HighlightSpec::fg(SemanticColor::FileDir),
+    ),
+    (
+        "CmpItemKindEnumMember",
+        HighlightSpec::fg(SemanticColor::Number),
+    ),
+    (
+        "CmpItemKindConstant",
+        HighlightSpec::fg(SemanticColor::Number),
+    ),
+    ("CmpItemKindStruct", HighlightSpec::fg(SemanticColor::Type)),
+    ("CmpItemKindEvent", HighlightSpec::fg(SemanticColor::Accent)),
+    (
+        "CmpItemKindOperator",
+        HighlightSpec::fg(SemanticColor::Keyword),
+    ),
+    (
+        "CmpItemKindTypeParameter",
+        HighlightSpec::fg(SemanticColor::Type),
+    ),
+    (
+        "CmpItemKindCopilot",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "CmpItemKindTabNine",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
+    (
+        "CmpItemKindCodeium",
+        HighlightSpec::fg(SemanticColor::Accent),
+    ),
 ];
 
 #[cfg(test)]
