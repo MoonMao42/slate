@@ -124,6 +124,10 @@ pub fn handle_with_env(
 
     crate::cli::sound::play_feedback();
 
+    // DEMO-02 (D-C1): single-line hint pointing at `slate demo`. setup has no
+    // --auto / --quiet flags at this surface, so both guards are false.
+    crate::cli::demo::emit_demo_hint_once(false, false);
+
     Ok(())
 }
 

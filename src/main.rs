@@ -82,6 +82,8 @@ enum Commands {
         /// Share code (e.g. slate://catppuccin-mocha/JetBrainsMono/frosted/s,h,f)
         uri: String,
     },
+    /// Showcase your palette with a curated demo
+    Demo,
     /// Hidden easter egg
     #[command(hide = true)]
     Aura,
@@ -147,6 +149,7 @@ fn run() -> Result<()> {
         Some(Commands::Share) => cli::share_screenshot::handle_share(),
         Some(Commands::Export) => cli::share::handle_export(),
         Some(Commands::Import { uri }) => cli::share::handle_import(&uri),
+        Some(Commands::Demo) => cli::demo::handle(),
         Some(Commands::Aura) => cli::aura::handle(),
         #[cfg(target_os = "linux")]
         Some(Commands::WatchAutoTheme) => cli::watch::handle_auto_theme_watch(),
