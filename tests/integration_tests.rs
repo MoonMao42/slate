@@ -681,9 +681,11 @@ fn demo_hint_theme_quiet_suppresses() {
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
     assert!(
-        !stdout.contains("slate demo"),
-        "--quiet must suppress the demo hint; got:\n{stdout}"
+        combined.trim().is_empty(),
+        "--quiet must suppress the explicit theme success line, apply report, and demo hint; got:\n{combined}"
     );
 }
 

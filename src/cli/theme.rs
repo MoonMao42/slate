@@ -1,11 +1,11 @@
-use crate::cli::apply::{SnapshotPolicy, ThemeApplyCoordinator};
+use crate::cli::apply::{SnapshotPolicy, ThemeApplyCoordinator, ThemeApplyReport};
 use crate::cli::auto_theme;
-use crate::cli::theme_apply::apply_theme_selection;
+use crate::cli::theme_apply::{apply_theme_selection, apply_theme_selection_with_env};
 use crate::config::ConfigManager;
 use crate::design::symbols::Symbols;
 use crate::env::SlateEnv;
 use crate::error::Result;
-use crate::theme::ThemeRegistry;
+use crate::theme::{ThemeRegistry, ThemeVariant};
 use std::os::fd::{AsRawFd, RawFd};
 
 struct StderrRedirectGuard {
@@ -57,6 +57,15 @@ impl Drop for StderrRedirectGuard {
     }
 }
 
+fn apply_explicit_theme(theme: &ThemeVariant, quiet: bool) -> Result<ThemeApplyReport> {
+    let env = SlateEnv::from_process()?;
+    if quiet {
+        ThemeApplyCoordinator::new(&env).apply(theme)
+    } else {
+        apply_theme_selection_with_env(theme, &env)
+    }
+}
+
 /// Handle `slate theme` command
 ///
 /// Supports three modes:
@@ -104,12 +113,11 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
             crate::error::SlateError::InvalidThemeData(format!("Theme '{}' not found", name))
         })?;
 
-        // Bind the report instead of discarding — we need `report.results` for
-        // the UX-02 aggregator below. `apply_theme_selection` already returns
-        // `Result<ThemeApplyReport>`, so no signature change is needed.
-        let report = apply_theme_selection(theme)?;
+        let report = apply_explicit_theme(theme, quiet)?;
 
-        println!("{} Theme switched to '{}'", Symbols::SUCCESS, theme.name);
+        if !quiet {
+            println!("{} Theme switched to '{}'", Symbols::SUCCESS, theme.name);
+        }
         crate::cli::sound::play_feedback();
 
         // UX-02 (D-D3): new-shell reminder sits BEFORE the demo hint on the
