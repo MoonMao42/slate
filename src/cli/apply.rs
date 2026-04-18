@@ -176,6 +176,27 @@ pub(crate) fn apply_theme_with_options(
         }
     }
 
+    // Phase 17 D-04: nvim state-file tail hook.
+    //
+    // Best-effort, non-fatal. Every successful apply path — explicit set,
+    // picker commit, restore re-apply, auto-follow — funnels through this
+    // coordinator, so writing the state file here guarantees every running
+    // nvim instance sees a single atomic `fs_event` and hot-reloads via the
+    // loader's `vim.uv.fs_event` watcher.
+    //
+    // Intentionally placed AFTER `set_current_theme` so the hook does not
+    // fire on the applied_count == 0 early-return path above: a theme that
+    // nothing else applied must not point running nvim at an orphan state.
+    // If the write itself fails (unwritable cache dir, etc.) we log a
+    // warning but do not abort the theme swap — matches the tmux reload
+    // posture documented in 17-RESEARCH §Pattern 3.
+    if let Err(err) = crate::adapter::nvim::write_state_file(env, &theme.id) {
+        eprintln!(
+            "warning: nvim state-file write failed for theme {}: {}",
+            theme.id, err
+        );
+    }
+
     reload_theme_targets(&registry, &report);
     Ok(report)
 }
@@ -442,6 +463,65 @@ mod tests {
         assert_eq!(
             count_restore_points(&env.slate_cache_dir().join("backups")),
             1
+        );
+    }
+
+    #[test]
+    fn slate_theme_set_writes_nvim_state_file_on_successful_apply() {
+        // Contract: after ThemeApplyCoordinator::apply succeeds (at least one
+        // adapter returns Applied), the shared coordinator writes the nvim
+        // state file at `<home>/.cache/slate/current_theme.lua` containing the
+        // applied variant id. The state file is what triggers the nvim loader's
+        // vim.uv.fs_event watcher (Phase 17 D-04) in any running nvim.
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let theme = catppuccin::catppuccin_mocha().unwrap();
+
+        let report = ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip)
+            .apply(&theme)
+            .unwrap();
+        assert!(
+            report.applied_count() >= 1,
+            "precondition: at least one adapter must apply (ls_colors is always-on)"
+        );
+
+        let state = tempdir.path().join(".cache/slate/current_theme.lua");
+        assert!(
+            state.is_file(),
+            "shared coordinator must write nvim state file at {:?}",
+            state
+        );
+        let got = std::fs::read_to_string(&state).unwrap();
+        assert!(
+            got.contains(&theme.id),
+            "state file must contain applied variant id {:?}, got {:?}",
+            theme.id,
+            got
+        );
+    }
+
+    #[test]
+    fn slate_theme_set_no_state_file_when_no_adapter_applied() {
+        // Contract: if applied_count == 0 (e.g., only a non-existent tool was
+        // targeted), the coordinator must NOT write an orphan state file. This
+        // prevents running nvim instances from hot-reloading to a theme that
+        // nothing else applied.
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let theme = catppuccin::catppuccin_mocha().unwrap();
+
+        let coordinator = ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip);
+        let unreachable_target = vec!["definitely-not-a-real-tool".to_string()];
+        let report = coordinator
+            .apply_to_tools(&theme, &unreachable_target)
+            .unwrap();
+        assert_eq!(report.applied_count(), 0);
+
+        let state = tempdir.path().join(".cache/slate/current_theme.lua");
+        assert!(
+            !state.exists(),
+            "no orphan state file must be written when no adapter applied; found {:?}",
+            state
         );
     }
 

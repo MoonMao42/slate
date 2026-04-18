@@ -31,6 +31,7 @@ pub use ghostty::GhosttyAdapter;
 pub use kitty::KittyAdapter;
 pub use lazygit::LazygitAdapter;
 pub use ls_colors::LsColorsAdapter;
+pub use nvim::NvimAdapter;
 pub use registry::{ToolApplyResult, ToolApplyStatus, ToolRegistry};
 pub use starship::StarshipAdapter;
 pub use tmux::TmuxAdapter;

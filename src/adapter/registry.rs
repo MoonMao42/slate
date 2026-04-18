@@ -156,7 +156,7 @@ pub fn requires_new_shell(results: &[ToolApplyResult]) -> bool {
 impl Default for ToolRegistry {
     fn default() -> Self {
         let mut registry = Self::new();
-        // Register all 11 adapters in default instance
+        // Register the default 14-adapter instance (Phase 17 bumps from 13).
         registry.register(Box::new(crate::adapter::GhosttyAdapter));
         registry.register(Box::new(crate::adapter::AlacrittyAdapter));
         registry.register(Box::new(crate::adapter::KittyAdapter));
@@ -170,6 +170,7 @@ impl Default for ToolRegistry {
         registry.register(Box::new(crate::adapter::ZshHighlightAdapter));
         registry.register(Box::new(crate::adapter::TmuxAdapter));
         registry.register(Box::new(crate::adapter::FontAdapter));
+        registry.register(Box::new(crate::adapter::NvimAdapter));
         registry
     }
 }
@@ -245,7 +246,7 @@ mod tests {
     #[test]
     fn test_registry_default() {
         let registry = ToolRegistry::default();
-        assert_eq!(registry.adapters().len(), 13);
+        assert_eq!(registry.adapters().len(), 14);
     }
 
     #[test]
