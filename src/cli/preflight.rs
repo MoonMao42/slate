@@ -180,6 +180,47 @@ pub fn run_checks_for_setup_with_env(
         blocking: false,
     });
 
+    // Phase 16 (LS-03 / D-B1): On macOS, if `gls` (GNU ls from coreutils) is
+    // absent AND the user hasn't been nudged before, push a non-blocking
+    // advisory explaining why the slate-managed LS_COLORS needs GNU `ls`.
+    // The acknowledgement flag is written immediately after emission so
+    // subsequent preflight runs suppress the message — "telling the user
+    // once, in the same tone as other preflight findings" (RESEARCH
+    // §Anti-Patterns: don't nag). Linux is a compile-time no-op.
+    //
+    // Scenario gate (RESEARCH §Pattern 3 "scenario gate"): only emit during
+    // first-touch flows (GuidedSetup / QuickSetup). RetryInstall and
+    // ConfigOnlyReconfigure are re-runs against an existing slate install
+    // where the user already saw the message on their first setup; the ack
+    // flag usually already suppresses it, but the scenario gate is defensive
+    // insurance against an edge case where someone's very first run is a
+    // retry/reconfigure (e.g. scripted installs).
+    #[cfg(target_os = "macos")]
+    {
+        let emits_for_scenario = matches!(
+            scenario,
+            PreflightScenario::GuidedSetup | PreflightScenario::QuickSetup
+        );
+        if emits_for_scenario {
+            let config = crate::config::ConfigManager::with_env(env)?;
+            let acknowledged = config.is_ls_capability_acknowledged().unwrap_or(false);
+            let gnu_ls_present = crate::detection::is_gnu_ls_present();
+
+            if !gnu_ls_present && !acknowledged {
+                checks.push(PreflightCheck {
+                    name: "GNU ls".to_string(),
+                    description: Language::ls_capability_message().to_string(),
+                    passed: true, // advisory — never blocks setup
+                    blocking: false,
+                });
+                // Defensive: a failed state-file write (disk full, permissions)
+                // must NOT block setup. Worst case is double emission next run,
+                // not a crash.
+                let _ = config.acknowledge_ls_capability();
+            }
+        }
+    }
+
     Ok(PreflightResult { checks })
 }
 
@@ -544,21 +585,22 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let env = SlateEnv::with_home(temp.path().to_path_buf());
 
-        let result =
-            run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
+        let result = run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
 
-        let ls_check = result
-            .checks
-            .iter()
-            .find(|c| c.name == "GNU ls")
-            .expect("preflight must push a 'GNU ls' check when gls is absent and flag is unset");
+        let ls_check =
+            result.checks.iter().find(|c| c.name == "GNU ls").expect(
+                "preflight must push a 'GNU ls' check when gls is absent and flag is unset",
+            );
 
         assert_eq!(
             ls_check.description,
             Language::ls_capability_message(),
             "description must be the brand-voiced Language::ls_capability_message()",
         );
-        assert!(ls_check.passed, "GNU ls check is advisory — must be passed=true");
+        assert!(
+            ls_check.passed,
+            "GNU ls check is advisory — must be passed=true"
+        );
         assert!(
             !ls_check.blocking,
             "GNU ls check must be non-blocking (LS-03 is a one-time nudge, not a gate)",
@@ -606,8 +648,7 @@ mod tests {
             "precondition: flag must be pre-created"
         );
 
-        let result =
-            run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
+        let result = run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
 
         assert!(
             result.checks.iter().all(|c| c.name != "GNU ls"),
@@ -633,8 +674,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let env = SlateEnv::with_home(temp.path().to_path_buf());
 
-        let result =
-            run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
+        let result = run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
 
         assert!(
             result.checks.iter().all(|c| c.name != "GNU ls"),
@@ -650,8 +690,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let env = SlateEnv::with_home(temp.path().to_path_buf());
 
-        let result =
-            run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
+        let result = run_checks_for_setup_with_env(&env, PreflightScenario::GuidedSetup).unwrap();
 
         assert!(
             result.checks.iter().all(|c| c.name != "GNU ls"),
