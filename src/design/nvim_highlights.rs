@@ -1624,4 +1624,123 @@ mod tests {
             assert_eq!(spec.style, Style::Bold, "{} must use Style::Bold", name);
         }
     }
+
+    // ── Plan 17-04 Task 2: lualine_theme tests ─────────────────────────
+
+    #[test]
+    fn lualine_theme_contains_all_six_modes() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        for mode in &[
+            "normal", "insert", "visual", "replace", "command", "inactive",
+        ] {
+            assert!(
+                out.contains(&format!("{} = {{", mode)),
+                "missing mode {} in output\n---\n{}",
+                mode,
+                out
+            );
+        }
+    }
+
+    #[test]
+    fn lualine_theme_each_mode_has_abc_sections() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        let a_count = out.matches("a = {").count();
+        let b_count = out.matches("b = {").count();
+        let c_count = out.matches("c = {").count();
+        assert_eq!(a_count, 6, "expected 6 'a' sections, got {}", a_count);
+        assert_eq!(b_count, 6, "expected 6 'b' sections, got {}", b_count);
+        assert_eq!(c_count, 6, "expected 6 'c' sections, got {}", c_count);
+    }
+
+    #[test]
+    fn lualine_theme_a_sections_are_bold() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        // Every 'a = {' block should contain `gui = 'bold'` — 6 modes, 6 bolds.
+        let bold_count = out.matches("gui = 'bold'").count();
+        assert_eq!(
+            bold_count, 6,
+            "expected 6 bold a-sections, got {}",
+            bold_count
+        );
+    }
+
+    #[test]
+    fn lualine_theme_is_deterministic() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("tokyo-night-dark")
+            .unwrap()
+            .clone();
+        assert_eq!(lualine_theme(&v.palette), lualine_theme(&v.palette));
+    }
+
+    #[test]
+    fn lualine_theme_hex_values_are_7_chars() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        // Every string between single quotes that starts with '#' must be a 7-char hex.
+        for substr in out.split('\'') {
+            if substr.starts_with('#') {
+                assert_eq!(
+                    substr.len(),
+                    7,
+                    "hex literal has wrong length: {:?}",
+                    substr
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lualine_theme_wraps_with_braces() {
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        assert!(out.starts_with('{'), "output must start with '{{'");
+        assert!(out.trim_end().ends_with('}'), "output must end with '}}'");
+    }
+
+    #[test]
+    fn lualine_theme_inactive_uses_muted_fg() {
+        // Per 17-RESEARCH §Pattern 6: inactive mode uses Muted fg + Surface bg
+        // rather than an accent color. The test verifies the Muted hex shows up
+        // at least once inside the `inactive = { ... }` block.
+        let v = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        let out = lualine_theme(&v.palette);
+        let muted_hex = v.palette.resolve(SemanticColor::Muted);
+        let inactive_start = out.find("inactive = {").expect("inactive block present");
+        let inactive_block = &out[inactive_start..];
+        assert!(
+            inactive_block.contains(&format!("fg = '{}'", muted_hex)),
+            "inactive block must reference Muted fg {}",
+            muted_hex
+        );
+    }
 }
