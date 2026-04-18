@@ -69,10 +69,17 @@ panic = "abort"
 inherits = "release"
 
 [dev-dependencies]
-rstest = "0.18"
 assert_cmd = "2"
 criterion = { version = "0.5", features = ["html_reports"] }
+notify = "6"
 predicates = "3"
+rstest = "0.18"
+
+[features]
+default = []
+# Gates integration tests that shell out to `nvim --headless`.
+# CI enables this via rhysd/action-setup-vim@v1 + `cargo test --features has-nvim`.
+has-nvim = []
 
 [[bench]]
 name = "performance"
