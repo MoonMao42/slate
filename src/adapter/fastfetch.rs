@@ -69,7 +69,9 @@ impl ToolAdapter for FastfetchAdapter {
         let config_manager = ConfigManager::new()?;
         config_manager.write_managed_file("fastfetch", "config.jsonc", &managed_content)?;
 
-        Ok(ApplyOutcome::Applied)
+        // fastfetch is invoked at shell startup via the managed wrapper;
+        // updated colors are visible the next time a shell runs it.
+        Ok(ApplyOutcome::applied_needs_new_shell())
     }
 
     fn get_current_theme(&self) -> Result<Option<String>> {

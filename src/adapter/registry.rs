@@ -13,10 +13,16 @@ pub enum ToolApplyStatus {
 }
 
 /// Structured adapter result emitted by ToolRegistry.
+///
+/// `requires_new_shell` is captured from `ApplyOutcome::Applied` when the adapter
+/// succeeds; it is `false` for `Skipped` / `Failed` outcomes since no change was
+/// made that would need a new shell. Plan 16-04 aggregates this field across the
+/// per-run result set to drive the Phase 16 UX-01 new-terminal reminder.
 #[derive(Debug)]
 pub struct ToolApplyResult {
     pub tool_name: String,
     pub status: ToolApplyStatus,
+    pub requires_new_shell: bool,
 }
 
 /// Registry for all tool adapters.
@@ -93,17 +99,25 @@ impl ToolRegistry {
             })
             .map(|adapter| {
                 let tool_name = adapter.tool_name().to_string();
-                let status = match adapter.is_installed() {
-                    Ok(false) => ToolApplyStatus::Skipped(SkipReason::NotInstalled),
+                let (status, requires_new_shell) = match adapter.is_installed() {
+                    Ok(false) => (ToolApplyStatus::Skipped(SkipReason::NotInstalled), false),
                     Ok(true) => match adapter.apply_theme(theme) {
-                        Ok(ApplyOutcome::Applied) => ToolApplyStatus::Applied,
-                        Ok(ApplyOutcome::Skipped(reason)) => ToolApplyStatus::Skipped(reason),
-                        Err(err) => ToolApplyStatus::Failed(err),
+                        Ok(ApplyOutcome::Applied { requires_new_shell }) => {
+                            (ToolApplyStatus::Applied, requires_new_shell)
+                        }
+                        Ok(ApplyOutcome::Skipped(reason)) => {
+                            (ToolApplyStatus::Skipped(reason), false)
+                        }
+                        Err(err) => (ToolApplyStatus::Failed(err), false),
                     },
-                    Err(err) => ToolApplyStatus::Failed(err),
+                    Err(err) => (ToolApplyStatus::Failed(err), false),
                 };
 
-                ToolApplyResult { tool_name, status }
+                ToolApplyResult {
+                    tool_name,
+                    status,
+                    requires_new_shell,
+                }
             })
             .collect()
     }
@@ -173,7 +187,9 @@ mod tests {
         }
 
         fn apply_theme(&self, _theme: &ThemeVariant) -> Result<ApplyOutcome> {
-            Ok(ApplyOutcome::Applied)
+            Ok(ApplyOutcome::Applied {
+                requires_new_shell: false,
+            })
         }
     }
 

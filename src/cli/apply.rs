@@ -314,16 +314,19 @@ mod tests {
                 ToolApplyResult {
                     tool_name: "ghostty".to_string(),
                     status: ToolApplyStatus::Applied,
+                    requires_new_shell: false,
                 },
                 ToolApplyResult {
                     tool_name: "alacritty".to_string(),
                     status: ToolApplyStatus::Skipped(SkipReason::MissingIntegrationConfig),
+                    requires_new_shell: false,
                 },
                 ToolApplyResult {
                     tool_name: "starship".to_string(),
                     status: ToolApplyStatus::Failed(crate::error::SlateError::Internal(
                         "boom".to_string(),
                     )),
+                    requires_new_shell: false,
                 },
             ],
         };

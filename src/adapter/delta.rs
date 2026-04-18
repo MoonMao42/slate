@@ -103,7 +103,9 @@ impl ToolAdapter for DeltaAdapter {
         let new_block = Self::render_delta_config(theme, &managed_path);
         marker_block::upsert_managed_block_file(&gitconfig_path, &new_block)?;
 
-        Ok(ApplyOutcome::Applied)
+        // delta reads colors from git config on every invocation; no shell
+        // restart required.
+        Ok(ApplyOutcome::applied_no_shell())
     }
 
     fn reload(&self) -> Result<()> {
