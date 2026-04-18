@@ -71,6 +71,7 @@ inherits = "release"
 [dev-dependencies]
 assert_cmd = "2"
 criterion = { version = "0.5", features = ["html_reports"] }
+insta = "1"
 notify = "6"
 predicates = "3"
 rstest = "0.18"
