@@ -48,26 +48,42 @@ pub(crate) fn reset_reminder_flag_for_tests() {
     REMINDER_EMITTED.store(false, Ordering::SeqCst);
 }
 
+/// Test-only: peek at the once-flag so sibling modules can assert that a
+/// handler DID (or DID NOT) invoke the emitter. Private state stays private
+/// in release builds.
+#[cfg(test)]
+pub(crate) fn reminder_flag_for_tests() -> bool {
+    REMINDER_EMITTED.load(Ordering::SeqCst)
+}
+
+/// Test-only: shared crate-wide lock for tests that manipulate
+/// `REMINDER_EMITTED`. Callers in `cli::setup`, `cli::theme`, `cli::font`,
+/// `cli::config`, and this module must all lock THIS mutex (not a local
+/// per-module one) so concurrent cargo-test threads can't race the
+/// `reset → emit → assert` sequence against an `emit` on another thread.
+#[cfg(test)]
+pub(crate) static REMINDER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    /// All four tests touch the same process-wide `REMINDER_EMITTED` flag.
-    /// Cargo runs tests in parallel by default, so without serialization the
-    /// `reset → emit → assert` sequence in one test can race a `reset` in
-    /// another and the "flag is true after emit" assertion flips red.
+    /// All tests in this module (and in sibling handler modules that wire the
+    /// emitter — `cli::setup`, `cli::theme`, `cli::font`, `cli::config`) touch
+    /// the same process-wide `REMINDER_EMITTED` flag. Cargo runs tests in
+    /// parallel by default, so we funnel everyone through `REMINDER_TEST_LOCK`
+    /// (defined at module scope above) to avoid races on the `reset → emit →
+    /// assert` sequence. Using a crate-wide lock (rather than per-module
+    /// mutexes) is the only way to prevent cross-module interleaving.
     ///
     /// `serial_test` is not a current dev-dependency; this hand-rolled mutex
-    /// keeps the fix local and avoids adding a crate for four tests.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
+    /// keeps the fix local and avoids adding a crate for the handful of tests.
     /// We assert flag state directly rather than capturing stdout: stdout
     /// capture across threads is finicky, and the flag is the load-bearing
     /// state per §Pitfall 1 (did the early-return happen BEFORE the swap?).
     #[test]
     fn reminder_emits_once_per_process() {
-        let _guard = TEST_LOCK
+        let _guard = REMINDER_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         reset_reminder_flag_for_tests();
@@ -88,7 +104,7 @@ mod tests {
 
     #[test]
     fn reminder_suppressed_by_auto() {
-        let _guard = TEST_LOCK
+        let _guard = REMINDER_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         reset_reminder_flag_for_tests();
@@ -105,7 +121,7 @@ mod tests {
 
     #[test]
     fn reminder_suppressed_by_quiet() {
-        let _guard = TEST_LOCK
+        let _guard = REMINDER_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         reset_reminder_flag_for_tests();
@@ -118,7 +134,7 @@ mod tests {
 
     #[test]
     fn reminder_flag_state_after_successful_emit() {
-        let _guard = TEST_LOCK
+        let _guard = REMINDER_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         reset_reminder_flag_for_tests();
