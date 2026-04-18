@@ -195,10 +195,11 @@ impl Palette {
             // Each arm cascades through ≥ 2 fallbacks so even minimalist
             // palettes (e.g. Solarized) never produce an empty hex.
             SemanticColor::Background => self.background.clone(),
-            SemanticColor::Surface => self
-                .surface0
-                .clone()
-                .unwrap_or_else(|| self.bg_dim.clone().unwrap_or_else(|| self.background.clone())),
+            SemanticColor::Surface => self.surface0.clone().unwrap_or_else(|| {
+                self.bg_dim
+                    .clone()
+                    .unwrap_or_else(|| self.background.clone())
+            }),
             SemanticColor::SurfaceAlt => self.surface1.clone().unwrap_or_else(|| {
                 self.overlay0
                     .clone()
@@ -214,10 +215,11 @@ impl Palette {
                     .clone()
                     .unwrap_or_else(|| self.bright_black.clone())
             }),
-            SemanticColor::LspParameter => self
-                .flamingo
-                .clone()
-                .unwrap_or_else(|| self.rosewater.clone().unwrap_or_else(|| self.yellow.clone())),
+            SemanticColor::LspParameter => self.flamingo.clone().unwrap_or_else(|| {
+                self.rosewater
+                    .clone()
+                    .unwrap_or_else(|| self.yellow.clone())
+            }),
         }
     }
 }
