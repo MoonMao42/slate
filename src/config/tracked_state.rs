@@ -78,10 +78,7 @@ impl ConfigManager {
     /// calling twice is fine; `slate clean` wipes the whole base_path so no
     /// disable helper is needed.
     pub fn acknowledge_ls_capability(&self) -> Result<()> {
-        state_files::write_state_file(
-            &self.base_path.join("ls-capability-acknowledged"),
-            "",
-        )
+        state_files::write_state_file(&self.base_path.join("ls-capability-acknowledged"), "")
     }
 }
 

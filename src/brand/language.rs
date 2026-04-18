@@ -184,6 +184,43 @@ impl Language {
         )
     }
 
+    // ────────────────────────────────────────────────────────────
+    // Phase 16 (LS-03 / UX-03) — brand-voiced shell-integration copy
+    // ────────────────────────────────────────────────────────────
+
+    /// macOS variant of the reveal-framed new-shell reminder.
+    /// Points to `⌘N` as the canvas where the new palette lives. Active voice;
+    /// no "please"; no "you need to". ≤76 chars so 2-space indent fits 80 cols.
+    pub const NEW_SHELL_REMINDER_MACOS: &str =
+        "✦ ⌘N for a fresh shell — your new palette lives there";
+
+    /// Non-macOS variant. Frames the new terminal (not "this one") as the
+    /// canvas. Active voice; no "please"; no "you need to". ≤76 chars.
+    pub const NEW_SHELL_REMINDER_LINUX: &str =
+        "✦ Open a new terminal — your new palette lives there";
+
+    /// UX-03 (D-D7): platform-aware reveal-framed reminder emitted at the tail
+    /// of `slate setup` / `theme` / `font` / `config` when any successful
+    /// adapter declared `RequiresNewShell`. Compile-time branch per RESEARCH
+    /// §Pattern 7 — simpler than routing through `platform::packages` and
+    /// keeps `Language` self-contained.
+    pub fn new_shell_reminder() -> &'static str {
+        if cfg!(target_os = "macos") {
+            Self::NEW_SHELL_REMINDER_MACOS
+        } else {
+            Self::NEW_SHELL_REMINDER_LINUX
+        }
+    }
+
+    /// LS-03 (D-B4): one-time macOS BSD-`ls` capability message emitted from
+    /// the setup preflight when `gls` (GNU ls from coreutils) is absent.
+    /// Shape: observation → consequence → `brew install coreutils`. Tone
+    /// mirrors `demo_size_error`: gentle, brand-voiced, ends with the fix.
+    /// Multi-line so it breathes inside the preflight printout block.
+    pub fn ls_capability_message() -> &'static str {
+        "✦ This macOS ships with BSD `ls`; the slate-managed LS_COLORS needs GNU `ls` to render.\n  Install it with `brew install coreutils` and your next shell lights up."
+    }
+
     // Hub menu labels
     pub const HUB_SWITCH_THEME: &str = "✦ Switch Theme";
     pub const HUB_PAUSE_AUTO_PICK: &str = "✦ Pause Auto & Pick Theme";
@@ -372,10 +409,7 @@ mod tests {
     #[test]
     fn new_shell_reminder_copy_brand_voice() {
         let msg = Language::new_shell_reminder();
-        assert!(
-            msg.starts_with('✦'),
-            "reminder must start with ✦: {msg:?}"
-        );
+        assert!(msg.starts_with('✦'), "reminder must start with ✦: {msg:?}");
         let lower = msg.to_lowercase();
         assert!(
             !lower.contains("please"),
