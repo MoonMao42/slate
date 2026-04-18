@@ -166,6 +166,7 @@ impl Default for ToolRegistry {
         registry.register(Box::new(crate::adapter::EzaAdapter));
         registry.register(Box::new(crate::adapter::LazygitAdapter));
         registry.register(Box::new(crate::adapter::FastfetchAdapter));
+        registry.register(Box::new(crate::adapter::LsColorsAdapter));
         registry.register(Box::new(crate::adapter::ZshHighlightAdapter));
         registry.register(Box::new(crate::adapter::TmuxAdapter));
         registry.register(Box::new(crate::adapter::FontAdapter));
@@ -244,7 +245,7 @@ mod tests {
     #[test]
     fn test_registry_default() {
         let registry = ToolRegistry::default();
-        assert_eq!(registry.adapters().len(), 12);
+        assert_eq!(registry.adapters().len(), 13);
     }
 
     #[test]

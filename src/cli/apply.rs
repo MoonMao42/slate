@@ -106,6 +106,9 @@ impl<'a> ThemeApplyCoordinator<'a> {
 
 pub fn log_apply_report(report: &ThemeApplyReport) {
     for result in &report.results {
+        if !should_log_apply_result(result) {
+            continue;
+        }
         match &result.status {
             ToolApplyStatus::Applied => eprintln!("✓ {}", result.tool_name),
             ToolApplyStatus::Skipped(SkipReason::MissingIntegrationConfig) => {
@@ -115,6 +118,13 @@ pub fn log_apply_report(report: &ThemeApplyReport) {
             ToolApplyStatus::Failed(err) => eprintln!("❌ {}: {}", result.tool_name, err),
         }
     }
+}
+
+fn should_log_apply_result(result: &ToolApplyResult) -> bool {
+    // `ls_colors` is an internal shell-integration layer, not a user-selected
+    // tool. Keep it in the apply report for state/reload decisions, but avoid
+    // surfacing a pseudo-tool line in user-facing progress output.
+    result.tool_name != "ls_colors"
 }
 
 pub(crate) fn apply_theme_with_options(
@@ -335,6 +345,20 @@ mod tests {
         assert_eq!(report.skipped_count(), 1);
         assert_eq!(report.failed_count(), 1);
         assert!(report.ghostty_applied());
+    }
+
+    #[test]
+    fn test_apply_report_skips_internal_ls_colors_adapter() {
+        let result = ToolApplyResult {
+            tool_name: "ls_colors".to_string(),
+            status: ToolApplyStatus::Applied,
+            requires_new_shell: true,
+        };
+
+        assert!(
+            !should_log_apply_result(&result),
+            "internal ls_colors layer should not print as a pseudo-tool in apply logs"
+        );
     }
 
     #[test]
