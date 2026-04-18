@@ -11,6 +11,7 @@ pub mod font;
 pub mod ghostty;
 pub mod kitty;
 pub mod lazygit;
+pub mod ls_colors;
 pub mod marker_block;
 pub mod palette_renderer;
 pub mod registry;
