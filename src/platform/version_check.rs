@@ -13,6 +13,8 @@ impl VersionPolicy {
             "ghostty" => Some("1.1.0"),
             // Alacritty: 0.12.0+
             "alacritty" => Some("0.12.0"),
+            // Neovim: 0.8.0+ (nvim_set_hl API + vim.uv baseline; Phase 17 D-01).
+            "nvim" => Some("0.8.0"),
             // Other tools: not yet gated (future expansion)
             _ => None,
         }
