@@ -292,3 +292,80 @@ mod registry_extended_tests {
         assert!(registry.get_adapter("tmux").is_some());
     }
 }
+
+#[cfg(test)]
+mod requires_new_shell_tests {
+    //! Plan 16-04 Task 2: D-D6-compliant aggregator — only successful
+    //! `Applied` results with `requires_new_shell == true` contribute;
+    //! `Failed` / `Skipped` never do.
+
+    use super::*;
+    use crate::adapter::SkipReason;
+    use crate::error::SlateError;
+
+    fn applied(name: &str, needs_new_shell: bool) -> ToolApplyResult {
+        ToolApplyResult {
+            tool_name: name.to_string(),
+            status: ToolApplyStatus::Applied,
+            requires_new_shell: needs_new_shell,
+        }
+    }
+
+    fn failed(name: &str, needs_new_shell: bool) -> ToolApplyResult {
+        ToolApplyResult {
+            tool_name: name.to_string(),
+            status: ToolApplyStatus::Failed(SlateError::Internal("test failure".into())),
+            requires_new_shell: needs_new_shell,
+        }
+    }
+
+    fn skipped(name: &str, needs_new_shell: bool) -> ToolApplyResult {
+        ToolApplyResult {
+            tool_name: name.to_string(),
+            status: ToolApplyStatus::Skipped(SkipReason::NotInstalled),
+            requires_new_shell: needs_new_shell,
+        }
+    }
+
+    #[test]
+    fn requires_new_shell_true_when_any_applied_with_flag() {
+        let results = vec![applied("bat", true)];
+        assert!(requires_new_shell(&results));
+    }
+
+    #[test]
+    fn requires_new_shell_false_when_all_applied_without_flag() {
+        let results = vec![
+            applied("ghostty", false),
+            applied("alacritty", false),
+            applied("kitty", false),
+        ];
+        assert!(!requires_new_shell(&results));
+    }
+
+    #[test]
+    fn requires_new_shell_ignores_failed_adapters() {
+        // D-D6: failures never contribute even if the failed adapter set the
+        // signal bool to true.
+        let results = vec![failed("bat", true)];
+        assert!(!requires_new_shell(&results));
+    }
+
+    #[test]
+    fn requires_new_shell_ignores_skipped_adapters() {
+        let results = vec![skipped("ls_colors", true)];
+        assert!(!requires_new_shell(&results));
+    }
+
+    #[test]
+    fn requires_new_shell_mixed_succeed_and_fail() {
+        let results = vec![applied("bat", true), failed("tmux", false)];
+        assert!(requires_new_shell(&results));
+    }
+
+    #[test]
+    fn requires_new_shell_empty_vec_is_false() {
+        let results: Vec<ToolApplyResult> = Vec::new();
+        assert!(!requires_new_shell(&results));
+    }
+}
