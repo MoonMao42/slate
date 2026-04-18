@@ -31,7 +31,7 @@ use crate::cli::picker::preview_panel::SemanticColor;
 use crate::design::nvim_highlights::{HighlightSpec, Style, HIGHLIGHT_GROUPS};
 use crate::env::SlateEnv;
 use crate::error::Result;
-use crate::theme::Palette;
+use crate::theme::{Palette, ThemeRegistry};
 use atomic_write_file::AtomicWriteFile;
 use std::fmt::Write as FmtWrite;
 use std::io::Write as IoWrite;
@@ -267,6 +267,176 @@ fn lua_string_literal(s: &str) -> String {
         }
     }
     out.push('"');
+    out
+}
+
+// ── Plan 17-03 Task 3: Lua loader template ─────────────────────────────
+//
+// The three `LOADER_TEMPLATE_*` constants below, sandwiched around the
+// spliced per-variant PALETTES entries produced by `render_colorscheme`
+// and an (empty in this plan) `LUALINE_THEMES` block, form the complete
+// `~/.config/nvim/lua/slate/init.lua` module Plan 05 ships through
+// `NvimAdapter::apply_setup`.
+//
+// Six load-bearing details from 17-RESEARCH.md §Pitfalls are inlined
+// inside these strings — every unit test in this file's `mod tests`
+// block guards one of them:
+//
+//   1. `local uv = vim.uv or vim.loop` (Pitfall 1 — nvim 0.8/0.9 compat)
+//   2. 100 ms debounce via `uv.new_timer()` (Pitfall 2 — APFS multi-fire)
+//   3. Watcher re-arm inside callback (Pitfall 6 — driver-specific close)
+//   4. `VimLeavePre` cleanup autocmd (no orphan libuv handles)
+//   5. `package.loaded['lualine']` guard (Pitfall 5 — never force-require)
+//   6. `doautocmd ColorScheme slate-<variant>` (downstream plugin hook)
+//
+// The strings are intentionally verbatim copies of 17-RESEARCH §Pattern 2
+// lines 329-446. Do not paraphrase: Plan 07's integration tests parse
+// these bytes directly via `nvim --headless -c 'luafile %'`, so any
+// syntactic drift breaks the syntax gate.
+
+/// Head of the loader: module prelude, uv shim, open PALETTES table.
+const LOADER_TEMPLATE_HEAD: &str = "\
+-- slate-managed: do not edit. Regenerate via `slate setup`.
+local M = {}
+local uv = vim.uv or vim.loop  -- nvim 0.8 compat (Pitfall 1)
+
+-- Per-variant highlight tables. Populated by slate setup from HIGHLIGHT_GROUPS.
+local PALETTES = {
+";
+
+/// Separator between PALETTES and LUALINE_THEMES tables.
+const LOADER_TEMPLATE_MID: &str = "\
+}
+
+-- Per-variant lualine theme tables. Plan 04 populates; empty stub now.
+local LUALINE_THEMES = {
+";
+
+/// Tail of the loader: close LUALINE_THEMES, define M.load / M.setup,
+/// wire the fs_event watcher with 100 ms debounce, register VimLeavePre
+/// cleanup, bootstrap via `M.setup()`, and return M.
+const LOADER_TEMPLATE_TAIL: &str = r#"}
+
+function M.load(variant)
+  local pal = PALETTES[variant]
+  if not pal then return end
+  vim.cmd('hi clear')
+  if vim.fn.exists('syntax_on') == 1 then vim.cmd('syntax reset') end
+  vim.g.colors_name = 'slate-' .. variant
+
+  for name, spec in pairs(pal) do
+    vim.api.nvim_set_hl(0, name, spec)
+  end
+
+  -- Lualine refresh guard (Pitfall 5)
+  if package.loaded['lualine'] and LUALINE_THEMES[variant] then
+    local ok, lualine = pcall(require, 'lualine')
+    if ok then
+      local cfg = lualine.get_config()
+      cfg.options.theme = LUALINE_THEMES[variant]
+      lualine.setup(cfg)
+      lualine.refresh({ force = true })
+    end
+  end
+
+  vim.cmd('doautocmd ColorScheme ' .. vim.g.colors_name)
+end
+
+local STATE_PATH = vim.fn.expand('~/.cache/slate/current_theme.lua')
+
+local function read_state()
+  local ok, mod = pcall(dofile, STATE_PATH)
+  if ok and type(mod) == 'string' then return mod end
+  return nil
+end
+
+local watcher
+local debounce_timer
+
+local function schedule_reload()
+  if debounce_timer then debounce_timer:stop() end
+  debounce_timer = uv.new_timer()
+  debounce_timer:start(100, 0, vim.schedule_wrap(function()  -- Pitfall 2: 100ms debounce
+    local variant = read_state()
+    if variant then M.load(variant) end
+    debounce_timer:close()
+    debounce_timer = nil
+  end))
+end
+
+function M.setup(opts)
+  opts = opts or {}
+  local variant = read_state()
+  if variant then M.load(variant) end
+
+  watcher = uv.new_fs_event()
+  watcher:start(STATE_PATH, {}, vim.schedule_wrap(function(err, _fname, _events)
+    if err then return end
+    schedule_reload()
+    -- Pitfall 6: re-arm watcher (some FS drivers close on first fire)
+    watcher:stop()
+    local ok = pcall(function()
+      watcher:start(STATE_PATH, {}, vim.schedule_wrap(schedule_reload))
+    end)
+    if not ok then watcher = nil end
+  end))
+
+  -- VimLeavePre cleanup -- prevents orphan libuv handles
+  vim.api.nvim_create_autocmd('VimLeavePre', {
+    callback = function()
+      if debounce_timer then pcall(function() debounce_timer:close() end) end
+      if watcher then pcall(function() watcher:close() end) end
+    end,
+  })
+end
+
+M.setup()
+
+return M
+"#;
+
+/// Render the complete `~/.config/nvim/lua/slate/init.lua` loader module.
+///
+/// Structure:
+///   1. LOADER_TEMPLATE_HEAD — module prelude + `local PALETTES = {`
+///   2. one `['<id>'] = <sub-table>,\n` line per built-in variant, the
+///      sub-table produced by [`render_colorscheme`] with its leading
+///      `-- slate-managed palette for …` comment stripped (the spliced
+///      form must be a bare `{ ... }` expression, not a prefixed one).
+///   3. LOADER_TEMPLATE_MID — close PALETTES + open LUALINE_THEMES.
+///   4. (empty in Plan 03 — Plan 04 splices per-variant lualine themes)
+///   5. LOADER_TEMPLATE_TAIL — close LUALINE_THEMES + M.load / M.setup
+///      / watcher / debounce / cleanup / `return M`.
+///
+/// Deterministic: iteration order is `ThemeRegistry::all()` order, which
+/// is the TOML declaration order (stable). Two calls yield byte-identical
+/// strings.
+pub fn render_loader() -> String {
+    let registry =
+        ThemeRegistry::new().expect("ThemeRegistry must initialise — validated at phase-load time");
+
+    let mut out = String::with_capacity(32 * 1024);
+    out.push_str(LOADER_TEMPLATE_HEAD);
+
+    for variant in registry.all() {
+        // `render_colorscheme` produces:
+        //   -- slate-managed palette for <id>\n{ ... }
+        // We need the bare table `{ ... }` keyed by the variant id inside
+        // the PALETTES block; strip the leading comment line by slicing
+        // after the first newline.
+        let sub = render_colorscheme(&variant.palette, &variant.id);
+        let body = sub.split_once('\n').map(|x| x.1).unwrap_or(&sub);
+
+        out.push_str("  ['");
+        out.push_str(&variant.id);
+        out.push_str("'] = ");
+        out.push_str(body);
+        out.push_str(",\n");
+    }
+
+    out.push_str(LOADER_TEMPLATE_MID);
+    // Plan 04 splices lualine theme entries here; Plan 03 leaves it empty.
+    out.push_str(LOADER_TEMPLATE_TAIL);
     out
 }
 
