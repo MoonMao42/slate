@@ -275,7 +275,10 @@ mod tests {
     fn test_demo_hint_format() {
         let hint = Language::DEMO_HINT;
         assert!(hint.starts_with('✦'), "hint must start with ✦ glyph");
-        assert!(hint.contains("slate demo"), "hint must mention `slate demo`");
+        assert!(
+            hint.contains("slate demo"),
+            "hint must mention `slate demo`"
+        );
         assert!(
             !hint.starts_with("(i)"),
             "hint must NOT use `(i) Tip:` advisory tone per D-C4"
