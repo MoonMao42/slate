@@ -70,6 +70,14 @@ pub fn extension_map() -> &'static [(&'static str, SemanticColor)] {
     EXTENSION_MAP
 }
 
+/// Flat (full-filename, SemanticColor) pairs for Phase 16
+/// `LS_COLORS` / `EZA_COLORS` generation. Order is deterministic — Phase 16
+/// iterates this slice to emit colors for full filename matches (e.g. lock
+/// files, manifests) that must round-trip through `classify()`.
+pub fn full_name_map() -> &'static [(&'static str, SemanticColor)] {
+    FULL_NAME_MAP
+}
+
 /// Full-filename matches (e.g. lock files, manifests) that should NOT fall
 /// through to extension lookup.
 static FULL_NAME_MAP: &[(&str, SemanticColor)] = &[
