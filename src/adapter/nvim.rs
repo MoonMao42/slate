@@ -429,4 +429,95 @@ mod tests {
         let out = render_colorscheme(&v.palette, &v.id);
         insta::assert_snapshot!("nvim_render_colorscheme_catppuccin_mocha", out);
     }
+
+    // ── write_state_file — Plan 17-03 Task 2 ──────────────────────────
+
+    #[test]
+    fn write_state_file_writes_exact_content() {
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        write_state_file(&env, "catppuccin-mocha").expect("write ok");
+        let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
+        assert_eq!(got, "return \"catppuccin-mocha\"\n");
+    }
+
+    #[test]
+    fn write_state_file_creates_parent_directory() {
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let path = state_file_path(&env);
+        // Precondition: cache dir must be absent before the call.
+        assert!(
+            !path.parent().expect("has parent").exists(),
+            "precondition: cache dir must be absent before write_state_file"
+        );
+        write_state_file(&env, "tokyo-night-dark").expect("creates parent");
+        assert!(path.exists(), "state file should exist after write");
+    }
+
+    #[test]
+    fn write_state_file_is_overwrite_not_append() {
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        write_state_file(&env, "a").expect("write a");
+        write_state_file(&env, "b").expect("write b");
+        let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
+        assert_eq!(got, "return \"b\"\n");
+    }
+
+    #[test]
+    fn lua_string_literal_escapes_metachars() {
+        assert_eq!(lua_string_literal("simple"), "\"simple\"");
+        assert_eq!(lua_string_literal("has\"quote"), "\"has\\\"quote\"");
+        assert_eq!(lua_string_literal("has\\back"), "\"has\\\\back\"");
+    }
+
+    #[test]
+    fn write_state_file_escapes_quote_metachar() {
+        // Defensive: even though variant ids are kebab-case ASCII in
+        // practice, the escaping contract must hold for any input that
+        // could ever reach this call path (future id schemes).
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        write_state_file(&env, "has\"quote").expect("write escapes quote");
+        let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
+        assert_eq!(got, "return \"has\\\"quote\"\n");
+    }
+
+    #[test]
+    fn write_state_file_escapes_backslash_metachar() {
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        write_state_file(&env, "has\\back").expect("write escapes backslash");
+        let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
+        assert_eq!(got, "return \"has\\\\back\"\n");
+    }
+
+    #[test]
+    fn write_state_file_loop_yields_final_variant_content() {
+        // Atomicity is a structural property of AtomicWriteFile::commit
+        // (fsync+rename). We can't observe mid-write partial state in
+        // pure Rust, so the practical proof is: N writes in a tight
+        // loop produce a file whose final content matches the last
+        // write exactly (no appends, no partial writes surviving).
+        use crate::env::SlateEnv;
+        use tempfile::TempDir;
+        let td = TempDir::new().expect("tempdir");
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        for i in 0..25 {
+            write_state_file(&env, &format!("variant-{i:02}")).expect("write");
+        }
+        let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
+        assert_eq!(got, "return \"variant-24\"\n");
+    }
 }
