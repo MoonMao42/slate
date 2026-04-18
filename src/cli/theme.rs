@@ -108,6 +108,12 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
 
         println!("{} Theme switched to '{}'", Symbols::SUCCESS, theme.name);
         crate::cli::sound::play_feedback();
+
+        // DEMO-02 (D-C1): hint only on explicit `slate theme <name>` success.
+        // NEVER from the `if auto` branch (Ghostty shell hook spam risk — Pitfall 1)
+        // NOR from the picker branch (D-C1).
+        crate::cli::demo::emit_demo_hint_once(false, false);
+
         Ok(())
     } else {
         // Picker path: launch interactive picker
