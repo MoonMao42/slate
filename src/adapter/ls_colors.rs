@@ -1,28 +1,75 @@
-//! LS_COLORS + EZA_COLORS adapter — RED stub (tests fail, implementation pending).
+//! LS_COLORS + EZA_COLORS adapter — projects the Phase-15 file_type classifier
+//! into two environment-variable strings.
 //!
-//! This module compiles and exposes the public surface expected by the tests
-//! so the RED phase of the TDD cycle can produce running-but-failing assertions.
-//! The GREEN phase (next commit) will replace the stub bodies with the real
-//! palette-driven projection.
+//! The rendered strings are materialised into the managed shell integration
+//! files (`managed/shell/env.{zsh,bash,fish}`) by `SharedShellModel` in
+//! Plan 16-04 (Wave 2). This module owns the projection only; it does not
+//! write any files.
 //!
-//! `render_ls_colors` / `render_eza_colors` / `render_strings` and the
+//! ## File-type kind keys (LS_COLORS)
+//!
+//! Phase-15 `file_type_colors::classify` is the single source of truth; it
+//! defines five `FileKind`s — `Regular`, `Directory`, `Symlink`, `Executable`
+//! (plus `Hidden` derived at match-time). GNU `LS_COLORS`, however, defines
+//! eight file-type kind keys that `ls` emits for filesystem entries beyond
+//! those four. We reuse the closest Phase-15 role for each missing kind so
+//! the output stays consistent with the project's single-palette invariant,
+//! and document the intentional reuse below:
+//!
+//! | Key | Meaning                           | Role reused           |
+//! |-----|-----------------------------------|-----------------------|
+//! | `di`| Directory                         | `FileDir`             |
+//! | `ln`| Symbolic link                     | `FileSymlink`         |
+//! | `ex`| Executable file                   | `FileExec`            |
+//! | `or`| Orphan symlink (broken)           | `FileSymlink` (reuse) |
+//! | `so`| Unix socket                       | `FileExec` (reuse)    |
+//! | `pi`| Named pipe / FIFO                 | `FileConfig` (reuse)  |
+//! | `bd`| Block device                      | `FileConfig` (reuse)  |
+//! | `cd`| Character device                  | `FileConfig` (reuse)  |
+//!
+//! `or` / `so` / `pi` / `bd` / `cd` do not appear in the Phase-15 classifier
+//! (`FileKind` has no Pipe / Socket / BlockDevice / CharDevice variants).
+//! Extending `FileKind` is deferred — until then, the closest semantically
+//! adjacent role is emitted per RESEARCH §Pitfall 4.
+//!
+//! ## `reset:` sentinel on EZA_COLORS
+//!
+//! Per `eza_colors(5)`, eza merges `EZA_COLORS` on top of its built-in
+//! extension → color map. Setting `EZA_COLORS="*.rs=…"` alone does not
+//! reset eza's defaults; colors for extensions we do not override leak
+//! through. To keep "one palette across the stack" true, `render_eza_colors`
+//! prepends `reset:` — eza wipes its built-in DB on `reset` and then honours
+//! only the palette-driven entries we emit (with `no=0` handling everything
+//! else as default foreground). See RESEARCH §Pattern 2 lines 338-384.
+//!
+//! Note on `allow(dead_code)`: the `pub(crate)` render functions and the
 //! `FILE_TYPE_KIND_KEYS` table are consumed by Plan 16-04 (`SharedShellModel`)
-//! in Wave 2 — until that wave lands they are `dead_code` for non-test
-//! compilation; the `allow(dead_code)` annotations below are intentional and
-//! will be dropped once Plan 16-04 wires the call sites.
+//! in Wave 2. Until that wave lands they have no non-test call sites; the
+//! module-level `allow(dead_code)` is intentional and will be dropped when
+//! Plan 16-04 wires `render_strings()` into shell-integration composition.
 
 #![allow(dead_code)]
 
+use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::cli::picker::preview_panel::SemanticColor;
+use crate::design::file_type_colors::{extension_map, full_name_map};
+use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::{Palette, ThemeVariant};
+use std::fmt::Write;
 use std::path::PathBuf;
 
+/// GNU `LS_COLORS` file-type kind keys → Phase-15 SemanticColor roles.
+///
+/// Order is deterministic (same iteration order as the wire format).
+/// See module-level docs for the intentional reuse rationale for `or`,
+/// `so`, `pi`, `bd`, `cd`.
 static FILE_TYPE_KIND_KEYS: &[(&str, SemanticColor)] = &[
     ("di", SemanticColor::FileDir),
     ("ln", SemanticColor::FileSymlink),
     ("ex", SemanticColor::FileExec),
+    // Intentional reuse — no Phase-15 role exists for these kinds yet.
     ("or", SemanticColor::FileSymlink),
     ("so", SemanticColor::FileExec),
     ("pi", SemanticColor::FileConfig),
@@ -30,26 +77,100 @@ static FILE_TYPE_KIND_KEYS: &[(&str, SemanticColor)] = &[
     ("cd", SemanticColor::FileConfig),
 ];
 
-fn ansi_code(_palette: &Palette, _role: SemanticColor) -> String {
-    // RED stub — will be implemented in GREEN.
-    String::new()
+/// Resolve a `SemanticColor` role into the inner `38;2;R;G;B` substring used
+/// by `LS_COLORS` / `EZA_COLORS` entries. On hex-parse error (should be
+/// unreachable for validated palettes) we degrade to the reset literal `"0"`
+/// rather than crash — a single malformed hex must not poison the whole
+/// env-var string.
+fn ansi_code(palette: &Palette, role: SemanticColor) -> String {
+    let hex = palette.resolve(role);
+    match PaletteRenderer::hex_to_rgb(&hex) {
+        Ok((r, g, b)) => PaletteRenderer::rgb_to_ansi_24bit(r, g, b),
+        Err(_) => String::from("0"),
+    }
 }
 
-pub(crate) fn render_ls_colors(_palette: &Palette) -> String {
-    // RED stub — returns empty string so tests fail meaningfully.
-    String::new()
+/// Render LS_COLORS string for a given palette.
+///
+/// Layout: `rs=0:no=0:<file-type kinds>:<*.ext entries>:<FULL_NAME entries>`.
+/// Every per-entry colour is a truecolor `38;2;R;G;B` triple (no 256-colour
+/// fallback, no `\x1b[` prefix, no trailing `m`).
+pub(crate) fn render_ls_colors(palette: &Palette) -> String {
+    let mut out = String::with_capacity(1024);
+    out.push_str("rs=0:no=0");
+
+    for (key, role) in FILE_TYPE_KIND_KEYS {
+        // write! on String cannot fail — unwrap is correctness-preserving.
+        let _ = write!(out, ":{key}={}", ansi_code(palette, *role));
+    }
+
+    for (ext, role) in extension_map() {
+        let _ = write!(out, ":*.{ext}={}", ansi_code(palette, *role));
+    }
+
+    for (name, role) in full_name_map() {
+        let _ = write!(out, ":{name}={}", ansi_code(palette, *role));
+    }
+
+    out
 }
 
-pub(crate) fn render_eza_colors(_palette: &Palette) -> String {
-    // RED stub — returns empty string so tests fail meaningfully.
-    String::new()
+/// Render EZA_COLORS string for a given palette.
+///
+/// Layout: `reset:<same body as render_ls_colors>:<eza identity keys>`.
+/// Prepending `reset` is required to stop eza's built-in extension map from
+/// leaking colours that aren't palette-sourced (see module docs).
+pub(crate) fn render_eza_colors(palette: &Palette) -> String {
+    let mut out = String::with_capacity(1024);
+    out.push_str("reset");
+
+    for (key, role) in FILE_TYPE_KIND_KEYS {
+        let _ = write!(out, ":{key}={}", ansi_code(palette, *role));
+    }
+
+    for (ext, role) in extension_map() {
+        let _ = write!(out, ":*.{ext}={}", ansi_code(palette, *role));
+    }
+
+    for (name, role) in full_name_map() {
+        let _ = write!(out, ":{name}={}", ansi_code(palette, *role));
+    }
+
+    // eza-specific identity keys (D-A4):
+    //   uu / gu → current user + group  → Text (primary foreground emphasis)
+    //   un / gn / da → other users / groups / dates → Muted (secondary metadata)
+    let text = ansi_code(palette, SemanticColor::Text);
+    let muted = ansi_code(palette, SemanticColor::Muted);
+    let _ = write!(out, ":uu={text}");
+    let _ = write!(out, ":gu={text}");
+    let _ = write!(out, ":un={muted}");
+    let _ = write!(out, ":gn={muted}");
+    let _ = write!(out, ":da={muted}");
+
+    out
 }
 
+/// Convenience tuple `(ls_colors, eza_colors)` — Plan 16-04 calls this from
+/// `SharedShellModel::new` so the two env vars stay in lock-step.
 pub(crate) fn render_strings(palette: &Palette) -> (String, String) {
     (render_ls_colors(palette), render_eza_colors(palette))
 }
 
+/// LS_COLORS / EZA_COLORS adapter.
+///
+/// Implements `ToolAdapter` so it participates in the standard registry
+/// lifecycle (setup / apply-all iteration). The adapter's `apply_theme`
+/// is a pure signal holder — actual string emission happens via
+/// `render_strings()` called from shell-integration composition in
+/// Plan 16-04.
 pub struct LsColorsAdapter;
+
+impl LsColorsAdapter {
+    fn config_home() -> Result<PathBuf> {
+        let env = SlateEnv::from_process()?;
+        Ok(env.config_dir().to_path_buf())
+    }
+}
 
 impl ToolAdapter for LsColorsAdapter {
     fn tool_name(&self) -> &'static str {
@@ -57,27 +178,40 @@ impl ToolAdapter for LsColorsAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        // RED stub — intentionally wrong so the adapter test fails.
-        Ok(false)
+        // Always applicable: writing `LS_COLORS` is a silent no-op on BSD
+        // `ls` and takes effect the moment the user installs GNU coreutils
+        // (D-B5). Never gated.
+        Ok(true)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
-        Ok(PathBuf::new())
+        // The "integration" file is the managed shell env script; the env
+        // vars are exported from there into every new shell.
+        Ok(Self::config_home()?
+            .join("managed")
+            .join("shell")
+            .join("env.zsh"))
     }
 
     fn managed_config_path(&self) -> PathBuf {
-        PathBuf::new()
+        match SlateEnv::from_process() {
+            Ok(env) => env.config_dir().join("managed").join("shell"),
+            Err(_) => PathBuf::from(".config/slate/managed/shell"),
+        }
     }
 
     fn apply_strategy(&self) -> ApplyStrategy {
-        // RED stub — intentionally wrong strategy so the test fails.
-        ApplyStrategy::SourceScript
+        ApplyStrategy::EnvironmentVariable
     }
 
     fn apply_theme(&self, _theme: &ThemeVariant) -> Result<ApplyOutcome> {
-        // RED stub — wrong signal so the test fails.
+        // String emission is owned by Plan 16-04's `SharedShellModel::new`,
+        // which calls `render_strings(&palette)` during shell-integration
+        // composition. This adapter's job is purely to declare the
+        // `requires_new_shell` signal honestly (D-C3 / Pitfall from 16-CONTEXT
+        // D-C4 — env vars only materialise in a fresh shell).
         Ok(ApplyOutcome::Applied {
-            requires_new_shell: false,
+            requires_new_shell: true,
         })
     }
 }
@@ -85,7 +219,6 @@ impl ToolAdapter for LsColorsAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::design::file_type_colors::{extension_map, full_name_map};
     use crate::theme::catppuccin::catppuccin_mocha;
     use crate::theme::gruvbox::gruvbox_dark;
     use regex::Regex;
@@ -103,6 +236,8 @@ mod tests {
             ),
         ]
     }
+
+    // --- LS_COLORS tests ---
 
     #[rstest]
     fn ls_colors_starts_with_rs_and_no_sentinels() {
@@ -166,7 +301,10 @@ mod tests {
     fn ls_colors_round_trips_through_classifier() {
         use crate::design::file_type_colors::{classify, FileKind};
 
+        // Curated sample: the filename's classified role must equal the ANSI
+        // code we emit in the LS_COLORS entry that `ls` will use for it.
         let cases: &[(&str, FileKind, &str)] = &[
+            // (filename, kind, lookup-prefix used to locate the entry in LS_COLORS)
             ("main.rs", FileKind::Regular, ":*.rs="),
             ("README.md", FileKind::Regular, ":*.md="),
             ("photo.png", FileKind::Regular, ":*.png="),
@@ -188,6 +326,8 @@ mod tests {
                         "palette={palette_label}: entry for `{name}` via prefix `{prefix}` not found",
                     )
                 });
+                // Extract the ANSI substring between "<prefix>" and next ":"
+                // (or end of string).
                 let value_start = pos + prefix.len();
                 let value_end = out[value_start..]
                     .find(':')
@@ -206,6 +346,9 @@ mod tests {
 
     #[rstest]
     fn ls_colors_uses_only_truecolor_codes() {
+        // Every value between `=` and the next `:` (or EOS) must match
+        // either a truecolor triple or the literal reset "0". No 256-colour
+        // fallback, no wrapped escapes.
         let truecolor_or_reset =
             Regex::new(r"^(?:38;2;\d{1,3};\d{1,3};\d{1,3}|0)$").expect("regex");
 
@@ -222,6 +365,9 @@ mod tests {
             );
 
             for entry in out.split(':') {
+                // Each entry is either `key=value` or just `value` for the
+                // reset sentinels at the head (`rs=0`, `no=0`). Validate the
+                // RHS of `=` if present.
                 let value = match entry.split_once('=') {
                     Some((_, v)) => v,
                     None => continue,
@@ -236,6 +382,8 @@ mod tests {
 
     #[rstest]
     fn ls_colors_or_uses_file_symlink_role_by_intent() {
+        // Documents the intentional reuse — `or` (orphan symlink) shares
+        // FileSymlink because classify() has no Orphan role.
         for (label, palette) in test_palettes() {
             let out = render_ls_colors(&palette);
             let symlink_ansi = ansi_code(&palette, SemanticColor::FileSymlink);
@@ -246,6 +394,8 @@ mod tests {
             );
         }
     }
+
+    // --- EZA_COLORS tests ---
 
     #[rstest]
     fn eza_colors_starts_with_reset_sentinel() {
@@ -264,6 +414,8 @@ mod tests {
 
     #[rstest]
     fn eza_colors_body_equals_ls_colors_body_for_shared_keys() {
+        // The eza string and the ls string must carry identical entries for
+        // the shared key-space (kind keys + extensions + full-name entries).
         for (label, palette) in test_palettes() {
             let ls = render_ls_colors(&palette);
             let eza = render_eza_colors(&palette);
@@ -350,6 +502,8 @@ mod tests {
         }
     }
 
+    // --- Adapter contract tests ---
+
     #[test]
     fn ls_colors_adapter_declares_env_var_strategy() {
         let adapter = LsColorsAdapter;
@@ -373,6 +527,7 @@ mod tests {
 
     #[test]
     fn ls_colors_adapter_is_installed_is_always_true() {
+        // D-B5: env var is a silent no-op on BSD ls; never gate writes.
         let adapter = LsColorsAdapter;
         assert!(adapter.is_installed().expect("is_installed ok"));
     }
