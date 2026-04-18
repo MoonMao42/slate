@@ -446,6 +446,65 @@ mod tests {
     }
 
     #[test]
+    fn slate_theme_set_writes_nvim_state_file_on_successful_apply() {
+        // Contract: after ThemeApplyCoordinator::apply succeeds (at least one
+        // adapter returns Applied), the shared coordinator writes the nvim
+        // state file at `<home>/.cache/slate/current_theme.lua` containing the
+        // applied variant id. The state file is what triggers the nvim loader's
+        // vim.uv.fs_event watcher (Phase 17 D-04) in any running nvim.
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let theme = catppuccin::catppuccin_mocha().unwrap();
+
+        let report = ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip)
+            .apply(&theme)
+            .unwrap();
+        assert!(
+            report.applied_count() >= 1,
+            "precondition: at least one adapter must apply (ls_colors is always-on)"
+        );
+
+        let state = tempdir.path().join(".cache/slate/current_theme.lua");
+        assert!(
+            state.is_file(),
+            "shared coordinator must write nvim state file at {:?}",
+            state
+        );
+        let got = std::fs::read_to_string(&state).unwrap();
+        assert!(
+            got.contains(&theme.id),
+            "state file must contain applied variant id {:?}, got {:?}",
+            theme.id,
+            got
+        );
+    }
+
+    #[test]
+    fn slate_theme_set_no_state_file_when_no_adapter_applied() {
+        // Contract: if applied_count == 0 (e.g., only a non-existent tool was
+        // targeted), the coordinator must NOT write an orphan state file. This
+        // prevents running nvim instances from hot-reloading to a theme that
+        // nothing else applied.
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let theme = catppuccin::catppuccin_mocha().unwrap();
+
+        let coordinator = ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip);
+        let unreachable_target = vec!["definitely-not-a-real-tool".to_string()];
+        let report = coordinator
+            .apply_to_tools(&theme, &unreachable_target)
+            .unwrap();
+        assert_eq!(report.applied_count(), 0);
+
+        let state = tempdir.path().join(".cache/slate/current_theme.lua");
+        assert!(
+            !state.exists(),
+            "no orphan state file must be written when no adapter applied; found {:?}",
+            state
+        );
+    }
+
+    #[test]
     fn test_apply_does_not_commit_current_when_no_adapter_applied() {
         // Targeting a non-existent adapter produces an empty result list, i.e. applied_count==0.
         // The guard must keep the previous current_theme untouched so `slate status` does not
