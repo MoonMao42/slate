@@ -192,14 +192,32 @@ impl Palette {
             SemanticColor::FileHidden => self.bright_black.clone(),
 
             // Editor theming (Phase 17 — consumed by src/adapter/nvim.rs).
-            // Temporary RED-stage stubs: tests must fail until cascading
-            // fallbacks land in the GREEN step.
-            SemanticColor::Background => String::new(),
-            SemanticColor::Surface => String::new(),
-            SemanticColor::SurfaceAlt => String::new(),
-            SemanticColor::Selection => String::new(),
-            SemanticColor::Border => String::new(),
-            SemanticColor::LspParameter => String::new(),
+            // Each arm cascades through ≥ 2 fallbacks so even minimalist
+            // palettes (e.g. Solarized) never produce an empty hex.
+            SemanticColor::Background => self.background.clone(),
+            SemanticColor::Surface => self
+                .surface0
+                .clone()
+                .unwrap_or_else(|| self.bg_dim.clone().unwrap_or_else(|| self.background.clone())),
+            SemanticColor::SurfaceAlt => self.surface1.clone().unwrap_or_else(|| {
+                self.overlay0
+                    .clone()
+                    .unwrap_or_else(|| self.bright_black.clone())
+            }),
+            SemanticColor::Selection => self.selection_bg.clone().unwrap_or_else(|| {
+                self.surface2
+                    .clone()
+                    .unwrap_or_else(|| self.bright_black.clone())
+            }),
+            SemanticColor::Border => self.surface2.clone().unwrap_or_else(|| {
+                self.overlay0
+                    .clone()
+                    .unwrap_or_else(|| self.bright_black.clone())
+            }),
+            SemanticColor::LspParameter => self
+                .flamingo
+                .clone()
+                .unwrap_or_else(|| self.rosewater.clone().unwrap_or_else(|| self.yellow.clone())),
         }
     }
 }
