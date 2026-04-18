@@ -176,6 +176,27 @@ pub(crate) fn apply_theme_with_options(
         }
     }
 
+    // Phase 17 D-04: nvim state-file tail hook.
+    //
+    // Best-effort, non-fatal. Every successful apply path — explicit set,
+    // picker commit, restore re-apply, auto-follow — funnels through this
+    // coordinator, so writing the state file here guarantees every running
+    // nvim instance sees a single atomic `fs_event` and hot-reloads via the
+    // loader's `vim.uv.fs_event` watcher.
+    //
+    // Intentionally placed AFTER `set_current_theme` so the hook does not
+    // fire on the applied_count == 0 early-return path above: a theme that
+    // nothing else applied must not point running nvim at an orphan state.
+    // If the write itself fails (unwritable cache dir, etc.) we log a
+    // warning but do not abort the theme swap — matches the tmux reload
+    // posture documented in 17-RESEARCH §Pattern 3.
+    if let Err(err) = crate::adapter::nvim::write_state_file(env, &theme.id) {
+        eprintln!(
+            "warning: nvim state-file write failed for theme {}: {}",
+            theme.id, err
+        );
+    }
+
     reload_theme_targets(&registry, &report);
     Ok(report)
 }
