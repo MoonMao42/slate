@@ -29,8 +29,13 @@
 use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::cli::picker::preview_panel::SemanticColor;
 use crate::design::nvim_highlights::{HighlightSpec, Style, HIGHLIGHT_GROUPS};
+use crate::env::SlateEnv;
+use crate::error::Result;
 use crate::theme::Palette;
+use atomic_write_file::AtomicWriteFile;
 use std::fmt::Write as FmtWrite;
+use std::io::Write as IoWrite;
+use std::path::PathBuf;
 
 /// Render ONE variant's highlight-group table as a Lua sub-table literal.
 ///
@@ -207,6 +212,62 @@ fn resolve_with_fallback(palette: &Palette, role: SemanticColor) -> String {
     } else {
         String::from("NONE")
     }
+}
+
+// ── Plan 17-03 Task 2: state-file plumbing ─────────────────────────────
+
+/// Atomically write the active-variant state file observed by the Lua
+/// watcher registered by `render_loader` (Plan 03 Task 3).
+///
+/// Path: `<env.slate_cache_dir()>/current_theme.lua`.
+/// Content: `return "<variant-id>"\n` — a minimal Lua string literal so
+/// `dofile(path)` / `pcall(dofile, path)` returns the variant id.
+///
+/// Atomicity: `AtomicWriteFile::commit()` performs `fsync → rename`,
+/// which fires EXACTLY ONE `fs_event` on the Lua watcher side — this
+/// is the load-bearing behaviour D-04 depends on. Never replace this
+/// with `std::fs::write` or a manual `.tmp` + rename dance; they can
+/// fire multiple events (Plan 07 Task 2 has an fs-event counter that
+/// would catch the regression).
+///
+/// The parent directory is created if missing (first-run safety).
+pub fn write_state_file(env: &SlateEnv, variant_id: &str) -> Result<()> {
+    let path = state_file_path(env);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = format!("return {}\n", lua_string_literal(variant_id));
+    let mut file = AtomicWriteFile::open(&path)?;
+    file.write_all(content.as_bytes())?;
+    file.commit()?;
+    Ok(())
+}
+
+/// Compute the canonical state-file path for a given env.
+///
+/// `pub(crate)` so Plan 05's adapter and Plan 06's clean helper can
+/// reach it without duplicating the join.
+pub(crate) fn state_file_path(env: &SlateEnv) -> PathBuf {
+    env.slate_cache_dir().join("current_theme.lua")
+}
+
+/// Escape a variant id for embedding inside a Lua double-quoted string
+/// literal. Variant ids are kebab-case ASCII in practice (no trigger),
+/// but defensive escaping keeps the contract safe for any future id
+/// scheme that could reach this code path.
+fn lua_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 #[cfg(test)]
