@@ -1727,9 +1727,9 @@ mod optional_automations {
 #[cfg(test)]
 mod polish_and_clarity {
     use slate_cli::brand::language::Language;
+    use slate_cli::brand::Symbols;
     use slate_cli::cli::tool_selection::ReviewReceipt;
     use slate_cli::cli::wizard_core::Wizard;
-    use slate_cli::design::typography::Typography;
 
     #[test]
     fn test_completion_message_contains_dopamine() {
@@ -1765,21 +1765,6 @@ mod polish_and_clarity {
 
         // Receipt footer (activation guidance) must be visible
         assert!(formatted.contains("Ready") || formatted.contains("apply"));
-    }
-
-    #[test]
-    fn test_typography_helpers_maintain_readability() {
-        // Verify typography helpers don't obscure content
-        let section = Typography::section_header("Tool Inventory");
-        assert!(section.contains("Tool Inventory")); // Must be readable
-        assert!(section.contains("✦")); // Brand mark visible
-
-        let strong = Typography::strong_emphasis("Your terminal is now beautiful!");
-        assert!(strong.contains("Your terminal is now beautiful!")); // Content visible
-
-        let item = Typography::list_item('✓', "Ghostty", "Makes your terminal glow");
-        assert!(item.contains("Ghostty")); // Label visible
-        assert!(item.contains("Makes your terminal glow")); // Description visible
     }
 
     #[test]
@@ -1819,21 +1804,13 @@ mod polish_and_clarity {
 
     #[test]
     fn test_polish_preserves_symbol_language() {
-        // Design system: exactly 5 core symbolspruned set)
-        assert_eq!(slate_cli::design::symbols::Symbols::BRAND, '✦');
-        assert_eq!(slate_cli::design::symbols::Symbols::SUCCESS, '✓');
-        assert_eq!(slate_cli::design::symbols::Symbols::FAILURE, '✗');
-        assert_eq!(slate_cli::design::symbols::Symbols::PENDING, '○');
-        assert_eq!(slate_cli::design::symbols::Symbols::DIAMOND, '◆');
-    }
-
-    #[test]
-    fn test_hierarchy_helpers_are_optional_not_required() {
-        // Typography helpers are infrastructure, not requirements for wizard operation
-        // This test verifies the design principle: helpers are optional
-        let _section = Typography::section_header("Test"); // Can be used
-        let _secondary = Typography::secondary_label("label", "value"); // Can be used
-        let _list_item = Typography::list_item('•', "item", "description"); // Can be used
-                                                                            // Wizard can still work without them (backward compatibility implicit)
+        // Brand system: the 5 core symbols live under `src/brand/symbols.rs`
+        // after the Phase 18 migration (Plan 18-01 Wave 0 moved the table,
+        // Plan 18-08 deleted the `src/design/symbols.rs` shim).
+        assert_eq!(Symbols::BRAND, '✦');
+        assert_eq!(Symbols::SUCCESS, '✓');
+        assert_eq!(Symbols::FAILURE, '✗');
+        assert_eq!(Symbols::PENDING, '○');
+        assert_eq!(Symbols::DIAMOND, '◆');
     }
 }
