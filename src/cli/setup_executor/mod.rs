@@ -5,6 +5,9 @@ mod font_install;
 mod integration;
 mod tool_install;
 
+use crate::brand::events::{dispatch, BrandEvent, FailureKind};
+use crate::brand::render_context::RenderContext;
+use crate::brand::roles::Roles;
 use crate::cli::failure_handler::{ExecutionSummary, InstallStatus, ToolInstallResult};
 use crate::config::ConfigManager;
 use crate::detection;
@@ -31,7 +34,17 @@ pub fn execute_setup_with_env(
 ) -> Result<ExecutionSummary> {
     let mut summary = ExecutionSummary::new();
 
-    eprintln!("\n✦ Applying your setup...\n");
+    // Build a RenderContext up-front so the tree-narrative anchor + the
+    // per-tool status lines share the same byte contract (sketch 003
+    // winner + D-01 daily chrome). Registry init failure is graceful —
+    // the executor still prints plain-text status, per D-05.
+    let ctx = RenderContext::from_active_theme().ok();
+    let roles = ctx.as_ref().map(Roles::new);
+
+    // D-10: the setup-applying header is a static tree-narrative anchor.
+    // Emit via println! (stderr-adjacent `eprintln!` for diagnostics
+    // parity with the existing flow) bypassing cliclack.
+    eprintln!("\n{}\n", heading(roles.as_ref(), "Applying your setup"));
 
     let spinner = cliclack::spinner();
 
@@ -63,6 +76,9 @@ pub fn execute_setup_with_env(
                         error_message: None,
                     });
                     spinner.stop(method.success_message(tool.label));
+                    // D-17: per-tool-apply success → BrandEvent::ApplyComplete.
+                    // Phase 20's SoundSink consumes this for per-tool SFX.
+                    dispatch(BrandEvent::ApplyComplete);
                 }
                 Err(err) => {
                     let elapsed = install_start.elapsed();
@@ -75,7 +91,10 @@ pub fn execute_setup_with_env(
                         status: InstallStatus::Failed,
                         error_message: Some(err.to_string()),
                     });
-                    spinner.error(format!("✗ {} failed: {}", tool.label, err));
+                    spinner.error(status_error(
+                        roles.as_ref(),
+                        &format!("{} failed: {}", tool.label, err),
+                    ));
                 }
             }
         }
@@ -194,14 +213,20 @@ pub fn execute_setup_with_env(
                 summary.add_issue(issue);
             }
             summary.set_theme_results(report.results);
-            spinner.stop(format!(
-                "✓ Shell integration configured for {}",
-                selected_theme.name
+            spinner.stop(status_success(
+                roles.as_ref(),
+                &format!("Shell integration configured for {}", selected_theme.name),
             ));
         }
         Err(err) => {
-            spinner.error(format!("✗ Shell integration had issues: {}", err));
+            spinner.error(status_error(
+                roles.as_ref(),
+                &format!("Shell integration had issues: {}", err),
+            ));
             summary.add_issue(format!("Shell integration setup failed: {}", err));
+            // D-17 + 18-CONTEXT.md: setup-level failure → single Failure
+            // dispatch so Phase 20's SoundSink maps it to the failure SFX.
+            dispatch(BrandEvent::Failure(FailureKind::SetupFailed));
         }
     }
 
@@ -249,6 +274,34 @@ pub fn execute_setup_with_env(
         && summary.issues.is_empty();
 
     Ok(summary)
+}
+
+/// Render `◆ title` via Roles::heading, falling back to a plain `◆ …`
+/// when the registry failed to boot. D-05 graceful degrade.
+fn heading(r: Option<&Roles<'_>>, title: &str) -> String {
+    match r {
+        Some(r) => r.heading(title),
+        None => format!("◆ {title}"),
+    }
+}
+
+/// Render `✗ message` via Roles::status_error (theme red — never
+/// lavender per D-01a), falling back to plain text without color when
+/// no Roles is available.
+fn status_error(r: Option<&Roles<'_>>, message: &str) -> String {
+    match r {
+        Some(r) => r.status_error(message),
+        None => format!("✗ {message}"),
+    }
+}
+
+/// Render `✓ message` via Roles::status_success (theme green), with a
+/// plain fallback.
+fn status_success(r: Option<&Roles<'_>>, message: &str) -> String {
+    match r {
+        Some(r) => r.status_success(message),
+        None => format!("✓ {message}"),
+    }
 }
 
 #[cfg(test)]
@@ -384,5 +437,49 @@ error_symbol = "[>](bold red)"
         assert_eq!(hack.release_asset, "Hack");
         assert_eq!(iosevka.release_asset, "IosevkaTerm");
         assert_eq!(fira.release_asset, "FiraCode");
+    }
+
+    /// Wave 1 snapshot — the `◆ Applying your setup` narrative anchor
+    /// (sketch 003 canon) rendered through Basic-mode Roles.
+    #[test]
+    fn setup_executor_heading_anchor_basic_snapshot() {
+        use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
+
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Basic);
+        let r = Roles::new(&ctx);
+        let out = heading(Some(&r), "Applying your setup");
+        insta::assert_snapshot!("setup_executor_heading_basic", out);
+    }
+
+    /// D-05 graceful degrade — heading/status helpers emit plain text
+    /// when Roles is absent. Zero ANSI bytes.
+    #[test]
+    fn setup_executor_helpers_fall_back_to_plain_when_roles_absent() {
+        assert_eq!(
+            heading(None, "Applying your setup"),
+            "◆ Applying your setup"
+        );
+        assert_eq!(status_error(None, "boom"), "✗ boom");
+        assert_eq!(status_success(None, "ok"), "✓ ok");
+    }
+
+    /// D-01a invariant — status_error, across all modes, must never
+    /// leak brand-anchor lavender bytes (error severity stays warning-
+    /// colored).
+    #[test]
+    fn setup_executor_status_error_never_emits_lavender() {
+        use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
+
+        let theme = mock_theme();
+        for mode in [RenderMode::Truecolor, RenderMode::Basic, RenderMode::None] {
+            let ctx = mock_context_with_mode(&theme, mode);
+            let r = Roles::new(&ctx);
+            let out = status_error(Some(&r), "something failed");
+            assert!(
+                !out.contains("38;2;114;135;253"),
+                "D-01a violation in mode {mode:?}: {out:?}"
+            );
+        }
     }
 }

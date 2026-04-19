@@ -74,7 +74,6 @@ mod tests {
     // ── Wave gates (enabled by each wave's migration plan) ─────────────
 
     #[test]
-    #[ignore = "enabled by Wave 1 plan (18-02-PLAN.md)"]
     fn no_raw_ansi_in_wave_1_files() {
         let files = &[
             "src/cli/setup.rs",

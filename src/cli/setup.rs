@@ -1,4 +1,5 @@
 use crate::adapter::ToolAdapter;
+use crate::brand::events::{dispatch, BrandEvent, FailureKind};
 use crate::brand::language::Language;
 use crate::cli::preflight;
 use crate::cli::setup_executor;
@@ -30,6 +31,7 @@ pub fn handle_with_env(
     }
 
     if !std::io::stdin().is_terminal() && !quick {
+        dispatch(BrandEvent::Failure(FailureKind::SetupFailed));
         return Err(crate::error::SlateError::Internal(
             "Non-interactive setup requires --quick for explicit consent.".to_string(),
         ));
@@ -50,6 +52,7 @@ pub fn handle_with_env(
     eprintln!("{}", preflight_result.format_for_display());
 
     if !preflight_result.is_ready() {
+        dispatch(BrandEvent::Failure(FailureKind::SetupFailed));
         return Err(crate::error::SlateError::Internal(
             preflight_result.format_blocking_guidance(),
         ));
@@ -178,6 +181,14 @@ pub fn handle_with_env(
     // DEMO-02 (D-C1): single-line hint pointing at `slate demo`. setup has no
     // --auto / --quiet flags at this surface, so both guards are false.
     crate::cli::demo::emit_demo_hint_once(false, false);
+
+    // D-17 + 18-CONTEXT.md: whole-flow milestone — setup finished
+    // successfully. Phase 20's SoundSink consumes this for the
+    // completion SFX; in Phase 18 it routes to NoopSink (no-op).
+    // Failure exits earlier in this function each fire
+    // BrandEvent::Failure(FailureKind::SetupFailed); the success
+    // signal is this single dispatch.
+    dispatch(BrandEvent::SetupComplete);
 
     Ok(())
 }
