@@ -1,5 +1,7 @@
+use crate::brand::events::{dispatch, BrandEvent, SuccessKind};
+use crate::brand::render_context::RenderContext;
+use crate::brand::roles::Roles;
 use crate::config::ConfigManager;
-use crate::design::symbols::Symbols;
 use crate::detection::TerminalProfile;
 use crate::env::SlateEnv;
 use crate::error::Result;
@@ -48,7 +50,14 @@ pub(crate) fn disable_auto_theme(config: &ConfigManager) -> Result<()> {
     Ok(())
 }
 
-/// Handle `slate config set <key> <value>` command
+/// Handle `slate config set <key> <value>` command.
+///
+/// Wave 6 migration: every successful set emits via `Roles::status_success`
+/// (theme.green per D-01a — NEVER lavender) and dispatches
+/// `BrandEvent::Success(SuccessKind::ConfigSet)` so Phase 20's SoundSink
+/// rings the same completion-event channel for every config mutation.
+/// Where the value is a user-facing literal (opacity preset, sub-action),
+/// it routes through `Roles::code` (inline-code pill per Sketch 001).
 pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
     let env = SlateEnv::from_process()?;
     handle_config_set_with_env(key, value, &env)
@@ -58,6 +67,9 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
     let config = ConfigManager::with_env(env)?;
     let terminal = TerminalProfile::detect();
     let appearance_backend = platform::desktop::detect_backend();
+
+    let ctx = RenderContext::from_active_theme().ok();
+    let r = ctx.as_ref().map(Roles::new);
 
     match key {
         "opacity" => {
@@ -83,7 +95,14 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
                 },
             )?;
 
-            println!("{} Opacity set to '{}'", Symbols::SUCCESS, value);
+            println!(
+                "{}",
+                status_success_line(
+                    r.as_ref(),
+                    &format!("Opacity set to {}", code_text(r.as_ref(), value)),
+                )
+            );
+            dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
             Ok(())
         }
         "auto-theme" => {
@@ -91,7 +110,7 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
                 "enable" => {
                     enable_auto_theme(&config)?;
 
-                    println!("{} Auto theme enabled", Symbols::SUCCESS);
+                    println!("{}", status_success_line(r.as_ref(), "Auto theme enabled"));
                     println!("  Appearance backend: {}", appearance_backend.label());
                     if terminal.watcher_shell_autostart_supported()
                         && appearance_backend.supports_watcher()
@@ -107,12 +126,14 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
                         );
                     }
                     println!("  Run 'slate config set auto-theme configure' to customize dark/light pairing");
+                    dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
                     Ok(())
                 }
                 "disable" => {
                     disable_auto_theme(&config)?;
 
-                    println!("{} Auto theme disabled", Symbols::SUCCESS);
+                    println!("{}", status_success_line(r.as_ref(), "Auto theme disabled"));
+                    dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
                     Ok(())
                 }
                 "configure" => {
@@ -138,20 +159,28 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
             "enable" => {
                 config.enable_fastfetch_autorun()?;
                 config.refresh_shell_integration()?;
-                println!("{} Fastfetch auto-run enabled", Symbols::SUCCESS);
+                println!(
+                    "{}",
+                    status_success_line(r.as_ref(), "Fastfetch auto-run enabled")
+                );
                 // UX-02 (D-D2): inline trigger — refresh_shell_integration
                 // above rewrote env files, so a new shell is needed to pick
                 // up the fastfetch wrapper.
                 crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
+                dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
                 Ok(())
             }
             "disable" => {
                 config.disable_fastfetch_autorun()?;
                 config.refresh_shell_integration()?;
-                println!("{} Fastfetch auto-run disabled", Symbols::SUCCESS);
+                println!(
+                    "{}",
+                    status_success_line(r.as_ref(), "Fastfetch auto-run disabled")
+                );
                 // UX-02 (D-D2): inline trigger — symmetrical with enable;
                 // the env file no longer sources the fastfetch wrapper.
                 crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
+                dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
                 Ok(())
             }
             _ => Err(crate::error::SlateError::InvalidConfig(format!(
@@ -162,12 +191,20 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
         "sound" => match value {
             "on" => {
                 config.set_sound_enabled(true)?;
-                println!("{} Sound feedback enabled", Symbols::SUCCESS);
+                println!(
+                    "{}",
+                    status_success_line(r.as_ref(), "Sound feedback enabled")
+                );
+                dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
                 Ok(())
             }
             "off" => {
                 config.set_sound_enabled(false)?;
-                println!("{} Sound feedback disabled", Symbols::SUCCESS);
+                println!(
+                    "{}",
+                    status_success_line(r.as_ref(), "Sound feedback disabled")
+                );
+                dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
                 Ok(())
             }
             _ => Err(crate::error::SlateError::InvalidConfig(format!(
@@ -189,10 +226,14 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
                 crate::adapter::marker_block::remove_managed_blocks_from_file(&init_lua)?;
                 crate::adapter::marker_block::remove_managed_blocks_from_file(&init_vim)?;
                 println!(
-                    "{} Slate's nvim auto-activation disabled. Colors/ files remain; \
-                     run `:colorscheme slate-<variant>` manually.",
-                    Symbols::SUCCESS
+                    "{}",
+                    status_success_line(
+                        r.as_ref(),
+                        "Slate's nvim auto-activation disabled. Colors/ files remain; \
+                         run `:colorscheme slate-<variant>` manually.",
+                    )
                 );
+                dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
                 Ok(())
             }
             _ => Err(crate::error::SlateError::InvalidConfig(format!(
@@ -207,11 +248,29 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
     }
 }
 
+/// Format a success body via `Roles::status_success` (theme.green —
+/// NEVER lavender per D-01a), falling back to plain `✓ message`.
+fn status_success_line(r: Option<&Roles<'_>>, message: &str) -> String {
+    match r {
+        Some(r) => r.status_success(message),
+        None => format!("✓ {}", message),
+    }
+}
+
+/// Wrap a literal value in `Roles::code` (inline-code pill per Sketch
+/// 001), falling back to backticked text when Roles is unavailable.
+fn code_text(r: Option<&Roles<'_>>, text: &str) -> String {
+    match r {
+        Some(r) => r.code(text),
+        None => format!("`{}`", text),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::handle_config_set_with_env;
+    use super::*;
+    use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
     use crate::cli::new_shell_reminder::REMINDER_TEST_LOCK;
-    use crate::env::SlateEnv;
     use tempfile::TempDir;
 
     fn managed_tool_dir(env: &SlateEnv, tool: &str) -> std::path::PathBuf {
@@ -455,5 +514,34 @@ mod tests {
             "unknown-key error must include `editor` in the known-keys list: {}",
             msg
         );
+    }
+
+    /// D-01a invariant — the config-set success line uses theme.green,
+    /// never brand-lavender, across every render mode.
+    #[test]
+    fn config_status_success_line_never_emits_brand_lavender() {
+        let theme = mock_theme();
+        for mode in [RenderMode::Truecolor, RenderMode::Basic, RenderMode::None] {
+            let ctx = mock_context_with_mode(&theme, mode);
+            let r = Roles::new(&ctx);
+            let out = status_success_line(Some(&r), "Auto theme enabled");
+            assert!(
+                !out.contains("38;2;114;135;253"),
+                "D-01a violation in mode {mode:?}: {out:?}"
+            );
+        }
+    }
+
+    /// D-05 graceful degrade — both helpers fall back to plain text
+    /// (with backticks for `code_text`) when Roles is unavailable.
+    #[test]
+    fn config_helpers_fall_back_to_plain_when_roles_absent() {
+        let line = status_success_line(None, "ok");
+        assert_eq!(line, "✓ ok");
+        let code = code_text(None, "frosted");
+        assert_eq!(code, "`frosted`");
+        for s in [line, code] {
+            assert!(!s.contains('\x1b'));
+        }
     }
 }

@@ -297,7 +297,6 @@ fn render() {
     }
 
     #[test]
-    #[ignore = "enabled by Wave 6 plan (18-07-PLAN.md); swatch + control-seq allowlist"]
     fn no_raw_ansi_in_wave_6_files() {
         let files = &[
             "src/cli/auto_theme.rs",
@@ -310,6 +309,53 @@ fn render() {
         ];
         let hits = scan_wave_files(files);
         assert!(hits.is_empty(), "Wave 6 style-ANSI residue: {hits:?}");
+    }
+
+    /// Final post-Phase-18 sweep — after Wave 6 lands, no file in
+    /// `src/cli/` or `src/brand/language.rs` should carry
+    /// `#![allow(deprecated)]`. Plan 01 Task 3 inserted those
+    /// attributes during the Wave-0 deprecation seeding; each migrating
+    /// wave was supposed to drop them as it touched the file. This
+    /// test makes the sweep CI-authoritative — a future regression
+    /// where someone adds an `#![allow(deprecated)]` to silence a
+    /// `Typography::*` / `Symbols::*` / `Colors::*` lint will fail
+    /// here instead of silently re-introducing legacy APIs.
+    #[test]
+    fn no_deprecated_allow_in_user_surfaces_after_phase_18() {
+        let mut targets: Vec<std::path::PathBuf> = Vec::new();
+
+        // Walk src/cli/ recursively (covers both top-level files and
+        // any nested module dirs like setup_executor / picker).
+        fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        walk(Path::new("src/cli"), &mut targets);
+        targets.push(std::path::PathBuf::from("src/brand/language.rs"));
+
+        let mut offenders: Vec<std::path::PathBuf> = Vec::new();
+        for path in &targets {
+            let Ok(src) = fs::read_to_string(path) else {
+                continue;
+            };
+            if src.contains("#![allow(deprecated)]") {
+                offenders.push(path.clone());
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "deprecated allow-attrs remain after Phase 18: {:?}",
+            offenders
+        );
     }
 
     /// Wave 0 meta-sanity: the scaffold helpers compile and are callable.

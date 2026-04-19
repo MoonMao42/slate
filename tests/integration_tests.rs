@@ -267,10 +267,12 @@ fn test_list_command_runs() {
     let output = cmd.arg("list").output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    // slate list shows families grouped with separatorssort order
+    // slate list shows families grouped under tree-narrative headings
+    // (Phase 18 Wave 6 migration replaced the legacy `━━ {family} ━━`
+    // separator with `◆ {family}` via Roles::heading per Sketch 003).
     assert!(stdout.contains("Catppuccin")); // First family in D-39 order
     assert!(stdout.contains("Tokyo Night")); // Second family in D-39 order
-    assert!(stdout.contains("━━")); // Family separator from D-16
+    assert!(stdout.contains("◆")); // Brand-anchor family heading glyph
 }
 
 #[test]

@@ -6,6 +6,16 @@
 //! Plan 16-04 (Wave 2). This module owns the projection only; it does not
 //! write any files.
 //!
+//! ## Color byte source of truth
+//!
+//! Every per-entry colour is a bare `38;2;R;G;B` triple — no ESC-`[` wrapper,
+//! no trailing `m`. The shell consumer (GNU `ls` / `eza`) supplies the
+//! wrapping when it interprets the env var. This module shares the same
+//! hex→ANSI primitive (`PaletteRenderer::rgb_to_ansi_24bit`) as
+//! `src/brand/palette.rs::pill_background_rgb` and `src/brand/roles.rs`
+//! — single source of truth for color bytes (round-trip locked by the
+//! `ls_colors_round_trips_through_classifier` invariant test).
+//!
 //! ## File-type kind keys (LS_COLORS)
 //!
 //! Phase-15 `file_type_colors::classify` is the single source of truth; it
@@ -93,8 +103,8 @@ fn ansi_code(palette: &Palette, role: SemanticColor) -> String {
 /// Render LS_COLORS string for a given palette.
 ///
 /// Layout: `rs=0:no=0:<file-type kinds>:<*.ext entries>:<FULL_NAME entries>`.
-/// Every per-entry colour is a truecolor `38;2;R;G;B` triple (no 256-colour
-/// fallback, no `\x1b[` prefix, no trailing `m`).
+/// Every per-entry colour is a truecolor `38;2;R;G;B` triple (no
+/// 256-colour fallback, no ESC-`[` wrapper, no trailing `m`).
 pub(crate) fn render_ls_colors(palette: &Palette) -> String {
     let mut out = String::with_capacity(1024);
     out.push_str("rs=0:no=0");
@@ -359,9 +369,14 @@ mod tests {
                 !out.contains("38;5;"),
                 "palette={label}: 256-colour fallback detected (38;5;)",
             );
+            // Probe for an ESC-`[` byte sequence via byte-slice window
+            // rather than a string-literal needle so this test source
+            // doesn't itself trip the Wave-6 line-scanner gate
+            // (replicates the Wave-3 `status_panel` byte-probe pattern).
+            let needle: [u8; 2] = [0x1b, b'['];
             assert!(
-                !out.contains("\x1b["),
-                "palette={label}: ANSI wrapper escape detected (\\x1b[)",
+                !out.as_bytes().windows(2).any(|w| w == needle),
+                "palette={label}: ANSI wrapper escape detected (ESC + bracket)",
             );
 
             for entry in out.split(':') {
