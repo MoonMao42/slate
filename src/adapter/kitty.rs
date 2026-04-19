@@ -443,6 +443,7 @@ mod tests {
             cursor: None,
             selection_bg: None,
             selection_fg: None,
+            brand_accent: "#7287fd".to_string(),
             black: "#000000".to_string(),
             red: "#ff0000".to_string(),
             green: "#00ff00".to_string(),

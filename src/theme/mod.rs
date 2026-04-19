@@ -44,6 +44,12 @@ pub struct Palette {
     pub selection_bg: Option<String>,
     pub selection_fg: Option<String>,
 
+    // Phase 18 (D-02): designer-picked per-theme brand accent used by the
+    // daily-chrome role surfaces (command pill, theme name, inline `slate`).
+    // Brand anchors (slate logo, ✦, ◆, ★) stay on the fixed lavender
+    // `BRAND_LAVENDER_FIXED` constant regardless of this value.
+    pub brand_accent: String,
+
     // Standard ANSI colors (black/8 colors + bright variants)
     pub black: String,
     pub red: String,
@@ -94,6 +100,7 @@ impl Palette {
     pub fn validate(&self) -> Result<()> {
         validate_hex_color("foreground", &self.foreground)?;
         validate_hex_color("background", &self.background)?;
+        validate_hex_color("brand_accent", &self.brand_accent)?;
         validate_hex_color("black", &self.black)?;
         validate_hex_color("red", &self.red)?;
         validate_hex_color("green", &self.green)?;
@@ -529,6 +536,7 @@ mod tests {
             cursor: Some("#ffffff".to_string()),
             selection_bg: Some("#222222".to_string()),
             selection_fg: Some("#eeeeee".to_string()),
+            brand_accent: "#7287fd".to_string(),
             black: "#000000".to_string(),
             red: "#ff0000".to_string(),
             green: "#00ff00".to_string(),
@@ -577,6 +585,30 @@ mod tests {
         palette.surface2 = Some("#98989 2".to_string());
         let err = palette.validate().expect_err("invalid color should fail");
         assert!(err.to_string().contains("surface2"));
+    }
+
+    /// D-02 + Phase 18 Wave 0: `brand_accent` is a required hex field on every
+    /// palette. A malformed or empty value must surface as a validation error
+    /// that names the field so downstream error frames can point the operator
+    /// at the correct line in `themes/themes.toml`.
+    #[test]
+    fn validate_rejects_missing_brand_accent() {
+        let mut palette = sample_palette();
+        palette.brand_accent = String::new();
+        let err = palette
+            .validate()
+            .expect_err("empty brand_accent should fail validation");
+        assert!(
+            err.to_string().contains("brand_accent"),
+            "error should mention brand_accent field, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_valid_brand_accent_hex() {
+        let mut palette = sample_palette();
+        palette.brand_accent = "#7287fd".to_string();
+        assert!(palette.validate().is_ok());
     }
 
     #[test]
