@@ -464,14 +464,146 @@ vim.cmd('qa!')
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Task 4 — marker_block_lua_comment_regression + loader_lua_parses_via_luafile
+// Task 4a — marker_block_lua_comment_regression
 // ─────────────────────────────────────────────────────────────────────
-#[test]
-#[ignore = "Plan 07 Task 4 — init.lua with slate marker block (Lua comment) is valid Lua (Pitfall 4 regression)"]
-#[cfg(feature = "has-nvim")]
-fn marker_block_lua_comment_regression() {}
 
+/// Pitfall 4 regression gate: the slate marker block as written by
+/// Plan 06 Option A must parse as valid Lua. Exercises three realistic
+/// init.lua shapes: clean (marker only), lazy-prelude + marker, and
+/// marker sandwiched by user content. All three must `luafile` cleanly.
 #[test]
-#[ignore = "Plan 07 Task 4 — loader Lua parses (luafile gate) — covers all 18 spliced PALETTES sub-tables"]
 #[cfg(feature = "has-nvim")]
-fn loader_lua_parses_via_luafile() {}
+fn marker_block_lua_comment_regression() {
+    use slate_cli::adapter::marker_block::{END, START};
+    use tempfile::TempDir;
+
+    if skip_if_no_nvim("marker_block_lua_comment_regression") {
+        return;
+    }
+
+    let td = TempDir::new().unwrap();
+
+    // Case 1: clean init.lua with only the slate marker block.
+    let only_marker = format!(
+        "-- {}\n\
+         pcall(require, 'slate')  -- slate-managed: keep or delete, safe either way\n\
+         -- {}\n",
+        START, END,
+    );
+    let p1 = td.path().join("init_only.lua");
+    std::fs::write(&p1, &only_marker).unwrap();
+    assert_luafile_ok(&p1, "only-marker case");
+
+    // Case 2: init.lua with a typical LazyVim-style prelude + slate
+    // marker block appended.
+    let with_lazy = format!(
+        "vim.g.mapleader = ' '\n\
+         vim.g.maplocalleader = ' '\n\
+         vim.opt.number = true\n\
+         \n\
+         -- Would normally require('lazy').setup({{}}) here,\n\
+         -- but we skip real plugin loading in this test.\n\
+         \n\
+         -- {}\n\
+         pcall(require, 'slate')  -- slate-managed\n\
+         -- {}\n",
+        START, END,
+    );
+    let p2 = td.path().join("init_with_lazy.lua");
+    std::fs::write(&p2, &with_lazy).unwrap();
+    assert_luafile_ok(&p2, "lazy-prelude case");
+
+    // Case 3: marker block in the MIDDLE of init.lua (user appended
+    // more content after slate setup).
+    let surrounded = format!(
+        "vim.g.mapleader = ' '\n\
+         -- {}\n\
+         pcall(require, 'slate')\n\
+         -- {}\n\
+         vim.opt.wrap = false\n\
+         vim.keymap.set('n', '<leader>w', ':w<CR>')\n",
+        START, END,
+    );
+    let p3 = td.path().join("init_surrounded.lua");
+    std::fs::write(&p3, &surrounded).unwrap();
+    assert_luafile_ok(&p3, "surrounded case");
+}
+
+#[cfg(feature = "has-nvim")]
+fn assert_luafile_ok(path: &std::path::Path, label: &str) {
+    let out = std::process::Command::new("nvim")
+        .args([
+            "--headless",
+            "-u",
+            "NONE",
+            "-c",
+            &format!("luafile {}", path.display()),
+            "-c",
+            "q",
+        ])
+        .output()
+        .expect("spawn nvim");
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        panic!("{}: luafile rejected init.lua:\n{}", label, stderr);
+    }
+    // Some nvim versions exit 0 but print Lua parse errors on stderr —
+    // guard against that too.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("Error") && !stderr.contains("E5") && !stderr.contains("error"),
+        "{}: luafile emitted error on stderr:\n{}",
+        label,
+        stderr
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Task 4b — loader_lua_parses_via_luafile
+// ─────────────────────────────────────────────────────────────────────
+
+/// The loader body contains every variant's `PALETTES['<id>'] = { ... }`
+/// sub-table spliced from `render_colorscheme`. `luafile`ing the full
+/// loader byte-compiles the lot through LuaJIT — a parse error in any
+/// sub-table aborts with a line-number pointing at the offender. This
+/// IS the 18-variant syntax gate.
+#[test]
+#[cfg(feature = "has-nvim")]
+fn loader_lua_parses_via_luafile() {
+    use slate_cli::adapter::nvim::render_loader;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    if skip_if_no_nvim("loader_lua_parses_via_luafile") {
+        return;
+    }
+
+    let td = TempDir::new().unwrap();
+    let loader = render_loader();
+    let path = td.path().join("loader.lua");
+    std::fs::write(&path, &loader).unwrap();
+
+    let out = Command::new("nvim")
+        .args([
+            "--headless",
+            "-u",
+            "NONE",
+            "-c",
+            &format!("luafile {}", path.display()),
+            "-c",
+            "q",
+        ])
+        // Redirect HOME so M.setup's fs_event watcher cannot reach the
+        // real user's state file. The loader executes M.setup() at
+        // require time — a no-op on a missing state file is fine.
+        .env("HOME", td.path())
+        .output()
+        .expect("spawn nvim");
+
+    assert!(
+        out.status.success(),
+        "loader Lua failed to parse/execute \
+         (18-variant syntax gate failure):\nstderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
