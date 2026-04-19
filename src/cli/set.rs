@@ -1,5 +1,6 @@
+use crate::brand::render_context::RenderContext;
+use crate::brand::roles::Roles;
 use crate::brand::Language;
-use crate::design::typography::Typography;
 use crate::env::SlateEnv;
 use crate::error::Result;
 
@@ -36,13 +37,27 @@ pub fn handle(theme_name: Option<&str>, auto: bool) -> Result<()> {
     }
 }
 
-/// Print a dim tip teaching users about the new `slate theme` surface
+/// Print a dim tip teaching users about the new `slate theme` surface.
+///
+/// Rendered through `Roles::path` so the byte contract matches the rest
+/// of the Wave 2 surfaces (dim + italic). D-05 graceful degrade — when
+/// the theme registry fails to boot we fall back to plain text.
 fn print_dim_tip() {
     println!();
-    println!(
-        "{}",
-        Typography::explanation(Language::SLATE_SET_DEPRECATION_TIP)
-    );
+    let ctx = RenderContext::from_active_theme().ok();
+    let roles = ctx.as_ref().map(Roles::new);
+    println!("{}", format_dim_tip(roles.as_ref()));
+}
+
+/// Pure formatter for the `slate set` deprecation tip — takes an
+/// optional `&Roles` so snapshot tests can drive it directly without a
+/// live registry. Matches the D-05 graceful-degrade pattern used in
+/// Wave 1 surfaces.
+fn format_dim_tip(r: Option<&Roles<'_>>) -> String {
+    match r {
+        Some(r) => r.path(Language::SLATE_SET_DEPRECATION_TIP),
+        None => format!("  {}", Language::SLATE_SET_DEPRECATION_TIP),
+    }
 }
 
 /// Silent preview apply: updates only the live preview path without persisting theme/opacity state.
@@ -101,4 +116,35 @@ pub fn silent_commit_apply(
             reload_terminals: true,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_dim_tip;
+    use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
+    use crate::brand::roles::Roles;
+
+    /// Wave 2 snapshot — the `slate set` deprecation tip rendered
+    /// through `Roles::path` (dim + italic) in Basic mode. Byte-locked
+    /// so future Language::SLATE_SET_DEPRECATION_TIP copy changes are
+    /// visible in review.
+    #[test]
+    fn set_deprecation_tip_basic_snapshot() {
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Basic);
+        let r = Roles::new(&ctx);
+        let out = format_dim_tip(Some(&r));
+        insta::assert_snapshot!("set_deprecation_tip_basic", out);
+    }
+
+    /// D-05 graceful degrade — without Roles the tip falls back to
+    /// plain text with 2-space indent (matches the legacy
+    /// `Typography::explanation` indent contract so the tip doesn't
+    /// jump positions when the registry is unreadable).
+    #[test]
+    fn set_deprecation_tip_falls_back_to_plain_when_roles_absent() {
+        let out = format_dim_tip(None);
+        assert!(!out.contains('\x1b'), "expected plain text, got: {out:?}");
+        assert!(out.starts_with("  "), "expected 2-space indent: {out:?}");
+    }
 }
