@@ -298,9 +298,13 @@ fn ensure_cache(sounds_dir: &Path) -> std::io::Result<()> {
         if path.exists() {
             continue;
         }
-        let mut file = atomic_write_file::AtomicWriteFile::open(&path)?;
-        std::io::Write::write_all(&mut file, bytes)?;
-        file.commit()?;
+        // Route through the shared helper so the parent-dir fsync invariant
+        // is consistent with the rest of slate. The helper returns SlateError;
+        // unpack into io::Error for this fn's signature.
+        crate::config::atomic_write_synced(&path, bytes).map_err(|e| match e {
+            crate::error::SlateError::IOError(io_err) => io_err,
+            other => std::io::Error::other(other.to_string()),
+        })?;
     }
     Ok(())
 }

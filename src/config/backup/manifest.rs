@@ -24,9 +24,8 @@ pub(super) fn write_manifest_raw(manifest_path: &Path, manifest: &RestoreManifes
         SlateError::BackupFailed(format!("Failed to serialize manifest.toml: {}", e))
     })?;
 
-    atomic_write_synced(manifest_path, content.as_bytes()).map_err(|e| {
-        SlateError::BackupFailed(format!("Failed to write manifest.toml: {}", e))
-    })
+    atomic_write_synced(manifest_path, content.as_bytes())
+        .map_err(|e| SlateError::BackupFailed(format!("Failed to write manifest.toml: {}", e)))
 }
 
 pub(crate) fn read_manifest_raw(manifest_path: &Path) -> Result<RestoreManifest> {

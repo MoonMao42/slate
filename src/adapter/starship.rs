@@ -266,18 +266,7 @@ impl ToolAdapter for StarshipAdapter {
             )
         })?;
         let rendered = themed_config_from_content(&content, theme)?;
-        use atomic_write_file::AtomicWriteFile;
-        use std::io::Write;
-
-        let mut file = AtomicWriteFile::open(&config_path).map_err(|e| {
-            SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string())
-        })?;
-
-        file.write_all(rendered.as_bytes()).map_err(|e| {
-            SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string())
-        })?;
-
-        file.commit().map_err(|e| {
+        crate::config::atomic_write_synced(&config_path, rendered.as_bytes()).map_err(|e| {
             SlateError::ConfigWriteError(config_path.display().to_string(), e.to_string())
         })?;
 
