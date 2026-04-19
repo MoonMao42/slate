@@ -233,17 +233,235 @@ fn state_file_atomic_write_single_event() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Task 3 — watcher_debounces_multi_fire + lualine_refresh_fires
+// Task 3a — watcher_debounces_multi_fire
 // ─────────────────────────────────────────────────────────────────────
-#[test]
-#[ignore = "Plan 07 Task 3 — file-watcher debounces multi-fire on macOS APFS"]
-#[cfg(feature = "has-nvim")]
-fn watcher_debounces_multi_fire() {}
 
+/// The loader's 100 ms debounce collapses rapid state-file rewrites into
+/// a single reload. Three writes within 20 ms must land on the last
+/// variant, not race-result in a mixed/earlier colorscheme.
+///
+/// The whole exercise runs inside a single `nvim -l <script>` invocation
+/// so `vim.wait` drives the event loop between writes — this pumps the
+/// fs_event callback + debounce timer so they actually fire during the
+/// wait window. Using `uv.sleep` here would block the thread without
+/// processing callbacks, and `qa!` would exit with the initial
+/// colors_name still in place.
 #[test]
-#[ignore = "Plan 07 Task 3 — lualine refresh autocmd fires on colorscheme swap"]
 #[cfg(feature = "has-nvim")]
-fn lualine_refresh_fires() {}
+fn watcher_debounces_multi_fire() {
+    use slate_cli::adapter::NvimAdapter;
+    use slate_cli::env::SlateEnv;
+    use slate_cli::theme::ThemeRegistry;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    if skip_if_no_nvim("watcher_debounces_multi_fire") {
+        return;
+    }
+
+    let td = TempDir::new().unwrap();
+    let env = SlateEnv::with_home(td.path().to_path_buf());
+    let registry = ThemeRegistry::new().unwrap();
+    let first = *registry.all().first().unwrap();
+    NvimAdapter::setup(&env, first).unwrap();
+
+    // Pick 3 distinct variants — the debounced reload should land on
+    // the LAST.
+    let variants = registry.all();
+    assert!(
+        variants.len() >= 3,
+        "need ≥ 3 variants for debounce test, got {}",
+        variants.len()
+    );
+    let v0 = &variants[0].id;
+    let v1 = &variants[1].id;
+    let v2 = &variants[2].id;
+    let final_id = v2.clone();
+
+    let rtp = td.path().join(".config/nvim");
+    let state = td.path().join(".cache/slate/current_theme.lua");
+
+    // IMPORTANT: use `vim.wait(ms, fn)` (NOT `uv.sleep`) between writes —
+    // `vim.wait` pumps the event loop so the loader's fs_event callback
+    // and 100 ms debounce timer actually fire during the wait window.
+    // `uv.sleep` blocks the thread without processing callbacks, so
+    // scheduled reloads would never run and `qa!` would exit with the
+    // initial colors_name still in place.
+    let lua_script = format!(
+        r#"
+vim.opt.runtimepath:prepend('{rtp}')
+require('slate')  -- triggers M.setup, starts the fs_event watcher
+
+local function write(id)
+  local f = io.open('{state}', 'w')
+  f:write('return "' .. id .. '"\n')
+  f:close()
+end
+
+vim.wait(150, function() return false end)   -- let watcher arm
+write('{v0}')
+vim.wait(10, function() return false end)
+write('{v1}')
+vim.wait(10, function() return false end)
+write('{v2}')
+vim.wait(500, function() return false end)   -- past 100 ms debounce + redraw
+
+io.stderr:write('FINAL=' .. (vim.g.colors_name or 'NONE'))
+io.stderr:flush()
+vim.cmd('qa!')
+"#,
+        rtp = rtp.display(),
+        state = state.display(),
+        v0 = v0,
+        v1 = v1,
+        v2 = v2,
+    );
+
+    let script_path = td.path().join("exercise.lua");
+    std::fs::write(&script_path, &lua_script).unwrap();
+
+    let out = Command::new("nvim")
+        .args([
+            "--headless",
+            "-u",
+            "NONE",
+            "-l",
+            script_path.to_str().unwrap(),
+        ])
+        .env("HOME", td.path())
+        .output()
+        .expect("spawn nvim");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let expected = format!("slate-{}", final_id);
+    assert!(
+        stderr.contains(&format!("FINAL={}", expected)),
+        "debounce failed — expected final colors_name {}, stderr={:?}",
+        expected,
+        stderr
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Task 3b — lualine_refresh_fires
+// ─────────────────────────────────────────────────────────────────────
+
+/// Installs a stand-in ColorScheme autocmd (no real lualine needed) that
+/// records slate-* fires, drives a state-file-driven swap, and asserts
+/// the autocmd fires for the new variant. Proves the loader emits the
+/// ColorScheme event on state-driven apply — the hook D-08's lualine
+/// refresh lives on.
+#[test]
+#[cfg(feature = "has-nvim")]
+fn lualine_refresh_fires() {
+    use slate_cli::adapter::NvimAdapter;
+    use slate_cli::env::SlateEnv;
+    use slate_cli::theme::ThemeRegistry;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    if skip_if_no_nvim("lualine_refresh_fires") {
+        return;
+    }
+
+    let td = TempDir::new().unwrap();
+    let env = SlateEnv::with_home(td.path().to_path_buf());
+    let registry = ThemeRegistry::new().unwrap();
+    let variants = registry.all();
+    assert!(
+        variants.len() >= 2,
+        "need ≥ 2 variants for refresh test, got {}",
+        variants.len()
+    );
+    let first = variants[0];
+    let second = variants[1];
+    NvimAdapter::setup(&env, first).unwrap();
+
+    let rtp = td.path().join(".config/nvim");
+    let state = td.path().join(".cache/slate/current_theme.lua");
+    let second_id = &second.id;
+
+    // `vim.wait` (not `uv.sleep`) pumps the event loop so the fs_event
+    // watcher + 100 ms debounce schedule_reload callback actually fire
+    // during the wait. Using `uv.sleep` would let `qa!` exit before the
+    // callback runs and the ColorScheme autocmd would only see the
+    // initial apply from M.setup().
+    let lua_script = format!(
+        r#"
+vim.opt.runtimepath:prepend('{rtp}')
+
+-- Test-double stand-in for lualine's ColorScheme refresh hook.
+_G.__slate_cs_fires = 0
+_G.__slate_last_cs = ''
+vim.api.nvim_create_autocmd('ColorScheme', {{
+  pattern = 'slate-*',
+  callback = function(args)
+    _G.__slate_cs_fires = _G.__slate_cs_fires + 1
+    _G.__slate_last_cs = args.match or ''
+  end,
+}})
+
+require('slate')  -- M.setup starts watcher, applies initial state
+vim.wait(150, function() return false end)   -- watcher arm + initial apply settle
+
+-- Drive a swap via the state file — same path `slate theme set` takes.
+local f = io.open('{state}', 'w')
+f:write('return "{v1}"\n')
+f:close()
+
+vim.wait(500, function() return false end)   -- past debounce + apply
+
+io.stderr:write(string.format('FIRES=%d LAST=%s', _G.__slate_cs_fires, _G.__slate_last_cs))
+io.stderr:flush()
+vim.cmd('qa!')
+"#,
+        rtp = rtp.display(),
+        state = state.display(),
+        v1 = second_id,
+    );
+
+    let script_path = td.path().join("lualine_exercise.lua");
+    std::fs::write(&script_path, &lua_script).unwrap();
+
+    let out = Command::new("nvim")
+        .args([
+            "--headless",
+            "-u",
+            "NONE",
+            "-l",
+            script_path.to_str().unwrap(),
+        ])
+        .env("HOME", td.path())
+        .output()
+        .expect("spawn nvim");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("FIRES="),
+        "no FIRES marker in output — lualine refresh probe did not run; stderr={:?}",
+        stderr
+    );
+
+    let fires: usize = stderr
+        .split("FIRES=")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .and_then(|s| s.parse().ok())
+        .expect("FIRES= count parseable");
+    assert!(
+        fires >= 1,
+        "ColorScheme autocmd did not fire for slate-*; stderr={:?}",
+        stderr
+    );
+
+    let expected_last = format!("slate-{}", second_id);
+    assert!(
+        stderr.contains(&format!("LAST={}", expected_last)),
+        "last ColorScheme fire was not for {}; stderr={:?}",
+        expected_last,
+        stderr
+    );
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Task 4 — marker_block_lua_comment_regression + loader_lua_parses_via_luafile
