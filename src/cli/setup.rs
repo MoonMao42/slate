@@ -352,8 +352,11 @@ fn init_file_has_slate_marker(env: &SlateEnv) -> Result<bool> {
     for name in ["init.lua", "init.vim"] {
         let path = nvim_home.join(name);
         if path.exists() {
-            let content = std::fs::read_to_string(&path)?;
-            if content.contains(crate::adapter::marker_block::START) {
+            let content = std::fs::read(&path)?;
+            if content
+                .windows(crate::adapter::marker_block::START.len())
+                .any(|w| w == crate::adapter::marker_block::START.as_bytes())
+            {
                 return Ok(true);
             }
         }
@@ -848,6 +851,29 @@ mod tests {
         assert_eq!(after, seed, "init.lua must be byte-identical");
     }
 
+    #[test]
+    fn init_file_has_slate_marker_handles_non_utf8_init_lua() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let init_lua = td.path().join(".config/nvim/init.lua");
+        std::fs::create_dir_all(init_lua.parent().unwrap()).unwrap();
+        let mut seed = vec![0xff, 0xfe, b'\n'];
+        seed.extend_from_slice(
+            format!(
+                "-- {}\npcall(require, 'slate')\n-- {}\n",
+                crate::adapter::marker_block::START,
+                crate::adapter::marker_block::END,
+            )
+            .as_bytes(),
+        );
+        std::fs::write(&init_lua, seed).unwrap();
+
+        assert!(
+            init_file_has_slate_marker(&env).expect("raw byte scan must succeed"),
+            "marker detection must not fail on non-UTF-8 init.lua"
+        );
+    }
+
     /// `apply_activation_choice_a` is the load-bearing side-effect
     /// path. It produces a Lua-comment-wrapped block on init.lua AND
     /// is detected by `init_file_has_slate_marker` on subsequent
@@ -905,6 +931,30 @@ mod tests {
         let outcome = apply_activation_choice_a(&env).unwrap();
         assert_eq!(outcome, NvimConsent::AutoAdded);
         assert!(td.path().join(".config/nvim/init.lua").exists());
+    }
+
+    #[test]
+    fn apply_activation_choice_a_preserves_non_utf8_prefix_bytes() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let init_lua = td.path().join(".config/nvim/init.lua");
+        std::fs::create_dir_all(init_lua.parent().unwrap()).unwrap();
+        std::fs::write(&init_lua, [0xff, 0xfe, b'\n']).unwrap();
+
+        let outcome = apply_activation_choice_a(&env).unwrap();
+        assert_eq!(outcome, NvimConsent::AutoAdded);
+
+        let updated = std::fs::read(&init_lua).unwrap();
+        assert!(
+            updated.starts_with(&[0xff, 0xfe, b'\n']),
+            "existing non-UTF-8 bytes must be preserved"
+        );
+        assert!(
+            updated
+                .windows(crate::adapter::marker_block::START.len())
+                .any(|w| w == crate::adapter::marker_block::START.as_bytes()),
+            "choice A must still append the marker block"
+        );
     }
 
     /// `skip_hint_for` — pure decision logic (Task 5).

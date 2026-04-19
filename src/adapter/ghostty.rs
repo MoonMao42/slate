@@ -21,6 +21,31 @@ use std::process::Command;
 pub struct GhosttyAdapter;
 
 impl GhosttyAdapter {
+    fn trim_ascii(bytes: &[u8]) -> &[u8] {
+        let start = bytes
+            .iter()
+            .position(|b| !b.is_ascii_whitespace())
+            .unwrap_or(bytes.len());
+        let end = bytes
+            .iter()
+            .rposition(|b| !b.is_ascii_whitespace())
+            .map(|idx| idx + 1)
+            .unwrap_or(start);
+        &bytes[start..end]
+    }
+
+    fn line_ends_with_newline(line: &[u8]) -> bool {
+        line.ends_with(b"\n")
+    }
+
+    fn render_config_file_line(managed_path: &Path, with_newline: bool) -> Vec<u8> {
+        let mut line = format!("config-file = \"{}\"", managed_path.display()).into_bytes();
+        if with_newline {
+            line.push(b'\n');
+        }
+        line
+    }
+
     /// The current Ghostty default config path documented upstream.
     /// Ghostty uses `config` (no extension) as the standard config filename.
     fn default_config_path(xdg_dir: &Path) -> PathBuf {
@@ -79,30 +104,41 @@ impl GhosttyAdapter {
             return Ok(());
         }
 
-        let content = fs::read_to_string(integration_path)?;
-        let managed_path_str = managed_path.display().to_string();
+        let content = fs::read(integration_path)?;
+        let managed_path_bytes = managed_path.display().to_string().into_bytes();
 
         // Parse content line-by-line to detect idempotence and handle migration
-        let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        let lines: Vec<Vec<u8>> = content
+            .split_inclusive(|b| *b == b'\n')
+            .map(|line| line.to_vec())
+            .collect();
         let mut found_config_file = false;
         let mut legacy_include_idx = None;
 
         for (idx, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
+            let trimmed = Self::trim_ascii(line);
 
             // Skip comments and empty lines
-            if trimmed.starts_with('#') || trimmed.is_empty() {
+            if trimmed.starts_with(b"#") || trimmed.is_empty() {
                 continue;
             }
 
             // Check for existing config-file pointing to our managed path
-            if trimmed.starts_with("config-file") && trimmed.contains(&managed_path_str) {
+            if trimmed.starts_with(b"config-file")
+                && trimmed
+                    .windows(managed_path_bytes.len())
+                    .any(|w| w == managed_path_bytes.as_slice())
+            {
                 found_config_file = true;
                 break;
             }
 
             // Check for legacy include = pointing to our managed path (for migration)
-            if trimmed.starts_with("include") && trimmed.contains(&managed_path_str) {
+            if trimmed.starts_with(b"include")
+                && trimmed
+                    .windows(managed_path_bytes.len())
+                    .any(|w| w == managed_path_bytes.as_slice())
+            {
                 legacy_include_idx = Some(idx);
                 break;
             }
@@ -116,18 +152,19 @@ impl GhosttyAdapter {
         // If legacy include exists, migrate it to config-file
         if let Some(idx) = legacy_include_idx {
             let mut updated_lines = lines;
-            updated_lines[idx] = format!("config-file = \"{}\"", managed_path_str);
-            let new_content = updated_lines.join("\n");
-            fs::write(integration_path, format!("{}\n", new_content))?;
+            let had_newline = Self::line_ends_with_newline(&updated_lines[idx]);
+            updated_lines[idx] = Self::render_config_file_line(managed_path, had_newline);
+            let new_content: Vec<u8> = updated_lines.concat();
+            fs::write(integration_path, new_content)?;
             return Ok(());
         }
 
         // Otherwise, append the config-file line
-        let config_file_line = format!("config-file = \"{}\"\n", managed_path_str);
-        let new_content = if content.ends_with('\n') {
-            format!("{}{}", content, config_file_line)
+        let config_file_line = Self::render_config_file_line(managed_path, true);
+        let new_content = if content.ends_with(b"\n") {
+            [content.as_slice(), config_file_line.as_slice()].concat()
         } else {
-            format!("{}\n{}", content, config_file_line)
+            [content.as_slice(), b"\n", config_file_line.as_slice()].concat()
         };
         fs::write(integration_path, new_content)?;
 
@@ -513,6 +550,28 @@ mod tests {
 
         assert_eq!(content1, content2);
         assert_eq!(content1.matches("config-file = ").count(), 1);
+    }
+
+    #[test]
+    fn test_ensure_integration_preserves_non_utf8_prefix_bytes() {
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let temp_path = tempdir.path().join("config");
+        let managed_path = PathBuf::from("/home/user/.config/slate/managed/ghostty/theme.conf");
+
+        fs::write(&temp_path, [0xff, b'\n']).unwrap();
+
+        GhosttyAdapter::ensure_integration_includes_managed(&temp_path, &managed_path).unwrap();
+
+        let content = fs::read(&temp_path).unwrap();
+        assert!(content.starts_with(&[0xff, b'\n']));
+        assert!(
+            content
+                .windows(b"config-file = ".len())
+                .any(|w| w == b"config-file = "),
+            "managed config-file line must still be appended"
+        );
     }
 
     /// Test Bug 2 fix: migration from legacy include = to config-file =

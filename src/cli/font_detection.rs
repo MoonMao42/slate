@@ -32,9 +32,9 @@ fn read_ghostty_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
             continue;
         }
 
-        match fs::read_to_string(&config_path) {
+        match fs::read(&config_path) {
             Ok(content) => {
-                if let Some(font) = parse_ghostty_font_config(&content) {
+                if let Some(font) = parse_ghostty_font_config_bytes(&content) {
                     return Ok(Some(font));
                 }
             }
@@ -53,17 +53,20 @@ fn read_alacritty_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
         return Ok(None);
     }
 
-    match fs::read_to_string(&config_path) {
+    match fs::read(&config_path) {
         Ok(content) => {
-            if let Ok(doc) = content.parse::<toml_edit::DocumentMut>() {
-                // Look for [font] section, then [font.normal] section, then family field
-                if let Some(font_table) = doc.get("font").and_then(|v| v.as_table()) {
-                    if let Some(normal_table) = font_table.get("normal").and_then(|v| v.as_table())
-                    {
-                        if let Some(family_val) =
-                            normal_table.get("family").and_then(|v| v.as_str())
+            if let Ok(content) = String::from_utf8(content) {
+                if let Ok(doc) = content.parse::<toml_edit::DocumentMut>() {
+                    // Look for [font] section, then [font.normal] section, then family field
+                    if let Some(font_table) = doc.get("font").and_then(|v| v.as_table()) {
+                        if let Some(normal_table) =
+                            font_table.get("normal").and_then(|v| v.as_table())
                         {
-                            return Ok(Some(family_val.to_string()));
+                            if let Some(family_val) =
+                                normal_table.get("family").and_then(|v| v.as_str())
+                            {
+                                return Ok(Some(family_val.to_string()));
+                            }
                         }
                     }
                 }
@@ -74,38 +77,61 @@ fn read_alacritty_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
     }
 }
 
+fn parse_ghostty_font_config_bytes(content: &[u8]) -> Option<String> {
+    for line in content.split(|b| *b == b'\n') {
+        let trimmed = line
+            .iter()
+            .copied()
+            .skip_while(|b| b.is_ascii_whitespace())
+            .collect::<Vec<u8>>();
+
+        if trimmed.starts_with(b"#") || trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.starts_with(b"font-family") {
+            let value_part = trimmed.splitn(2, |b| *b == b'=').nth(1)?;
+            let font = value_part
+                .iter()
+                .copied()
+                .skip_while(|b| b.is_ascii_whitespace())
+                .collect::<Vec<u8>>();
+            let font = trim_ascii_quotes_and_space(&font);
+            if !font.is_empty() {
+                if let Ok(font) = String::from_utf8(font.to_vec()) {
+                    return Some(font);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn trim_ascii_quotes_and_space(bytes: &[u8]) -> &[u8] {
+    let start = bytes
+        .iter()
+        .position(|b| !b.is_ascii_whitespace() && *b != b'"' && *b != b'\'')
+        .unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .rposition(|b| !b.is_ascii_whitespace() && *b != b'"' && *b != b'\'')
+        .map(|idx| idx + 1)
+        .unwrap_or(start);
+    &bytes[start..end]
+}
+
+#[cfg(test)]
+fn parse_ghostty_font_config(content: &str) -> Option<String> {
+    parse_ghostty_font_config_bytes(content.as_bytes())
+}
+
 fn ghostty_config_paths_with_env(env: &SlateEnv) -> Vec<PathBuf> {
     let config_base = env.xdg_config_home();
     vec![
         config_base.join("ghostty/config.ghostty"),
         config_base.join("ghostty/config"),
     ]
-}
-
-fn parse_ghostty_font_config(content: &str) -> Option<String> {
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-
-        if trimmed.starts_with('#') || trimmed.is_empty() {
-            continue;
-        }
-
-        if trimmed.starts_with("font-family") {
-            let Some((_, value_part)) = trimmed.split_once('=') else {
-                continue;
-            };
-            let font = value_part
-                .trim()
-                .trim_matches('"')
-                .trim_matches('\'')
-                .to_string();
-            if !font.is_empty() {
-                return Some(font);
-            }
-        }
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -153,6 +179,13 @@ mod tests {
         let content = r#"font-family = "SomeName=Something Nerd Font""#;
         let font = parse_ghostty_font_config(content);
         assert_eq!(font.as_deref(), Some("SomeName=Something Nerd Font"));
+    }
+
+    #[test]
+    fn test_parse_ghostty_font_config_bytes_handles_non_utf8_prefix() {
+        let content = b"\xFF\nfont-family = \"JetBrains Mono Nerd Font\"\n";
+        let font = parse_ghostty_font_config_bytes(content);
+        assert_eq!(font.as_deref(), Some("JetBrains Mono Nerd Font"));
     }
 
     #[test]

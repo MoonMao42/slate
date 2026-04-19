@@ -149,10 +149,21 @@ pub(crate) fn ensure_tool_configs(
     }
 
     fn seed_starship_config(path: &Path, issues: &mut Vec<String>) {
-        let needs_seed = match fs::read_to_string(path) {
-            Ok(content) => {
-                crate::config::shell_integration::should_upgrade_seeded_starship_content(&content)
-            }
+        let needs_seed = match fs::read(path) {
+            Ok(content) => match String::from_utf8(content) {
+                Ok(content) => {
+                    crate::config::shell_integration::should_upgrade_seeded_starship_content(
+                        &content,
+                    )
+                }
+                Err(_) => {
+                    issues.push(format!(
+                        "Could not inspect starship config at {}: file is not valid UTF-8",
+                        path.display()
+                    ));
+                    false
+                }
+            },
             Err(err) => {
                 issues.push(format!(
                     "Could not inspect starship config at {}: {}",

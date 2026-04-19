@@ -27,7 +27,7 @@ pub fn create_backup_with_session(
     session: &BackupSession,
     config_path: &Path,
 ) -> Result<RestoreEntry> {
-    let content = fs::read_to_string(config_path)
+    let content = fs::read(config_path)
         .map_err(|e| SlateError::BackupFailed(format!("Failed to read config: {}", e)))?;
 
     let backup_filename = format!("{}.backup", tool_key);
@@ -35,7 +35,7 @@ pub fn create_backup_with_session(
 
     let mut file = AtomicWriteFile::open(&backup_path)
         .map_err(|e| SlateError::BackupFailed(format!("Failed to create backup file: {}", e)))?;
-    file.write_all(content.as_bytes())
+    file.write_all(&content)
         .map_err(|e| SlateError::BackupFailed(format!("Failed to write backup: {}", e)))?;
     file.commit()
         .map_err(|e| SlateError::BackupFailed(format!("Failed to commit backup: {}", e)))?;

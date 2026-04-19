@@ -124,23 +124,26 @@ fn remove_ghostty_managed_references(env: &SlateEnv) -> Result<()> {
         .join("ghostty")
         .to_string_lossy()
         .to_string();
-    let content = fs::read_to_string(&integration_path)?;
-    let mut cleaned = Vec::new();
+    let content = fs::read(&integration_path)?;
+    let mut cleaned: Vec<u8> = Vec::with_capacity(content.len());
 
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("config-file") && trimmed.contains(&managed_prefix) {
+    for line in content.split_inclusive(|b| *b == b'\n') {
+        let trimmed = line
+            .iter()
+            .copied()
+            .skip_while(|b| b.is_ascii_whitespace())
+            .collect::<Vec<u8>>();
+        if trimmed.starts_with(b"config-file")
+            && trimmed
+                .windows(managed_prefix.len())
+                .any(|w| w == managed_prefix.as_bytes())
+        {
             continue;
         }
-        cleaned.push(line);
+        cleaned.extend_from_slice(line);
     }
 
-    let new_content = if cleaned.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", cleaned.join("\n"))
-    };
-    fs::write(integration_path, new_content)?;
+    fs::write(integration_path, cleaned)?;
     Ok(())
 }
 
@@ -157,7 +160,13 @@ fn remove_alacritty_managed_references(env: &SlateEnv) -> Result<()> {
         .join("alacritty")
         .to_string_lossy()
         .to_string();
-    let content = fs::read_to_string(&integration_path)?;
+    let content = match fs::read(&integration_path) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(content) => content,
+            Err(_) => return Ok(()),
+        },
+        Err(err) => return Err(err.into()),
+    };
     let mut doc: toml_edit::DocumentMut = if content.trim().is_empty() {
         toml_edit::DocumentMut::new()
     } else {
@@ -402,5 +411,31 @@ mod tests {
         assert!(remove_nvim_managed_references(&env).is_ok());
         // No side effects — no directory materialized.
         assert!(!td.path().join(".config/nvim").exists());
+    }
+
+    #[test]
+    fn remove_ghostty_managed_references_preserves_non_utf8_bytes() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let integration_path = td.path().join(".config/ghostty/config");
+        std::fs::create_dir_all(integration_path.parent().unwrap()).unwrap();
+
+        let mut content = vec![0xff, b'\n'];
+        content.extend_from_slice(
+            format!(
+                "config-file = \"{}/managed/ghostty/theme.conf\"\nuser-setting = true\n",
+                env.config_dir().display()
+            )
+            .as_bytes(),
+        );
+        std::fs::write(&integration_path, content).unwrap();
+
+        remove_ghostty_managed_references(&env).unwrap();
+
+        let cleaned = std::fs::read(&integration_path).unwrap();
+        assert!(cleaned.starts_with(&[0xff, b'\n']));
+        let cleaned_str = String::from_utf8_lossy(&cleaned);
+        assert!(!cleaned_str.contains("config-file ="));
+        assert!(cleaned_str.contains("user-setting = true"));
     }
 }
