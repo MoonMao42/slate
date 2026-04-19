@@ -29,6 +29,15 @@ mod tests {
     /// palette colors as visible swatches, so its `\x1b[38;2;...m` +
     /// `\x1b[0m` bytes are intentional and must not trip the gate).
     ///
+    /// Wave 5 extends the allowlist with `// TERMINAL-CONTROL:` — a
+    /// narrower, **single-line** marker that covers ONLY the very next
+    /// source line. This is for alt-screen / cursor-visibility / screen-
+    /// clear escapes that are harder to encode as bare `\x1b[...l` /
+    /// `\x1b[?25h` prefixes (e.g. when emitted via `push_str` against a
+    /// composed `String`). Unlike SWATCH-RENDERER (function scope), the
+    /// TERMINAL-CONTROL marker covers the immediate next line only so a
+    /// stray marker cannot accidentally smother a whole block.
+    ///
     /// The swatch allowlist works line-by-line: once a `SWATCH-RENDERER:`
     /// marker is seen, the scanner skips all subsequent lines until the
     /// brace depth (counted from the opening `{` that starts the marked
@@ -43,7 +52,12 @@ mod tests {
         };
 
         // First pass: drop the body of every SWATCH-RENDERER-marked fn.
-        let filtered = strip_swatch_renderers(&contents);
+        let swatch_filtered = strip_swatch_renderers(&contents);
+        // Second pass: drop every line that immediately follows a
+        // `// TERMINAL-CONTROL:` marker (Wave 5 — cursor / alt-screen /
+        // screen-clear escapes emitted via push_str rather than a bare
+        // literal on its own line).
+        let filtered = strip_terminal_control_markers(&swatch_filtered);
 
         // Strip allowlisted control sequences before the styling scan so
         // they don't false-positive.
@@ -116,6 +130,36 @@ mod tests {
             }
         }
 
+        out
+    }
+
+    /// Line-level allowlist for terminal-control escapes that are
+    /// assembled via `push_str` rather than written as a bare `\x1b[?25h`
+    /// literal the bulk allowlist already knows about. Whenever a line
+    /// contains `TERMINAL-CONTROL:` the NEXT line is dropped; the marker
+    /// itself is also dropped so it cannot survive to re-enter the scan.
+    /// Unlike `strip_swatch_renderers`, this is **single-line scope** —
+    /// a stray marker cannot accidentally smother a multi-line block.
+    ///
+    /// NOTE for future maintainers: this helper is a line filter; keep
+    /// braces out of the documentation when editing marker-adjacent
+    /// code (same hygiene rule as `strip_swatch_renderers`; see Wave-3
+    /// docstring-hygiene bug in 18-04-SUMMARY).
+    fn strip_terminal_control_markers(src: &str) -> String {
+        let mut out = String::with_capacity(src.len());
+        let mut skip_next = false;
+        for line in src.lines() {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if line.contains("TERMINAL-CONTROL:") {
+                skip_next = true;
+                continue;
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
         out
     }
 
@@ -210,8 +254,38 @@ fn after() {
         assert!(hits.is_empty(), "Wave 4 style-ANSI residue: {hits:?}");
     }
 
+    /// Wave 5 allowlist regression guard — `strip_terminal_control_markers`
+    /// drops the single line that immediately follows a
+    /// `// TERMINAL-CONTROL:` marker while leaving surrounding code intact.
+    /// Mirrors the narrower scope of the Wave-5 marker (single line vs.
+    /// SWATCH-RENDERER's function scope).
     #[test]
-    #[ignore = "enabled by Wave 5 plan (18-06-PLAN.md); swatch sites allowlisted separately"]
+    fn strip_terminal_control_markers_drops_only_next_line() {
+        let src = "\
+fn normal() {
+    let x = \"\\x1b[1mhi\\x1b[0m\";
+}
+
+fn render() {
+    // TERMINAL-CONTROL: leave alt-screen
+    output.push_str(\"\\x1b[?1049l\");
+    let styled = \"\\x1b[1mremains\\x1b[0m\";
+}
+";
+        let stripped = strip_terminal_control_markers(src);
+        // Surrounding styling bytes survive (both the `normal` fn and the
+        // `styled` binding after the marker).
+        assert!(stripped.contains("\\x1b[1mhi"));
+        assert!(stripped.contains("\\x1b[1mremains"));
+        // The marker itself + its target line are gone.
+        assert!(!stripped.contains("TERMINAL-CONTROL"));
+        assert!(
+            !stripped.contains("1049l"),
+            "the single line after the marker must be stripped"
+        );
+    }
+
+    #[test]
     fn no_raw_ansi_in_wave_5_files() {
         let files = &[
             "src/cli/demo.rs",

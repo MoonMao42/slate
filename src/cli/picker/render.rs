@@ -1,4 +1,5 @@
-use crate::design::symbols::Symbols;
+use crate::brand::render_context::RenderContext;
+use crate::brand::roles::Roles;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::opacity::OpacityPreset;
@@ -18,16 +19,27 @@ pub(super) fn render(state: &PickerState, flash_text: Option<&str>) -> Result<()
     let mut stdout = io::stdout();
     queue_io(queue!(stdout, Clear(ClearType::All), MoveTo(0, 0)))?;
 
+    let ctx = RenderContext::from_active_theme().ok();
+    let roles = ctx.as_ref().map(Roles::new);
+
+    // Picker chrome header: "✦ slate  theme + opacity picker".
+    // `r.logo()` carries the brand-lavender ✦ glyph + `slate` wordmark;
+    // `r.path()` dims the descriptor so the eye lands on the wordmark first.
+    let logo = roles
+        .as_ref()
+        .map(|r| r.logo())
+        .unwrap_or_else(|| "✦ slate".to_string());
+    let tagline = roles
+        .as_ref()
+        .map(|r| r.path("theme + opacity picker"))
+        .unwrap_or_else(|| "theme + opacity picker".to_string());
     queue_io(queue!(
         stdout,
         Print("\r\n  "),
-        SetForegroundColor(Color::Cyan),
-        SetAttribute(Attribute::Bold),
-        Print(Symbols::BRAND),
-        Print("  slate set"),
-        SetAttribute(Attribute::Reset),
-        ResetColor,
-        Print("   theme + opacity picker\r\n\r\n"),
+        Print(&logo),
+        Print("   "),
+        Print(&tagline),
+        Print("\r\n\r\n"),
     ))?;
 
     let (_cols, rows) = terminal::size().map_err(io_err)?;
@@ -122,17 +134,26 @@ pub(super) fn render(state: &PickerState, flash_text: Option<&str>) -> Result<()
     }
     queue_io(queue!(stdout, Print("\r\n\r\n")))?;
 
-    let help_line = if supports_opacity {
-        "  ↑↓/jk theme · ←→/hl opacity · Enter save · Esc cancel\r\n"
+    let help_body = if supports_opacity {
+        "↑↓/jk theme · ←→/hl opacity · Enter save · Esc cancel"
     } else {
-        "  ↑↓/jk theme · Enter save · Esc cancel\r\n"
+        "↑↓/jk theme · Enter save · Esc cancel"
     };
+    let help_line = roles
+        .as_ref()
+        .map(|r| r.path(help_body))
+        .unwrap_or_else(|| help_body.to_string());
+    let save_line = roles
+        .as_ref()
+        .map(|r| r.path("s save-auto · r resume-auto"))
+        .unwrap_or_else(|| "s save-auto · r resume-auto".to_string());
     queue_io(queue!(
         stdout,
-        SetForegroundColor(Color::DarkGrey),
-        Print(help_line),
-        Print("  s save-auto · r resume-auto\r\n"),
-        ResetColor,
+        Print("  "),
+        Print(&help_line),
+        Print("\r\n  "),
+        Print(&save_line),
+        Print("\r\n"),
     ))?;
 
     if let Some(text) = flash_text {
@@ -176,22 +197,55 @@ pub(super) fn is_ghostty() -> bool {
         .unwrap_or(false)
 }
 
+// SWATCH-RENDERER: intentionally raw ANSI. `render_afterglow_receipt`
+// renders the active theme's foreground color directly onto the receipt
+// lines so the user immediately sees the theme they just committed. The
+// alt-screen-leave + cursor-restore sequences at the top are terminal
+// control, not styling, and the `38;2;R;G;B` fg is a palette swatch that
+// MUST carry the theme's hex for the receipt to land. Chrome glyphs +
+// labels inside this fn flow through the Roles API (brand/heading/path),
+// wrapped by the swatch fg so everything inherits the theme tint.
 pub(super) fn render_afterglow_receipt(state: &PickerState, _env: &SlateEnv) -> Result<()> {
     let current_theme = state.get_current_theme()?;
     let current_opacity = state.get_current_opacity();
     let text_rgb = parse_hex_color(&current_theme.palette.foreground);
+
+    let ctx = RenderContext::from_active_theme().ok();
+    let roles = ctx.as_ref().map(Roles::new);
 
     let mut output = String::new();
     output.push_str("\x1b[?1049l");
     output.push_str("\x1b[?25h");
     output.push('\n');
 
-    let theme_line = format!("  {}  Theme     {}\n", Symbols::BRAND, current_theme.name);
+    let brand_glyph = roles
+        .as_ref()
+        .map(|r| r.brand("✦"))
+        .unwrap_or_else(|| "✦".to_string());
+    let diamond_glyph = roles
+        .as_ref()
+        .map(|r| r.heading("").trim_end().to_string())
+        .unwrap_or_else(|| "◆".to_string());
+    let theme_label = roles
+        .as_ref()
+        .map(|r| r.path("Theme"))
+        .unwrap_or_else(|| "Theme".to_string());
+    let opacity_label = roles
+        .as_ref()
+        .map(|r| r.path("Opacity"))
+        .unwrap_or_else(|| "Opacity".to_string());
+    let theme_name = roles
+        .as_ref()
+        .map(|r| r.theme_name(&current_theme.name))
+        .unwrap_or_else(|| current_theme.name.clone());
+
+    let theme_line = format!("  {}  {}     {}\n", brand_glyph, theme_label, theme_name);
     let show_opacity = crate::detection::TerminalProfile::detect().supports_opacity();
     let opacity_line = if show_opacity {
         format!(
-            "  {}  Opacity   {}\n",
-            Symbols::DIAMOND,
+            "  {}  {}   {}\n",
+            diamond_glyph,
+            opacity_label,
             opacity_to_label(current_opacity)
         )
     } else {

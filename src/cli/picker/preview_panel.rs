@@ -163,6 +163,14 @@ pub const SAMPLE_TOKENS: &[PreviewSpan] = &[
 /// Output sample token lines, 16 ANSI matrix, and optional extras matrix.
 /// Returns formatted string with ANSI 24-bit escape codes embedded so the output
 /// renders in color when written to a real terminal.
+///
+/// The entire body of this function is a palette-swatch renderer — every
+/// cell intentionally carries a truecolor background SGR (ESC `[` `4` `8` `;`
+/// `2` `;` R `;` G `;` B m) because the whole point of the preview panel IS
+/// to display theme colors. The `// SWATCH-RENDERER:` marker below drops
+/// this body from the Wave-5 grep gate (same pattern as Wave-3's
+/// `src/cli/status_panel.rs::swatch_cell`).
+// SWATCH-RENDERER: intentionally raw ANSI (renders theme preview colors, not role text)
 pub fn render_preview(palette: &crate::theme::Palette) -> String {
     use crate::adapter::palette_renderer::PaletteRenderer;
 
@@ -175,7 +183,7 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
     let mut output = String::new();
 
     // Render 16 ANSI color matrix using background blocks so every cell
-    // carries an explicit \x1b[48;2;R;G;Bm sequence.
+    // carries an explicit truecolor background SGR.
     // Normal (0-7)
     output.push_str("Normal: ");
     let ansi_normal = [

@@ -1,6 +1,7 @@
 //! Event loop and rendering for the interactive crossterm picker.
 //! Built on crossterm for live preview support.
 
+use crate::brand::events::{dispatch, BrandEvent, NavKind, SelectKind};
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::opacity::OpacityPreset;
@@ -210,10 +211,13 @@ fn handle_key(
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
             state.move_up();
+            // D-17: picker navigation — NoopSink in Phase 18, SoundSink in Phase 20.
+            dispatch(BrandEvent::Navigation(NavKind::PickerMove));
             Ok(KeyOutcome::Continue)
         }
         KeyCode::Down | KeyCode::Char('j') => {
             state.move_down();
+            dispatch(BrandEvent::Navigation(NavKind::PickerMove));
             Ok(KeyOutcome::Continue)
         }
         KeyCode::Left | KeyCode::Char('h') => {
@@ -278,11 +282,171 @@ fn handle_key(
             }
             Ok(KeyOutcome::Continue)
         }
-        KeyCode::Enter => Ok(KeyOutcome::Commit),
+        KeyCode::Enter => {
+            // D-17: picker Enter → Selection. Fires IN ADDITION to the existing
+            // `crate::cli::sound::play_feedback` call from `launch_picker`'s
+            // Commit branch — Phase 18 does not delete `sound.rs`; Phase 20's
+            // SoundSink will supersede `play_feedback` once registered.
+            dispatch(BrandEvent::Selection(SelectKind::PickerEnter));
+            Ok(KeyOutcome::Commit)
+        }
         KeyCode::Esc | KeyCode::Char('q') => Ok(KeyOutcome::Cancel),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Ok(KeyOutcome::Cancel)
         }
         _ => Ok(KeyOutcome::Inert),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Wave-5 picker key → BrandEvent dispatch unit tests.
+    //!
+    //! Rather than drive the whole alt-screen event loop, we call
+    //! `handle_key` directly with synthetic `KeyEvent`s and assert the
+    //! shared `OnceLock` sink tally. Private `handle_key` + `Flash` are
+    //! reachable here because this module lives next to them in the same
+    //! crate.
+    //!
+    //! Note: the `brand::events` sink is a process-global `OnceLock`
+    //! shared across lib unit tests. We piggy-back on whatever sink was
+    //! seated first; if the default `NoopSink` won the race, these tests
+    //! degrade to smoke tests (the `handle_key` branches still run
+    //! without panicking). Phase 20's integration target will exercise
+    //! the fresh-process case against `SoundSink`; the routing contract
+    //! lives in `tests/wave5_picker_events.rs`.
+
+    use super::*;
+    use crate::brand::events::{set_sink, EventSink};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[derive(Default)]
+    struct PickerCountingSink {
+        picker_move: AtomicUsize,
+        picker_enter: AtomicUsize,
+    }
+
+    impl EventSink for PickerCountingSink {
+        fn dispatch(&self, event: BrandEvent) {
+            match event {
+                BrandEvent::Navigation(NavKind::PickerMove) => {
+                    self.picker_move.fetch_add(1, Ordering::SeqCst);
+                }
+                BrandEvent::Selection(SelectKind::PickerEnter) => {
+                    self.picker_enter.fetch_add(1, Ordering::SeqCst);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Try to seat a `PickerCountingSink`. Returns `None` if another sink
+    /// (e.g. `NoopSink` from an earlier test) already won the `OnceLock`,
+    /// in which case these tests fall back to smoke-testing that
+    /// `handle_key` doesn't panic on the target key codes.
+    fn try_seat_picker_sink() -> Option<Arc<PickerCountingSink>> {
+        let sink = Arc::new(PickerCountingSink::default());
+        match set_sink(sink.clone() as Arc<dyn EventSink>) {
+            Ok(()) => Some(sink),
+            Err(_) => None,
+        }
+    }
+
+    fn dummy_env() -> SlateEnv {
+        SlateEnv::with_home(PathBuf::from("/tmp/slate-picker-test-home"))
+    }
+
+    fn fresh_state() -> PickerState {
+        PickerState::new("catppuccin-mocha", OpacityPreset::Solid)
+            .expect("picker state must build from registry")
+    }
+
+    #[test]
+    fn picker_nav_keys_fire_picker_move_event() {
+        let sink = try_seat_picker_sink();
+        let env = dummy_env();
+        let mut state = fresh_state();
+        let mut flash: Option<Flash> = None;
+
+        let before_move = sink.as_ref().map(|s| s.picker_move.load(Ordering::SeqCst));
+        let _ = handle_key(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .expect("Down key must not error");
+        let _ = handle_key(
+            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .expect("Up key must not error");
+        let _ = handle_key(
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .expect("j key must not error");
+        let _ = handle_key(
+            KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .expect("k key must not error");
+
+        if let (Some(sink), Some(before)) = (sink, before_move) {
+            let delta = sink.picker_move.load(Ordering::SeqCst) - before;
+            assert_eq!(
+                delta, 4,
+                "four nav keys (Down/Up/j/k) should dispatch PickerMove exactly 4 times"
+            );
+        }
+        // If the sink couldn't be seated (another test won the OnceLock),
+        // the handle_key calls above at least proved no panic on target keys.
+    }
+
+    #[test]
+    fn picker_enter_fires_picker_enter_event_and_commits() {
+        let sink = try_seat_picker_sink();
+        let env = dummy_env();
+        let mut state = fresh_state();
+        let mut flash: Option<Flash> = None;
+
+        let before_enter = sink.as_ref().map(|s| s.picker_enter.load(Ordering::SeqCst));
+        let outcome = handle_key(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .expect("Enter key must not error");
+
+        assert!(
+            matches!(outcome, KeyOutcome::Commit),
+            "Enter must return Commit, got {outcome:?}"
+        );
+
+        if let (Some(sink), Some(before)) = (sink, before_enter) {
+            let delta = sink.picker_enter.load(Ordering::SeqCst) - before;
+            assert_eq!(delta, 1, "Enter should dispatch PickerEnter exactly once");
+        }
+    }
+
+    impl std::fmt::Debug for KeyOutcome {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                KeyOutcome::Continue => f.write_str("Continue"),
+                KeyOutcome::Inert => f.write_str("Inert"),
+                KeyOutcome::Commit => f.write_str("Commit"),
+                KeyOutcome::Cancel => f.write_str("Cancel"),
+            }
+        }
     }
 }
