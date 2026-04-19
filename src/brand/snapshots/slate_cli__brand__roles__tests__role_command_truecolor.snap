@@ -1,0 +1,5 @@
+---
+source: src/brand/roles.rs
+expression: "roles.command(\"slate theme set\")"
+---
+[48;2;16;19;35;38;2;114;135;253m slate theme set [0m

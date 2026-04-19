@@ -1999,6 +1999,7 @@ dependencies = [
  "clap",
  "cliclack",
  "color-eyre",
+ "console",
  "criterion",
  "crossterm",
  "insta",

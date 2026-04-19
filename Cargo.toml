@@ -43,6 +43,7 @@ atty = "0.2"
 clap = { version = "4.5", features = ["derive"] }
 cliclack = "0.5.4"
 color-eyre = "0.6"
+console = "0.16"
 crossterm = "0.27"
 libc = "0.2"
 rayon = "1"
