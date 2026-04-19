@@ -1,7 +1,8 @@
 /// Tool selection for setup wizard.
 /// Single source of truth for tool metadata, installability, and selection logic.
 use crate::brand::language::Language;
-use crate::design::typography::Typography;
+use crate::brand::render_context::RenderContext;
+use crate::brand::roles::Roles;
 use crate::detection::{self, TerminalProfile, ToolPresence};
 use crate::env::SlateEnv;
 use std::collections::HashMap;
@@ -252,42 +253,59 @@ impl ReviewReceipt {
         self.install_actions.push(action);
     }
 
-    /// Format receipt as human-readable string for display using typography helpers
+    /// Format receipt as human-readable string for display using the Roles API.
     pub fn format_for_display(&self) -> String {
+        // Build a RenderContext up-front so the whole receipt renders through
+        // the same ctx. Registry init failure is a graceful-degrade path
+        // (plain text, no ANSI) — the wizard must still print something.
+        let ctx = RenderContext::from_active_theme().ok();
+        let r = ctx.as_ref().map(Roles::new);
+        self.format_for_display_with_roles(r.as_ref())
+    }
+
+    /// Shared body — factored so snapshot tests can inject a mock `Roles`
+    /// without going through registry init.
+    pub(crate) fn format_for_display_with_roles(&self, r: Option<&Roles<'_>>) -> String {
         let mut output = String::new();
         let terminal = TerminalProfile::detect();
-        output.push_str(&format!(
-            "{}\n\n",
-            Typography::section_header("Review and confirm")
-        ));
+
+        // Heading: "◆ Review and confirm" via Roles::heading. Mirrors
+        // sketch 003 tree narrative anchor.
+        output.push_str(&render_heading(r, "Review and confirm"));
+        output.push_str("\n\n");
 
         if !self.install_actions.is_empty() {
-            output.push_str(&format!("{}\n", Typography::category_heading("Install")));
+            output.push_str(&render_heading(r, "Install"));
+            output.push('\n');
             for action in &self.install_actions {
                 let kind_str = match action.brew_kind {
                     BrewKind::Formula => "formula",
                     BrewKind::Cask => "cask",
                 };
-                output.push_str(&format!(
-                    "{}\n",
-                    Typography::list_item('•', &action.tool_label, kind_str)
-                ));
+                let line = format!("• {} — {}", action.tool_label, kind_str);
+                output.push_str(&match r {
+                    Some(r) => r.tree_branch(&line),
+                    None => format!("  {}", line),
+                });
+                output.push('\n');
             }
             output.push('\n');
         }
 
         if let Some(font) = &self.selected_font {
-            output.push_str(&format!(
-                "{}\n",
-                Language::receipt_line(Language::RECEIPT_FONT_SECTION, font)
+            output.push_str(&Language::receipt_line(
+                Language::RECEIPT_FONT_SECTION,
+                font,
             ));
+            output.push('\n');
         }
 
         if let Some(theme) = &self.selected_theme {
-            output.push_str(&format!(
-                "{}\n",
-                Language::receipt_line(Language::RECEIPT_THEME_SECTION, theme)
+            output.push_str(&Language::receipt_line(
+                Language::RECEIPT_THEME_SECTION,
+                theme,
             ));
+            output.push('\n');
         }
 
         let terminal_summary = self
@@ -304,16 +322,30 @@ impl ReviewReceipt {
                     terminal.compatibility_label()
                 )
             });
-        output.push_str(&format!(
-            "{}\n",
-            Language::receipt_line(Language::RECEIPT_TERMINAL_SECTION, &terminal_summary)
+        output.push_str(&Language::receipt_line(
+            Language::RECEIPT_TERMINAL_SECTION,
+            &terminal_summary,
         ));
+        output.push('\n');
 
-        output.push_str(&format!(
-            "\n{}\n",
-            Typography::explanation(Language::RECEIPT_FOOTER)
-        ));
+        // Footer hint — path-role (dim italic, no container) per sketch 003.
+        output.push('\n');
+        output.push_str(&match r {
+            Some(r) => format!("  {}", r.path(Language::RECEIPT_FOOTER)),
+            None => format!("  {}", Language::RECEIPT_FOOTER),
+        });
+        output.push('\n');
+
         output
+    }
+}
+
+/// Render `◆ title` via Roles::heading, or a plain fallback when ctx is
+/// unavailable (registry init failure — graceful degrade, D-05).
+fn render_heading(r: Option<&Roles<'_>>, title: &str) -> String {
+    match r {
+        Some(r) => r.heading(title),
+        None => format!("◆ {title}"),
     }
 }
 
@@ -477,5 +509,85 @@ mod tests {
         for tool in ToolCatalog::installable_tools() {
             assert!(!tool.detect_only);
         }
+    }
+
+    /// Wave 1 snapshot — the `ReviewReceipt` format body routed through
+    /// a MockTheme-backed `Roles`. Locks the `◆ heading + ┃ ├─` tree
+    /// narrative for the review pane. Deterministic bytes per D-06.
+    #[test]
+    fn tool_selection_review_receipt_basic_mode_snapshot() {
+        use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
+
+        let theme = mock_theme();
+        // Basic mode so the snapshot is stable even without a theme-derived
+        // D-04 pill bg — and more importantly so the receipt's tree
+        // narrative is byte-identical across CI truecolor / contributor
+        // truecolor / non-truecolor runners.
+        let ctx = mock_context_with_mode(&theme, RenderMode::Basic);
+        let r = Roles::new(&ctx);
+
+        let mut receipt = ReviewReceipt::new();
+        receipt.selected_font = Some("JetBrains Mono".to_string());
+        receipt.selected_theme = Some("Catppuccin Mocha".to_string());
+        receipt.install_actions.push(InstallAction {
+            tool_id: "starship".to_string(),
+            tool_label: "Starship".to_string(),
+            brew_package: "starship".to_string(),
+            brew_kind: BrewKind::Formula,
+        });
+        receipt.install_actions.push(InstallAction {
+            tool_id: "bat".to_string(),
+            tool_label: "bat".to_string(),
+            brew_package: "bat".to_string(),
+            brew_kind: BrewKind::Formula,
+        });
+
+        let out = receipt.format_for_display_with_roles(Some(&r));
+        insta::assert_snapshot!("tool_selection_review_receipt_basic", out);
+    }
+
+    /// The `◆` anchor + `Review and confirm` label must land in the
+    /// output regardless of render mode. Truecolor wraps the diamond in
+    /// ANSI so we assert the anchors separately.
+    #[test]
+    fn review_receipt_uses_diamond_heading_anchor() {
+        use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
+
+        let theme = mock_theme();
+        for mode in [RenderMode::Truecolor, RenderMode::Basic, RenderMode::None] {
+            let ctx = mock_context_with_mode(&theme, mode);
+            let r = Roles::new(&ctx);
+            let receipt = ReviewReceipt::new();
+            let out = receipt.format_for_display_with_roles(Some(&r));
+            assert!(
+                out.contains('◆'),
+                "missing diamond in mode {mode:?}: {out:?}"
+            );
+            assert!(
+                out.contains("Review and confirm"),
+                "missing `Review and confirm` prose in mode {mode:?}: {out:?}"
+            );
+        }
+    }
+
+    /// Registry-init failure fallback — when no `Roles` can be built, the
+    /// receipt still renders (no styling, plain text). D-05 graceful
+    /// degradation contract.
+    #[test]
+    fn review_receipt_falls_back_to_plain_when_roles_absent() {
+        let mut receipt = ReviewReceipt::new();
+        receipt.selected_font = Some("JetBrains Mono".to_string());
+        receipt.selected_theme = Some("Catppuccin Mocha".to_string());
+
+        let out = receipt.format_for_display_with_roles(None);
+        // Fallback path produces plain `◆ Review and confirm` (no ANSI),
+        // so the adjacency check is safe here.
+        assert!(out.contains("◆ Review and confirm"));
+        assert!(out.contains("JetBrains Mono"));
+        assert!(out.contains("Catppuccin Mocha"));
+        assert!(
+            !out.contains('\x1b'),
+            "fallback must emit zero ANSI bytes, got: {out:?}"
+        );
     }
 }

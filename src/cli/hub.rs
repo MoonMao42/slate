@@ -1,3 +1,5 @@
+use crate::brand::render_context::RenderContext;
+use crate::brand::roles::Roles;
 use crate::cli::config::{disable_auto_theme, enable_auto_theme};
 use crate::config::ConfigManager;
 use crate::error::Result;
@@ -7,6 +9,27 @@ use crate::theme::ThemeRegistry;
 pub fn handle() -> Result<()> {
     let config = ConfigManager::new()?;
     show_hub_once(&config)
+}
+
+/// Pure formatter for the 3-line Theme/Opacity/Font status panel. Split
+/// from `show_hub_once` so snapshot tests can lock the Roles-rendered
+/// byte output without going through `cliclack::log::info` (which needs
+/// a TTY). Returns the three lines in the order they should be emitted.
+fn format_hub_status_panel(
+    r: &Roles<'_>,
+    theme_name: &str,
+    opacity: &str,
+    font: Option<&str>,
+) -> Vec<String> {
+    vec![
+        format!("{}    {}", r.heading("Theme"), r.theme_name(theme_name)),
+        format!("{}  {}", r.heading("Opacity"), r.code(opacity)),
+        format!(
+            "{}    {}",
+            r.heading("Font"),
+            r.path(font.unwrap_or("Not configured"))
+        ),
+    ]
 }
 
 fn sync_auto_theme_toggle(config: &ConfigManager, enabled: bool) -> Result<()> {
@@ -118,16 +141,17 @@ fn show_hub_once(config: &ConfigManager) -> Result<()> {
     if is_first_run {
         cliclack::log::warning("No theme set yet. Run Setup to get started.")?;
     } else {
-        cliclack::log::info(format!(
-            "\x1b[1m{}\x1b[0m    {}",
-            "Theme", current_theme.name
-        ))?;
-        cliclack::log::info(format!("\x1b[1m{}\x1b[0m  {}", "Opacity", current_opacity))?;
-        cliclack::log::info(format!(
-            "\x1b[1m{}\x1b[0m    {}",
-            "Font",
-            current_font.unwrap_or_else(|| "Not configured".to_string())
-        ))?;
+        let ctx = RenderContext::from_active_theme()?;
+        let r = Roles::new(&ctx);
+        let lines = format_hub_status_panel(
+            &r,
+            &current_theme.name,
+            &current_opacity,
+            current_font.as_deref(),
+        );
+        for line in lines {
+            cliclack::log::info(line)?;
+        }
     }
 
     cliclack::log::remark("")?;
@@ -438,5 +462,57 @@ mod tests {
         let enabled_content = fs::read_to_string(&shell_path).unwrap();
         assert!(config.is_zsh_highlighting_enabled().unwrap());
         assert!(enabled_content.contains("highlight-styles.sh"));
+    }
+
+    /// Wave 1 snapshot — 3-line hub status panel rendered through the
+    /// MockTheme-backed Basic Roles. Locks `◆ Theme` / `◆ Opacity`
+    /// / `◆ Font` headings + their respective role-rendered values.
+    #[test]
+    fn hub_status_panel_basic_mode_snapshot() {
+        use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
+
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Basic);
+        let r = Roles::new(&ctx);
+        let lines =
+            format_hub_status_panel(&r, "Catppuccin Mocha", "Frosted", Some("JetBrains Mono"));
+        insta::assert_snapshot!("hub_status_panel_basic", lines.join("\n"));
+    }
+
+    /// The hub's status lines always carry the `◆` heading anchor + the
+    /// three labels (Theme / Opacity / Font), regardless of render mode.
+    /// Truecolor wraps the diamond in ANSI so we can't assert on the
+    /// literal `◆ Theme` token — assert separately on the diamond byte
+    /// and the label prose.
+    #[test]
+    fn hub_status_panel_always_emits_diamond_anchors() {
+        use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
+
+        let theme = mock_theme();
+        for mode in [RenderMode::Truecolor, RenderMode::Basic, RenderMode::None] {
+            let ctx = mock_context_with_mode(&theme, mode);
+            let r = Roles::new(&ctx);
+            let lines =
+                format_hub_status_panel(&r, "Catppuccin Mocha", "Solid", Some("JetBrains Mono"));
+            let joined = lines.join("\n");
+            assert!(joined.contains('◆'), "missing diamond in mode {mode:?}");
+            for label in ["Theme", "Opacity", "Font"] {
+                assert!(
+                    joined.contains(label),
+                    "missing label `{label}` in mode {mode:?}: {joined:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hub_status_panel_handles_missing_font() {
+        use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
+
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::None);
+        let r = Roles::new(&ctx);
+        let lines = format_hub_status_panel(&r, "Mock", "Solid", None);
+        assert!(lines[2].contains("Not configured"));
     }
 }
