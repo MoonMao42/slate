@@ -1,12 +1,12 @@
 # Requirements: slate v2.2
 
-**Defined:** 2026-04-18
+**Defined:** 2026-04-18 · **Expanded:** 2026-04-19 (4 → 8 phases)
 **Core Value:** 30-second Time-to-Dopamine: from `brew install` to a stunning terminal
-**Milestone Goal:** Extend "one palette across the stack" to CLI file tools, editor ecosystem, and interaction polish — researching before building the editor adapter.
+**Milestone Goal:** Extend "one palette across the stack" to CLI file tools + editor ecosystem, then polish the product surfaces (brand text roles, interactive demo, sound cues) and ship v2.2 as one cohesive release — Solarized as the crowning reveal.
 
 ## v2.2 Requirements
 
-Each requirement maps to exactly one roadmap phase. Phases continue numbering from v2.1 (Phases 15–18).
+Each requirement maps to exactly one roadmap phase. Phases continue numbering from v2.1 (Phases 15–22).
 
 ### Demo & Showcase
 
@@ -29,10 +29,34 @@ Each requirement maps to exactly one roadmap phase. Phases continue numbering fr
 
 - [x] **EDITOR-01**: `slate theme set <id>` propagates to Neovim — each built-in theme renders as a slate-generated Lua colorscheme at `~/.config/nvim/colors/slate-<variant>.lua` (one per built-in theme) backed by a slate-managed loader at `~/.config/nvim/lua/slate/init.lua`; the loader watches `~/.cache/slate/current_theme.lua` and hot-reloads every running nvim instance when the state file changes. The user's `init.lua` is touched only via a single-line `pcall(require, 'slate')` activation, written ONLY on explicit consent through a 3-way A/B/C prompt (add-for-me / show-me-the-line / skip). Every generated colorscheme passes `nvim --headless -c 'luafile %' -c 'q'` syntax validation, and the adapter reports `ApplyOutcome::Applied { requires_new_shell: false }`. Classic vim (not nvim) is out of scope; missing or too-old nvim emits a one-line capability hint and skips silently.
 
-### Theme Family
+### Brand & CLI Text Roles
+
+Placeholder — refined during `/gsd-discuss-phase 18` after the sketch phase picks a direction.
+
+- [ ] **BRAND-01**: slate's CLI output emits via a unified text-role system — command keys, file paths, keyboard shortcuts, status severity, quoted code, and brand accents each have a single canonical ANSI treatment codified in `src/brand/` rather than ad-hoc inline escapes. Every user-facing surface (setup wizard, `slate theme`, `slate status`, `slate clean`, completion receipts, errors, new-shell reminders) routes through the role API, and ANSI byte sequences per role are regression-locked so brand drift is caught at CI.
+- [ ] **BRAND-02**: The role system was chosen via a `/gsd-sketch` artifact — 3–4 candidate treatments captured side-by-side, user picked one, and the picked variant is the shipped style. Future brand changes go through the same sketch-first loop.
+
+### Interactive Demo
+
+- [ ] **DEMO-03**: `slate demo` evolves from one-shot showcase into an interactive theme picker — navigating variants (grouped by family) live-previews the full stack in-place (ghostty bg, starship prompt, bat snippet, delta diff, eza listing, lazygit mini-UI, nvim syntax) without mutating persistent config. `Enter` applies the highlighted variant; `Esc` / `q` exits without applying. Preview state is ephemeral.
+
+### Sound + Promo
+
+Placeholder — refined during `/gsd-discuss-phase 20`.
+
+- [ ] **AUDIO-01**: slate emits subtle SFX at key interaction moments (theme set success, picker move, error, setup completion) — opt-in via `slate config set sound enable`, default off, respects `--quiet`, at most one SFX per user action. SFX library is licensed / original, cross-platform playback works on macOS + Linux with no extra daemons. VHS-scripted promo recordings (`demo` picker, `theme set`, setup wizard) ship as `.tape` + rendered outputs for README / launch embedding.
+
+### Theme Family (Phase 21 — scheduled last)
 
 - [ ] **FAM-01**: User can apply Solarized Dark and Solarized Light through `slate theme set solarized-dark` / `solarized-light`, with full coverage across existing tool backends (Ghostty, Alacritty, Starship, bat, delta, eza, lazygit, fastfetch, tmux, zsh-syntax-highlighting) matching the quality bar of existing themes
-- [ ] **FAM-02**: User can see themes grouped by `family` when listing (`slate theme --list` or equivalent) and when browsing the picker, so the 20 variants across 10 families are navigable rather than a flat list
+- [ ] **FAM-02**: User can see themes grouped by `family` when listing (`slate theme --list` or equivalent) and when browsing the picker from Phase 19, so the 20 variants across 10 families are navigable rather than a flat list
+
+### Docs + Release
+
+Placeholder — refined during `/gsd-discuss-phase 22`.
+
+- [ ] **DOCS-01**: README is rewritten to reflect the matured v2.2 product (interactive demo, nvim adapter, sound cues, Solarized, family grouping) with a hero recording, 30-second onboarding, command reference, theme gallery covering all 20 variants, and an honest platform matrix.
+- [ ] **DOCS-02**: CHANGELOG has a complete v2.2 entry; release-notes draft captures demo redesign + nvim adapter + sound + Solarized as narrative beats; brew tap formula + cargo-dist automation validated for the v2.2 release cut.
 
 ## Future Requirements (Deferred)
 
@@ -59,8 +83,8 @@ Each requirement maps to exactly one roadmap phase. Phases continue numbering fr
 
 | Requirement | Phase | Status | Verified by |
 |-------------|-------|--------|-------------|
-| DEMO-01 | Phase 15 | Pending | — |
-| DEMO-02 | Phase 15 | Pending | — |
+| DEMO-01 | Phase 15 | Complete | — |
+| DEMO-02 | Phase 15 | Complete | — |
 | LS-01 | Phase 16 | Complete | — |
 | LS-02 | Phase 16 | Complete | — |
 | LS-03 | Phase 16 | Complete | — |
@@ -68,13 +92,20 @@ Each requirement maps to exactly one roadmap phase. Phases continue numbering fr
 | UX-02 | Phase 16 | Complete | — |
 | UX-03 | Phase 16 | Complete | — |
 | EDITOR-01 | Phase 17 | Complete | `src/adapter/nvim.rs` (render_colorscheme, render_loader, render_shim, NvimAdapter, version_check); `src/cli/setup.rs` 3-way consent prompt + `src/cli/clean.rs::remove_nvim_managed_references` + `src/cli/config.rs::handle_config_set_with_env` (`editor disable`); `tests/nvim_integration.rs` 7 nvim-headless gates (state-file atomicity, fs_event hot-reload, 18-variant `luafile` syntax, Pitfall 4 marker-comment regression, capability hint); `src/cli/clean.rs::tests` + `src/cli/config.rs::tests` source-side coverage of clean/disable contracts |
-| FAM-01 | Phase 18 | Pending | — |
-| FAM-02 | Phase 18 | Pending | — |
+| BRAND-01 | Phase 18 | Pending | — |
+| BRAND-02 | Phase 18 | Pending | — |
+| DEMO-03 | Phase 19 | Pending | — |
+| AUDIO-01 | Phase 20 | Pending | — |
+| FAM-01 | Phase 21 | Pending | — |
+| FAM-02 | Phase 21 | Pending | — |
+| DOCS-01 | Phase 22 | Pending | — |
+| DOCS-02 | Phase 22 | Pending | — |
 
 **Coverage:**
-- v2.2 requirements: 11 total
-- Mapped to phases: 11
+- v2.2 requirements: 17 total
+- Mapped to phases: 17
 - Unmapped: 0 ✓
+- Note: Phase 15's DEMO-01/02 flipped to Complete retroactively (Phase 15 shipped 2026-04-18 but the table was never back-filled).
 
 ---
 

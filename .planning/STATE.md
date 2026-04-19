@@ -4,50 +4,57 @@ milestone: v2.2
 milestone_name: Editor Ecosystem + Polish
 current_phase: 18
 status: idle
-last_updated: "2026-04-19T05:35:27Z"
-last_activity: 2026-04-19 -- Phase 17 closed (9/9 plans, nvim editor adapter shipped); Phase 18 (Solarized) not yet planned
+last_updated: "2026-04-19T15:00:00Z"
+last_activity: 2026-04-19 -- Phase 17 closed; v2.2 expanded from 4 to 8 phases (added brand/demo/sound/docs, moved Solarized to Phase 21)
 progress:
-  total_phases: 4
+  total_phases: 8
   completed_phases: 3
   total_plans: 22
   completed_plans: 22
-  percent: 100
+  percent: 37
 ---
 
 # State: slate v2.2
 
 **Initialized:** 2026-04-18
-**Current Phase:** 18 (Solarized — not yet planned)
-**Status:** Phase 17 closed; v2.2 milestone awaiting Phase 18 plan
+**Current Phase:** 18 (Brand Sketch + CLI Text-Role System — not yet planned)
+**Status:** Phase 17 closed; v2.2 expanded to 8 phases (15-22); awaiting Phase 18 sketch
 
 ---
 
 ## Current Position
 
-Phase: 18 (theme-family-expansion-solarized) — NOT YET PLANNED
+Phase: 18 (brand-sketch-cli-text-roles) — NOT YET PLANNED (sketch phase — starts with `/gsd-sketch`)
 Plan: n/a (Phase 18 still TBD)
 Plans: 9 of 9 plans complete in Phase 17 (editor-adapter-vim-neovim-colorschemes)
-Status: Phase 17 closed 2026-04-19; Phase 18 awaiting `/gsd-discuss-phase 18`
-Last activity: 2026-04-19 -- Phase 17 closed (9/9 plans, nvim editor adapter shipped)
+Status: Phase 17 closed 2026-04-19; v2.2 restructured 2026-04-19 to pull v2.3 polish into v2.2; awaiting `/gsd-sketch` for brand text-role system
+Last activity: 2026-04-19 -- Phase 17 closed + v2.2 restructured (15-22, 8 phases, Solarized moved to Phase 21)
 
 **What's Next:**
 
-1. `/gsd-discuss-phase 18` — design Solarized Dark + Light coverage and family-grouping surface
-2. After Phase 18 ships, v2.2 milestone closes: 4/4 phases (15, 16, 17, 18), 11/11 requirements
-3. Phase 17 shipped as production nvim editor adapter (not the originally-scoped research spike — see Decision 12 SUPERSEDED note below)
+1. `/gsd-sketch` — rapidly mock 3-4 candidate CLI text-role treatments (command keys, paths, shortcuts, status severity) before formalizing Phase 18
+2. `/gsd-discuss-phase 18` — refine BRAND-01 / BRAND-02 acceptance criteria using the sketch artifact as the picked direction
+3. Remaining v2.2 phases: 18 brand → 19 demo-picker → 20 sound+promo → 21 Solarized → 22 README+release
+4. v2.2 ships as one release tag once Phase 22 lands (no per-phase releases)
+
+See also: memory file `project_phase_status.md` for the phase rationale and the polish-seeds that feed phases 18-22 (`project_phase9_promo_plan`, `project_ux_overhaul`, `project_design_*` entries).
 
 ---
 
 ## v2.2 Phase Structure
 
-| Phase | Goal | Requirements | Character |
-|-------|------|--------------|-----------|
-| 15 | `slate demo` single-screen showcase + contextual hint | DEMO-01, DEMO-02 | Build |
-| 16 | LS_COLORS/EZA_COLORS from palette + `RequiresNewShell` reminders | LS-01..03, UX-01..03 | Build |
-| 17 | Editor plugin license + portability research, go/no-go for v2.3 | EDITOR-01 | Research spike |
-| 18 | Solarized dark+light full backend coverage + family grouping in list/picker | FAM-01, FAM-02 | Build |
+| Phase | Goal | Requirements | Character | Status |
+|-------|------|--------------|-----------|--------|
+| 15 | `slate demo` single-screen showcase + contextual hint | DEMO-01, DEMO-02 | Build | ✅ |
+| 16 | LS_COLORS/EZA_COLORS from palette + `RequiresNewShell` reminders | LS-01..03, UX-01..03 | Build | ✅ |
+| 17 | Neovim editor adapter (18 Lua colorschemes + loader + hot-reload + 3-way consent) | EDITOR-01 | Build | ✅ |
+| 18 | Brand sketch + CLI text-role system | BRAND-01, BRAND-02 | Sketch → Build | 📋 |
+| 19 | `slate demo` redesign — picker + live preview across full stack | DEMO-03 | Build | 📋 |
+| 20 | Sound design + promo assets (SFX library + VHS recordings) | AUDIO-01 | Build | 📋 |
+| 21 | Solarized dark+light + family grouping (moved from Phase 18, lands last for max reveal) | FAM-01, FAM-02 | Build | 📋 |
+| 22 | README rewrite + release polish (CHANGELOG, brew tap, v2.2 cut) | DOCS-01, DOCS-02 | Docs | 📋 |
 
-Coverage: 11/11 requirements mapped, no requirement in multiple phases, no empty phase.
+Coverage: 17/17 requirements mapped, no requirement in multiple phases, no empty phase.
 
 ---
 
@@ -186,13 +193,17 @@ Theme palette (Palette struct) → single source of truth
 ### v2.2 Phase Dependencies
 
 ```
-Phase 15 (Demo)        ← depends on palette infra (shipped); no v2.2 dep
-Phase 16 (CLI Colors + UX)  ← depends on Phase 11 shared-shell (v2.1, shipped)
-Phase 17 (Research Spike)   ← no dependencies (pure research artifact)
-Phase 18 (Solarized)        ← ideally lands last; amplified by Phase 15 + 16
+Phase 15 (Demo)                      ← shipped
+Phase 16 (CLI Colors + UX)           ← shipped (depends on Phase 11 shared-shell)
+Phase 17 (Neovim Adapter)            ← shipped
+Phase 18 (Brand Sketch + Text Roles) ← no hard deps; runs first to feed 19/21/22
+Phase 19 (Demo Redesign)             ← depends on Phase 18 (brand roles drive picker chrome)
+Phase 20 (Sound + Promo)             ← depends on Phase 18 + 19 (picker is a trigger surface)
+Phase 21 (Solarized + Family)        ← scheduled LAST so reveal = brand + demo + sound together
+Phase 22 (README + Release)          ← depends on 20 (VHS recordings) + 21 (Solarized ships before README mentions it)
 ```
 
-**Parallelism opportunity:** Phases 15, 16, and 17 have no v2.2 internal dependencies and could be worked concurrently; Phase 18 prefers to land after 15 and 16 so the Solarized reveal includes demo + new-terminal UX.
+**Scheduling note:** Strict linear order 18 → 19 → 20 → 21 → 22. Phase 21 (Solarized) is deliberately delayed so its reveal lands with the full polished experience; Phase 22 (README) runs last so docs capture the shipped v2.2 state.
 
 ---
 
@@ -210,11 +221,12 @@ All three items are from v2.0 phases (pre-v2.1). Not blocking v2.2 work.
 
 v2.2-specific deferrals (from REQUIREMENTS.md):
 
-- Vim/Neovim production adapter → v2.3 (blocked on Phase 17 research outcome)
+- Vim/Neovim production adapter → **shipped as Phase 17 in v2.2 (2026-04-19)**, nvim-only. Classic vim still out of scope.
 - VSCode adapter → deferred indefinitely (JSON merge + profile/workspace fragility)
 - `slate export` (palette JSON/env/CSS) → later milestone
 - BSD `ls` 8-color fallback → rejected in favor of `coreutils` upgrade path
 - Additional theme families beyond Solarized → later milestones (one family per milestone cadence)
+- Brand polish / demo redesign / sound / README rewrite → **pulled back into v2.2** (2026-04-19) as Phases 18-22, was originally slated for v2.3
 
 ---
 
@@ -222,27 +234,29 @@ v2.2-specific deferrals (from REQUIREMENTS.md):
 
 **When Resuming Work:**
 
-1. Check `Current Position` above — v2.2 roadmap is defined; next action is `/gsd-discuss-phase 15`
+1. Check `Current Position` above — Phase 17 closed, next is `/gsd-sketch` for brand text roles, then `/gsd-discuss-phase 18`
 2. Review `Accumulated Context` (decisions, philosophy, architecture patterns)
-3. Open `.planning/ROADMAP.md` for the Phase 15–18 structure and success criteria
+3. Open `.planning/ROADMAP.md` for the Phase 15–22 structure and success criteria
 4. Open `.planning/REQUIREMENTS.md` for v2.2 requirement IDs and traceability
 5. Refer to `.planning/milestones/v2.1-*` for shipped cross-platform core reference
 
 **Key Files:**
 
 - `.planning/PROJECT.md` — Product vision and constraints
-- `.planning/REQUIREMENTS.md` — v2.2 requirements with REQ-IDs and traceability
-- `.planning/ROADMAP.md` — Full phase structure and success criteria (Phases 10–18)
+- `.planning/REQUIREMENTS.md` — v2.2 requirements with REQ-IDs and traceability (17 requirements across 8 phases)
+- `.planning/ROADMAP.md` — Full phase structure and success criteria (Phases 10–22)
 - `.planning/MILESTONES.md` — Shipped milestone log
 - `.planning/milestones/v2.1-ROADMAP.md` — v2.1 archived reference
 - `.planning/milestones/v2.0-pre-v2.1/` — Snapshot of the replaced v2.0 requirements and roadmap
 
 **Milestone Notes:**
 
-- v2.2 is deliberately a mix of one research spike (Phase 17) and three build phases (15, 16, 18)
-- Phase 17 outputs a spike artifact only — no production code changes
-- Phase 16 intentionally bundles LS colors with new-terminal reminders because both touch shell integration surface
+- v2.2 is now 8 phases covering editor ecosystem (shipped 15-17) + brand / demo / sound / Solarized / release polish (18-22, not yet planned). Ships as a single cohesive release, not per-phase tags.
+- Phase 17 shipped a production nvim-only editor adapter — supersedes the original research-spike scope from Decision 12.
+- Phase 16 bundles LS colors + new-terminal reminders because both touch shell integration surface.
+- Phase 21 (Solarized) is deliberately last so its reveal is amplified by the new brand + demo + sound work from phases 18-20.
+- Memory seeds feeding phases 18-22: `project_phase9_promo_plan`, `project_phase9_ui_polish`, `project_ux_overhaul`, `project_design_claude_code_preset`, `project_design_manual_override_lock`, `project_design_ideas_opacity_daynight`, `project_phase6_picker_ux_debt`.
 
 ---
 
-*Last updated: 2026-04-18 — v2.2 roadmap defined: 4 phases (15–18), 11 requirements, 100% coverage*
+*Last updated: 2026-04-19 — v2.2 expanded from 4 to 8 phases (15–22), 17 requirements, 100% coverage. Phase 17 closed; Phase 18 brand sketch next.*

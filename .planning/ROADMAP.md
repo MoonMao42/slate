@@ -1,11 +1,11 @@
 ---
-roadmap_version: 3.0
+roadmap_version: 3.1
 milestone: v2.2
 milestone_name: editor-ecosystem-polish
-phase_count: 4
+phase_count: 8
 granularity: balanced
 created: "2026-04-16"
-last_updated: "2026-04-18"
+last_updated: "2026-04-19"
 ---
 
 # Roadmap: slate
@@ -15,7 +15,7 @@ last_updated: "2026-04-18"
 - ✅ **v1.0 themectl** — archived (superseded by v2.0 pivot, see `.planning/archive/v1.0-themectl/`)
 - ✅ **v2.0 pre-v2.1 snapshot** — pre-pivot v2.0 milestone docs snapshotted for reference (see `.planning/milestones/v2.0-pre-v2.1/`)
 - ✅ **v2.1 Cross-Platform Core** — Phases 10–14 (shipped 2026-04-17)
-- 📋 **v2.2 Editor Ecosystem + Polish** — Phases 15–18 (planning)
+- 📋 **v2.2 Editor Ecosystem + Polish** — Phases 15–22 (3/8 complete; expanded 2026-04-19 to pull pre-release polish into v2.2 so the milestone ships as one cohesive release)
 
 ## Phases
 
@@ -32,12 +32,16 @@ Full archive: [`milestones/v2.1-ROADMAP.md`](./milestones/v2.1-ROADMAP.md) · [`
 
 </details>
 
-### 📋 v2.2 Editor Ecosystem + Polish (Phases 15–18)
+### 📋 v2.2 Editor Ecosystem + Polish (Phases 15–22)
 
 - [x] **Phase 15: Palette Showcase — `slate demo`** — curated single-screen payoff render + contextual hint surfacing (completed 2026-04-18)
 - [x] **Phase 16: CLI Tool Colors + New-Terminal UX** — `LS_COLORS` / `EZA_COLORS` from the active palette + cross-platform `RequiresNewShell` reminder plumbing (completed 2026-04-18, shipped as v0.1.2)
 - [x] **Phase 17: Editor Adapter — Neovim Colorschemes** — 18 slate-generated Lua colorschemes + slate-managed loader + file-watcher hot-reload + 3-way consent prompt for the single `pcall(require, 'slate')` activation line; classic vim explicitly out of scope (completed 2026-04-19)
-- [ ] **Phase 18: Theme Family Expansion — Solarized** — Solarized Dark + Light full-backend coverage, `family` grouping surfaced in listing + picker
+- [ ] **Phase 18: Brand Sketch + CLI Text-Role System** — sketch-driven design pass that introduces a unified text-role system for slate's CLI output (command keys, file paths, shortcuts, status, severity) and rolls the winning style across `setup` / `theme` / `status` / `clean` / `demo` receipt surfaces
+- [ ] **Phase 19: `slate demo` Redesign — Picker + Live Preview** — evolve `slate demo` from one-shot showcase into an interactive theme picker where navigating variants live-previews the whole stack (ghostty + starship + bat + delta + eza + lazygit + nvim) in-place
+- [ ] **Phase 20: Sound Design + Promo Assets** — curated SFX library, cross-platform audio playback, triggers at key moments (set success, picker move, error); produce VHS-scripted promo recordings for README and launch
+- [ ] **Phase 21: Theme Family Expansion — Solarized** — originally Phase 18; scheduled last so Solarized's reveal is amplified by the new brand + demo + sound work. Solarized Dark + Light full-backend coverage, `family` grouping surfaced in listing + picker
+- [ ] **Phase 22: README Rewrite + Release Polish** — rewrite README to reflect the matured v2.2 product (new demo, nvim adapter, sound cues, family grouping); embed recordings / screenshots; polish CHANGELOG and release-note scaffolding for the v2.2 tag
 
 ---
 
@@ -103,16 +107,56 @@ Plans:
 - [x] 17-07-PLAN.md — Wave 7 integration: fill 7 ignored test stubs with nvim-headless gates + atomicity/debounce/Pitfall-4 regression tests
 - [x] 17-08-PLAN.md — Wave 8 housekeeping: rewrite REQUIREMENTS / ROADMAP / STATE wording per CONTEXT.md §domain
 
-### Phase 18: Theme Family Expansion — Solarized
+### Phase 18: Brand Sketch + CLI Text-Role System
+**Goal**: slate's CLI output gets a unified visual voice — command keys, paths, keyboard shortcuts, status severity, and quoted code each have a consistent role-based style. Sketch first (throw-away HTML / ANSI mocks), pick the winning treatment, then roll it out across every user-facing surface.
+**Depends on**: No hard dependency. Runs before Phase 19 so the demo rebuild inherits the new text-role system; runs before Phase 21 so Solarized's reveal surfaces use the new brand.
+**Requirements**: BRAND-01, BRAND-02
+**Success Criteria** (what must be TRUE — refined during `/gsd-discuss-phase 18`):
+  1. A `/gsd-sketch` artifact captures 3–4 candidate text-role treatments side-by-side (command keys, paths, shortcuts, status severities, quoted code); user picks one and the picked variant gets codified in `src/brand/`.
+  2. A text-role system (module or helper functions) replaces ad-hoc ANSI escapes across setup wizard, `slate theme` output, `slate status`, completion receipts, error surfaces, and new-shell reminders — every user-facing surface emits via the role API.
+  3. Regression tests lock the ANSI byte sequences per role so brand drift is caught at CI.
+**Plans**: TBD — start with `/gsd-sketch` then `/gsd-discuss-phase 18`.
+
+### Phase 19: `slate demo` Redesign — Picker + Live Preview
+**Goal**: `slate demo` stops being a one-shot showcase and becomes an interactive surface where navigating theme variants live-previews the full stack (terminal bg, prompt, syntax, file listing, diff, git UI, nvim) in-place — user sees the "wow" moment per variant without applying + rolling back.
+**Depends on**: Phase 18 (text-role system drives the picker chrome); existing Phase 6 picker UX debt (memory: `project_phase6_picker_ux_debt`) gets addressed as part of this redesign.
+**Requirements**: DEMO-03
+**Success Criteria** (what must be TRUE — refined during `/gsd-discuss-phase 19`):
+  1. User runs `slate demo` (or `slate demo <theme>`) and sees a picker listing all 20 variants grouped by family.
+  2. As the user moves through the picker, the preview panel live-updates the full stack without mutating persistent config — at minimum ghostty bg, starship prompt, bat snippet, delta diff, eza listing, lazygit mini-UI, nvim syntax.
+  3. `Enter` applies the highlighted variant (same semantics as `slate theme <id>`); `Esc` / `q` exits without applying. Preview state is ephemeral.
+**Plans**: TBD
+
+### Phase 20: Sound Design + Promo Assets
+**Goal**: slate gains a subtle, premium sound layer — small SFX at key moments (theme set success, picker move, error) — plus a set of VHS-scripted promo recordings for README and launch. Sound is opt-in, off by default, never intrusive.
+**Depends on**: Phase 18 (text-role system — brand consistency applies to sound triggers too); Phase 19 (picker is a primary trigger surface); Phase 15 demo (shipped) for recording subject.
+**Requirements**: AUDIO-01
+**Success Criteria** (what must be TRUE — refined during `/gsd-discuss-phase 20`):
+  1. SFX library selected / recorded + licensing resolved; cross-platform audio playback path works on macOS + Linux without extra daemons.
+  2. Opt-in via `slate config set sound enable`; default off; respects `--quiet`. At most one SFX per user action — no stacking.
+  3. VHS-scripted promo recordings (demo picker, `slate theme set`, full setup wizard) produced as `.tape` + rendered outputs for embedding in README / launch posts.
+**Plans**: TBD
+
+### Phase 21: Theme Family Expansion — Solarized
 **Goal**: Solarized Dark + Light land as first-class palettes with full tool-backend coverage matching the existing quality bar, and the `family` grouping already present in `themes/themes.toml` becomes navigable surface — so the 20+ variants across 10 families stop being a flat list.
-**Depends on**: No hard v2.2 dependency. Ideally lands last in the milestone because Phase 16's new-terminal reminder and Phase 15's `slate demo` both amplify Solarized's reveal moment — applying Solarized and seeing the full showcase + env-driven `ls` colors together is the intended payoff.
+**Depends on**: No hard v2.2 dependency. Deliberately scheduled LAST so its reveal benefits from Phase 18's new brand + Phase 19's live-preview picker + Phase 20's SFX — applying Solarized with the full polished experience is the intended payoff moment.
 **Requirements**: FAM-01, FAM-02
 **Success Criteria** (what must be TRUE):
   1. User runs `slate theme set solarized-dark` or `slate theme set solarized-light` and sees palette-correct output across every existing tool backend (Ghostty, Alacritty, Starship, bat, delta, eza, lazygit, fastfetch, tmux, zsh-syntax-highlighting) — matching the visual fidelity of existing themes.
   2. Both Solarized variants pass the strict WCAG 4.5:1 contrast gate and the theme-registry validation (hex format, required tool_refs, auto_pair cross-reference) introduced during the Codex refactor.
   3. Running `slate theme --list` (or equivalent listing surface) shows themes grouped by `family`, with Solarized appearing as a family alongside Catppuccin, Tokyo Night, Dracula, Nord, Gruvbox, Everforest, Kanagawa, and Rose Pine.
-  4. Browsing the interactive picker, the user sees themes organized by family rather than a flat 20-item scroll, and family headings are visually distinct from individual variants.
+  4. Browsing the interactive picker (from Phase 19 redesign), the user sees themes organized by family rather than a flat 20-item scroll, and family headings are visually distinct from individual variants.
   5. The Solarized auto-pair (dark ↔ light) is wired so `slate theme --auto` flips correctly between the two variants when system appearance changes.
+**Plans**: TBD
+
+### Phase 22: README Rewrite + Release Polish
+**Goal**: README reflects the matured v2.2 product (interactive demo, nvim adapter, sound cues, Solarized, family grouping), embeds polished recordings + screenshots, and the release scaffolding (CHANGELOG, brew tap, release notes template) is ready for the v2.2 tag.
+**Depends on**: Phase 20 (VHS recordings) + Phase 21 (Solarized ships before README mentions it). Last phase of v2.2.
+**Requirements**: DOCS-01, DOCS-02
+**Success Criteria** (what must be TRUE — refined during `/gsd-discuss-phase 22`):
+  1. README front page reads like a launch landing — hero recording, 30-second onboarding, command reference, theme gallery with all 20 variants, honest platform matrix.
+  2. CHANGELOG has a complete v2.2 entry; release notes draft captures demo redesign + nvim adapter + sound + Solarized as the narrative beats.
+  3. brew tap formula / cargo-dist automation validated for the v2.2 release cut.
 **Plans**: TBD
 
 ---
@@ -128,9 +172,13 @@ Plans:
 | 14. Release Matrix + Installer + Docs | v2.1 | 3/3 | Complete | 2026-04-17 |
 | 15. Palette Showcase — `slate demo` | v2.2 | 6/6 | Complete    | 2026-04-18 |
 | 16. CLI Tool Colors + New-Terminal UX | v2.2 | 7/7 | Complete    | 2026-04-18 |
-| 17. Editor Adapter — Neovim Colorschemes | v2.2 | 9/9 | Complete    | 2026-04-19 |
-| 18. Theme Family Expansion — Solarized | v2.2 | 0/? | Not started | — |
+| 17. Editor Adapter — Neovim Colorschemes | v2.2 | 9/9 | Complete   | 2026-04-19 |
+| 18. Brand Sketch + CLI Text-Role System | v2.2 | 0/? | Not started | — |
+| 19. `slate demo` Redesign — Picker + Live Preview | v2.2 | 0/? | Not started | — |
+| 20. Sound Design + Promo Assets | v2.2 | 0/? | Not started | — |
+| 21. Theme Family Expansion — Solarized | v2.2 | 0/? | Not started | — |
+| 22. README Rewrite + Release Polish | v2.2 | 0/? | Not started | — |
 
 ---
 
-*Roadmap reorganized: 2026-04-18 at v2.1 milestone close. v2.2 phases 15–18 planned 2026-04-18. Phase 16 plans defined 2026-04-18 (7 plans across 5 waves). Phase 17 redefined from research spike to shipping editor adapter 2026-04-18. Phase 16 completed + shipped as v0.1.2 on 2026-04-18. Phase 17 completed 2026-04-19 (9 plans, nvim-only adapter with 18 colorschemes + loader + file-watcher hot-reload + 3-way consent prompt).*
+*Roadmap reorganized: 2026-04-18 at v2.1 milestone close. v2.2 phases 15–18 planned 2026-04-18. Phase 16 plans defined 2026-04-18 (7 plans across 5 waves). Phase 17 redefined from research spike to shipping editor adapter 2026-04-18. Phase 16 completed + shipped as v0.1.2 on 2026-04-18. Phase 17 completed 2026-04-19 (9 plans, nvim-only adapter with 18 colorschemes + loader + file-watcher hot-reload + 3-way consent prompt). v2.2 restructured 2026-04-19: original 4-phase scope (15–18) expanded to 8 phases (15–22) so the milestone ships as one cohesive release — added Phase 18 brand-sketch, Phase 19 demo-redesign, Phase 20 sound+promo, Phase 22 README+release-polish; Solarized moved from Phase 18 to Phase 21 so its reveal is amplified by the new brand/demo/sound work.*
