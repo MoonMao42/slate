@@ -256,22 +256,11 @@ impl Language {
 
     pub const NVIM_CONSENT_HEADER: &str = "✦ slate can auto-switch your Neovim colors";
 
-    pub const NVIM_CONSENT_PREAMBLE: &str =
-        "Adding this one line to your init.lua lets slate colors follow every `slate theme set`:\n\n\
-         \x20\x20pcall(require, 'slate')\n\n\
-         The line is harmless if you delete ~/.config/nvim/lua/slate/ later — \
-         `pcall` swallows the missing-module error. A `-- slate-managed` marker comment \
-         above makes it easy to spot and remove.";
-
     pub const NVIM_CONSENT_OPTION_A: &str = "Add it for me (recommended — one-step done)";
 
     pub const NVIM_CONSENT_OPTION_B: &str = "Show me the line, I'll paste it myself";
 
     pub const NVIM_CONSENT_OPTION_C: &str = "Skip — I'll run `:colorscheme slate-…` manually";
-
-    pub const NVIM_CONSENT_HINT_EXISTING_CS: &str =
-        "Note: option A replaces any `vim.cmd.colorscheme(...)` call you have later in init.lua. \
-         If you already set a colorscheme you want to keep, choose B or C.";
 
     pub const NVIM_CONSENT_MARKER_COMMENT: &str =
         "-- slate-managed: keep or delete, safe either way";
@@ -508,11 +497,9 @@ mod tests {
     fn nvim_consent_constants_are_distinct_and_nonempty() {
         let all = [
             Language::NVIM_CONSENT_HEADER,
-            Language::NVIM_CONSENT_PREAMBLE,
             Language::NVIM_CONSENT_OPTION_A,
             Language::NVIM_CONSENT_OPTION_B,
             Language::NVIM_CONSENT_OPTION_C,
-            Language::NVIM_CONSENT_HINT_EXISTING_CS,
             Language::NVIM_CONSENT_MARKER_COMMENT,
             Language::NVIM_MISSING_HINT,
             Language::NVIM_TOO_OLD_HINT,
@@ -553,11 +540,9 @@ mod tests {
     fn nvim_copy_matches_brand_voice() {
         let surfaces = [
             Language::NVIM_CONSENT_HEADER,
-            Language::NVIM_CONSENT_PREAMBLE,
             Language::NVIM_CONSENT_OPTION_A,
             Language::NVIM_CONSENT_OPTION_B,
             Language::NVIM_CONSENT_OPTION_C,
-            Language::NVIM_CONSENT_HINT_EXISTING_CS,
             Language::NVIM_MISSING_HINT,
             Language::NVIM_TOO_OLD_HINT,
         ];
@@ -572,22 +557,6 @@ mod tests {
                 "nvim copy must not contain 'you need to': {msg:?}"
             );
         }
-    }
-
-    /// Preamble must name the conceptual centerpiece (pcall + orphan
-    /// safety) so users choosing option A understand the safety
-    /// property before consenting.
-    #[test]
-    fn nvim_consent_preamble_explains_pcall_safety() {
-        let preamble = Language::NVIM_CONSENT_PREAMBLE;
-        assert!(
-            preamble.contains("pcall(require, 'slate')"),
-            "preamble must show the exact line slate will write"
-        );
-        assert!(
-            preamble.contains("harmless"),
-            "preamble must surface the orphan-safety property"
-        );
     }
 
     /// Marker comment is spliced above the `pcall(require, 'slate')`

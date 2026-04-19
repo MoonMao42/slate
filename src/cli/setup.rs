@@ -272,11 +272,23 @@ fn validate_retry_tool(tool_id: &str) -> Result<crate::cli::tool_selection::Tool
 fn format_completion_timing(start_time: Option<Instant>) -> Option<String> {
     start_time.map(|start| {
         format!(
-            "{} {}ms",
+            "{} {}",
             Language::COMPLETION_TIME_TAKEN,
-            start.elapsed().as_millis()
+            format_elapsed(start.elapsed())
         )
     })
+}
+
+fn format_elapsed(elapsed: std::time::Duration) -> String {
+    let ms = elapsed.as_millis();
+    if ms < 1_000 {
+        format!("{}ms", ms)
+    } else if ms < 60_000 {
+        format!("{:.1}s", elapsed.as_secs_f64())
+    } else {
+        let secs = elapsed.as_secs();
+        format!("{}m {}s", secs / 60, secs % 60)
+    }
 }
 
 // ────────────────────────────────────────────────────────────
@@ -446,12 +458,6 @@ pub(crate) fn prompt_nvim_activation(env: &SlateEnv, non_interactive: bool) -> R
                 return apply_activation_choice_a(env);
             }
 
-            // Preamble + existing-colorscheme hint come BEFORE the
-            // prompt so users with an existing `vim.cmd.colorscheme`
-            // call see the hint in time to pick B or C.
-            let _ = cliclack::log::info(Language::NVIM_CONSENT_PREAMBLE);
-            let _ = cliclack::log::remark(Language::NVIM_CONSENT_HINT_EXISTING_CS);
-
             let choice = cliclack::select(Language::NVIM_CONSENT_HEADER)
                 .item("A", Language::NVIM_CONSENT_OPTION_A, "")
                 .item("B", Language::NVIM_CONSENT_OPTION_B, "")
@@ -530,11 +536,7 @@ fn format_nvim_consent_receipt(consent: &NvimConsent) -> Option<String> {
         NvimConsent::AlreadyConsented => Some(
             "✦ Neovim auto-activation already wired (marker detected in init.lua).".to_string(),
         ),
-        NvimConsent::AutoAdded => Some(
-            "✦ Added `pcall(require, 'slate')` to init.lua — open a new nvim to see slate colors. \
-             Run `slate config editor disable` to opt out."
-                .to_string(),
-        ),
+        NvimConsent::AutoAdded => None,
         NvimConsent::ShownLine => Some(
             "✦ Nvim activation line shown above — paste it into init.lua when you're ready."
                 .to_string(),
@@ -637,6 +639,17 @@ mod tests {
 
         assert!(line.contains(Language::COMPLETION_TIME_TAKEN));
         assert!(line.contains("ms"));
+    }
+
+    #[test]
+    fn format_elapsed_picks_human_unit() {
+        use std::time::Duration;
+        assert_eq!(format_elapsed(Duration::from_millis(10)), "10ms");
+        assert_eq!(format_elapsed(Duration::from_millis(999)), "999ms");
+        assert_eq!(format_elapsed(Duration::from_millis(1_500)), "1.5s");
+        assert_eq!(format_elapsed(Duration::from_millis(15_500)), "15.5s");
+        assert_eq!(format_elapsed(Duration::from_millis(60_000)), "1m 0s");
+        assert_eq!(format_elapsed(Duration::from_millis(223_088)), "3m 43s");
     }
 
     #[test]
@@ -931,7 +944,8 @@ mod tests {
 
     /// Receipt surface distinctness — every meaningful consent state
     /// produces a distinct one-liner so the reader can tell outcomes
-    /// apart.
+    /// apart. AutoAdded and NoNvim are intentionally silent (the marker
+    /// in init.lua and the capability hint cover those surfaces).
     #[test]
     fn format_nvim_consent_receipt_surfaces_distinct_messages() {
         let auto = format_nvim_consent_receipt(&NvimConsent::AutoAdded);
@@ -940,20 +954,14 @@ mod tests {
         let already = format_nvim_consent_receipt(&NvimConsent::AlreadyConsented);
         let none = format_nvim_consent_receipt(&NvimConsent::NoNvim);
 
-        assert!(auto.is_some());
+        assert_eq!(auto, None, "AutoAdded is silent — marker speaks for itself");
+        assert_eq!(none, None, "NoNvim is silent — hint surface covers it");
         assert!(shown.is_some());
         assert!(skipped.is_some());
         assert!(already.is_some());
-        assert_eq!(
-            none, None,
-            "NoNvim emits no receipt (hint surface covers it)"
-        );
 
-        assert_ne!(auto, shown);
         assert_ne!(shown, skipped);
-        assert_ne!(already, auto);
-        // AutoAdded surface must point to the opt-out command per the
-        // D-09 "transparent, never sneaky" principle.
-        assert!(auto.unwrap().contains("slate config editor disable"));
+        assert_ne!(already, shown);
+        assert_ne!(already, skipped);
     }
 }
