@@ -245,6 +245,43 @@ impl Language {
     pub const STATUS_AUTO_WATCHER_DISABLED: &str = "disabled";
     pub const STATUS_AUTO_WATCHER_DRIFT: &str =
         "disabled in config, but the watcher is still running";
+
+    // ────────────────────────────────────────────────────────────
+    // Editor integration (Phase 17 — D-09 3-way consent prompt +
+    // capability hints). Copy pulled verbatim from 17-RESEARCH.md
+    // §Pattern 7 (prompt copy) + §Pattern 8 (capability hints).
+    // Brand voice: playful, premium, never generic — no "please",
+    // no "you need to".
+    // ────────────────────────────────────────────────────────────
+
+    pub const NVIM_CONSENT_HEADER: &str = "✦ slate can auto-switch your Neovim colors";
+
+    pub const NVIM_CONSENT_PREAMBLE: &str =
+        "Adding this one line to your init.lua lets slate colors follow every `slate theme set`:\n\n\
+         \x20\x20pcall(require, 'slate')\n\n\
+         The line is harmless if you delete ~/.config/nvim/lua/slate/ later — \
+         `pcall` swallows the missing-module error. A `-- slate-managed` marker comment \
+         above makes it easy to spot and remove.";
+
+    pub const NVIM_CONSENT_OPTION_A: &str = "Add it for me (recommended — one-step done)";
+
+    pub const NVIM_CONSENT_OPTION_B: &str = "Show me the line, I'll paste it myself";
+
+    pub const NVIM_CONSENT_OPTION_C: &str = "Skip — I'll run `:colorscheme slate-…` manually";
+
+    pub const NVIM_CONSENT_HINT_EXISTING_CS: &str =
+        "Note: option A replaces any `vim.cmd.colorscheme(...)` call you have later in init.lua. \
+         If you already set a colorscheme you want to keep, choose B or C.";
+
+    pub const NVIM_CONSENT_MARKER_COMMENT: &str =
+        "-- slate-managed: keep or delete, safe either way";
+
+    pub const NVIM_MISSING_HINT: &str =
+        "tip: install Neovim (≥ 0.8) to let slate color your editor too → `brew install neovim`";
+
+    pub const NVIM_TOO_OLD_HINT: &str =
+        "tip: your Neovim is older than 0.8 — slate's editor adapter needs nvim_set_hl. \
+         Upgrade via `brew upgrade neovim` to enable it.";
 }
 
 #[cfg(test)]
@@ -457,6 +494,128 @@ mod tests {
             Language::NEW_SHELL_REMINDER_MACOS,
             Language::NEW_SHELL_REMINDER_LINUX,
             "platform reminder constants must differ"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Phase 17 Plan 06 — D-09 consent prompt copy contract
+    // ────────────────────────────────────────────────────────────
+
+    /// Sanity check: every NVIM_* const is non-empty and the 3 option
+    /// strings are distinct (so cliclack can render them as separate
+    /// labels without collision).
+    #[test]
+    fn nvim_consent_constants_are_distinct_and_nonempty() {
+        let all = [
+            Language::NVIM_CONSENT_HEADER,
+            Language::NVIM_CONSENT_PREAMBLE,
+            Language::NVIM_CONSENT_OPTION_A,
+            Language::NVIM_CONSENT_OPTION_B,
+            Language::NVIM_CONSENT_OPTION_C,
+            Language::NVIM_CONSENT_HINT_EXISTING_CS,
+            Language::NVIM_CONSENT_MARKER_COMMENT,
+            Language::NVIM_MISSING_HINT,
+            Language::NVIM_TOO_OLD_HINT,
+        ];
+        for s in &all {
+            assert!(!s.is_empty(), "NVIM_* constant must not be empty");
+        }
+        assert_ne!(
+            Language::NVIM_CONSENT_OPTION_A,
+            Language::NVIM_CONSENT_OPTION_B
+        );
+        assert_ne!(
+            Language::NVIM_CONSENT_OPTION_B,
+            Language::NVIM_CONSENT_OPTION_C
+        );
+        assert_ne!(
+            Language::NVIM_CONSENT_OPTION_A,
+            Language::NVIM_CONSENT_OPTION_C
+        );
+    }
+
+    /// Header must include the ✦ brand glyph + the word "Neovim" so
+    /// users understand immediately which editor the prompt targets.
+    #[test]
+    fn nvim_consent_header_carries_brand_and_scope() {
+        let header = Language::NVIM_CONSENT_HEADER;
+        assert!(header.starts_with('✦'), "header must begin with ✦ glyph");
+        assert!(
+            header.contains("Neovim"),
+            "header must name Neovim so the scope is unmistakable"
+        );
+    }
+
+    /// Brand-voice contract (shared with the ls / reminder copy): no
+    /// "please", no "you need to", no robotic tone. Applies to every
+    /// piece of user-facing NVIM copy.
+    #[test]
+    fn nvim_copy_matches_brand_voice() {
+        let surfaces = [
+            Language::NVIM_CONSENT_HEADER,
+            Language::NVIM_CONSENT_PREAMBLE,
+            Language::NVIM_CONSENT_OPTION_A,
+            Language::NVIM_CONSENT_OPTION_B,
+            Language::NVIM_CONSENT_OPTION_C,
+            Language::NVIM_CONSENT_HINT_EXISTING_CS,
+            Language::NVIM_MISSING_HINT,
+            Language::NVIM_TOO_OLD_HINT,
+        ];
+        for msg in &surfaces {
+            let lower = msg.to_lowercase();
+            assert!(
+                !lower.contains("please"),
+                "nvim copy must not contain 'please': {msg:?}"
+            );
+            assert!(
+                !lower.contains("you need to"),
+                "nvim copy must not contain 'you need to': {msg:?}"
+            );
+        }
+    }
+
+    /// Preamble must name the conceptual centerpiece (pcall + orphan
+    /// safety) so users choosing option A understand the safety
+    /// property before consenting.
+    #[test]
+    fn nvim_consent_preamble_explains_pcall_safety() {
+        let preamble = Language::NVIM_CONSENT_PREAMBLE;
+        assert!(
+            preamble.contains("pcall(require, 'slate')"),
+            "preamble must show the exact line slate will write"
+        );
+        assert!(
+            preamble.contains("harmless"),
+            "preamble must surface the orphan-safety property"
+        );
+    }
+
+    /// Marker comment is spliced above the `pcall(require, 'slate')`
+    /// line in init.lua — must start with `--` so the resulting file
+    /// remains syntactically valid Lua (Pitfall 4 contract).
+    #[test]
+    fn nvim_consent_marker_comment_is_lua_comment() {
+        assert!(
+            Language::NVIM_CONSENT_MARKER_COMMENT.starts_with("-- "),
+            "marker comment must begin with `-- ` so init.lua stays valid Lua"
+        );
+    }
+
+    /// Capability hints must name the fix (brew) so users have an
+    /// actionable next step — matches the ls_capability_message shape.
+    #[test]
+    fn nvim_capability_hints_name_the_fix() {
+        assert!(
+            Language::NVIM_MISSING_HINT.contains("brew install neovim"),
+            "missing-nvim hint must surface the brew install command"
+        );
+        assert!(
+            Language::NVIM_TOO_OLD_HINT.contains("brew upgrade neovim"),
+            "too-old-nvim hint must surface the brew upgrade command"
+        );
+        assert!(
+            Language::NVIM_TOO_OLD_HINT.contains("0.8"),
+            "too-old-nvim hint must name the minimum version (0.8)"
         );
     }
 }
