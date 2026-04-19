@@ -1,0 +1,59 @@
+/* slate sketch theme — charm warmth, restrained (1-2 colors) */
+/* Based on Catppuccin Mocha base palette so sketches feel native to slate. */
+
+:root {
+  /* Terminal background + foreground (catppuccin mocha base) */
+  --color-bg:        #1e1e2e;
+  --color-bg-soft:   #181825;       /* nested panel bg */
+  --color-bg-pill:   #313244;       /* shortcut/code pill bg */
+  --color-fg:        #cdd6f4;       /* default text */
+  --color-fg-dim:    #a6adc8;       /* secondary text */
+  --color-fg-mute:   #6c7086;       /* tertiary / paths */
+  --color-rule:      #313244;       /* separators / tree branches */
+
+  /* Brand (single accent — lavender), used sparingly.
+     Lavender chosen for semantic match: slate-the-product ↔ slate-the-stone (cool blue-gray family). */
+  --color-brand:     #7287fd;       /* lavender — slate brand */
+  --color-brand-dim: #8a9bd9;       /* desaturated brand */
+
+  /* Status colors (restrained — only severity uses them) */
+  --color-success:   #a6e3a1;       /* green */
+  --color-warn:      #f9e2af;       /* yellow */
+  --color-danger:    #f38ba8;       /* red */
+
+  /* Typography */
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Menlo', ui-monospace, monospace;
+  --font-sans: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --text-xs:   12px;
+  --text-sm:   13px;
+  --text-base: 14px;
+  --text-lg:   16px;
+  --text-xl:   20px;
+  --text-2xl:  28px;
+
+  /* Spacing — tight for terminal feel */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Shapes */
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* Line height tuned for monospace */
+  --leading-mono: 1.55;
+}
+
+html, body {
+  background: #0d0d14;             /* page background — darker than terminal */
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
