@@ -1,0 +1,39 @@
+---
+source: src/cli/status_panel.rs
+assertion_line: 525
+expression: out
+---
+
+ ╭─ [1m✦[0m slate status ─────────────────────────────────────────╮
+ │
+ │  ◆ Core Vibe
+ │    [38;2;255;255;255m████[0m[38;2;0;0;0m████[0m[38;2;137;180;250m████[0m[38;2;243;139;168m████[0m [1mMock[0m
+ │    [2;3mMock[0m
+ │
+ │  ◆ Typography
+ │    [2;3mJetBrains Mono[0m
+ │
+ │  ◆ Background
+ │    Terminal  [2;3mGhostty[0m
+ │    Support   [2;3mbest experience — live reload, frosted glass, watcher relaunch[0m
+ │    Reload   [1m`SIGUSR2`[0m
+ │    Preview  [1m`supported`[0m
+ │    Font     [1m`config`[0m
+ │    Opacity  [1m`Solid`[0m
+ │
+ │  ◆ Platform Capabilities
+ │    [2;3mOS  supported · macos[0m
+ │    [2;3mArch  supported · aarch64[0m
+ │    [2;3mShell  supported · zsh[0m
+ │    [2;3mPackage Manager  supported · homebrew[0m
+ │    [2;3mDesktop Appearance  supported · macOS defaults[0m
+ │    [2;3mShare Capture  supported · screencapture[0m
+ │    [2;3mFont Platform  supported · fontconfig[0m
+ │    [2;3mTerminal  supported · ghostty[0m
+ │
+ │  ◆ Toolkit
+ │    [1m✓ ghostty         [0m  [1m✗ alacritty       [0m  [1m✓ starship        [0m  
+ │
+ │  ◆ Auto Theme Watcher
+ │    [2;3menabled and running — macOS defaults[0m
+ ╰─────────────────────────────────────────────────────────────╯

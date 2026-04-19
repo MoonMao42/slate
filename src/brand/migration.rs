@@ -22,7 +22,18 @@ mod tests {
     use std::path::Path;
 
     /// Count styling ANSI escapes in a single file, excluding the
-    /// terminal-control allowlist documented at the top of this module.
+    /// terminal-control allowlist documented at the top of this module
+    /// AND any function body whose signature is preceded by a
+    /// `// SWATCH-RENDERER:` line comment (Wave 3 allowlist — the
+    /// `src/cli/status_panel.rs::swatch_cell` helper renders theme
+    /// palette colors as visible swatches, so its `\x1b[38;2;...m` +
+    /// `\x1b[0m` bytes are intentional and must not trip the gate).
+    ///
+    /// The swatch allowlist works line-by-line: once a `SWATCH-RENDERER:`
+    /// marker is seen, the scanner skips all subsequent lines until the
+    /// brace depth (counted from the opening `{` that starts the marked
+    /// function) returns to zero. This survives nested blocks (match
+    /// arms, closures, if/else) without needing a real Rust parser.
     ///
     /// Returns 0 for missing files so Wave 0 can seed the scaffold
     /// without every wave's file set needing to exist yet.
@@ -31,9 +42,12 @@ mod tests {
             return 0;
         };
 
+        // First pass: drop the body of every SWATCH-RENDERER-marked fn.
+        let filtered = strip_swatch_renderers(&contents);
+
         // Strip allowlisted control sequences before the styling scan so
         // they don't false-positive.
-        let mut text = contents;
+        let mut text = filtered;
         for ctrl in [
             "\\x1b[?1049l",
             "\\x1b[?1049h",
@@ -52,6 +66,57 @@ mod tests {
         // `\x1b[` inside the source, so we look for the exact byte
         // sequence `\x1b[`.
         text.match_indices("\\x1b[").count()
+    }
+
+    /// Walk the file line-by-line and drop every line that belongs to a
+    /// function body marked with a `// SWATCH-RENDERER:` comment. The
+    /// marker itself is a regular-Rust line comment placed directly
+    /// above (or a few lines above) the `fn` signature. Brace depth is
+    /// counted in `{` / `}` occurrences starting from the first `{`
+    /// seen after the marker; once depth returns to 0, the scanner
+    /// resumes normal counting on the next line.
+    ///
+    /// Keeping this outside `count_style_ansi_in` lets the unit tests
+    /// exercise the allowlist independently of the wave-gate assertions.
+    fn strip_swatch_renderers(src: &str) -> String {
+        let mut out = String::with_capacity(src.len());
+        let mut in_swatch = false;
+        let mut depth: i32 = 0;
+        let mut seen_open_brace = false;
+
+        for line in src.lines() {
+            if !in_swatch {
+                if line.contains("SWATCH-RENDERER:") {
+                    in_swatch = true;
+                    depth = 0;
+                    seen_open_brace = false;
+                    // Drop the marker line too so the raw `\x1b[` in
+                    // the marker-adjacent docstring (if any) never
+                    // reaches the scanner.
+                    continue;
+                }
+                out.push_str(line);
+                out.push('\n');
+                continue;
+            }
+
+            // Inside a swatch fn: track brace depth until we return to 0.
+            let opens = line.matches('{').count() as i32;
+            let closes = line.matches('}').count() as i32;
+            if opens > 0 {
+                seen_open_brace = true;
+            }
+            depth += opens - closes;
+
+            if seen_open_brace && depth <= 0 {
+                // End of the swatch fn — drop this line too and resume.
+                in_swatch = false;
+                depth = 0;
+                seen_open_brace = false;
+            }
+        }
+
+        out
     }
 
     /// Walk a wave's file set and return only the files that still
@@ -95,11 +160,47 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "enabled by Wave 3 plan (18-04-PLAN.md)"]
     fn no_raw_ansi_in_wave_3_files() {
         let files = &["src/cli/status_panel.rs"];
         let hits = scan_wave_files(files);
         assert!(hits.is_empty(), "Wave 3 style-ANSI residue: {hits:?}");
+    }
+
+    /// Wave 3 allowlist regression guard — `strip_swatch_renderers`
+    /// must drop the body of `// SWATCH-RENDERER:`-marked functions
+    /// (otherwise the `src/cli/status_panel.rs::swatch_cell` helper's
+    /// intentional `\x1b[38;2;R;G;B;...m` bytes would trip the gate).
+    #[test]
+    fn strip_swatch_renderers_drops_marked_fn_body_but_keeps_rest() {
+        let src = "\
+fn normal_styling() {
+    let x = \"\\x1b[1mhi\\x1b[0m\";
+}
+
+// SWATCH-RENDERER: intentionally raw ANSI (renders palette colors, not role text)
+fn swatch_cell(hex: &str) -> String {
+    format!(\"\\x1b[38;2;{};{};{}m████\\x1b[0m\", r, g, b)
+}
+
+fn after() {
+    println!(\"\\x1b[1mdone\\x1b[0m\");
+}
+";
+        let stripped = strip_swatch_renderers(src);
+        // The normal-styling fns survive...
+        assert!(stripped.contains("normal_styling"));
+        assert!(stripped.contains("after"));
+        assert!(stripped.contains("\\x1b[1mhi"));
+        assert!(stripped.contains("\\x1b[1mdone"));
+        // ...but the marked swatch body is gone.
+        assert!(
+            !stripped.contains("swatch_cell"),
+            "marked fn signature must be dropped with its body"
+        );
+        assert!(
+            !stripped.contains("\\x1b[38;2;"),
+            "raw styling bytes inside the marked fn must be stripped"
+        );
     }
 
     #[test]
