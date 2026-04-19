@@ -175,8 +175,33 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
                 value
             ))),
         },
+        // Phase 17 Plan 06 — `slate config editor disable` strips the
+        // D-09 marker block from init.lua / init.vim without touching
+        // the 18 `slate-*.lua` shims or the loader. For users who want
+        // to keep the colorscheme files available (so
+        // `:colorscheme slate-<variant>` still works) but stop the
+        // `pcall(require, 'slate')` auto-activation.
+        "editor" => match value {
+            "disable" => {
+                let init_lua = env.home().join(".config/nvim/init.lua");
+                let init_vim = env.home().join(".config/nvim/init.vim");
+                // Best-effort — primitive is a no-op on missing files.
+                crate::adapter::marker_block::remove_managed_blocks_from_file(&init_lua)?;
+                crate::adapter::marker_block::remove_managed_blocks_from_file(&init_vim)?;
+                println!(
+                    "{} Slate's nvim auto-activation disabled. Colors/ files remain; \
+                     run `:colorscheme slate-<variant>` manually.",
+                    Symbols::SUCCESS
+                );
+                Ok(())
+            }
+            _ => Err(crate::error::SlateError::InvalidConfig(format!(
+                "Invalid editor action: '{}'. Must be one of: disable",
+                value
+            ))),
+        },
         _ => Err(crate::error::SlateError::InvalidConfig(format!(
-            "Unknown config key: '{}'. Known keys: opacity, auto-theme, fastfetch, sound",
+            "Unknown config key: '{}'. Known keys: opacity, auto-theme, fastfetch, sound, editor",
             key
         ))),
     }
@@ -312,6 +337,123 @@ mod tests {
         assert!(
             !crate::cli::new_shell_reminder::reminder_flag_for_tests(),
             "opacity sub-command is terminal-hot-reloadable (RESEARCH Q4) and MUST NOT emit the new-shell reminder"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Phase 17 Plan 06 — `slate config editor disable` sub-command
+    // ────────────────────────────────────────────────────────────
+
+    /// `slate config editor disable` strips the marker block from
+    /// init.lua but leaves the 18 slate-*.lua shims + the loader
+    /// intact. Users who chose this verb want to stop auto-activation
+    /// while preserving `:colorscheme slate-<variant>` access.
+    #[test]
+    fn config_editor_disable_removes_marker_leaves_colors() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+
+        // Seed: run the real adapter install (writes 18 shims + loader).
+        let registry = crate::theme::ThemeRegistry::new().unwrap();
+        let theme = registry.get("catppuccin-mocha").unwrap().clone();
+        crate::adapter::NvimAdapter::setup(&env, &theme).unwrap();
+
+        // Seed: simulate option-A marker insertion into init.lua.
+        let init_lua = td.path().join(".config/nvim/init.lua");
+        std::fs::create_dir_all(init_lua.parent().unwrap()).unwrap();
+        let block = format!(
+            "{}\npcall(require, 'slate')\n{}\n",
+            crate::adapter::marker_block::START,
+            crate::adapter::marker_block::END,
+        );
+        std::fs::write(&init_lua, &block).unwrap();
+
+        // Exercise the editor disable sub-command.
+        handle_config_set_with_env("editor", "disable", &env).unwrap();
+
+        // Colors/ shims must survive — the whole point of the verb.
+        let colors_dir = td.path().join(".config/nvim/colors");
+        let shim_count = std::fs::read_dir(&colors_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("slate-"))
+            .count();
+        assert!(
+            shim_count > 0,
+            "colors/ slate-*.lua shims must survive editor disable, found {}",
+            shim_count
+        );
+
+        // Loader dir must survive too.
+        assert!(
+            td.path().join(".config/nvim/lua/slate").exists(),
+            "lua/slate/ must survive editor disable"
+        );
+
+        // Marker block must be stripped.
+        let after = std::fs::read_to_string(&init_lua).unwrap();
+        assert!(
+            !after.contains(crate::adapter::marker_block::START),
+            "init.lua START marker must be removed by editor disable"
+        );
+        assert!(
+            !after.contains(crate::adapter::marker_block::END),
+            "init.lua END marker must be removed by editor disable"
+        );
+    }
+
+    /// Unknown editor action → InvalidConfig error, clear message.
+    #[test]
+    fn config_editor_rejects_unknown_action() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+
+        let result = handle_config_set_with_env("editor", "force-on", &env);
+        assert!(result.is_err(), "unknown editor action must error");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("force-on"),
+            "error must name the invalid action: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("disable"),
+            "error must list the valid action: {}",
+            err_msg
+        );
+    }
+
+    /// `editor disable` on a home with no init files is a no-op:
+    /// no error, nothing created. Mirrors the "best-effort" posture
+    /// of the other missing-files paths.
+    #[test]
+    fn config_editor_disable_is_noop_when_no_init_files() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+
+        let result = handle_config_set_with_env("editor", "disable", &env);
+        assert!(
+            result.is_ok(),
+            "editor disable on an empty home must succeed silently"
+        );
+        assert!(!td.path().join(".config/nvim/init.lua").exists());
+        assert!(!td.path().join(".config/nvim/init.vim").exists());
+    }
+
+    /// Regression guard: the unknown-top-level-key error message
+    /// advertises the new `editor` verb so users discover it.
+    #[test]
+    fn config_unknown_key_error_lists_editor() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+
+        let result = handle_config_set_with_env("nonexistent-key", "anything", &env);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("editor"),
+            "unknown-key error must include `editor` in the known-keys list: {}",
+            msg
         );
     }
 }

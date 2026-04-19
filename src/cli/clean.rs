@@ -52,6 +52,7 @@ pub fn handle_clean() -> Result<()> {
     remove_alacritty_managed_references(&env)?;
     remove_tmux_managed_references(env.home())?;
     remove_delta_managed_references(env.home())?;
+    remove_nvim_managed_references(&env)?;
     log::success("✓ Removed config-file/import/source hooks")?;
 
     // Step 3: Delete Slate-owned config directory
@@ -218,4 +219,188 @@ fn remove_tmux_managed_references(home: &Path) -> Result<()> {
 fn remove_delta_managed_references(home: &Path) -> Result<()> {
     let gitconfig_path = home.join(".gitconfig");
     crate::adapter::marker_block::remove_managed_blocks_from_file(&gitconfig_path)
+}
+
+/// Remove every slate-owned file under `~/.config/nvim/` plus the
+/// state file in `~/.cache/slate/`, and best-effort strip the
+/// `pcall(require, 'slate')` marker block from init.lua / init.vim
+/// (Phase 17 D-03). Non-slate files in `colors/` are preserved.
+///
+/// Each step is best-effort — a missing file or directory is NOT
+/// an error (mirrors `remove_fish_loader`'s posture). The orphan
+/// safety of `pcall(require, 'slate')` means failure on the
+/// marker-block strip is cosmetic only: nvim startup still
+/// succeeds because `pcall` swallows the missing-module error.
+fn remove_nvim_managed_references(env: &SlateEnv) -> Result<()> {
+    let nvim_home = env.home().join(".config/nvim");
+
+    // 1. Remove every `slate-*.lua` shim under ~/.config/nvim/colors/.
+    //    User-owned files (my-custom.lua, theme.lua, …) are preserved
+    //    — Pitfall 7 guard verified by
+    //    `remove_nvim_managed_references_leaves_user_files_alone`.
+    let colors_dir = nvim_home.join("colors");
+    if colors_dir.exists() {
+        for entry in fs::read_dir(&colors_dir)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with("slate-") {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    // 2. Remove the loader dir ~/.config/nvim/lua/slate/ (slate-owned).
+    let loader_dir = nvim_home.join("lua").join("slate");
+    if loader_dir.exists() {
+        let _ = fs::remove_dir_all(&loader_dir);
+    }
+
+    // 3. Best-effort strip the D-09 marker block from init.lua / init.vim.
+    //    Primitive is a no-op on missing files, so both calls are safe
+    //    unconditionally. Errors are swallowed so a corrupted init file
+    //    on one path doesn't abort the clean of the other.
+    let _ =
+        crate::adapter::marker_block::remove_managed_blocks_from_file(&nvim_home.join("init.lua"));
+    let _ =
+        crate::adapter::marker_block::remove_managed_blocks_from_file(&nvim_home.join("init.vim"));
+
+    // 4. Remove the state file ~/.cache/slate/current_theme.lua.
+    //    `Step 3: Remove Slate-managed config state` in handle_clean
+    //    deletes the whole ~/.config/slate/ tree but the nvim state
+    //    file lives under ~/.cache/slate/, so the explicit removal
+    //    here guarantees no orphan state file survives.
+    let state_file = env.slate_cache_dir().join("current_theme.lua");
+    if state_file.exists() {
+        let _ = fs::remove_file(&state_file);
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::ThemeRegistry;
+    use tempfile::TempDir;
+
+    /// Full-install → clean contract: after running
+    /// `NvimAdapter::setup` + writing a slate marker block to init.lua,
+    /// `remove_nvim_managed_references` takes the filesystem back to
+    /// the pre-install state — no `slate-*.lua` shims in colors/, no
+    /// `lua/slate/` dir, no marker block in init.lua, no state file.
+    #[test]
+    fn remove_nvim_managed_references_removes_all_slate_files() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+
+        // Setup: run the real adapter install to seed 18 shims +
+        // loader + state file. Any regression in `NvimAdapter::setup`
+        // that adds a new managed path will surface here.
+        let registry = ThemeRegistry::new().unwrap();
+        let theme = registry.get("catppuccin-mocha").unwrap().clone();
+        crate::adapter::NvimAdapter::setup(&env, &theme).unwrap();
+
+        // Seed init.lua with a slate marker block (no Lua-comment
+        // wrap required here — strip_managed_blocks is byte-positional
+        // so the bare marker is sufficient for the clean contract;
+        // the Lua-wrap only matters for *generating* valid init.lua).
+        let init_lua = td.path().join(".config/nvim/init.lua");
+        std::fs::create_dir_all(init_lua.parent().unwrap()).unwrap();
+        let marker_block = format!(
+            "{}\npcall(require, 'slate')\n{}\n",
+            crate::adapter::marker_block::START,
+            crate::adapter::marker_block::END,
+        );
+        std::fs::write(&init_lua, &marker_block).unwrap();
+
+        // Exercise.
+        remove_nvim_managed_references(&env).unwrap();
+
+        // Assert: no slate-* files in colors/.
+        let colors_dir = td.path().join(".config/nvim/colors");
+        let slate_shims: Vec<_> = std::fs::read_dir(&colors_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("slate-"))
+            .collect();
+        assert_eq!(
+            slate_shims.len(),
+            0,
+            "expected no slate-* shim files after clean, got {}",
+            slate_shims.len()
+        );
+
+        // Assert: no loader dir.
+        assert!(
+            !td.path().join(".config/nvim/lua/slate").exists(),
+            "lua/slate/ directory must be removed"
+        );
+
+        // Assert: marker block stripped from init.lua.
+        let after = std::fs::read_to_string(&init_lua).unwrap();
+        assert!(
+            !after.contains(crate::adapter::marker_block::START),
+            "marker START must be removed from init.lua"
+        );
+        assert!(
+            !after.contains(crate::adapter::marker_block::END),
+            "marker END must be removed from init.lua"
+        );
+
+        // Assert: no state file at ~/.cache/slate/current_theme.lua.
+        assert!(
+            !td.path().join(".cache/slate/current_theme.lua").exists(),
+            "state file must be removed"
+        );
+    }
+
+    /// Pitfall 7 guard: `remove_nvim_managed_references` must not
+    /// touch user-owned files in `~/.config/nvim/colors/` — only
+    /// entries whose filename starts with `slate-`. A user's custom
+    /// `my-custom.lua` or `theme.lua` survives the clean.
+    #[test]
+    fn remove_nvim_managed_references_leaves_user_files_alone() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+
+        let colors_dir = td.path().join(".config/nvim/colors");
+        std::fs::create_dir_all(&colors_dir).unwrap();
+
+        // User's own colorscheme.
+        let user_file = colors_dir.join("my-custom.lua");
+        std::fs::write(&user_file, "vim.g.colors_name = 'my-custom'").unwrap();
+
+        // Another user file with a slate-ish name but NOT prefixed
+        // with `slate-` (e.g. `slatecolors.lua`, `not-slate.lua`).
+        let edge = colors_dir.join("not-slate.lua");
+        std::fs::write(&edge, "-- user").unwrap();
+
+        // A genuine slate shim — should be removed.
+        std::fs::write(
+            colors_dir.join("slate-tokyo-night-dark.lua"),
+            "require('slate').load('tokyo-night-dark')",
+        )
+        .unwrap();
+
+        remove_nvim_managed_references(&env).unwrap();
+
+        assert!(user_file.exists(), "my-custom.lua must survive clean");
+        assert!(edge.exists(), "not-slate.lua must survive clean");
+        assert!(
+            !colors_dir.join("slate-tokyo-night-dark.lua").exists(),
+            "slate shim must be removed"
+        );
+    }
+
+    /// Missing-files contract: running clean on a pristine home with
+    /// no nvim config must succeed silently. Matches `remove_fish_loader`'s
+    /// NotFound posture.
+    #[test]
+    fn remove_nvim_managed_references_is_noop_on_empty_home() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        assert!(remove_nvim_managed_references(&env).is_ok());
+        // No side effects — no directory materialized.
+        assert!(!td.path().join(".config/nvim").exists());
+    }
 }
