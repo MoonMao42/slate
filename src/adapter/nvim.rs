@@ -365,22 +365,32 @@ local function schedule_reload()
   end))
 end
 
+-- Pitfall 6: AtomicWriteFile::commit performs fsync + rename, replacing
+-- the inode at STATE_PATH. The fs_event handle is bound to the original
+-- inode and stops firing after the first rename. We must close the old
+-- handle and create a new one on every event so subsequent renames are
+-- observed. Stop+start on the same handle is NOT sufficient on macOS.
+local function start_watcher()
+  if watcher then
+    pcall(function() watcher:stop() end)
+    pcall(function() watcher:close() end)
+    watcher = nil
+  end
+  local w = uv.new_fs_event()
+  watcher = w
+  w:start(STATE_PATH, {}, vim.schedule_wrap(function(err, _fname, _events)
+    if err then return end
+    schedule_reload()
+    start_watcher()  -- recreate handle to track the new inode
+  end))
+end
+
 function M.setup(opts)
   opts = opts or {}
   local variant = read_state()
   if variant then M.load(variant) end
 
-  watcher = uv.new_fs_event()
-  watcher:start(STATE_PATH, {}, vim.schedule_wrap(function(err, _fname, _events)
-    if err then return end
-    schedule_reload()
-    -- Pitfall 6: re-arm watcher (some FS drivers close on first fire)
-    watcher:stop()
-    local ok = pcall(function()
-      watcher:start(STATE_PATH, {}, vim.schedule_wrap(schedule_reload))
-    end)
-    if not ok then watcher = nil end
-  end))
+  start_watcher()
 
   -- VimLeavePre cleanup -- prevents orphan libuv handles
   vim.api.nvim_create_autocmd('VimLeavePre', {
