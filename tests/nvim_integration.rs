@@ -607,3 +607,36 @@ fn loader_lua_parses_via_luafile() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Task 5 — clean + config editor disable (cross-reference)
+// ─────────────────────────────────────────────────────────────────────
+//
+// The `clean_removes_all_nvim_files` and
+// `config_editor_disable_preserves_colors` contracts live alongside the
+// helpers they exercise (`remove_nvim_managed_references` in
+// `src/cli/clean.rs`, `handle_config_set_with_env` in
+// `src/cli/config.rs`) — plan Task 5 option (b). Those helpers are
+// crate-private; routing tests through the crate's own `#[cfg(test)]
+// mod tests` blocks keeps the public surface tight rather than
+// widening it to `pub` just so the integration harness can reach in.
+// Each of the following production-side tests covers the same
+// assertion shape the stubs originally planned here:
+//
+//   * `cli::clean::tests::remove_nvim_managed_references_removes_all_slate_files`
+//     — full install → clean takes colors/, lua/slate/, state, marker
+//       back to pristine state.
+//   * `cli::clean::tests::remove_nvim_managed_references_leaves_user_files_alone`
+//     — Pitfall 7: user-owned colors/ files survive the clean sweep.
+//   * `cli::clean::tests::remove_nvim_managed_references_is_noop_on_empty_home`
+//     — clean on a fresh home is a no-op, not an error.
+//   * `cli::config::tests::config_editor_disable_removes_marker_leaves_colors`
+//     — `slate config set editor disable` strips the init.lua marker
+//       but preserves the 18 slate-*.lua shims + the loader.
+//   * `cli::config::tests::config_editor_rejects_unknown_action`
+//     — unknown `editor` action errors with both the bad + valid
+//       action names in the message.
+//   * `cli::config::tests::config_editor_disable_is_noop_when_no_init_files`
+//     — disable on an empty home is a best-effort no-op, not an error.
+//
+// No stubs are left in this file for those contracts.
