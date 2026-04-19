@@ -1,7 +1,5 @@
 use crate::error::Result;
-use atomic_write_file::AtomicWriteFile;
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use toml_edit::DocumentMut;
 
@@ -49,8 +47,5 @@ pub(super) fn set_config_flag(
 }
 
 pub(super) fn write_document(path: &Path, document: &DocumentMut) -> Result<()> {
-    let mut file = AtomicWriteFile::open(path)?;
-    file.write_all(document.to_string().as_bytes())?;
-    file.commit()?;
-    Ok(())
+    super::state_files::atomic_write_synced(path, document.to_string().as_bytes())
 }

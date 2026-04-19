@@ -9,8 +9,13 @@ mod flags;
 mod integration;
 mod preferences;
 pub(crate) mod shell_integration;
-mod state_files;
+pub(crate) mod state_files;
 mod tracked_state;
+
+// Re-export the shared atomic-write helper so the rest of the crate
+// (adapters, brand sound cache) can route through the single source of
+// truth for AtomicWriteFile + parent-dir fsync.
+pub(crate) use state_files::atomic_write_synced;
 
 pub use backup::{
     backup_directory, backup_directory_with_env, begin_restore_point_baseline,

@@ -7,11 +7,10 @@ use super::{
     backup_directory_with_env, manifest_path, resolve_restore_point_directory, BackupSession,
     OriginalFileState, RestoreEntry, RestorePoint,
 };
+use crate::config::atomic_write_synced;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
-use atomic_write_file::AtomicWriteFile;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -33,12 +32,8 @@ pub fn create_backup_with_session(
     let backup_filename = format!("{}.backup", tool_key);
     let backup_path = session.restore_point_dir.join(&backup_filename);
 
-    let mut file = AtomicWriteFile::open(&backup_path)
-        .map_err(|e| SlateError::BackupFailed(format!("Failed to create backup file: {}", e)))?;
-    file.write_all(&content)
-        .map_err(|e| SlateError::BackupFailed(format!("Failed to write backup: {}", e)))?;
-    file.commit()
-        .map_err(|e| SlateError::BackupFailed(format!("Failed to commit backup: {}", e)))?;
+    atomic_write_synced(&backup_path, &content)
+        .map_err(|e| SlateError::BackupFailed(format!("Failed to write backup file: {}", e)))?;
 
     let restore_entry = RestoreEntry {
         tool_key: tool_key.to_string(),
