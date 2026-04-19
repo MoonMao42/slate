@@ -180,6 +180,26 @@ mod tests {
             .collect()
     }
 
+    /// Recursively collect every `*.rs` path under `root`. Used by the
+    /// phase-level aggregate invariant (`no_raw_styling_ansi_anywhere_in_user_surfaces`)
+    /// and the deprecation sweep (`no_deprecated_allow_in_user_surfaces_after_phase_18`).
+    ///
+    /// No `walkdir` dependency — stdlib `read_dir` recursion is plenty
+    /// for a test-only helper that runs on a few dozen files.
+    fn walk_rs_files(root: &Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = fs::read_dir(root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk_rs_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
     // ── Wave gates (enabled by each wave's migration plan) ─────────────
 
     #[test]
@@ -326,20 +346,7 @@ fn render() {
 
         // Walk src/cli/ recursively (covers both top-level files and
         // any nested module dirs like setup_executor / picker).
-        fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
-            let Ok(entries) = fs::read_dir(dir) else {
-                return;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    walk(&path, out);
-                } else if path.extension().is_some_and(|ext| ext == "rs") {
-                    out.push(path);
-                }
-            }
-        }
-        walk(Path::new("src/cli"), &mut targets);
+        walk_rs_files(Path::new("src/cli"), &mut targets);
         targets.push(std::path::PathBuf::from("src/brand/language.rs"));
 
         let mut offenders: Vec<std::path::PathBuf> = Vec::new();
@@ -355,6 +362,43 @@ fn render() {
             offenders.is_empty(),
             "deprecated allow-attrs remain after Phase 18: {:?}",
             offenders
+        );
+    }
+
+    /// Phase-level aggregate invariant (Plan 18-08) — belt-and-suspenders
+    /// on top of the 6 per-wave gates. Walks ALL `*.rs` under `src/cli/`
+    /// recursively + `src/adapter/ls_colors.rs` + `src/brand/language.rs`
+    /// in ONE scan and asserts zero raw styling-ANSI residue (respecting
+    /// the shared SWATCH-RENDERER / TERMINAL-CONTROL allowlists baked into
+    /// `count_style_ansi_in`).
+    ///
+    /// Catches two regression classes the per-wave gates alone cannot:
+    ///
+    ///  * A brand-new `src/cli/*.rs` file added post-Phase-18 that isn't
+    ///    listed in any wave's explicit file array (per-wave tests only
+    ///    see the hardcoded set).
+    ///  * A nested `src/cli/<mod>/inner.rs` that ships raw ANSI because
+    ///    the parent wave never enumerated the child (e.g. a new picker
+    ///    submodule beyond `render.rs` + `preview_panel.rs`).
+    #[test]
+    fn no_raw_styling_ansi_anywhere_in_user_surfaces() {
+        let mut targets: Vec<std::path::PathBuf> = Vec::new();
+        walk_rs_files(Path::new("src/cli"), &mut targets);
+        targets.push(std::path::PathBuf::from("src/adapter/ls_colors.rs"));
+        targets.push(std::path::PathBuf::from("src/brand/language.rs"));
+
+        // Stable order for reproducible failure output.
+        targets.sort();
+
+        let path_strings: Vec<String> = targets
+            .iter()
+            .filter_map(|p| p.to_str().map(|s| s.to_string()))
+            .collect();
+        let borrowed: Vec<&str> = path_strings.iter().map(String::as_str).collect();
+        let hits = scan_wave_files(&borrowed);
+        assert!(
+            hits.is_empty(),
+            "Phase 18 aggregate: raw styling ANSI residue in user surfaces: {hits:?}"
         );
     }
 
