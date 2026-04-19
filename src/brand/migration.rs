@@ -88,7 +88,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "enabled by Wave 2 plan (18-03-PLAN.md)"]
     fn no_raw_ansi_in_wave_2_files() {
         let files = &["src/cli/theme.rs", "src/cli/font.rs", "src/cli/set.rs"];
         let hits = scan_wave_files(files);

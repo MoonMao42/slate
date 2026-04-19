@@ -1,0 +1,5 @@
+---
+source: src/cli/font.rs
+expression: out
+---
+[1m✓ Updated font to [2;3mJetBrains Mono Nerd Font[0m in Slate-managed terminal configs.[0m
