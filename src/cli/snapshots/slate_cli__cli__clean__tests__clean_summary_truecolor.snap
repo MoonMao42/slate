@@ -1,0 +1,11 @@
+---
+source: src/cli/clean.rs
+assertion_line: 450
+expression: out
+---
+
+[38;2;114;135;253m◆[0m Cleanup summary
+[38;2;114;135;253m┃ ├─[0m auto-theme watcher ✓
+[38;2;114;135;253m┃ ├─[0m shell + tool hooks ✓
+[38;2;114;135;253m┃ ├─[0m managed config state ✓
+[38;2;114;135;253m└─ ★[0m Ready for a fresh start

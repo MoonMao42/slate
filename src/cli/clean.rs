@@ -1,4 +1,7 @@
 use crate::adapter::{GhosttyAdapter, ToolAdapter};
+use crate::brand::events::{dispatch, BrandEvent, FailureKind, SuccessKind};
+use crate::brand::render_context::RenderContext;
+use crate::brand::roles::Roles;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::{config::ConfigManager, platform};
@@ -9,12 +12,34 @@ use std::path::Path;
 /// Removes managed files, stops the auto-theme watcher, and removes.zshrc marker block
 /// Clean removes slate-managed assets; see 'slate restore' to recover from snapshot
 pub fn handle_clean() -> Result<()> {
+    match handle_clean_inner() {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            // D-17: clean-level failure → `BrandEvent::Failure(CleanFailed)`
+            // so Phase 20's SoundSink maps the error moment to the failure
+            // SFX. Paired Success events dispatch from the happy path below.
+            dispatch(BrandEvent::Failure(FailureKind::CleanFailed));
+            Err(err)
+        }
+    }
+}
+
+fn handle_clean_inner() -> Result<()> {
     use cliclack::{intro, log};
 
-    intro("✦ Clean Up Slate")?;
+    // Build a RenderContext up-front so every user-visible status line
+    // shares the same byte contract (sketch 003 tree narrative + D-01
+    // daily chrome + D-01a severity). D-05 graceful degrade — plain text
+    // when the theme registry fails to load.
+    let ctx = RenderContext::from_active_theme().ok();
+    let r = ctx.as_ref().map(Roles::new);
+
+    intro(intro_title(r.as_ref(), "Clean Up Slate"))?;
 
     let env = SlateEnv::from_process()?;
     let config = ConfigManager::with_env(&env)?;
+
+    let mut removed_sections: Vec<&'static str> = Vec::new();
 
     // Step 0: Snapshot the current state so the user can undo this clean. Without this
     // the only restore point after clean is the pre-slate baseline, which is the wrong
@@ -30,7 +55,10 @@ pub fn handle_clean() -> Result<()> {
         if let Err(err) = crate::config::snapshot_current_state_with_env(&env, &label) {
             log::remark(format!("  (couldn't create pre-clean snapshot: {})", err))?;
         } else {
-            log::success(format!("✓ Saved pre-clean snapshot ({})", label))?;
+            log::success(status_success_line(
+                r.as_ref(),
+                &format!("Saved pre-clean snapshot ({})", label),
+            ))?;
         }
     }
 
@@ -41,7 +69,8 @@ pub fn handle_clean() -> Result<()> {
     }
     platform::dark_mode_notify::stop()?;
     platform::dark_mode_notify::remove_binary(&config)?;
-    log::success("✓ Watcher stopped")?;
+    log::success(status_success_line(r.as_ref(), "Watcher stopped"))?;
+    removed_sections.push("auto-theme watcher");
 
     // Step 2: Remove integration references before deleting managed files
     log::step("Removing integration references...")?;
@@ -53,14 +82,19 @@ pub fn handle_clean() -> Result<()> {
     remove_tmux_managed_references(env.home())?;
     remove_delta_managed_references(env.home())?;
     remove_nvim_managed_references(&env)?;
-    log::success("✓ Removed config-file/import/source hooks")?;
+    log::success(status_success_line(
+        r.as_ref(),
+        "Removed config-file/import/source hooks",
+    ))?;
+    removed_sections.push("shell + tool hooks");
 
     // Step 3: Delete Slate-owned config directory
     log::step("Removing Slate-managed config state...")?;
     let config_dir = env.config_dir();
     if config_dir.exists() {
         fs::remove_dir_all(config_dir)?;
-        log::success("✓ Removed ~/.config/slate")?;
+        log::success(status_success_line(r.as_ref(), "Removed ~/.config/slate"))?;
+        removed_sections.push("managed config state");
     } else {
         log::remark("  (~/.config/slate already removed)")?;
     }
@@ -72,16 +106,80 @@ pub fn handle_clean() -> Result<()> {
     // isn't running we silently move on.
     let _ = GhosttyAdapter.reload();
 
-    // Exit message: Clarify clean vs restore boundary)
-    log::remark("")?;
+    // D-10: completion receipt is a static tree-narrative anchor — bypass
+    // cliclack and println! via Roles::heading / tree_branch / tree_end.
+    // Sketch 003 canon: `◆ Cleanup summary ┃ ├─ … └─ ★ Ready for a fresh start`.
+    println!();
+    println!("{}", heading_text(r.as_ref(), "Cleanup summary"));
+    for section in &removed_sections {
+        println!(
+            "{}",
+            tree_branch_text(r.as_ref(), &format!("{} ✓", section))
+        );
+    }
+    println!("{}", tree_end_text(r.as_ref(), "Ready for a fresh start"),);
+    println!();
+
+    // Exit message: Clarify clean vs restore boundary. Routed through
+    // log::info so cliclack's lavender-bar SlateTheme renders the chrome
+    // while the body is whatever the Language copy says today.
     log::info(
-        "✦ clean removed Slate-owned shell hooks, watcher artifacts, and config state. \
+        "clean removed Slate-owned shell hooks, watcher artifacts, and config state. \
 Third-party tools installed through Homebrew remain installed. \
 Use 'slate restore' before cleanup if you want to roll back to a snapshot instead.",
     )?;
-    log::remark("")?;
+
+    // D-17: clean success → paired `CleanComplete` (category) +
+    // `ApplyComplete` (whole-flow milestone) so Phase 20 can latch onto
+    // either the per-category or per-command moment.
+    dispatch(BrandEvent::Success(SuccessKind::CleanComplete));
+    dispatch(BrandEvent::ApplyComplete);
 
     Ok(())
+}
+
+/// Build the intro header title. Always starts with the ✦ brand glyph
+/// (routed through `Roles::brand` when available) so the wordmark keeps
+/// the lavender anchor that Sketch 002 locks in.
+fn intro_title(r: Option<&Roles<'_>>, text: &str) -> String {
+    match r {
+        Some(r) => format!("{} {}", r.brand("✦"), text),
+        None => format!("✦ {}", text),
+    }
+}
+
+/// Format a `log::success` body via `Roles::status_success` (theme.green
+/// — NEVER lavender per D-01a), falling back to plain `✓ message`.
+fn status_success_line(r: Option<&Roles<'_>>, message: &str) -> String {
+    match r {
+        Some(r) => r.status_success(message),
+        None => format!("✓ {}", message),
+    }
+}
+
+/// Render `◆ title` via `Roles::heading`, falling back to plain ◆ text
+/// when Roles is unavailable (D-05 graceful degrade).
+fn heading_text(r: Option<&Roles<'_>>, title: &str) -> String {
+    match r {
+        Some(r) => r.heading(title),
+        None => format!("◆ {}", title),
+    }
+}
+
+/// Render `┃ ├─ text` via `Roles::tree_branch`.
+fn tree_branch_text(r: Option<&Roles<'_>>, text: &str) -> String {
+    match r {
+        Some(r) => r.tree_branch(text),
+        None => format!("┃ ├─ {}", text),
+    }
+}
+
+/// Render `└─ ★ text` via `Roles::tree_end`.
+fn tree_end_text(r: Option<&Roles<'_>>, text: &str) -> String {
+    match r {
+        Some(r) => r.tree_end(text),
+        None => format!("└─ ★ {}", text),
+    }
 }
 
 /// Remove marker block from.zshrc
@@ -289,8 +387,98 @@ fn remove_nvim_managed_references(env: &SlateEnv) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
     use crate::theme::ThemeRegistry;
     use tempfile::TempDir;
+
+    /// Helper: render the completion tree receipt against the given
+    /// RenderMode. Mirrors the `println!` block inside `handle_clean_inner`
+    /// so the snapshot can lock the exact byte shape without driving the
+    /// whole clean flow.
+    fn render_clean_receipt(r: Option<&Roles<'_>>, sections: &[&'static str]) -> String {
+        let mut out = String::new();
+        out.push('\n');
+        out.push_str(&heading_text(r, "Cleanup summary"));
+        out.push('\n');
+        for section in sections {
+            out.push_str(&tree_branch_text(r, &format!("{} ✓", section)));
+            out.push('\n');
+        }
+        out.push_str(&tree_end_text(r, "Ready for a fresh start"));
+        out.push('\n');
+        out
+    }
+
+    /// Wave 4 snapshot — byte-lock the `slate clean` completion tree in
+    /// Basic mode so the sketch-003 tree narrative stays stable across
+    /// CI and contributor workstations (D-06 MockTheme).
+    #[test]
+    fn clean_summary_basic_snapshot() {
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Basic);
+        let r = Roles::new(&ctx);
+        let out = render_clean_receipt(
+            Some(&r),
+            &[
+                "auto-theme watcher",
+                "shell + tool hooks",
+                "managed config state",
+            ],
+        );
+        insta::assert_snapshot!("clean_summary_basic", out);
+    }
+
+    /// Truecolor variant — anchors every tree glyph to the lavender
+    /// brand byte triple (`38;2;114;135;253`) per Sketch 002.
+    #[test]
+    fn clean_summary_truecolor_snapshot() {
+        let theme = mock_theme();
+        let ctx = mock_context_with_mode(&theme, RenderMode::Truecolor);
+        let r = Roles::new(&ctx);
+        let out = render_clean_receipt(
+            Some(&r),
+            &[
+                "auto-theme watcher",
+                "shell + tool hooks",
+                "managed config state",
+            ],
+        );
+        assert!(
+            out.contains("38;2;114;135;253"),
+            "tree chrome must carry brand-lavender bytes in truecolor, got: {out:?}"
+        );
+        insta::assert_snapshot!("clean_summary_truecolor", out);
+    }
+
+    /// D-05 graceful degrade — without Roles the tree falls back to
+    /// plain glyphs, zero ANSI bytes.
+    #[test]
+    fn clean_summary_falls_back_to_plain_when_roles_absent() {
+        let out = render_clean_receipt(None, &["auto-theme watcher", "shell + tool hooks"]);
+        assert!(
+            !out.contains('\x1b'),
+            "plain fallback must contain no ANSI bytes, got: {out:?}"
+        );
+        assert!(out.contains("◆ Cleanup summary"));
+        assert!(out.contains("┃ ├─ auto-theme watcher ✓"));
+        assert!(out.contains("└─ ★ Ready for a fresh start"));
+    }
+
+    /// D-01a invariant — `status_success_line` uses theme.green, never
+    /// brand lavender, across every RenderMode.
+    #[test]
+    fn status_success_line_never_emits_brand_lavender() {
+        let theme = mock_theme();
+        for mode in [RenderMode::Truecolor, RenderMode::Basic, RenderMode::None] {
+            let ctx = mock_context_with_mode(&theme, mode);
+            let r = Roles::new(&ctx);
+            let out = status_success_line(Some(&r), "Watcher stopped");
+            assert!(
+                !out.contains("38;2;114;135;253"),
+                "D-01a violation in mode {mode:?}: {out:?}"
+            );
+        }
+    }
 
     /// Full-install → clean contract: after running
     /// `NvimAdapter::setup` + writing a slate marker block to init.lua,

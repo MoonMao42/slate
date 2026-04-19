@@ -1,0 +1,11 @@
+---
+source: src/cli/clean.rs
+assertion_line: 428
+expression: out
+---
+
+◆ Cleanup summary
+┃ ├─ auto-theme watcher ✓
+┃ ├─ shell + tool hooks ✓
+┃ ├─ managed config state ✓
+└─ ★ Ready for a fresh start

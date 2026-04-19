@@ -204,7 +204,6 @@ fn after() {
     }
 
     #[test]
-    #[ignore = "enabled by Wave 4 plan (18-05-PLAN.md)"]
     fn no_raw_ansi_in_wave_4_files() {
         let files = &["src/cli/clean.rs", "src/cli/restore.rs"];
         let hits = scan_wave_files(files);

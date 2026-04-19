@@ -1,0 +1,12 @@
+---
+source: src/cli/restore.rs
+assertion_line: 370
+expression: out
+---
+
+◆ Restored to Catppuccin Mocha
+┃ ├─ 3 file(s) restored successfully
+┃ ├─ 2 file(s) failed
+┃ ├─ [1m✗ ghostty: permission denied[0m
+┃ ├─ [1m✗ starship: file not found[0m
+└─ ★ Back on track
