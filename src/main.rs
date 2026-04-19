@@ -121,14 +121,12 @@ fn main() {
 fn run() -> Result<()> {
     error::install_error_handler()?;
 
-    // Phase 18 Wave 0 (D-08 + Pitfall 5): register slate's cliclack
-    // theme and the brand EventSink default BEFORE parsing CLI args —
-    // any `cliclack::*` call fired from a `Commands::...` handler needs
-    // SlateTheme already seated; any `brand::events::dispatch(...)`
-    // needs a NoopSink waiting in the OnceLock so the first event
-    // doesn't lose the write race against Phase 20's SoundSink.
+    // Phase 18 Wave 0: seat cliclack's global theme before any command
+    // handler runs. Brand events intentionally do NOT pre-seat the
+    // default sink here — `dispatch()` self-initializes with NoopSink,
+    // and leaving the slot untouched preserves Phase 20's chance to
+    // register a real sink before the first dispatch.
     brand::cliclack_theme::init();
-    brand::events::ensure_default_sink();
 
     // Initialize SlateEnv from process environment early
     let env = SlateEnv::from_process()?;

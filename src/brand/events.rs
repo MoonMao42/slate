@@ -20,7 +20,7 @@
 //! on `NoopSink` being the default, so absent any `set_sink` call the
 //! dispatches are observably no-ops.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// High-level user-facing events emitted from `src/cli/*` during Waves
 /// 1–6 migration. Phase 20 maps each variant to an SFX.
@@ -86,13 +86,39 @@ impl EventSink for NoopSink {
     fn dispatch(&self, _: BrandEvent) {}
 }
 
-static SINK: OnceLock<Arc<dyn EventSink>> = OnceLock::new();
+struct SinkState {
+    sink: Arc<dyn EventSink>,
+    dispatched: bool,
+    explicitly_registered: bool,
+}
+
+impl Default for SinkState {
+    fn default() -> Self {
+        Self {
+            sink: Arc::new(NoopSink) as Arc<dyn EventSink>,
+            dispatched: false,
+            explicitly_registered: false,
+        }
+    }
+}
+
+static SINK: OnceLock<Mutex<SinkState>> = OnceLock::new();
+
+fn sink_state() -> &'static Mutex<SinkState> {
+    SINK.get_or_init(|| Mutex::new(SinkState::default()))
+}
 
 /// Fire a [`BrandEvent`]. Self-initializes with [`NoopSink`] on first
 /// call if no sink has been registered via [`set_sink`].
 pub fn dispatch(event: BrandEvent) {
-    SINK.get_or_init(|| Arc::new(NoopSink) as Arc<dyn EventSink>)
-        .dispatch(event);
+    let sink = {
+        let mut state = sink_state()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.dispatched = true;
+        state.sink.clone()
+    };
+    sink.dispatch(event);
 }
 
 /// Register a sink. Returns `Err(sink)` if the `OnceLock` has already
@@ -100,14 +126,31 @@ pub fn dispatch(event: BrandEvent) {
 /// triggering the `NoopSink` default) — the caller can then log a
 /// "registered too late" diagnostic.
 pub fn set_sink(sink: Arc<dyn EventSink>) -> std::result::Result<(), Arc<dyn EventSink>> {
-    SINK.set(sink)
+    let mut state = sink_state()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if state.dispatched || state.explicitly_registered {
+        Err(sink)
+    } else {
+        state.sink = sink;
+        state.explicitly_registered = true;
+        Ok(())
+    }
 }
 
 /// Explicitly register the default [`NoopSink`] — optional in Phase 18
 /// (dispatch self-initializes) but `main.rs` calls this to make the
 /// Pitfall 5 ordering explicit so Phase 20 has a documented template.
 pub fn ensure_default_sink() {
-    let _ = SINK.set(Arc::new(NoopSink) as Arc<dyn EventSink>);
+    let _ = sink_state();
+}
+
+#[cfg(test)]
+pub(crate) fn reset_sink_for_tests() {
+    let mut state = sink_state()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *state = SinkState::default();
 }
 
 #[cfg(test)]
@@ -120,6 +163,7 @@ mod tests {
     /// confirms the `NoopSink` default).
     #[test]
     fn dispatch_with_default_sink_is_noop() {
+        reset_sink_for_tests();
         dispatch(BrandEvent::SetupComplete);
         dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
         // If this line is reached, the default sink did not panic.
@@ -135,52 +179,67 @@ mod tests {
     }
 
     /// Row `18-W0-event-routing` — `set_sink(TestSink)` routes subsequent
-    /// dispatches. NOTE: `SINK` is a process-global `OnceLock`, so this
-    /// test runs in the same shared slot as `dispatch_with_default_sink_is_noop`.
-    /// We accept that the FIRST `set_sink` attempt may lose (if the
-    /// noop-default test ran first) — in that case we validate routing
-    /// against the previously-seated `NoopSink` by other means.
-    ///
-    /// Keeping both tests in-file keeps the blast radius contained; Phase
-    /// 20 will harden this into an integration-target test
-    /// (`tests/event_routing.rs`) that runs in its own process.
+    /// dispatches. The test-only reset helper restores the global sink
+    /// state between cases so this stays deterministic inside the shared
+    /// lib-test process.
     #[test]
     fn set_sink_routes_subsequent_dispatches() {
+        reset_sink_for_tests();
         let flag = Arc::new(AtomicBool::new(false));
         let sink = Arc::new(TestSink { flag: flag.clone() }) as Arc<dyn EventSink>;
 
-        match set_sink(sink) {
-            Ok(()) => {
-                dispatch(BrandEvent::Selection(SelectKind::PickerEnter));
-                assert!(
-                    flag.load(Ordering::SeqCst),
-                    "TestSink must have been invoked"
-                );
-            }
-            Err(_already) => {
-                // `OnceLock` already initialized (either by a prior
-                // `set_sink` in-process or by `dispatch()` seating the
-                // `NoopSink` default). In that case this test degrades
-                // to a no-op — the behavior is still correct (the sink
-                // that WAS seated handles the dispatch) and Phase 20's
-                // integration target exercises the fresh-process case.
-                dispatch(BrandEvent::Selection(SelectKind::PickerEnter));
-            }
-        }
+        assert!(
+            set_sink(sink).is_ok(),
+            "sink should register before first dispatch"
+        );
+        dispatch(BrandEvent::Selection(SelectKind::PickerEnter));
+        assert!(
+            flag.load(Ordering::SeqCst),
+            "TestSink must have been invoked"
+        );
     }
 
     /// `ensure_default_sink` is idempotent — safe to call multiple times
     /// from `main.rs::run()` and from test setup.
     #[test]
     fn ensure_default_sink_is_idempotent() {
+        reset_sink_for_tests();
         ensure_default_sink();
         ensure_default_sink();
+    }
+
+    #[test]
+    fn set_sink_can_replace_default_before_first_dispatch() {
+        reset_sink_for_tests();
+        ensure_default_sink();
+
+        let flag = Arc::new(AtomicBool::new(false));
+        let sink = Arc::new(TestSink { flag: flag.clone() }) as Arc<dyn EventSink>;
+        assert!(
+            set_sink(sink).is_ok(),
+            "explicit sink should replace default before first dispatch"
+        );
+
+        dispatch(BrandEvent::ApplyComplete);
+        assert!(flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn set_sink_fails_after_first_dispatch() {
+        reset_sink_for_tests();
+        dispatch(BrandEvent::SetupComplete);
+
+        let sink = Arc::new(TestSink {
+            flag: Arc::new(AtomicBool::new(false)),
+        }) as Arc<dyn EventSink>;
+        assert!(set_sink(sink).is_err());
     }
 
     /// Six top-level variants per D-16 — the plan fixes this at 6 so
     /// Phase 20's SFX mapping stays broad-category, not per-detail.
     #[test]
     fn brand_event_has_six_top_level_variants() {
+        reset_sink_for_tests();
         let all: &[BrandEvent] = &[
             BrandEvent::Success(SuccessKind::ThemeApplied),
             BrandEvent::Failure(FailureKind::ThemeApplyFailed),

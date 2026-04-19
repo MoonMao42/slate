@@ -16,9 +16,11 @@
 #[cfg(test)]
 use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::brand::palette;
+use crate::config::ConfigManager;
 use crate::error::Result;
 use crate::theme::{ThemeRegistry, ThemeVariant, DEFAULT_THEME_ID};
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 /// Rendering capability of the current terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,41 +70,72 @@ impl<'a> RenderContext<'a> {
         }
     }
 
-    /// Build a context against the bundled default theme. Callers that
-    /// don't already hold a `&ThemeVariant` can use this to bootstrap;
-    /// subsequent calls within the same process reuse a cached clone so
-    /// the returned context is safe to thread as `'static`.
+    /// Build a context against the tracked current theme when available,
+    /// otherwise fall back to the bundled default theme. The selected
+    /// theme is cached by theme ID so repeated calls do not re-clone or
+    /// re-leak the same embedded variant.
     ///
     /// Returns an error only if the embedded theme registry fails to load
     /// (which would also break every other slate command — correctness
     /// guard, not a routine failure).
     pub fn from_active_theme() -> Result<RenderContext<'static>> {
-        Ok(RenderContext::new(default_theme_ref()?))
+        let registry = ThemeRegistry::new()?;
+        let configured_theme_id = current_theme_id()?;
+        let resolved_theme_id =
+            resolve_active_theme_id(configured_theme_id.as_deref(), &registry)?;
+        Ok(RenderContext::new(cached_theme_ref(resolved_theme_id)?))
     }
 }
 
-/// Process-wide cached default `ThemeVariant`, cloned from the embedded
-/// registry on first call. Uses `Box::leak` to hand out `&'static` without
-/// any `unsafe` lifetime trickery — the leaked allocation lives for the
-/// lifetime of the process, which is exactly what callers need. One-shot
-/// via `OnceLock`.
-fn default_theme_ref() -> Result<&'static ThemeVariant> {
-    static CACHED: OnceLock<&'static ThemeVariant> = OnceLock::new();
-    if let Some(theme) = CACHED.get() {
-        return Ok(*theme);
+fn current_theme_id() -> Result<Option<String>> {
+    ConfigManager::new()?.get_current_theme()
+}
+
+fn resolve_active_theme_id<'a>(
+    configured_theme_id: Option<&'a str>,
+    registry: &ThemeRegistry,
+) -> Result<&'a str> {
+    if let Some(theme_id) = configured_theme_id {
+        if registry.get(theme_id).is_some() {
+            return Ok(theme_id);
+        }
     }
+
+    if registry.get(DEFAULT_THEME_ID).is_some() {
+        Ok(DEFAULT_THEME_ID)
+    } else {
+        Err(crate::error::SlateError::InvalidThemeData(format!(
+            "default theme '{DEFAULT_THEME_ID}' not found"
+        )))
+    }
+}
+
+/// Process-wide cache of leaked embedded themes keyed by theme ID. The
+/// theme set is finite and embedded in the binary, so leaking one clone
+/// per resolved theme ID is a bounded cost and keeps `RenderContext`
+/// borrowing semantics unchanged across the migrated call sites.
+fn cached_theme_ref(theme_id: &str) -> Result<&'static ThemeVariant> {
+    static CACHED: OnceLock<Mutex<HashMap<String, &'static ThemeVariant>>> = OnceLock::new();
+    let cache = CACHED.get_or_init(|| Mutex::new(HashMap::new()));
+    {
+        let guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(theme) = guard.get(theme_id) {
+            return Ok(*theme);
+        }
+    }
+
     let registry = ThemeRegistry::new()?;
     let theme = registry
-        .get(DEFAULT_THEME_ID)
+        .get(theme_id)
         .ok_or_else(|| {
-            crate::error::SlateError::InvalidThemeData(format!(
-                "default theme '{DEFAULT_THEME_ID}' not found"
-            ))
+            crate::error::SlateError::InvalidThemeData(format!("theme '{theme_id}' not found"))
         })?
         .clone();
     let leaked: &'static ThemeVariant = Box::leak(Box::new(theme));
-    let _ = CACHED.set(leaked);
-    Ok(CACHED.get().copied().unwrap_or(leaked))
+
+    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let theme = guard.entry(theme_id.to_string()).or_insert(leaked);
+    Ok(*theme)
 }
 
 /// Compute the ANSI background substring for the active theme's pill —
@@ -137,13 +170,15 @@ pub(crate) fn classify_env(
     if matches!(colorterm, Some("truecolor") | Some("24bit")) {
         return RenderMode::Truecolor;
     }
-    // Known truecolor-capable terminals even when COLORTERM is absent.
+    // Conservative fallback: only treat terminal families we explicitly
+    // know as truecolor-capable as `Truecolor`. `xterm-256color`
+    // intentionally stays in `Basic` so the non-truecolor contract can
+    // still be exercised on classic 256-color terminals.
     match term {
         Some(t)
             if t.contains("kitty")
                 || t.contains("alacritty")
                 || t.contains("ghostty")
-                || t.contains("xterm-256color")
                 || t.contains("-truecolor") =>
         {
             RenderMode::Truecolor
@@ -325,6 +360,30 @@ mod tests {
             classify_env(false, true, None, Some("ghostty")),
             RenderMode::Truecolor
         );
+    }
+
+    #[test]
+    fn classify_env_xterm_256color_without_truecolor_hint_is_basic() {
+        assert_eq!(
+            classify_env(false, true, None, Some("xterm-256color")),
+            RenderMode::Basic
+        );
+    }
+
+    #[test]
+    fn resolve_active_theme_id_prefers_configured_theme_when_present() {
+        let registry = ThemeRegistry::new().expect("registry constructs");
+        let resolved =
+            resolve_active_theme_id(Some("tokyo-night-dark"), &registry).expect("theme resolves");
+        assert_eq!(resolved, "tokyo-night-dark");
+    }
+
+    #[test]
+    fn resolve_active_theme_id_falls_back_to_default_for_missing_theme() {
+        let registry = ThemeRegistry::new().expect("registry constructs");
+        let resolved =
+            resolve_active_theme_id(Some("missing-theme"), &registry).expect("fallback resolves");
+        assert_eq!(resolved, DEFAULT_THEME_ID);
     }
 
     #[test]

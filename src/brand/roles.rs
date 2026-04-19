@@ -78,9 +78,11 @@ impl<'a> Roles<'a> {
     /// (`surface0`-ish) + default fg.
     pub fn code(&self, text: &str) -> String {
         match self.ctx.mode {
-            // `48;5;236` is a safe 256-color surface for the code pill;
-            // avoids hand-rolling another blend for inline code spans.
-            RenderMode::Truecolor => format!("\x1b[48;5;236m {text} \x1b[0m"),
+            RenderMode::Truecolor => {
+                let bg = self.ctx.cached_pill_bg.as_deref().unwrap_or("48;2;0;0;0");
+                let fg = ansi_fg_from_hex(&self.ctx.theme.palette.foreground);
+                format!("\x1b[{bg};{fg}m {text} \x1b[0m")
+            }
             RenderMode::Basic => format!("\x1b[1m`{text}`\x1b[0m"),
             RenderMode::None => format!("`{text}`"),
         }
@@ -261,6 +263,23 @@ mod tests {
             "Basic mode must not emit background bytes, got: {out:?}"
         );
         insta::assert_snapshot!("role_command_basic_fallback", out);
+    }
+
+    #[test]
+    fn code_role_truecolor_reuses_dynamic_pill_background() {
+        let theme = mock_theme();
+        let ctx = mock_context(&theme);
+        let roles = Roles::new(&ctx);
+        let out = roles.code("frosted");
+        let bg = ctx.cached_pill_bg.as_deref().expect("truecolor mock caches pill bg");
+        assert!(
+            out.contains(bg),
+            "code pill should reuse the D-04 cached background, got: {out:?}"
+        );
+        assert!(
+            !out.contains("48;5;236"),
+            "code pill must not fall back to the old fixed 256-color background, got: {out:?}"
+        );
     }
 
     /// Row `18-W0-roles-none-mode` — None mode is zero-ANSI plain text.

@@ -99,13 +99,6 @@ fn format_theme_auto_switched(r: Option<&Roles<'_>>, theme_name: &str) -> String
 /// 2. `slate theme --auto` — Apply auto-resolved theme based on system appearance
 /// 3. `slate theme` (no args) — Launch interactive picker
 pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Result<()> {
-    // Build a RenderContext up front so every status line in this
-    // handler shares the same byte contract (D-01 daily chrome +
-    // sketch 003 tree shape). Registry init failure degrades to plain
-    // text per D-05.
-    let ctx = RenderContext::from_active_theme().ok();
-    let roles = ctx.as_ref().map(Roles::new);
-
     if auto {
         // Auto path: resolve theme based on system appearance
         let env = SlateEnv::from_process()?;
@@ -150,6 +143,8 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
                 dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
                 return Err(err);
             }
+            let ctx = RenderContext::from_active_theme().ok();
+            let roles = ctx.as_ref().map(Roles::new);
             println!(
                 "{}",
                 format_theme_auto_switched(roles.as_ref(), &theme.name)
@@ -186,6 +181,8 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         };
 
         if !quiet {
+            let ctx = RenderContext::from_active_theme().ok();
+            let roles = ctx.as_ref().map(Roles::new);
             println!("{}", format_theme_switched(roles.as_ref(), &theme.name));
         }
         // D-17: explicit-name apply success → ThemeApplied + ApplyComplete.
