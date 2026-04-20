@@ -58,7 +58,7 @@ Then run `slate setup`.
 
 ## What it does
 
-- One palette across Ghostty, Kitty, Alacritty, Starship, bat, delta, ls, eza, lazygit, fastfetch, tmux, and zsh-syntax-highlighting.
+- One palette across Ghostty, Kitty, Alacritty, Neovim, Starship, bat, delta, ls, eza, lazygit, fastfetch, tmux, and zsh-syntax-highlighting.
 - 🌓 Auto dark/light pairing — native watcher on macOS, XDG Desktop Portal (with GNOME fallback) on Linux.
 - Non-destructive: slate writes into managed include files and never edits your dotfiles in place. Snapshots before every change; one command to roll back.
 
@@ -67,6 +67,24 @@ Then run `slate setup`.
   <br />
   <sub>Terminal, prompt, system info, CLI utilities — same palette everywhere.</sub>
 </p>
+
+## Neovim follows along
+
+Slate ships 18 Neovim colorschemes mirroring every terminal family, picks the one that matches your active theme, and reloads open buffers the moment you switch.
+
+<p align="center">
+  <img src="./assets/nvim-before.png" alt="Neovim before — detached from terminal theme" width="700" />
+  <br />
+  <sub>Before — your terminal is themed, your editor isn't.</sub>
+</p>
+
+<p align="center">
+  <img src="./assets/nvim-after.png" alt="Neovim after — synced with terminal theme" width="700" />
+  <br />
+  <sub>After — <code>slate theme</code> and the whole stack, editor included, moves together.</sub>
+</p>
+
+Works with any LazyVim / kickstart.nvim / bare init.lua setup. Don't want it? `slate config set editor disable`.
 
 ## Auto-theme
 
@@ -84,7 +102,7 @@ Official targets: `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-unknown
 | Terminal | Status | Notes |
 |----------|--------|-------|
 | Ghostty | Recommended | Full support — live reload, opacity, watcher relaunch |
-| Kitty | Full | Live push via remote control |
+| Kitty | Full | Live palette push via `kitten @ set-colors`; opacity + Nerd Font sync |
 | Alacritty | Full | Inline preview and reload |
 | Terminal.app | Partial | macOS only — no live preview, no opacity, font cannot be auto-applied |
 | Other | Best effort | Shell and CLI tool theming works; terminal visuals depend on the app |
@@ -129,7 +147,7 @@ Slate composes managed config files alongside your existing setup rather than re
 ~/.config/<tool>/...               # your files, untouched
 ```
 
-For Ghostty: `config-file = ...`. For Kitty/Alacritty: managed `include`/`import` entries. For zsh: a removable marker block in `.zshrc`. Slate-owned files stay slate-owned; yours stay yours.
+For Ghostty: `config-file = ...`. For Kitty/Alacritty: managed `include`/`import` entries. For zsh/bash/fish: a removable marker block in the shell rc. For Neovim: a `pcall(require, 'slate')` marker block in `init.lua` (`init.vim` works too) that falls back silently if slate is uninstalled. Slate-owned files stay slate-owned; yours stay yours.
 
 </details>
 
@@ -148,4 +166,4 @@ MIT.
 ## Credits
 
 Built on top of great work from others:
-[Ghostty](https://ghostty.org/) · [Kitty](https://sw.kovidgoyal.net/kitty/) · [Alacritty](https://github.com/alacritty/alacritty) · [Starship](https://github.com/starship/starship) · [bat](https://github.com/sharkdp/bat) · [delta](https://github.com/dandavison/delta) · [eza](https://github.com/eza-community/eza) · [lazygit](https://github.com/jesseduffield/lazygit) · [fastfetch](https://github.com/fastfetch-cli/fastfetch) · [tmux](https://github.com/tmux/tmux) · [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting) · [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts).
+[Ghostty](https://ghostty.org/) · [Kitty](https://sw.kovidgoyal.net/kitty/) · [Alacritty](https://github.com/alacritty/alacritty) · [Neovim](https://neovim.io/) · [Starship](https://github.com/starship/starship) · [bat](https://github.com/sharkdp/bat) · [delta](https://github.com/dandavison/delta) · [eza](https://github.com/eza-community/eza) · [lazygit](https://github.com/jesseduffield/lazygit) · [fastfetch](https://github.com/fastfetch-cli/fastfetch) · [tmux](https://github.com/tmux/tmux) · [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting) · [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts).
