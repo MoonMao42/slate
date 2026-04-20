@@ -314,12 +314,16 @@ pub fn render_progress_block(palette: &Palette) -> String {
 /// `full=true` (Tab full-preview mode): 2 lines.
 ///  * Line 1: 16 background cells — all 8 "normal" slots (black..white)
 ///    followed by the 8 "bright" slots (bright_black..bright_white). Each
-///    cell is 4 spaces wide (total 64 visible cols).
+///    cell is 5 spaces wide (total 80 visible cols).
 ///  * Line 2: 8 named labels `rosewater red peach yellow green sky blue
-///    mauve` rendered in `palette.foreground`. Labels are 8 cols wide
-///    each so they sit under pairs of cells from line 1. The names are
-///    Catppuccin's canonical 8-accent family — reused across all 18
-///    themes for consistency per sketch 005 A / D-03.
+///    mauve` rendered in `palette.foreground`. Labels are 10 cols wide
+///    each so they sit under pairs of cells from line 1 (2×5 = 10 per
+///    label). The 10-col width fits the longest canonical label
+///    (`rosewater`, 9 chars) with a trailing space separator — the
+///    previous 8-col width silently overflowed and merged "rosewater"
+///    with "red" (WR-01). The names are Catppuccin's canonical 8-accent
+///    family — reused across all 18 themes for consistency per sketch
+///    005 A / D-03.
 ///
 /// The returned String is pure (no I/O, no panics on bad palette bytes —
 /// `fg` degrades to empty). Consumed by `preview::compose` (Plan 19-04).
@@ -364,7 +368,7 @@ pub fn render_palette_swatch(palette: &Palette, full: bool) -> String {
         out
     } else {
         let mut out = String::with_capacity(512);
-        // Full-mode line 1: 16 cells × 4 spaces = 64 cols.
+        // Full-mode line 1: 16 cells × 5 spaces = 80 cols.
         for hex in [
             palette.black.as_str(),
             palette.red.as_str(),
@@ -383,18 +387,22 @@ pub fn render_palette_swatch(palette: &Palette, full: bool) -> String {
             palette.bright_cyan.as_str(),
             palette.bright_white.as_str(),
         ] {
-            push_cell(&mut out, hex, 4);
+            push_cell(&mut out, hex, 5);
         }
         out.push('\n');
 
-        // Full-mode line 2: 8 × 8-col labels in `palette.foreground`
+        // Full-mode line 2: 8 × 10-col labels in `palette.foreground`
         // (Catppuccin canonical 8 accents — shared across all themes).
+        // WR-01 fix: label cells must be wide enough to fit the longest
+        // canonical name (`rosewater`, 9 chars) without overflowing into
+        // the next cell. 10 cols also keeps the row aligned 1:1 with
+        // pairs of the 5-col bg cells above (2 × 5 = 10 per label).
         const NAMES: [&str; 8] = [
             "rosewater", "red", "peach", "yellow", "green", "sky", "blue", "mauve",
         ];
         out.push_str(&fg(&palette.foreground));
         for name in NAMES {
-            out.push_str(&format!("{name:<8}"));
+            out.push_str(&format!("{name:<10}"));
         }
         out.push_str(RESET);
         out.push('\n');
