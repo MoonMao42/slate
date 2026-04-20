@@ -79,6 +79,7 @@ fn handle_clean_inner() -> Result<()> {
     remove_fish_loader(&env)?;
     remove_ghostty_managed_references(&env)?;
     remove_alacritty_managed_references(&env)?;
+    remove_kitty_managed_references(&env)?;
     remove_tmux_managed_references(env.home())?;
     remove_delta_managed_references(env.home())?;
     remove_nvim_managed_references(&env)?;
@@ -207,6 +208,65 @@ fn remove_fish_loader(env: &SlateEnv) -> Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err.into()),
     }
+}
+
+/// Strip slate-owned lines from `~/.config/kitty/kitty.conf`.
+///
+/// Only removes lines that slate can positively identify as slate-owned:
+///   - `include` lines pointing anywhere under `~/.config/slate/managed/kitty/`
+///     (theme.conf, opacity.conf, font.conf)
+///   - `listen_on` lines whose socket path contains the slate-specific
+///     marker "kitty-slate" — `listen_on` was prepended by the live-preview
+///     wiring in kitty.rs to enable `kitten @ set-colors`.
+///
+/// Lines slate also prepends but that the user may legitimately want to
+/// keep (`allow_remote_control socket-only`, `dynamic_background_opacity yes`)
+/// are NOT stripped — they don't carry a slate-specific marker and the
+/// safer posture is to leave them in place than to nuke a pre-existing
+/// user setting.
+///
+/// Byte-oriented to preserve non-UTF-8 content elsewhere in the file.
+fn remove_kitty_managed_references(env: &SlateEnv) -> Result<()> {
+    let integration_path =
+        crate::adapter::KittyAdapter::resolve_config_path_with_env(env);
+    if !integration_path.exists() {
+        return Ok(());
+    }
+
+    let managed_prefix = env
+        .config_dir()
+        .join("managed")
+        .join("kitty")
+        .to_string_lossy()
+        .to_string();
+    let content = fs::read(&integration_path)?;
+    let mut cleaned: Vec<u8> = Vec::with_capacity(content.len());
+
+    for line in content.split_inclusive(|b| *b == b'\n') {
+        let trimmed = line
+            .iter()
+            .copied()
+            .skip_while(|b| b.is_ascii_whitespace())
+            .collect::<Vec<u8>>();
+        // Drop `include /…/managed/kitty/…` — slate-owned theme includes.
+        if trimmed.starts_with(b"include")
+            && trimmed
+                .windows(managed_prefix.len())
+                .any(|w| w == managed_prefix.as_bytes())
+        {
+            continue;
+        }
+        // Drop `listen_on unix:…/kitty-slate` — slate-owned socket marker.
+        if trimmed.starts_with(b"listen_on")
+            && trimmed.windows(b"kitty-slate".len()).any(|w| w == b"kitty-slate")
+        {
+            continue;
+        }
+        cleaned.extend_from_slice(line);
+    }
+
+    fs::write(integration_path, cleaned)?;
+    Ok(())
 }
 
 fn remove_ghostty_managed_references(env: &SlateEnv) -> Result<()> {
@@ -599,6 +659,78 @@ mod tests {
         assert!(remove_nvim_managed_references(&env).is_ok());
         // No side effects — no directory materialized.
         assert!(!td.path().join(".config/nvim").exists());
+    }
+
+    #[test]
+    fn remove_kitty_managed_references_strips_slate_lines_and_keeps_user_content() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let integration_path = td.path().join(".config/kitty/kitty.conf");
+        std::fs::create_dir_all(integration_path.parent().unwrap()).unwrap();
+
+        let managed_kitty = env.config_dir().join("managed").join("kitty");
+        let contents = format!(
+            "allow_remote_control socket-only\n\
+             listen_on unix:/tmp/kitty-slate\n\
+             dynamic_background_opacity yes\n\
+             include {}/theme.conf\n\
+             include {}/opacity.conf\n\
+             font_family FiraCode Nerd Font\n\
+             include /home/user/my-own-theme.conf\n",
+            managed_kitty.display(),
+            managed_kitty.display(),
+        );
+        std::fs::write(&integration_path, contents).unwrap();
+
+        remove_kitty_managed_references(&env).unwrap();
+
+        let cleaned = std::fs::read_to_string(&integration_path).unwrap();
+        // slate-owned include lines removed
+        assert!(!cleaned.contains(&format!("include {}/theme.conf", managed_kitty.display())));
+        assert!(!cleaned.contains(&format!("include {}/opacity.conf", managed_kitty.display())));
+        // slate-owned listen_on removed (carries the kitty-slate socket marker)
+        assert!(!cleaned.contains("listen_on unix:/tmp/kitty-slate"));
+        // user content preserved
+        assert!(cleaned.contains("font_family FiraCode Nerd Font"));
+        assert!(cleaned.contains("include /home/user/my-own-theme.conf"));
+        // allow_remote_control and dynamic_background_opacity are left alone — they
+        // may pre-date slate and don't carry a slate-specific marker.
+        assert!(cleaned.contains("allow_remote_control socket-only"));
+        assert!(cleaned.contains("dynamic_background_opacity yes"));
+    }
+
+    #[test]
+    fn remove_kitty_managed_references_is_noop_on_missing_file() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        assert!(remove_kitty_managed_references(&env).is_ok());
+        assert!(!td.path().join(".config/kitty").exists());
+    }
+
+    #[test]
+    fn remove_kitty_managed_references_preserves_non_utf8_bytes() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let integration_path = td.path().join(".config/kitty/kitty.conf");
+        std::fs::create_dir_all(integration_path.parent().unwrap()).unwrap();
+
+        let mut content = vec![0xff, b'\n'];
+        content.extend_from_slice(
+            format!(
+                "include {}/managed/kitty/theme.conf\nfont_family Mono\n",
+                env.config_dir().display()
+            )
+            .as_bytes(),
+        );
+        std::fs::write(&integration_path, content).unwrap();
+
+        remove_kitty_managed_references(&env).unwrap();
+
+        let cleaned = std::fs::read(&integration_path).unwrap();
+        assert!(cleaned.starts_with(&[0xff, b'\n']));
+        let cleaned_str = String::from_utf8_lossy(&cleaned);
+        assert!(!cleaned_str.contains("managed/kitty/theme.conf"));
+        assert!(cleaned_str.contains("font_family Mono"));
     }
 
     #[test]
