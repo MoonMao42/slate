@@ -38,6 +38,15 @@ pub struct PickerState {
     /// session; not persisted across picker launches); `true` = full-screen
     /// preview with ◆ Heading responsive fold.
     pub preview_mode_full: bool,
+    /// Theme-id → forked starship prompt cache. Populated by Plan 19-07
+    /// event_loop glue when Tab mode triggers a fork for a new theme;
+    /// cleared on resize (because `--terminal-width` changes).
+    ///
+    /// Plan 19-06 (Wave 3, parallel plan) owns the full field + accessor
+    /// surface; this worktree adds the minimum (field + 3 pub(crate)
+    /// methods) needed for Plan 19-07 event_loop glue to compile. The
+    /// orchestrator's Wave-3 merge will keep 19-06's authoritative copy.
+    prompt_cache: std::collections::HashMap<String, String>,
 }
 
 impl PickerState {
@@ -85,6 +94,7 @@ impl PickerState {
             committed: std::rc::Rc::new(std::cell::Cell::new(false)),
             opacity_override_in_session: false,
             preview_mode_full: false, // D-12 default; Tab toggles
+            prompt_cache: std::collections::HashMap::new(),
         })
     }
 
@@ -133,6 +143,28 @@ impl PickerState {
     #[allow(dead_code)]
     pub(super) fn committed_flag(&self) -> std::rc::Rc<std::cell::Cell<bool>> {
         self.committed.clone()
+    }
+
+    /// Read cached forked prompt for a theme. `None` = cache miss or
+    /// first Tab visit. Plan 19-07 glue consults this before forking.
+    #[allow(dead_code)] // Wired by Plan 19-07 event_loop Tab branch.
+    pub(crate) fn cached_prompt(&self, theme_id: &str) -> Option<&str> {
+        self.prompt_cache.get(theme_id).map(String::as_str)
+    }
+
+    /// Store a forked prompt for reuse on subsequent Tab visits to
+    /// the same theme. Plan 19-07 calls this after a successful fork.
+    #[allow(dead_code)] // Wired by Plan 19-07 event_loop Tab branch.
+    pub(crate) fn cache_prompt(&mut self, theme_id: &str, prompt: String) {
+        self.prompt_cache.insert(theme_id.to_string(), prompt);
+    }
+
+    /// Clear the prompt cache — called on terminal resize because
+    /// `--terminal-width` is part of the fork args so cached prompts
+    /// no longer match the current layout (D-06).
+    #[allow(dead_code)] // Wired by Plan 19-07 event_loop resize branch.
+    pub(crate) fn invalidate_prompt_cache(&mut self) {
+        self.prompt_cache.clear();
     }
 
     /// Jump to a specific theme by index (for resume-auto and mouse clicks)
