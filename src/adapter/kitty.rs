@@ -230,7 +230,15 @@ impl ToolAdapter for KittyAdapter {
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
         let env = SlateEnv::from_process()?;
-        let integration_path = Self::resolve_config_path_with_env(&env);
+        self.apply_theme_with_env(theme, &env)
+    }
+
+    /// Plan 19-09: preview-path override. Resolves both the integration config
+    /// (`kitty.conf`) and the managed config directory (`managed/kitty/*`) via
+    /// the injected `env`, so live-preview callers can drive Kitty through a
+    /// tempdir-backed env without any `SlateEnv::from_process()` fallback.
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
+        let integration_path = Self::resolve_config_path_with_env(env);
 
         // Kitty doesn't auto-create its config file. If Kitty is installed
         // but kitty.conf is missing, create it so we can add include directives.
@@ -251,7 +259,7 @@ impl ToolAdapter for KittyAdapter {
 
         let colors_content = Self::render_kitty_colors(theme);
 
-        let config_mgr = ConfigManager::with_env(&env)?;
+        let config_mgr = ConfigManager::with_env(env)?;
 
         // Include font if configured
         let mut final_content = colors_content;
@@ -269,7 +277,7 @@ impl ToolAdapter for KittyAdapter {
 
         // Write opacity config
         let current_opacity = config_mgr.get_current_opacity_preset()?;
-        write_opacity_config(&env, current_opacity)?;
+        write_opacity_config(env, current_opacity)?;
 
         // Ensure integration file includes managed paths
         let managed_base = config_mgr.managed_dir("kitty");
@@ -673,5 +681,42 @@ mod tests {
 
         assert!(!called);
         assert_eq!(outcome, KittyBroadcastOutcome::NoSockets);
+    }
+
+    /// Plan 19-09 contract: the trait-level `apply_theme_with_env` must honor
+    /// the injected env — managed kitty theme.conf and kitty.conf includes
+    /// MUST land inside the tempdir, not the host's `~/.config/kitty`.
+    #[test]
+    fn apply_theme_with_env_honors_injected_env_for_managed_writes() {
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let adapter = KittyAdapter;
+
+        let theme = create_test_theme();
+
+        // Kitty auto-creates kitty.conf if missing, so we don't need to pre-create.
+        let outcome = ToolAdapter::apply_theme_with_env(&adapter, &theme, &env).unwrap();
+        assert!(matches!(outcome, ApplyOutcome::Applied { .. }));
+
+        // Managed theme.conf MUST have landed inside the tempdir.
+        let managed_theme = tempdir
+            .path()
+            .join(".config/slate/managed/kitty/theme.conf");
+        assert!(
+            managed_theme.exists(),
+            "expected managed kitty theme.conf inside tempdir at {:?}",
+            managed_theme
+        );
+
+        // Auto-created kitty.conf must reference the tempdir-scoped managed path.
+        let integration_path = KittyAdapter::resolve_config_path_with_env(&env);
+        let integration_content = fs::read_to_string(&integration_path).unwrap();
+        assert!(
+            integration_content.contains(&managed_theme.display().to_string()),
+            "kitty.conf must include the managed theme.conf under tempdir, got:\n{}",
+            integration_content
+        );
     }
 }

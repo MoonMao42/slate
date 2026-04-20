@@ -108,13 +108,23 @@ impl ToolAdapter for StarshipAdapter {
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
-        let config_path = self.integration_config_path()?;
+        let env = SlateEnv::from_process()?;
+        self.apply_theme_with_env(theme, &env)
+    }
+
+    /// Plan 19-09: preview-path override. Resolves `starship.toml` via the
+    /// injected env (so tempdir-backed integration tests can point Starship at
+    /// a sandboxed XDG root) and creates the `ConfigManager` via
+    /// `with_env(env)` rather than `new()` so the managed-file backup area
+    /// also lives inside the injected config dir.
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
+        let config_path = Self::integration_config_path_with_env(env);
         if !config_path.exists() {
             return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
         }
 
         // Step 0: Backup before any modification
-        let config_manager = ConfigManager::new()?;
+        let config_manager = ConfigManager::with_env(env)?;
         let _backup_path = config_manager.backup_file(&config_path)?;
 
         // Step 1: Read and parse TOML (preserves comments via toml_edit)
@@ -335,5 +345,64 @@ crust = "#111111"
         let result = adapter.get_current_theme();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
+    }
+
+    /// Plan 19-09 contract: the trait-level `apply_theme_with_env` must honor
+    /// the injected env — palette selection must be written to the
+    /// `starship.toml` inside the tempdir, not the host's real
+    /// `~/.config/starship.toml`, and the backup must also land inside the
+    /// tempdir's slate cache.
+    #[test]
+    fn apply_theme_with_env_honors_injected_env_for_in_place_edits() {
+        use crate::adapter::ToolAdapter;
+        use std::io::Write;
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let adapter = StarshipAdapter;
+
+        // Pre-create starship.toml inside the tempdir so the EditInPlace path
+        // doesn't early-return with MissingIntegrationConfig.
+        let integration_path = StarshipAdapter::integration_config_path_with_env(&env);
+        fs::create_dir_all(integration_path.parent().unwrap()).unwrap();
+        let mut file = fs::File::create(&integration_path).unwrap();
+        writeln!(file, "# starship managed by slate").unwrap();
+        drop(file);
+
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+
+        let outcome = ToolAdapter::apply_theme_with_env(&adapter, &theme, &env).unwrap();
+        assert!(matches!(outcome, ApplyOutcome::Applied { .. }));
+
+        // The edit must have happened on the tempdir-scoped starship.toml.
+        let content = fs::read_to_string(&integration_path).unwrap();
+        assert!(
+            content.contains("palette = \"slate\""),
+            "tempdir starship.toml must select the slate palette, got:\n{}",
+            content
+        );
+        assert!(
+            content.contains("[palettes.slate]"),
+            "tempdir starship.toml must contain [palettes.slate] table, got:\n{}",
+            content
+        );
+
+        // Confirm NOTHING leaked into the host's ~/.config via the process env.
+        // The tempdir-scoped SlateEnv points config_dir at tempdir/.config/slate,
+        // so the backup must live inside tempdir, not under the real $HOME.
+        let backups_dir = tempdir.path().join(".cache/slate/backups");
+        if backups_dir.exists() {
+            let entries: Vec<_> = fs::read_dir(&backups_dir)
+                .unwrap()
+                .flatten()
+                .map(|e| e.path())
+                .collect();
+            assert!(
+                !entries.is_empty(),
+                "backup must land inside tempdir's slate cache dir at {:?}",
+                backups_dir
+            );
+        }
     }
 }

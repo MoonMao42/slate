@@ -277,23 +277,11 @@ impl ToolAdapter for GhosttyAdapter {
         self.apply_theme_with_env(theme, &env)
     }
 
-    fn reload(&self) -> Result<()> {
-        // macOS: use Ghostty's own AppleScript API (Automation permission, not Accessibility).
-        // No System Events access = no Accessibility popup.
-        #[cfg(target_os = "macos")]
-        {
-            Self::reload_via_applescript()
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            Self::send_reload_signal()
-        }
-    }
-}
-
-/// Helper methods using injected SlateEnv (for testing)
-impl GhosttyAdapter {
+    /// Plan 19-09: preview-path override. Resolves both the integration config
+    /// path and the managed config path via the injected `env` instead of
+    /// `SlateEnv::from_process()`, so `silent_preview_apply(&tempdir_env, …)`
+    /// lands writes inside the test sandbox rather than the user's real
+    /// `~/.config/ghostty` / `~/.config/slate/managed/ghostty`.
     fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
         let integration_path = self.integration_config_path_with_env(env)?;
         if !integration_path.exists() {
@@ -387,6 +375,25 @@ impl GhosttyAdapter {
         Ok(ApplyOutcome::applied_no_shell())
     }
 
+    fn reload(&self) -> Result<()> {
+        // macOS: use Ghostty's own AppleScript API (Automation permission, not Accessibility).
+        // No System Events access = no Accessibility popup.
+        #[cfg(target_os = "macos")]
+        {
+            Self::reload_via_applescript()
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            Self::send_reload_signal()
+        }
+    }
+}
+
+/// Inherent helper methods that take an explicit `SlateEnv`. Kept separate
+/// from the trait impl so other modules (`apply_font_only`, tests) can call
+/// them by name — trait impl blocks don't allow `pub` on individual methods.
+impl GhosttyAdapter {
     pub fn integration_config_path_with_env(&self, env: &SlateEnv) -> Result<PathBuf> {
         let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
         let xdg_dir = env.xdg_config_home().join("ghostty");
@@ -707,5 +714,53 @@ mod tests {
         let adapter = GhosttyAdapter;
         let _result = adapter.reload();
         // Result will be Err since Ghostty is not running in test, but method exists
+    }
+
+    /// Plan 19-09 contract: the trait-level `apply_theme_with_env` must honor
+    /// the injected env — writes MUST land inside the tempdir, and the
+    /// host's real `~/.config/slate/managed/ghostty` MUST NOT be touched.
+    /// This is the behavior proof that closes the 19-08 "signature lie".
+    #[test]
+    fn apply_theme_with_env_honors_injected_env_for_managed_writes() {
+        use crate::adapter::ToolAdapter;
+        use std::io::Write;
+        use tempfile::TempDir;
+
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let adapter = GhosttyAdapter;
+
+        // Pre-create the integration config file inside the tempdir so the
+        // apply path doesn't early-return with MissingIntegrationConfig.
+        let integration_path = adapter.integration_config_path_with_env(&env).unwrap();
+        fs::create_dir_all(integration_path.parent().unwrap()).unwrap();
+        let mut file = fs::File::create(&integration_path).unwrap();
+        writeln!(file, "# slate managed").unwrap();
+        drop(file);
+
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+
+        // Route through the TRAIT method — this is what ToolRegistry dispatches
+        // to when `apply_theme_to_tools_with_env` is used (Plan 19-09 Task 01).
+        let outcome = ToolAdapter::apply_theme_with_env(&adapter, &theme, &env).unwrap();
+        assert!(matches!(outcome, ApplyOutcome::Applied { .. }));
+
+        // Managed writes MUST have landed inside the tempdir.
+        let managed_theme = tempdir
+            .path()
+            .join(".config/slate/managed/ghostty/theme.conf");
+        assert!(
+            managed_theme.exists(),
+            "expected managed theme.conf inside tempdir at {:?}",
+            managed_theme
+        );
+
+        // Integration file inside the tempdir must reference the managed path.
+        let integration_content = fs::read_to_string(&integration_path).unwrap();
+        assert!(
+            integration_content.contains(&managed_theme.display().to_string()),
+            "integration config must include the managed theme.conf under tempdir, got:\n{}",
+            integration_content
+        );
     }
 }
