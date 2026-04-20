@@ -3,7 +3,6 @@ pub mod aura;
 pub mod auto_theme;
 pub mod clean;
 pub mod config;
-pub mod demo;
 pub mod failure_handler;
 pub mod font;
 pub mod font_detection;
