@@ -305,6 +305,103 @@ pub fn render_progress_block(palette: &Palette) -> String {
     out
 }
 
+/// D-03: palette swatch for picker preview.
+///
+/// `full=false` (mini-preview mode): 1 line, 8 background cells rendering
+/// the 8 "normal" ANSI slots (black..white). Each cell is 3 spaces wide
+/// (total 24 visible cols + the trailing newline).
+///
+/// `full=true` (Tab full-preview mode): 2 lines.
+///  * Line 1: 16 background cells — all 8 "normal" slots (black..white)
+///    followed by the 8 "bright" slots (bright_black..bright_white). Each
+///    cell is 4 spaces wide (total 64 visible cols).
+///  * Line 2: 8 named labels `rosewater red peach yellow green sky blue
+///    mauve` rendered in `palette.foreground`. Labels are 8 cols wide
+///    each so they sit under pairs of cells from line 1. The names are
+///    Catppuccin's canonical 8-accent family — reused across all 18
+///    themes for consistency per sketch 005 A / D-03.
+///
+/// The returned String is pure (no I/O, no panics on bad palette bytes —
+/// `fg` degrades to empty). Consumed by `preview::compose` (Plan 19-04).
+// SWATCH-RENDERER: intentionally raw ANSI (renders palette colors, not role text)
+pub fn render_palette_swatch(palette: &Palette, full: bool) -> String {
+    // Background-cell helper: emits `ESC[48;2;R;G;B m` + `width` spaces + RESET.
+    // On malformed palette hex (a theme-file bug, not a user-facing error)
+    // we degrade to `width` uncolored spaces so layout stays stable.
+    let push_cell = |out: &mut String, hex: &str, width: usize| {
+        match PaletteRenderer::hex_to_rgb(hex) {
+            Ok((r, g, b)) => {
+                out.push_str(&format!("\x1b[48;2;{r};{g};{b}m"));
+                for _ in 0..width {
+                    out.push(' ');
+                }
+                out.push_str(RESET);
+            }
+            Err(_) => {
+                for _ in 0..width {
+                    out.push(' ');
+                }
+            }
+        }
+    };
+
+    if !full {
+        let mut out = String::with_capacity(128);
+        // Mini-mode: 8 cells × 3 spaces = 24 cols (normal slots 0–7).
+        for hex in [
+            palette.black.as_str(),
+            palette.red.as_str(),
+            palette.green.as_str(),
+            palette.yellow.as_str(),
+            palette.blue.as_str(),
+            palette.magenta.as_str(),
+            palette.cyan.as_str(),
+            palette.white.as_str(),
+        ] {
+            push_cell(&mut out, hex, 3);
+        }
+        out.push('\n');
+        out
+    } else {
+        let mut out = String::with_capacity(512);
+        // Full-mode line 1: 16 cells × 4 spaces = 64 cols.
+        for hex in [
+            palette.black.as_str(),
+            palette.red.as_str(),
+            palette.green.as_str(),
+            palette.yellow.as_str(),
+            palette.blue.as_str(),
+            palette.magenta.as_str(),
+            palette.cyan.as_str(),
+            palette.white.as_str(),
+            palette.bright_black.as_str(),
+            palette.bright_red.as_str(),
+            palette.bright_green.as_str(),
+            palette.bright_yellow.as_str(),
+            palette.bright_blue.as_str(),
+            palette.bright_magenta.as_str(),
+            palette.bright_cyan.as_str(),
+            palette.bright_white.as_str(),
+        ] {
+            push_cell(&mut out, hex, 4);
+        }
+        out.push('\n');
+
+        // Full-mode line 2: 8 × 8-col labels in `palette.foreground`
+        // (Catppuccin canonical 8 accents — shared across all themes).
+        const NAMES: [&str; 8] = [
+            "rosewater", "red", "peach", "yellow", "green", "sky", "blue", "mauve",
+        ];
+        out.push_str(&fg(&palette.foreground));
+        for name in NAMES {
+            out.push_str(&format!("{name:<8}"));
+        }
+        out.push_str(RESET);
+        out.push('\n');
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,5 +596,99 @@ mod tests {
             swatch_count >= 10,
             "render should emit >=10 palette swatch escapes, got {swatch_count}"
         );
+    }
+
+    /// Byte-slice probe helper for the 24-bit background-SGR prefix
+    /// (`ESC [ 4 8 ; 2 ;`). Counts how many background cells the swatch
+    /// rendered. Avoids a literal escape in the test source so the
+    /// Wave-5 grep gate stays authoritative.
+    fn count_bg_cells(out: &str) -> usize {
+        let bytes = out.as_bytes();
+        let needle: [u8; 7] = [0x1b, b'[', b'4', b'8', b';', b'2', b';'];
+        bytes.windows(7).filter(|w| *w == needle).count()
+    }
+
+    /// D-03: mini-preview swatch is a single line of 8 background cells
+    /// covering ANSI slots 0–7 (black..white).
+    #[test]
+    fn palette_swatch_mini_is_single_line() {
+        let out = render_palette_swatch(&mocha_palette(), false);
+        assert!(out.ends_with('\n'), "mini swatch must end with newline");
+        // Exactly one line break — i.e. one trailing '\n', zero internal.
+        assert_eq!(
+            out.matches('\n').count(),
+            1,
+            "mini swatch must be a single line, got: {out:?}"
+        );
+        // 8 background cells (normal slots 0–7).
+        assert_eq!(
+            count_bg_cells(&out),
+            8,
+            "mini swatch must render 8 bg cells, got: {out:?}"
+        );
+        // Visible width (after ANSI strip) = 8 cells × 3 spaces = 24 cols.
+        let visible = strip_ansi(&out);
+        let body = visible.trim_end_matches('\n');
+        assert_eq!(
+            body.chars().count(),
+            24,
+            "mini swatch body must be 24 visible cols (8 × 3 spaces), got {body:?}"
+        );
+    }
+
+    /// D-03: full-preview swatch is 2 lines — 16 cells on line 1 (slots
+    /// 0–15), 8 Catppuccin canonical labels on line 2.
+    #[test]
+    fn palette_swatch_full_is_two_lines_with_names() {
+        let out = render_palette_swatch(&mocha_palette(), true);
+        // Exactly two line breaks — i.e. two '\n'.
+        assert_eq!(
+            out.matches('\n').count(),
+            2,
+            "full swatch must be 2 lines, got: {out:?}"
+        );
+        // 16 background cells (slots 0–15).
+        assert_eq!(
+            count_bg_cells(&out),
+            16,
+            "full swatch must render 16 bg cells, got: {out:?}"
+        );
+        // Label row must carry the 8 Catppuccin canonical names in order.
+        let visible = strip_ansi(&out);
+        let lines: Vec<&str> = visible.trim_end_matches('\n').split('\n').collect();
+        assert_eq!(lines.len(), 2, "expected exactly 2 lines, got {lines:?}");
+        let labels = lines[1];
+        for name in [
+            "rosewater", "red", "peach", "yellow", "green", "sky", "blue", "mauve",
+        ] {
+            assert!(
+                labels.contains(name),
+                "label row must contain {name:?}, got: {labels:?}"
+            );
+        }
+        // Names must appear in the locked order.
+        let positions: Vec<_> = [
+            "rosewater", "red", "peach", "yellow", "green", "sky", "blue", "mauve",
+        ]
+        .iter()
+        .map(|n| labels.find(n).unwrap_or(usize::MAX))
+        .collect();
+        let mut sorted = positions.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            positions, sorted,
+            "D-03 label order violated — expected rosewater red peach yellow green sky blue mauve, got positions {positions:?} in {labels:?}"
+        );
+    }
+
+    /// D-03 snapshot: lock the full-mode structure (ANSI-stripped) for
+    /// catppuccin-mocha so any drift in cell widths, label order, or
+    /// spacing surfaces immediately. Strips ANSI first so the snapshot
+    /// locks structure + names, not fragile byte sequences.
+    #[test]
+    fn palette_swatch_8_named_cells() {
+        let out = render_palette_swatch(&mocha_palette(), true);
+        let stripped = strip_ansi(&out);
+        insta::assert_snapshot!("palette_swatch_8_named_cells", stripped);
     }
 }
