@@ -275,7 +275,7 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
     }
     output.push('\n');
 
-    // Render extras matrix if presentconditional)
+    // Render extras matrix if present (conditional).
     if !palette.extras.is_empty() {
         output.push_str("Extras: ");
         let mut sorted_extras: Vec<_> = palette.extras.iter().collect();
