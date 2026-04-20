@@ -585,6 +585,33 @@ mod tests {
         }
     }
 
+    /// Plan 19-07 Task 02: `render_full_preview` accepts a
+    /// `prompt_line_override: Option<&str>` and forwards it into
+    /// `compose::compose_full` so Plan 19-06's starship fork can inject
+    /// the real forked prompt into the `◆ Prompt` block.
+    ///
+    /// Contract proof: when called with `Some("__FORK_MARKER__")` the
+    /// rendered alt-screen output contains that marker in the prompt
+    /// slot. `None` falls back to the self-drawn SAMPLE_TOKENS prompt
+    /// (already covered by `mode_dispatch_uses_preview_mode_full`).
+    #[test]
+    fn render_full_preview_forwards_prompt_override() {
+        let mut state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
+        state.preview_mode_full = true;
+        let marker = "__FORK_MARKER__";
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        render_full_preview(&mut buf, &state, None, 80, 24, Some(marker))
+            .expect("render_full_preview with override must succeed");
+        let bytes = buf.into_inner();
+        let visible = strip_ansi(&bytes);
+        assert!(
+            visible.contains(marker),
+            "render_full_preview must forward prompt_line_override into the \
+             ◆ Prompt block so Plan 19-06 starship fork output lands in the \
+             preview. Got:\n{visible}"
+        );
+    }
+
     /// D-12: `render_into` dispatches on `state.preview_mode_full`.
     /// List-dominant mode shows the `◆ Catppuccin` family band but NOT the
     /// preview-block headings; full-preview mode shows `◆ Palette` +
