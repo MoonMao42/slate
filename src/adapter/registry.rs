@@ -1,4 +1,5 @@
 use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
+use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeVariant;
 use rayon::prelude::*;
@@ -86,6 +87,26 @@ impl ToolRegistry {
         self.apply_theme_with_filter(theme, Some(tool_names))
     }
 
+    /// Env-injecting variant of [`apply_theme_to_tools`] / [`apply_theme_to_all`].
+    ///
+    /// Dispatches through [`ToolAdapter::apply_theme_with_env`] so the four
+    /// preview-path adapters (Ghostty, Alacritty, Kitty, Starship) resolve all
+    /// paths via the injected `env` instead of `SlateEnv::from_process()`. The
+    /// other 10 adapters inherit the trait's default implementation (which
+    /// simply delegates to `apply_theme`), so their behavior is unchanged.
+    ///
+    /// Pass `allowed_tools = None` to apply to every themeable adapter (the
+    /// equivalent of `apply_theme_to_all`); pass `Some(&set)` to restrict to a
+    /// caller-selected subset (the equivalent of `apply_theme_to_tools`).
+    pub fn apply_theme_to_tools_with_env(
+        &self,
+        theme: &ThemeVariant,
+        env: &SlateEnv,
+        allowed_tools: Option<&HashSet<String>>,
+    ) -> Vec<ToolApplyResult> {
+        self.apply_theme_with_filter_env(theme, env, allowed_tools)
+    }
+
     fn apply_theme_with_filter(
         &self,
         theme: &ThemeVariant,
@@ -102,6 +123,43 @@ impl ToolRegistry {
                 let (status, requires_new_shell) = match adapter.is_installed() {
                     Ok(false) => (ToolApplyStatus::Skipped(SkipReason::NotInstalled), false),
                     Ok(true) => match adapter.apply_theme(theme) {
+                        Ok(ApplyOutcome::Applied { requires_new_shell }) => {
+                            (ToolApplyStatus::Applied, requires_new_shell)
+                        }
+                        Ok(ApplyOutcome::Skipped(reason)) => {
+                            (ToolApplyStatus::Skipped(reason), false)
+                        }
+                        Err(err) => (ToolApplyStatus::Failed(err), false),
+                    },
+                    Err(err) => (ToolApplyStatus::Failed(err), false),
+                };
+
+                ToolApplyResult {
+                    tool_name,
+                    status,
+                    requires_new_shell,
+                }
+            })
+            .collect()
+    }
+
+    fn apply_theme_with_filter_env(
+        &self,
+        theme: &ThemeVariant,
+        env: &SlateEnv,
+        allowed_tools: Option<&HashSet<String>>,
+    ) -> Vec<ToolApplyResult> {
+        self.adapters
+            .par_iter()
+            .filter(|adapter| adapter.apply_strategy() != ApplyStrategy::DetectAndInstall)
+            .filter(|adapter| {
+                allowed_tools.is_none_or(|allowed| allowed.contains(adapter.tool_name()))
+            })
+            .map(|adapter| {
+                let tool_name = adapter.tool_name().to_string();
+                let (status, requires_new_shell) = match adapter.is_installed() {
+                    Ok(false) => (ToolApplyStatus::Skipped(SkipReason::NotInstalled), false),
+                    Ok(true) => match adapter.apply_theme_with_env(theme, env) {
                         Ok(ApplyOutcome::Applied { requires_new_shell }) => {
                             (ToolApplyStatus::Applied, requires_new_shell)
                         }
