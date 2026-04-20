@@ -334,7 +334,106 @@ mod tests {
         );
     }
 
-    // ── Task 19-04-02 tests (added in the second commit) ───────────────
-    // Populated in the Task 19-04-02 commit below — heading-count
-    // invariants, lavender byte assertion, prompt override contract.
+    // ── Task 19-04-02 tests ─────────────────────────────────────────────
+
+    /// D-13 Minimum tier — exactly 4 `◆ ` heading labels.
+    #[test]
+    fn compose_full_minimum_has_four_heading_labels() {
+        let palette = mock_palette();
+        let out = compose_full(&palette, FoldTier::Minimum, None, None);
+        let count = out.matches("◆ ").count();
+        assert_eq!(
+            count, 4,
+            "Minimum tier must emit exactly 4 ◆ labels (Palette/Prompt/Code/Files), got {count}: {out:?}"
+        );
+        // Verify label identities survive.
+        let visible = strip_ansi(&out);
+        for label in ["◆ Palette", "◆ Prompt", "◆ Code", "◆ Files"] {
+            assert!(
+                visible.contains(label),
+                "Minimum tier must include label {label:?}, got visible: {visible:?}"
+            );
+        }
+    }
+
+    /// D-13 Medium tier — exactly 6 `◆ ` heading labels.
+    #[test]
+    fn compose_full_medium_has_six_heading_labels() {
+        let palette = mock_palette();
+        let out = compose_full(&palette, FoldTier::Medium, None, None);
+        let count = out.matches("◆ ").count();
+        assert_eq!(
+            count, 6,
+            "Medium tier must emit exactly 6 ◆ labels (+ Git/Diff), got {count}: {out:?}"
+        );
+        let visible = strip_ansi(&out);
+        for label in ["◆ Git", "◆ Diff"] {
+            assert!(
+                visible.contains(label),
+                "Medium tier must include label {label:?}, got visible: {visible:?}"
+            );
+        }
+    }
+
+    /// D-13 Large tier — exactly 8 `◆ ` heading labels.
+    #[test]
+    fn compose_full_large_has_eight_heading_labels() {
+        let palette = mock_palette();
+        let out = compose_full(&palette, FoldTier::Large, None, None);
+        let count = out.matches("◆ ").count();
+        assert_eq!(
+            count, 8,
+            "Large tier must emit exactly 8 ◆ labels (+ Lazygit/Nvim), got {count}: {out:?}"
+        );
+        let visible = strip_ansi(&out);
+        for label in ["◆ Lazygit", "◆ Nvim"] {
+            assert!(
+                visible.contains(label),
+                "Large tier must include label {label:?}, got visible: {visible:?}"
+            );
+        }
+    }
+
+    /// Phase 18 D-01 invariant — when `roles` is `Some`, every `◆`
+    /// carries the brand-lavender byte triple `38;2;114;135;253` (from
+    /// `BRAND_LAVENDER_FIXED = #7287fd`). Uses the test-only
+    /// `brand::render_context::mock_{theme,context}` helpers so the test
+    /// is byte-stable across machines.
+    #[test]
+    fn heading_uses_roles_lavender_when_roles_some() {
+        let theme = crate::brand::render_context::mock_theme();
+        let ctx = crate::brand::render_context::mock_context(&theme);
+        let roles = Roles::new(&ctx);
+        let out = compose_full(&theme.palette, FoldTier::Minimum, Some(&roles), None);
+        assert!(
+            out.contains("38;2;114;135;253"),
+            "Roles::heading must emit brand-lavender bytes (#7287fd = 114;135;253), got: {out:?}"
+        );
+        // And the literal diamond still appears (bytes wrap the glyph).
+        assert!(
+            out.contains("◆"),
+            "◆ glyph must appear alongside the lavender fg wrapper, got: {out:?}"
+        );
+    }
+
+    /// Plan 19-06 contract — `prompt_line_override = Some(fork)` replaces
+    /// the self-drawn prompt verbatim. The override string must appear
+    /// and the self-draw signature must be absent.
+    #[test]
+    fn prompt_override_replaces_self_draw() {
+        let palette = mock_palette();
+        let marker = "(phase-19-test-override-prompt)";
+        let out = compose_full(&palette, FoldTier::Minimum, None, Some(marker));
+        assert!(
+            out.contains(marker),
+            "override string must appear verbatim in compose_full output, got: {out:?}"
+        );
+        // Self-draw signature — the `❯` prompt sigil — must NOT appear
+        // in the Prompt block when an override is injected.
+        let visible = strip_ansi(&out);
+        assert!(
+            !visible.contains('❯'),
+            "self-draw sigil ❯ must NOT appear when prompt_line_override is Some(_), got visible: {visible:?}"
+        );
+    }
 }
