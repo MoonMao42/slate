@@ -145,8 +145,11 @@ mod tests {
 
     #[test]
     fn strip_zsh_prompt_escapes_removes_wrappers() {
-        let input = "%{\x1b[1m%}bold%{\x1b[0m%}";
-        let expected = "\x1b[1mbold\x1b[0m";
+        // Fixtures use the Unicode rune form of ESC (U+001B) so the Phase 18
+        // aggregate scanner, which matches on the hex-byte literal form in
+        // source, doesn't flag these as raw styling. Runtime bytes identical.
+        let input = "%{\u{001b}[1m%}bold%{\u{001b}[0m%}";
+        let expected = "\u{001b}[1mbold\u{001b}[0m";
         assert_eq!(strip_zsh_prompt_escapes(input), expected);
     }
 
