@@ -26,9 +26,18 @@ pub struct PickerState {
     /// Snapshot of original opacity for rollback
     original_opacity: OpacityPreset,
     /// Has this state been explicitly committed by the user?
-    committed: bool,
+    ///
+    /// Shared with `RollbackGuard` via `Rc::clone` so both observe the same
+    /// cell — `commit()` flips it to `true` before the guard's Drop runs,
+    /// short-circuiting the managed/* rollback. Single-threaded only;
+    /// picker runs on the main thread.
+    committed: std::rc::Rc<std::cell::Cell<bool>>,
     /// Has user explicitly pressed ←→ to override light-theme opacity guard?
     opacity_override_in_session: bool,
+    /// Tab-toggled view mode (D-12). `false` = list-dominant (default per
+    /// session; not persisted across picker launches); `true` = full-screen
+    /// preview with ◆ Heading responsive fold.
+    pub preview_mode_full: bool,
 }
 
 impl PickerState {
@@ -73,8 +82,9 @@ impl PickerState {
             selected_opacity: current_opacity,
             original_theme_id: current_theme_id.to_string(),
             original_opacity: current_opacity,
-            committed: false,
+            committed: std::rc::Rc::new(std::cell::Cell::new(false)),
             opacity_override_in_session: false,
+            preview_mode_full: false, // D-12 default; Tab toggles
         })
     }
 
@@ -110,7 +120,19 @@ impl PickerState {
 
     /// Whether the user pressed Enter to commit this selection.
     pub fn is_committed(&self) -> bool {
-        self.committed
+        self.committed.get()
+    }
+
+    /// Returns a clone of the `Rc<Cell<bool>>` committed flag so the event
+    /// loop can hand it to `RollbackGuard::arm` (so both the guard's Drop
+    /// impl and the panic hook observe the same commit state).
+    ///
+    /// Currently only consumed by the `committed_flag_shared_with_guard`
+    /// unit test; Plan 19-07 (event_loop wiring) will wire this into
+    /// `launch_picker` so the `#[allow(dead_code)]` drops there.
+    #[allow(dead_code)]
+    pub(super) fn committed_flag(&self) -> std::rc::Rc<std::cell::Cell<bool>> {
+        self.committed.clone()
     }
 
     /// Jump to a specific theme by index (for resume-auto and mouse clicks)
@@ -182,9 +204,12 @@ impl PickerState {
         self.opacity_override_in_session
     }
 
-    /// Mark this selection as committed (will skip rollback in Drop)
+    /// Mark this selection as committed (will skip rollback in Drop).
+    ///
+    /// Writes through the shared `Rc<Cell<bool>>` so any cloned handle
+    /// (e.g. `RollbackGuard`) sees the flip before its own Drop runs.
     pub fn commit(&mut self) {
-        self.committed = true;
+        self.committed.set(true);
     }
 
     /// Restore to original snapshot (for rollback)
@@ -197,7 +222,7 @@ impl PickerState {
             self.selected_theme_index = pos;
         }
         self.selected_opacity = self.original_opacity;
-        self.committed = false;
+        self.committed.set(false);
     }
 
     /// Get current theme variant from registry
@@ -216,12 +241,12 @@ impl PickerState {
 }
 
 impl Drop for PickerState {
-    /// Guard: if not committed, restore original state (rollback safety)
+    /// In-memory-only rollback: reset cursor to original theme + opacity.
+    /// Disk-side rollback (managed/*) is handled by `RollbackGuard` in
+    /// `rollback_guard.rs` — parallel Drop structure (Phase 19 D-11).
     fn drop(&mut self) {
-        if !self.committed {
+        if !self.committed.get() {
             self.revert();
-            // TODO: Call rollback helper to restore preview path
-            // This will be integrated in Task 2
         }
     }
 }
@@ -358,9 +383,9 @@ mod tests {
     fn test_picker_state_commit_flag() {
         let mut state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
 
-        assert!(!state.committed);
+        assert!(!state.committed.get());
         state.commit();
-        assert!(state.committed);
+        assert!(state.committed.get());
     }
 
     #[test]
@@ -427,5 +452,87 @@ mod tests {
         assert!(theme.is_ok());
         let theme = theme.unwrap();
         assert_eq!(theme.id, "catppuccin-mocha");
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 19 Plan 19-03 — Task 01 additions (D-08 + D-12 invariants)
+    // ---------------------------------------------------------------------
+
+    /// D-12 default: picker opens in list-dominant mode, NOT full preview.
+    #[test]
+    fn preview_mode_full_defaults_to_list_dominant() {
+        let state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
+        assert!(
+            !state.preview_mode_full,
+            "picker must open in list-dominant mode per D-12"
+        );
+    }
+
+    /// D-08: family section headers are render-time decoration, not data.
+    /// `theme_ids` must contain only real variant IDs (none with the
+    /// lavender ◆ prefix or a bare family name like "Catppuccin").
+    #[test]
+    fn family_headers_are_not_in_theme_ids() {
+        let state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
+        for id in state.theme_ids() {
+            assert!(
+                !id.starts_with("◆"),
+                "theme_ids must not carry the lavender ◆ family header prefix; found: {id}"
+            );
+            // Family names are capitalised ("Catppuccin"); variant IDs are
+            // kebab-case ("catppuccin-mocha"). A raw family name in the
+            // vector would mean the render-time band leaked into data.
+            for family in FAMILY_SORT_ORDER.iter() {
+                assert_ne!(
+                    id, family,
+                    "bare family name {family:?} must never appear as a theme id"
+                );
+            }
+        }
+    }
+
+    /// D-08: cursor moves only over selectable variant IDs. Walking the
+    /// full move_down cycle must land on strings the registry resolves.
+    #[test]
+    fn section_header_not_selectable() {
+        let registry = ThemeRegistry::new().expect("registry must build");
+        let mut state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
+        let total = state.theme_ids().len();
+        assert!(total > 0, "registry must be non-empty for this invariant");
+
+        // Walk the full cycle + one extra to confirm wrap lands on data.
+        for _ in 0..=total {
+            let id = state.get_current_theme_id().to_string();
+            assert!(
+                registry.get(&id).is_some(),
+                "cursor visited a non-resolving id {id:?}; section headers leaked into theme_ids"
+            );
+            state.move_down();
+        }
+    }
+
+    /// Task 19-03-01 Test 4 — the committed flag is shared via Rc<Cell<bool>>
+    /// so `RollbackGuard` (Task 19-03-02) can observe commit decisions made
+    /// on the state after it clones the cell.
+    #[test]
+    fn committed_flag_shared_with_guard() {
+        let mut state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
+        let guard_view = state.committed_flag();
+        assert!(!guard_view.get(), "initial commit flag must be false");
+        assert!(
+            !state.is_committed(),
+            "is_committed must mirror the cell's initial value"
+        );
+
+        state.commit();
+
+        assert!(
+            guard_view.get(),
+            "the guard-held Rc<Cell<bool>> must observe the commit flip"
+        );
+        assert!(
+            state.is_committed(),
+            "is_committed must mirror the flipped cell"
+        );
     }
 }
