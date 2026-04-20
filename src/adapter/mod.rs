@@ -166,11 +166,7 @@ pub trait ToolAdapter: Send + Sync {
     /// fastfetch, lazygit, ls_colors, nvim, zsh_highlight) keep working
     /// unchanged. Migrating those to honor the injected env is a separate
     /// follow-up.
-    fn apply_theme_with_env(
-        &self,
-        theme: &ThemeVariant,
-        _env: &SlateEnv,
-    ) -> Result<ApplyOutcome> {
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, _env: &SlateEnv) -> Result<ApplyOutcome> {
         self.apply_theme(theme)
     }
 

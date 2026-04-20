@@ -271,7 +271,10 @@ mod tests {
         let ctx = mock_context(&theme);
         let roles = Roles::new(&ctx);
         let out = roles.code("frosted");
-        let bg = ctx.cached_pill_bg.as_deref().expect("truecolor mock caches pill bg");
+        let bg = ctx
+            .cached_pill_bg
+            .as_deref()
+            .expect("truecolor mock caches pill bg");
         assert!(
             out.contains(bg),
             "code pill should reuse the D-04 cached background, got: {out:?}"

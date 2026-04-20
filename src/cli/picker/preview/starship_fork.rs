@@ -28,8 +28,8 @@ use std::process::{Command, Stdio};
 /// to `compose::self_draw_prompt_from_sample_tokens`.
 #[derive(Debug)]
 #[allow(dead_code)] // Plan 19-07 event_loop wiring removes the attribute.
-// Plan 19-08: `pub(crate)` → `pub` so integration tests can match on
-// the error variants (V-11 integration coverage for the V12 path-guard).
+                    // Plan 19-08: `pub(crate)` → `pub` so integration tests can match on
+                    // the error variants (V-11 integration coverage for the V12 path-guard).
 pub enum StarshipForkError {
     /// Either `which::which("starship")` failed OR the caller-injected
     /// `starship_bin` path doesn't exist on disk.
@@ -54,9 +54,9 @@ pub enum StarshipForkError {
 /// Returns the stdout (with zsh %{ %} prompt-width escapes stripped) on
 /// success. On any failure the caller should fall back to self-drawing.
 #[allow(dead_code)] // Plan 19-07 event_loop wiring removes the attribute.
-// Plan 19-08: `pub(crate)` → `pub` so integration + bench targets can
-// call the fork without a shim. Production callers inside the crate are
-// unaffected by the visibility bump.
+                    // Plan 19-08: `pub(crate)` → `pub` so integration + bench targets can
+                    // call the fork without a shim. Production callers inside the crate are
+                    // unaffected by the visibility bump.
 pub fn fork_starship_prompt(
     managed_toml: &Path,
     managed_dir: &Path,

@@ -266,7 +266,10 @@ fn strip_starship_slate_palette(integration_path: &Path) -> Result<()> {
         changed = true;
     }
 
-    if let Some(palettes) = doc.get_mut("palettes").and_then(|value| value.as_table_mut()) {
+    if let Some(palettes) = doc
+        .get_mut("palettes")
+        .and_then(|value| value.as_table_mut())
+    {
         if palettes.remove("slate").is_some() {
             changed = true;
         }
@@ -298,8 +301,7 @@ fn strip_starship_slate_palette(integration_path: &Path) -> Result<()> {
 ///
 /// Byte-oriented to preserve non-UTF-8 content elsewhere in the file.
 fn remove_kitty_managed_references(env: &SlateEnv) -> Result<()> {
-    let integration_path =
-        crate::adapter::KittyAdapter::resolve_config_path_with_env(env);
+    let integration_path = crate::adapter::KittyAdapter::resolve_config_path_with_env(env);
     if !integration_path.exists() {
         return Ok(());
     }
@@ -329,7 +331,9 @@ fn remove_kitty_managed_references(env: &SlateEnv) -> Result<()> {
         }
         // Drop `listen_on unix:…/kitty-slate` — slate-owned socket marker.
         if trimmed.starts_with(b"listen_on")
-            && trimmed.windows(b"kitty-slate".len()).any(|w| w == b"kitty-slate")
+            && trimmed
+                .windows(b"kitty-slate".len())
+                .any(|w| w == b"kitty-slate")
         {
             continue;
         }

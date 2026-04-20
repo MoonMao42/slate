@@ -81,8 +81,7 @@ impl<'a> RenderContext<'a> {
     pub fn from_active_theme() -> Result<RenderContext<'static>> {
         let registry = ThemeRegistry::new()?;
         let configured_theme_id = current_theme_id()?;
-        let resolved_theme_id =
-            resolve_active_theme_id(configured_theme_id.as_deref(), &registry)?;
+        let resolved_theme_id = resolve_active_theme_id(configured_theme_id.as_deref(), &registry)?;
         Ok(RenderContext::new(cached_theme_ref(resolved_theme_id)?))
     }
 }
@@ -118,7 +117,9 @@ fn cached_theme_ref(theme_id: &str) -> Result<&'static ThemeVariant> {
     static CACHED: OnceLock<Mutex<HashMap<String, &'static ThemeVariant>>> = OnceLock::new();
     let cache = CACHED.get_or_init(|| Mutex::new(HashMap::new()));
     {
-        let guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(theme) = guard.get(theme_id) {
             return Ok(*theme);
         }
@@ -133,7 +134,9 @@ fn cached_theme_ref(theme_id: &str) -> Result<&'static ThemeVariant> {
         .clone();
     let leaked: &'static ThemeVariant = Box::leak(Box::new(theme));
 
-    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let theme = guard.entry(theme_id.to_string()).or_insert(leaked);
     Ok(*theme)
 }

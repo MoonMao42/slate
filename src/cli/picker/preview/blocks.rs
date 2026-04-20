@@ -332,8 +332,8 @@ pub fn render_palette_swatch(palette: &Palette, full: bool) -> String {
     // Background-cell helper: emits `ESC[48;2;R;G;B m` + `width` spaces + RESET.
     // On malformed palette hex (a theme-file bug, not a user-facing error)
     // we degrade to `width` uncolored spaces so layout stays stable.
-    let push_cell = |out: &mut String, hex: &str, width: usize| {
-        match PaletteRenderer::hex_to_rgb(hex) {
+    let push_cell =
+        |out: &mut String, hex: &str, width: usize| match PaletteRenderer::hex_to_rgb(hex) {
             Ok((r, g, b)) => {
                 out.push_str(&format!("\x1b[48;2;{r};{g};{b}m"));
                 for _ in 0..width {
@@ -346,8 +346,7 @@ pub fn render_palette_swatch(palette: &Palette, full: bool) -> String {
                     out.push(' ');
                 }
             }
-        }
-    };
+        };
 
     if !full {
         let mut out = String::with_capacity(128);
@@ -398,7 +397,14 @@ pub fn render_palette_swatch(palette: &Palette, full: bool) -> String {
         // the next cell. 10 cols also keeps the row aligned 1:1 with
         // pairs of the 5-col bg cells above (2 × 5 = 10 per label).
         const NAMES: [&str; 8] = [
-            "rosewater", "red", "peach", "yellow", "green", "sky", "blue", "mauve",
+            "rosewater",
+            "red",
+            "peach",
+            "yellow",
+            "green",
+            "sky",
+            "blue",
+            "mauve",
         ];
         out.push_str(&fg(&palette.foreground));
         for name in NAMES {
@@ -667,7 +673,14 @@ mod tests {
         assert_eq!(lines.len(), 2, "expected exactly 2 lines, got {lines:?}");
         let labels = lines[1];
         for name in [
-            "rosewater", "red", "peach", "yellow", "green", "sky", "blue", "mauve",
+            "rosewater",
+            "red",
+            "peach",
+            "yellow",
+            "green",
+            "sky",
+            "blue",
+            "mauve",
         ] {
             assert!(
                 labels.contains(name),
@@ -676,7 +689,14 @@ mod tests {
         }
         // Names must appear in the locked order.
         let positions: Vec<_> = [
-            "rosewater", "red", "peach", "yellow", "green", "sky", "blue", "mauve",
+            "rosewater",
+            "red",
+            "peach",
+            "yellow",
+            "green",
+            "sky",
+            "blue",
+            "mauve",
         ]
         .iter()
         .map(|n| labels.find(n).unwrap_or(usize::MAX))
@@ -700,4 +720,3 @@ mod tests {
         insta::assert_snapshot!("palette_swatch_8_named_cells", stripped);
     }
 }
-
