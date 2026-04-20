@@ -112,35 +112,7 @@ impl ToolRegistry {
         theme: &ThemeVariant,
         allowed_tools: Option<&HashSet<String>>,
     ) -> Vec<ToolApplyResult> {
-        self.adapters
-            .par_iter()
-            .filter(|adapter| adapter.apply_strategy() != ApplyStrategy::DetectAndInstall)
-            .filter(|adapter| {
-                allowed_tools.is_none_or(|allowed| allowed.contains(adapter.tool_name()))
-            })
-            .map(|adapter| {
-                let tool_name = adapter.tool_name().to_string();
-                let (status, requires_new_shell) = match adapter.is_installed() {
-                    Ok(false) => (ToolApplyStatus::Skipped(SkipReason::NotInstalled), false),
-                    Ok(true) => match adapter.apply_theme(theme) {
-                        Ok(ApplyOutcome::Applied { requires_new_shell }) => {
-                            (ToolApplyStatus::Applied, requires_new_shell)
-                        }
-                        Ok(ApplyOutcome::Skipped(reason)) => {
-                            (ToolApplyStatus::Skipped(reason), false)
-                        }
-                        Err(err) => (ToolApplyStatus::Failed(err), false),
-                    },
-                    Err(err) => (ToolApplyStatus::Failed(err), false),
-                };
-
-                ToolApplyResult {
-                    tool_name,
-                    status,
-                    requires_new_shell,
-                }
-            })
-            .collect()
+        self.apply_theme_with_filter_inner(allowed_tools, |adapter| adapter.apply_theme(theme))
     }
 
     fn apply_theme_with_filter_env(
@@ -149,6 +121,28 @@ impl ToolRegistry {
         env: &SlateEnv,
         allowed_tools: Option<&HashSet<String>>,
     ) -> Vec<ToolApplyResult> {
+        self.apply_theme_with_filter_inner(allowed_tools, |adapter| {
+            adapter.apply_theme_with_env(theme, env)
+        })
+    }
+
+    /// Shared body for the two public apply-with-filter variants.
+    ///
+    /// WR-03 (Phase 19 review): the non-env and env-aware paths are identical
+    /// aside from which `ToolAdapter` method they invoke. Any future change to
+    /// the filter predicate, `ToolApplyResult` shape, or error-to-status
+    /// mapping only needs to land here. `apply_call` is the per-adapter hook
+    /// that selects `apply_theme` vs `apply_theme_with_env`; it must be `Fn +
+    /// Sync` because rayon parallelises the map. `ToolAdapter: Send + Sync`
+    /// already makes adapter handles thread-safe.
+    fn apply_theme_with_filter_inner<F>(
+        &self,
+        allowed_tools: Option<&HashSet<String>>,
+        apply_call: F,
+    ) -> Vec<ToolApplyResult>
+    where
+        F: Fn(&dyn ToolAdapter) -> Result<ApplyOutcome> + Sync,
+    {
         self.adapters
             .par_iter()
             .filter(|adapter| adapter.apply_strategy() != ApplyStrategy::DetectAndInstall)
@@ -159,7 +153,7 @@ impl ToolRegistry {
                 let tool_name = adapter.tool_name().to_string();
                 let (status, requires_new_shell) = match adapter.is_installed() {
                     Ok(false) => (ToolApplyStatus::Skipped(SkipReason::NotInstalled), false),
-                    Ok(true) => match adapter.apply_theme_with_env(theme, env) {
+                    Ok(true) => match apply_call(adapter.as_ref()) {
                         Ok(ApplyOutcome::Applied { requires_new_shell }) => {
                             (ToolApplyStatus::Applied, requires_new_shell)
                         }
