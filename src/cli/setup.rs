@@ -178,10 +178,6 @@ pub fn handle_with_env(
         crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
     }
 
-    // DEMO-02 (D-C1): single-line hint pointing at `slate demo`. setup has no
-    // --auto / --quiet flags at this surface, so both guards are false.
-    crate::cli::demo::emit_demo_hint_once(false, false);
-
     // D-17 + 18-CONTEXT.md: whole-flow milestone — setup finished
     // successfully. Phase 20's SoundSink consumes this for the
     // completion SFX; in Phase 18 it routes to NoopSink (no-op).
