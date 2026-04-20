@@ -137,10 +137,9 @@ impl PickerState {
     /// loop can hand it to `RollbackGuard::arm` (so both the guard's Drop
     /// impl and the panic hook observe the same commit state).
     ///
-    /// Currently only consumed by the `committed_flag_shared_with_guard`
-    /// unit test; Plan 19-07 (event_loop wiring) will wire this into
-    /// `launch_picker` so the `#[allow(dead_code)]` drops there.
-    #[allow(dead_code)]
+    /// Consumed by `launch_picker` (Plan 19-07): when RollbackGuard::arm
+    /// receives this handle, `state.commit()` flips the cell before the
+    /// guard drops so its Drop short-circuits managed/* rollback.
     pub(super) fn committed_flag(&self) -> std::rc::Rc<std::cell::Cell<bool>> {
         self.committed.clone()
     }
