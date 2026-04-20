@@ -692,3 +692,4 @@ mod tests {
         insta::assert_snapshot!("palette_swatch_8_named_cells", stripped);
     }
 }
+

@@ -40,25 +40,33 @@ use crate::theme::Palette;
 use super::blocks;
 
 /// Responsive fold tier derived from terminal row count (D-13).
+///
+/// Thresholds were re-calibrated after UAT (2026-04-20) against the measured
+/// heights of each compose tier (including the ◆ Heading labels and blank
+/// separators) plus ~3 rows of picker chrome (logo + "preview · Tab to
+/// return" breadcrumb + blank). Minimum content = ~29 rows, Medium = ~42,
+/// Large = ~50. Original thresholds (32/40) were "number of blocks" not
+/// "row budget" and clipped the top of the preview in any real terminal.
 #[allow(dead_code)] // Wired by Plan 19-05 render::render mode dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FoldTier {
-    /// < 32 rows — stack 4 blocks: Palette / Prompt / Code / Files.
+    /// < 45 rows — stack 4 blocks: Palette / Prompt / Code / Files.
     Minimum,
-    /// 32..=39 rows — stack 6 blocks (+ Git, Diff).
+    /// 45..=53 rows — stack 6 blocks (+ Git, Diff).
     Medium,
-    /// ≥ 40 rows — stack 8 blocks (+ Lazygit, Nvim).
+    /// ≥ 54 rows — stack 8 blocks (+ Lazygit, Nvim).
     Large,
 }
 
 /// Decide the fold tier for `rows` terminal rows per D-13.
 ///
-/// Locked boundaries: 31→Minimum, 32→Medium, 39→Medium, 40→Large.
+/// Boundaries reflect actual compose output heights + picker chrome, not
+/// raw block counts — see `FoldTier` docstring.
 #[allow(dead_code)] // Wired by Plan 19-05 render::render mode dispatch.
 pub(crate) fn decide_fold_tier(rows: u16) -> FoldTier {
     match rows {
-        0..=31 => FoldTier::Minimum,
-        32..=39 => FoldTier::Medium,
+        0..=44 => FoldTier::Minimum,
+        45..=53 => FoldTier::Medium,
         _ => FoldTier::Large,
     }
 }
@@ -112,7 +120,14 @@ pub(crate) fn compose_full(
     push_heading(&mut out, roles, "Prompt");
     match prompt_line_override {
         Some(fork) => {
-            out.push_str(fork);
+            // starship's `add_newline = true` config option (enabled in
+            // slate's managed plain.toml) prepends a `\n` to its output so
+            // each invocation visually separates from the previous command.
+            // Inside the preview composer that leading newline shows up as
+            // an unwanted blank line between `◆ Prompt` and the prompt
+            // itself. Strip leading newlines so the prompt butts directly
+            // under its heading.
+            out.push_str(fork.trim_start_matches('\n'));
             if !fork.ends_with('\n') {
                 out.push('\n');
             }
@@ -256,20 +271,19 @@ mod tests {
 
     // ── Task 19-04-01 tests ─────────────────────────────────────────────
 
-    /// VALIDATION row 10 — responsive fold thresholds 24/32/40.
-    /// Exact boundary assertions: 31→Minimum, 32→Medium, 39→Medium, 40→Large.
+    /// Responsive fold thresholds — re-calibrated 2026-04-20 to match actual
+    /// compose heights + picker chrome. Boundary assertions:
+    /// 44→Minimum, 45→Medium, 53→Medium, 54→Large.
     #[test]
-    fn fold_thresholds_24_32_40() {
+    fn fold_thresholds_45_54() {
         assert!(matches!(decide_fold_tier(0), FoldTier::Minimum));
-        assert!(matches!(decide_fold_tier(23), FoldTier::Minimum));
-        assert!(matches!(decide_fold_tier(24), FoldTier::Minimum));
-        assert!(matches!(decide_fold_tier(31), FoldTier::Minimum));
-        assert!(matches!(decide_fold_tier(32), FoldTier::Medium));
-        assert!(matches!(decide_fold_tier(33), FoldTier::Medium));
-        assert!(matches!(decide_fold_tier(39), FoldTier::Medium));
-        assert!(matches!(decide_fold_tier(40), FoldTier::Large));
-        assert!(matches!(decide_fold_tier(50), FoldTier::Large));
-        assert!(matches!(decide_fold_tier(100), FoldTier::Large));
+        assert!(matches!(decide_fold_tier(32), FoldTier::Minimum));
+        assert!(matches!(decide_fold_tier(44), FoldTier::Minimum));
+        assert!(matches!(decide_fold_tier(45), FoldTier::Medium));
+        assert!(matches!(decide_fold_tier(46), FoldTier::Medium));
+        assert!(matches!(decide_fold_tier(53), FoldTier::Medium));
+        assert!(matches!(decide_fold_tier(54), FoldTier::Large));
+        assert!(matches!(decide_fold_tier(80), FoldTier::Large));
     }
 
     /// D-12 mini-preview contract — exactly 3 `\n` characters: swatch row, prompt row, separator row.

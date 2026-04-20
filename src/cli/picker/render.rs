@@ -72,28 +72,49 @@ fn render_list_dominant<W: io::Write>(
     let ctx = RenderContext::from_active_theme().ok();
     let roles = ctx.as_ref().map(Roles::new);
 
-    // Picker chrome header: "✦ slate  theme + opacity picker".
+    // Re-read terminal width early — needed for right-aligning the Tab hint
+    // in the chrome header as well as the selected-row pill below.
+    let (cols, _) = terminal::size().map_err(io_err).unwrap_or((80, rows));
+
+    // Picker chrome header: "✦ slate  theme + opacity picker      Tab ▸ preview".
     // `r.logo()` carries the brand-lavender ✦ glyph + `slate` wordmark;
     // `r.path()` dims the descriptor so the eye lands on the wordmark first.
+    // The right-aligned `Tab ▸ preview` hint is a permanent affordance —
+    // first-time users would otherwise miss the Tab shortcut buried in the
+    // footer help line.
     let logo = roles
         .as_ref()
         .map(|r| r.logo())
         .unwrap_or_else(|| "✦ slate".to_string());
+    let tagline_text = "theme + opacity picker";
     let tagline = roles
         .as_ref()
-        .map(|r| r.path("theme + opacity picker"))
-        .unwrap_or_else(|| "theme + opacity picker".to_string());
+        .map(|r| r.path(tagline_text))
+        .unwrap_or_else(|| tagline_text.to_string());
+    let tab_hint_text = "Tab ▸ preview";
+    let tab_hint = roles
+        .as_ref()
+        .map(|r| r.path(tab_hint_text))
+        .unwrap_or_else(|| tab_hint_text.to_string());
+    // Visible widths (ANSI-stripped). Logo "✦ slate" = 7 visible chars;
+    // tagline + hint are plain ASCII plus one ▸ glyph counted as 1 char.
+    const LOGO_VISIBLE: usize = 7;
+    let left_visible = LOGO_VISIBLE + 3 + tagline_text.chars().count(); // logo + 3sp + tagline
+    let right_visible = tab_hint_text.chars().count();
+    let gap = (cols as usize)
+        .saturating_sub(2 + left_visible + right_visible + 1) // 2 indent + 1 right margin
+        .max(2);
+    let spacer = " ".repeat(gap);
     queue_io(queue!(
         out,
         Print("\r\n  "),
         Print(&logo),
         Print("   "),
         Print(&tagline),
+        Print(&spacer),
+        Print(&tab_hint),
         Print("\r\n\r\n"),
     ))?;
-
-    // Re-read terminal width for full-width pill calculation.
-    let (cols, _) = terminal::size().map_err(io_err).unwrap_or((80, rows));
 
     let total_rows = rows as usize;
     let show_preview = total_rows > 20;
@@ -167,9 +188,9 @@ fn render_list_dominant<W: io::Write>(
     queue_io(queue!(out, Print("\r\n\r\n")))?;
 
     let help_body = if supports_opacity {
-        "↑↓/jk theme · ←→/hl opacity · Tab preview · Enter save · Esc cancel"
+        "↑↓/jk theme · ←→/hl opacity · Enter save · Esc cancel"
     } else {
-        "↑↓/jk theme · Tab preview · Enter save · Esc cancel"
+        "↑↓/jk theme · Enter save · Esc cancel"
     };
     let help_line = roles
         .as_ref()
@@ -177,8 +198,8 @@ fn render_list_dominant<W: io::Write>(
         .unwrap_or_else(|| help_body.to_string());
     let save_line = roles
         .as_ref()
-        .map(|r| r.path("s save-auto · r resume-auto"))
-        .unwrap_or_else(|| "s save-auto · r resume-auto".to_string());
+        .map(|r| r.path("s save-auto"))
+        .unwrap_or_else(|| "s save-auto".to_string());
     queue_io(queue!(
         out,
         Print("  "),
@@ -306,17 +327,37 @@ fn queue_variant_row<W: io::Write>(
     roles: Option<&Roles<'_>>,
 ) -> Result<()> {
     let desc = crate::theme::get_theme_description(&theme.id).unwrap_or("");
-    // Width budget for selected-row pill body: terminal cols minus the
-    // 2-space indent that sits OUTSIDE the pill. Saturating_sub guards
-    // against pathologically narrow terminals.
-    let width = (cols as usize).saturating_sub(2);
+    // Width budget for selected-row pill body.
+    //
+    // `Roles::command` wraps the body with ONE space of internal padding on
+    // each side (ANSI-BG + ` body ` + ANSI-reset), so the visible pill width
+    // is `body_width + 2`. Combined with the 2-space indent that sits OUTSIDE
+    // the pill, total visible row width = `4 + body_width`.
+    //
+    // To keep the row strictly inside the terminal (no wrap, no trailing
+    // empty lavender band from writing exactly `cols` chars + `\r\n`), leave
+    // 1 col of right margin → `body_width ≤ cols - 5`.
+    let width = (cols as usize).saturating_sub(5);
 
     if is_selected {
-        // Selected row body: "› {name:20}  {desc}" padded out to the full
-        // pill width. `Roles::command` wraps this in the D-04 alpha pill
-        // so the line reads as a single lavender band.
-        let body = format!("› {:<20}  {}", theme.name, desc);
-        let padded = format!("{:<width$}", body, width = width);
+        // Selected row body: "› {name:20}  {desc}   Tab ▸" right-aligned
+        // inside the pill. `Roles::command` wraps the whole padded string
+        // in the D-04 alpha pill so the line reads as a single lavender
+        // band. The `Tab ▸` tail reinforces the header's Tab-to-preview
+        // affordance at the point of action.
+        let left = format!("› {:<20}  {}", theme.name, desc);
+        const TAIL: &str = "Tab ▸";
+        let tail_cols = TAIL.chars().count();
+        let left_cols = left.chars().count();
+        // Minimum 2-char gap between desc and tail so they don't visually
+        // merge. If the row is too narrow to hold both + gap, drop the tail
+        // and fall back to plain padding.
+        let padded = if width >= left_cols + tail_cols + 2 {
+            let gap = width - left_cols - tail_cols;
+            format!("{left}{spacer}{TAIL}", spacer = " ".repeat(gap))
+        } else {
+            format!("{:<width$}", left, width = width)
+        };
         let pill = match roles {
             Some(r) => r.command(&padded),
             None => padded,
@@ -564,6 +605,11 @@ mod tests {
 
     /// D-14: the selected-row pill body must span roughly the full
     /// terminal width (indent of 2 cols sits outside the pill).
+    ///
+    /// Acceptance updated 2026-04-20 UAT — `queue_variant_row` now reserves 1
+    /// col of right margin so the pill never writes the terminal's last
+    /// column (which triggered an auto-wrap + empty trailing lavender band
+    /// in Ghostty). Effective visible pill = cols - 1.
     #[test]
     fn pill_cursor_padded_to_terminal_width() {
         let state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
@@ -575,14 +621,15 @@ mod tests {
             .find(|line| line.trim_start().starts_with("›"))
             .expect("selected row with › prefix should be present");
         // `Roles::command` wraps the padded body with one leading + one
-        // trailing space; we accept anything at or above `cols - 4` to be
-        // tolerant of the pill wrapper bytes.
+        // trailing space; we accept anything at or above `cols - 5` to match
+        // the current body-width budget (leading 2-space indent + 2-space
+        // pill internal padding + 1-col right margin = 5).
         let body = selected_line.trim_start_matches(' ');
         let width_body = body.chars().count();
         assert!(
-            width_body + 4 >= cols as usize,
-            "pill body shorter than cols-4; got {width_body} of expected {}",
-            cols - 4
+            width_body + 5 >= cols as usize,
+            "pill body shorter than cols-5; got {width_body} of expected {}",
+            cols - 5
         );
     }
 

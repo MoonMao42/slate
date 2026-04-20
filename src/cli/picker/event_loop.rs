@@ -17,7 +17,8 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
-use super::actions::{quick_resume_auto, quick_save_auto};
+use super::actions::quick_save_auto;
+use super::preview::starship_fork::fork_starship_prompt;
 use super::render::{
     get_effective_opacity_for_rendering, is_ghostty, render, render_afterglow_receipt,
     should_guard_light_theme_opacity,
@@ -236,6 +237,24 @@ fn handle_key(
     env: &SlateEnv,
     flash: &mut Option<Flash>,
 ) -> Result<KeyOutcome> {
+    // Navigation + opacity keys are list-dominant only. In full-preview mode
+    // the picker shows a detailed read-only render of the currently-selected
+    // theme; changing selection from here would be disorienting (no list
+    // cursor visible) so the keys are inert until the user returns to list.
+    if state.preview_mode_full {
+        match key.code {
+            KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Char('k')
+            | KeyCode::Char('j')
+            | KeyCode::Char('h')
+            | KeyCode::Char('l') => return Ok(KeyOutcome::Inert),
+            _ => {}
+        }
+    }
+
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
             state.move_up();
@@ -301,31 +320,17 @@ fn handle_key(
             });
             Ok(KeyOutcome::Inert)
         }
-        KeyCode::Char('r') => {
-            if let Some(text) = quick_resume_auto(state, env) {
-                *flash = Some(Flash {
-                    text,
-                    until: Instant::now() + Duration::from_millis(1200),
-                });
-            }
-            Ok(KeyOutcome::Continue)
-        }
         KeyCode::Tab => {
             // D-12 Tab toggle: flip list-dominant ↔ full-preview mode.
             //
-            // V-04 VERIFIED CONTRACT (src/cli/picker/event_loop.rs L175-189):
-            //   `KeyOutcome::Continue` → outer event_loop sets `dirty = true`
-            //   → next iteration's loop-top check (L122-126) calls
-            //   `render(state, ...)` with the NEW `state.preview_mode_full`
-            //   value. No `ContinueDirty` variant needed — Continue alone is
-            //   sufficient. The `tab_triggers_rerender_via_dirty_flag`
-            //   unit test proves this behaviorally (not just by reading source).
-            //
-            // Intentionally no BrandEvent dispatched here — Tab has no
-            // "selection" semantics (CONTEXT §Established Patterns); Phase 20
-            // SoundSink must stay silent on mode switches. The structural
-            // invariant `tab_does_not_dispatch_brand_event` enforces this.
+            // When flipping INTO preview mode, eagerly fork starship so the
+            // preview shows the real theme-aware prompt instead of the
+            // self-draw fallback. Failure is silent (compose_full falls back
+            // to self-draw) per D-04.
             state.preview_mode_full = !state.preview_mode_full;
+            if state.preview_mode_full {
+                fork_and_cache_prompt(state, env);
+            }
             Ok(KeyOutcome::Continue)
         }
         KeyCode::Enter => {
@@ -336,11 +341,49 @@ fn handle_key(
             dispatch(BrandEvent::Selection(SelectKind::PickerEnter));
             Ok(KeyOutcome::Commit)
         }
-        KeyCode::Esc | KeyCode::Char('q') => Ok(KeyOutcome::Cancel),
+        KeyCode::Esc | KeyCode::Char('q') => {
+            // Esc in full-preview mode returns to the list-dominant view
+            // instead of exiting. To leave the picker, user Escs again from
+            // the list view.
+            if state.preview_mode_full {
+                state.preview_mode_full = false;
+                return Ok(KeyOutcome::Continue);
+            }
+            Ok(KeyOutcome::Cancel)
+        }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Ok(KeyOutcome::Cancel)
         }
         _ => Ok(KeyOutcome::Inert),
+    }
+}
+
+/// Fork the `starship` binary once against the current managed toml +
+/// terminal width, and stash the output into `state.prompt_cache` keyed by
+/// theme id. A no-op when the managed toml is missing or when the cache is
+/// already populated for this theme. Errors are swallowed — `compose_full`
+/// degrades to `self_draw_prompt_from_sample_tokens` per D-04 silent
+/// fallback when `cached_prompt` returns `None`.
+fn fork_and_cache_prompt(state: &mut PickerState, env: &SlateEnv) {
+    let theme_id = state.get_current_theme_id().to_string();
+    if state.cached_prompt(&theme_id).is_some() {
+        return;
+    }
+
+    let managed_dir = env.config_dir().join("managed").join("starship");
+    // The managed starship config is named `plain.toml` today (single-file
+    // layout). If that changes, update `StarshipAdapter::apply_theme` in
+    // src/adapter/starship.rs — the fork must read the same file slate's
+    // writer writes to.
+    let managed_toml = managed_dir.join("plain.toml");
+    if !managed_toml.exists() {
+        return;
+    }
+
+    let width = terminal::size().map(|(c, _)| c).unwrap_or(80);
+
+    if let Ok(prompt) = fork_starship_prompt(&managed_toml, &managed_dir, width, None) {
+        state.cache_prompt(&theme_id, prompt);
     }
 }
 
