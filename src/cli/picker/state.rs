@@ -38,6 +38,15 @@ pub struct PickerState {
     /// session; not persisted across picker launches); `true` = full-screen
     /// preview with ◆ Heading responsive fold.
     pub preview_mode_full: bool,
+    /// Theme-id → forked starship prompt cache. Populated by Plan 19-07
+    /// event_loop glue when Tab mode triggers a fork for a new theme;
+    /// cleared on resize (because `--terminal-width` is part of the fork
+    /// args, so cached prompts no longer match the current layout).
+    ///
+    /// No LRU eviction — max 18 themes × ~100 bytes ≈ 2KB total
+    /// (RESEARCH Open Q3). Chose simple HashMap over an LRU crate since the
+    /// bounded cardinality makes eviction pointless for this use case.
+    prompt_cache: std::collections::HashMap<String, String>,
 }
 
 impl PickerState {
@@ -85,6 +94,7 @@ impl PickerState {
             committed: std::rc::Rc::new(std::cell::Cell::new(false)),
             opacity_override_in_session: false,
             preview_mode_full: false, // D-12 default; Tab toggles
+            prompt_cache: std::collections::HashMap::new(),
         })
     }
 
@@ -237,6 +247,37 @@ impl PickerState {
                     self.get_current_theme_id()
                 ))
             })
+    }
+
+    // -------------------------------------------------------------------
+    // Phase 19 Plan 19-06 — starship-fork prompt cache (D-04 Hybrid)
+    // -------------------------------------------------------------------
+
+    /// Read cached forked prompt for a theme; `None` = cache miss or
+    /// first Tab visit since the last resize.
+    ///
+    /// Populated by Plan 19-07 event_loop glue after a successful
+    /// `fork_starship_prompt` call; consumers feed the returned string
+    /// into `compose::compose_full` as `prompt_line_override`.
+    #[allow(dead_code)] // Plan 19-07 event_loop wiring removes the attribute.
+    pub(crate) fn cached_prompt(&self, theme_id: &str) -> Option<&str> {
+        self.prompt_cache.get(theme_id).map(String::as_str)
+    }
+
+    /// Store a forked prompt for reuse on subsequent Tab visits to the
+    /// same theme. Owned `String` is taken to sidestep borrow aliasing
+    /// during the event-loop hot path.
+    #[allow(dead_code)] // Plan 19-07 event_loop wiring removes the attribute.
+    pub(crate) fn cache_prompt(&mut self, theme_id: &str, prompt: String) {
+        self.prompt_cache.insert(theme_id.to_string(), prompt);
+    }
+
+    /// Clear the whole prompt cache — called on terminal resize because
+    /// `--terminal-width` is part of the fork args, so every cached
+    /// prompt is stale relative to the new layout.
+    #[allow(dead_code)] // Plan 19-07 event_loop wiring removes the attribute.
+    pub(crate) fn invalidate_prompt_cache(&mut self) {
+        self.prompt_cache.clear();
     }
 }
 
@@ -509,6 +550,49 @@ mod tests {
             );
             state.move_down();
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 19 Plan 19-06 — Task 02 additions (prompt_cache contract)
+    // ---------------------------------------------------------------------
+
+    /// Fresh state: no entries cached, so any lookup misses.
+    #[test]
+    fn prompt_cache_returns_none_for_missing_theme() {
+        let state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
+        assert_eq!(
+            state.cached_prompt("catppuccin-mocha"),
+            None,
+            "fresh state must report cache miss for every theme_id"
+        );
+    }
+
+    /// Inserted prompts round-trip verbatim (no trimming / normalisation).
+    #[test]
+    fn prompt_cache_returns_inserted_value() {
+        let mut state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
+        state.cache_prompt("catppuccin-mocha", "❯ ".to_string());
+        assert_eq!(
+            state.cached_prompt("catppuccin-mocha"),
+            Some("❯ "),
+            "cache_prompt/cached_prompt must round-trip the stored value"
+        );
+    }
+
+    /// `invalidate_prompt_cache` drops every entry — matches the resize
+    /// contract (terminal-width changed, all cached forks are stale).
+    #[test]
+    fn invalidate_prompt_cache_clears_all() {
+        let mut state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
+        state.cache_prompt("catppuccin-mocha", "p1".to_string());
+        state.cache_prompt("tokyo-night", "p2".to_string());
+        state.cache_prompt("gruvbox-dark", "p3".to_string());
+
+        state.invalidate_prompt_cache();
+
+        assert_eq!(state.cached_prompt("catppuccin-mocha"), None);
+        assert_eq!(state.cached_prompt("tokyo-night"), None);
+        assert_eq!(state.cached_prompt("gruvbox-dark"), None);
     }
 
     /// Task 19-03-01 Test 4 — the committed flag is shared via Rc<Cell<bool>>
