@@ -6,4 +6,9 @@
 
 pub mod blocks;
 pub(super) mod compose;
-pub(super) mod starship_fork;
+// Plan 19-08: promoted from `pub(super)` → `pub` so the integration test
+// suite (`tests/picker_starship_fork_fixture.rs`) can call
+// `fork_starship_prompt` + match on `StarshipForkError` without going
+// through a shim. Surface area is narrow (one fn + one enum); Phase 20
+// may consume it too.
+pub mod starship_fork;
