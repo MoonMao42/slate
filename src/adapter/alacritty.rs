@@ -88,8 +88,24 @@ impl AlacrittyAdapter {
             return Ok(());
         }
 
-        // Read existing integration file
-        let content = fs::read_to_string(integration_path)?;
+        // Read existing integration file. Byte-first read + explicit UTF-8
+        // check so a stray non-UTF-8 byte in alacritty.toml (issue #3)
+        // produces an actionable "which file, where" error instead of a
+        // bare IO "stream did not contain valid UTF-8".
+        let bytes = fs::read(integration_path).map_err(|e| {
+            SlateError::ConfigReadError(integration_path.display().to_string(), e.to_string())
+        })?;
+        let content = String::from_utf8(bytes).map_err(|e| {
+            SlateError::ConfigReadError(
+                integration_path.display().to_string(),
+                format!(
+                    "contains non-UTF-8 bytes at byte offset {} — slate cannot parse this file. \
+                     Inspect with `xxd {} | head` around that offset and remove the stray bytes.",
+                    e.utf8_error().valid_up_to(),
+                    integration_path.display()
+                ),
+            )
+        })?;
 
         // Parse as TOML AST (preserves comments and formatting)
         let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e| {
