@@ -80,6 +80,7 @@ fn handle_clean_inner() -> Result<()> {
     remove_ghostty_managed_references(&env)?;
     remove_alacritty_managed_references(&env)?;
     remove_kitty_managed_references(&env)?;
+    remove_starship_managed_references(&env)?;
     remove_tmux_managed_references(env.home())?;
     remove_delta_managed_references(env.home())?;
     remove_nvim_managed_references(&env)?;
@@ -208,6 +209,76 @@ fn remove_fish_loader(env: &SlateEnv) -> Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err.into()),
     }
+}
+
+/// Strip slate's in-place edits from the user's `starship.toml`.
+///
+/// StarshipAdapter (unlike the WriteAndInclude adapters) modifies the
+/// user's integration file directly — setting `palette = "slate"` at the
+/// root and injecting a `[palettes.slate]` table with the active theme's
+/// colors. Clean must undo both, otherwise the starship prompt stays
+/// themed even after every slate file is deleted (issue #3 tail):
+///   - `palette = "slate"` only reverted when currently set to "slate"
+///     (we can't restore the user's pre-slate palette — that's
+///     `slate restore <baseline>`'s job).
+///   - `[palettes.slate]` table removed unconditionally.
+///   - empty `[palettes]` table removed after cleanup.
+///
+/// Honors STARSHIP_CONFIG env override. Silently skips if the file is
+/// non-UTF-8 or unparseable — clean is best-effort and shouldn't fail
+/// the whole uninstall on a malformed config.
+fn remove_starship_managed_references(env: &SlateEnv) -> Result<()> {
+    let integration_path = std::env::var("STARSHIP_CONFIG")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| env.xdg_config_home().join("starship.toml"));
+    strip_starship_slate_palette(&integration_path)
+}
+
+/// Pure path-level helper — split from `remove_starship_managed_references`
+/// so tests can exercise the edit logic on a tempdir path without having
+/// to mutate the process-wide `STARSHIP_CONFIG` env var (feedback:
+/// no global env var mutation in tests).
+fn strip_starship_slate_palette(integration_path: &Path) -> Result<()> {
+    if !integration_path.exists() {
+        return Ok(());
+    }
+
+    let bytes = fs::read(integration_path)?;
+    let Ok(content) = String::from_utf8(bytes) else {
+        return Ok(()); // non-UTF-8 — leave it alone
+    };
+
+    let mut doc: toml_edit::DocumentMut = match content.parse() {
+        Ok(doc) => doc,
+        Err(_) => return Ok(()), // malformed TOML — leave it alone
+    };
+
+    let mut changed = false;
+
+    if doc
+        .get("palette")
+        .and_then(|value| value.as_str())
+        .is_some_and(|value| value == "slate")
+    {
+        doc.remove("palette");
+        changed = true;
+    }
+
+    if let Some(palettes) = doc.get_mut("palettes").and_then(|value| value.as_table_mut()) {
+        if palettes.remove("slate").is_some() {
+            changed = true;
+        }
+        if palettes.is_empty() {
+            doc.remove("palettes");
+        }
+    }
+
+    if changed {
+        fs::write(integration_path, doc.to_string())?;
+    }
+    Ok(())
 }
 
 /// Strip slate-owned lines from `~/.config/kitty/kitty.conf`.
@@ -659,6 +730,95 @@ mod tests {
         assert!(remove_nvim_managed_references(&env).is_ok());
         // No side effects — no directory materialized.
         assert!(!td.path().join(".config/nvim").exists());
+    }
+
+    #[test]
+    fn strip_starship_slate_palette_reverts_slate_palette_edits() {
+        let td = TempDir::new().unwrap();
+        let starship_path = td.path().join("starship.toml");
+
+        let before = r##"
+format = "$all"
+palette = "slate"
+
+[palettes.slate]
+red = "#f00"
+blue = "#00f"
+
+[palettes.other]
+green = "#0f0"
+"##;
+        std::fs::write(&starship_path, before).unwrap();
+
+        strip_starship_slate_palette(&starship_path).unwrap();
+
+        let after = std::fs::read_to_string(&starship_path).unwrap();
+        assert!(!after.contains("palette = \"slate\""));
+        assert!(!after.contains("[palettes.slate]"));
+        // Unrelated user palettes stay — only the slate one is removed.
+        assert!(after.contains("[palettes.other]"));
+        assert!(after.contains("green = \"#0f0\""));
+        // User format setting untouched.
+        assert!(after.contains("format = \"$all\""));
+    }
+
+    #[test]
+    fn strip_starship_slate_palette_leaves_user_palette_alone() {
+        let td = TempDir::new().unwrap();
+        let starship_path = td.path().join("starship.toml");
+
+        // User set palette to their own choice BEFORE slate ever ran.
+        // slate never changed palette to "slate" here, so clean must not
+        // rip out the user's setting.
+        let before = "palette = \"nord\"\n";
+        std::fs::write(&starship_path, before).unwrap();
+
+        strip_starship_slate_palette(&starship_path).unwrap();
+
+        let after = std::fs::read_to_string(&starship_path).unwrap();
+        assert!(after.contains("palette = \"nord\""));
+    }
+
+    #[test]
+    fn strip_starship_slate_palette_is_noop_on_missing_file() {
+        let td = TempDir::new().unwrap();
+        let missing = td.path().join("nope.toml");
+        assert!(strip_starship_slate_palette(&missing).is_ok());
+    }
+
+    #[test]
+    fn strip_starship_slate_palette_does_not_fail_on_unparseable_toml() {
+        let td = TempDir::new().unwrap();
+        let starship_path = td.path().join("starship.toml");
+        std::fs::write(&starship_path, "this is not valid = toml [ {").unwrap();
+
+        // Clean is best-effort — unparseable config must not block uninstall.
+        assert!(strip_starship_slate_palette(&starship_path).is_ok());
+        // Original garbage content preserved.
+        let after = std::fs::read_to_string(&starship_path).unwrap();
+        assert!(after.contains("this is not valid = toml"));
+    }
+
+    #[test]
+    fn strip_starship_slate_palette_drops_empty_palettes_table() {
+        let td = TempDir::new().unwrap();
+        let starship_path = td.path().join("starship.toml");
+
+        // User's starship.toml had no palettes before slate — after slate
+        // ran, the [palettes] table exists with only the slate child.
+        // Removing that child must also remove the now-empty parent table.
+        let before = r##"palette = "slate"
+
+[palettes.slate]
+red = "#f00"
+"##;
+        std::fs::write(&starship_path, before).unwrap();
+
+        strip_starship_slate_palette(&starship_path).unwrap();
+
+        let after = std::fs::read_to_string(&starship_path).unwrap();
+        assert!(!after.contains("[palettes.slate]"));
+        assert!(!after.contains("[palettes]"));
     }
 
     #[test]
