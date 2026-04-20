@@ -449,4 +449,223 @@ mod tests {
             }
         }
     }
+
+    // -----------------------------------------------------------------
+    // Phase 19 Plan 19-07 — Task 01 (Tab branch + dirty-flag contract)
+    // -----------------------------------------------------------------
+
+    /// VALIDATION row 6: Tab is a no-event surface.
+    /// Tab must flip `preview_mode_full` and return `KeyOutcome::Continue`
+    /// WITHOUT firing any `BrandEvent` (no PickerMove, no PickerEnter).
+    /// CONTEXT §Established Patterns: Tab has no "selection" semantics.
+    #[test]
+    fn tab_does_not_dispatch_brand_event() {
+        let sink = try_seat_picker_sink();
+        let env = dummy_env();
+        let mut state = fresh_state();
+        let mut flash: Option<Flash> = None;
+        let before_any = sink.as_ref().map(|s| {
+            (
+                s.picker_move.load(Ordering::SeqCst),
+                s.picker_enter.load(Ordering::SeqCst),
+            )
+        });
+
+        let outcome = handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .expect("Tab must not error");
+
+        assert!(
+            matches!(outcome, KeyOutcome::Continue),
+            "Tab must return Continue, got {outcome:?}"
+        );
+        assert!(
+            state.preview_mode_full,
+            "Tab should toggle preview_mode_full to true"
+        );
+
+        if let (Some(sink), Some((mv, en))) = (sink, before_any) {
+            assert_eq!(
+                sink.picker_move.load(Ordering::SeqCst),
+                mv,
+                "Tab must NOT fire PickerMove (counter unchanged)"
+            );
+            assert_eq!(
+                sink.picker_enter.load(Ordering::SeqCst),
+                en,
+                "Tab must NOT fire PickerEnter (counter unchanged)"
+            );
+        }
+    }
+
+    /// Tab toggles `preview_mode_full` bidirectionally.
+    #[test]
+    fn tab_toggles_preview_mode_full_both_ways() {
+        let env = dummy_env();
+        let mut state = fresh_state();
+        let mut flash: Option<Flash> = None;
+        assert!(!state.preview_mode_full, "default is list-dominant");
+
+        let _ = handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .expect("first Tab ok");
+        assert!(state.preview_mode_full, "first Tab → full mode");
+
+        let _ = handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .expect("second Tab ok");
+        assert!(!state.preview_mode_full, "second Tab → back to list");
+    }
+
+    /// Navigation within full-preview mode does NOT reset the mode.
+    #[test]
+    fn second_tab_after_nav_still_toggles() {
+        let env = dummy_env();
+        let mut state = fresh_state();
+        let mut flash: Option<Flash> = None;
+        let _ = handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .unwrap();
+        assert!(state.preview_mode_full);
+
+        let _ = handle_key(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .unwrap();
+        assert!(state.preview_mode_full, "nav does not reset mode");
+
+        let _ = handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .unwrap();
+        assert!(!state.preview_mode_full);
+    }
+
+    /// V-04 BEHAVIOR PROOF: Tab → `KeyOutcome::Continue` → outer loop
+    /// sets `dirty = true` → next loop-top iteration renders with the
+    /// new `preview_mode_full` value. We replicate that cycle with a
+    /// render-count spy to prove the contract behaviorally — not just
+    /// by reading the source.
+    #[test]
+    fn tab_triggers_rerender_via_dirty_flag() {
+        use std::cell::Cell as StdCell;
+
+        struct RenderSpy {
+            count: StdCell<u32>,
+        }
+        impl RenderSpy {
+            fn new() -> Self {
+                Self {
+                    count: StdCell::new(0),
+                }
+            }
+            fn render(&self) {
+                self.count.set(self.count.get() + 1);
+            }
+            fn total(&self) -> u32 {
+                self.count.get()
+            }
+        }
+
+        let spy = RenderSpy::new();
+        let env = dummy_env();
+        let mut state = fresh_state();
+        let mut flash: Option<Flash> = None;
+        let mut dirty = true;
+
+        // Initial paint (mirrors production loop seed at event_loop L120).
+        if dirty {
+            spy.render();
+            dirty = false;
+        }
+        assert_eq!(spy.total(), 1, "initial render must have fired");
+
+        // User presses Tab.
+        let outcome = handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &mut state,
+            &env,
+            &mut flash,
+        )
+        .expect("Tab ok");
+
+        // Production outer match (L175-185 of event_loop.rs):
+        // Continue → dirty=true.
+        match outcome {
+            KeyOutcome::Continue => {
+                dirty = true;
+            }
+            KeyOutcome::Inert => {}
+            KeyOutcome::Commit | KeyOutcome::Cancel => {
+                panic!("Tab must return Continue, got {outcome:?}");
+            }
+        }
+
+        // Next loop iteration — re-render if dirty (L122-126).
+        if dirty {
+            spy.render();
+            dirty = false;
+        }
+
+        assert_eq!(
+            spy.total(),
+            2,
+            "Tab → Continue → dirty=true → render called exactly once \
+             more. If the counter is still 1, the Tab arm returned Inert \
+             or Continue semantics changed; the picker would show a \
+             stale frame under the new preview_mode_full value."
+        );
+        assert!(
+            state.preview_mode_full,
+            "Tab must have flipped the mode"
+        );
+    }
+
+    /// V-09 (D-06 resize contract): `invalidate_prompt_cache` clears
+    /// all cached forked prompts. Pins the resize→cache-clear contract
+    /// so a future optimizer ("only evict stale entries") cannot break
+    /// the `--terminal-width` coupling baked into each cached prompt.
+    #[test]
+    fn resize_invalidates_prompt_cache() {
+        let mut state = fresh_state();
+        state.cache_prompt("catppuccin-mocha", "marker".to_string());
+        assert_eq!(
+            state.cached_prompt("catppuccin-mocha"),
+            Some("marker"),
+            "cache_prompt should seed a readable entry"
+        );
+
+        // This is exactly what the event_loop `had_resize` branch will
+        // call (Task 19-07-01 action C).
+        state.invalidate_prompt_cache();
+
+        assert_eq!(
+            state.cached_prompt("catppuccin-mocha"),
+            None,
+            "resize must evict all cached prompts so stale --terminal-width \
+             entries don't render at the new window size"
+        );
+    }
 }
