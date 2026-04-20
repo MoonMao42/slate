@@ -26,7 +26,6 @@ use std::rc::Rc;
 
 /// RAII guard that restores `managed/*` to the original theme + opacity
 /// when the picker exits without `committed` being set to `true`.
-#[allow(dead_code)] // Wired by Plan 19-07 (launch_picker)
 pub(crate) struct RollbackGuard {
     env: SlateEnv,
     original_theme_id: String,
@@ -38,7 +37,6 @@ impl RollbackGuard {
     /// Arm the guard at picker launch. Snapshots the original theme + opacity
     /// and takes a shared handle to the committed flag (same `Rc<Cell<bool>>`
     /// held by `PickerState::committed`).
-    #[allow(dead_code)] // Wired by Plan 19-07 (launch_picker)
     pub(crate) fn arm(
         env: &SlateEnv,
         original_theme_id: &str,
@@ -76,7 +74,6 @@ impl Drop for RollbackGuard {
 /// in release builds (RESEARCH §Pitfall 1). The hook captures the env +
 /// original theme by move, so it carries its own state independent of
 /// any guard Drop order.
-#[allow(dead_code)] // Wired by Plan 19-07 (launch_picker)
 pub(crate) fn install_rollback_panic_hook(
     env: SlateEnv,
     original_theme_id: String,

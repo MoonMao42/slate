@@ -44,7 +44,14 @@ pub(super) fn render_into<W: io::Write>(
     rows: u16,
 ) -> Result<()> {
     if state.preview_mode_full {
-        render_full_preview(out, state, flash_text, cols, rows)
+        // Plan 19-07 Task 02: the full-preview path accepts an optional
+        // forked-prompt string. `render_into` is read-only (`&PickerState`)
+        // so it does NOT perform the fork itself — that's the event_loop's
+        // job (Tab arm; cache populated on new theme entry). Here we
+        // simply consult the cache via `cached_prompt` when Plan 19-06's
+        // fork has populated it; otherwise compose self-draws per D-04.
+        let override_prompt = state.cached_prompt(state.get_current_theme_id());
+        render_full_preview(out, state, flash_text, cols, rows, override_prompt)
     } else {
         render_list_dominant(out, state, flash_text, cols, rows)
     }
@@ -201,15 +208,18 @@ fn render_list_dominant<W: io::Write>(
 /// labels (see Plan 19-04). Opacity strip + help-line chrome is
 /// intentionally hidden here (D-09 stays in list-dominant only).
 ///
-/// `prompt_line_override` is passed as `None` at this layer — Plan 19-07
-/// event_loop glue will inject a real forked starship prompt; the renderer
-/// itself stays fork-agnostic.
+/// `prompt_line_override` is Plan 19-07's glue point: the caller (event
+/// loop / `render_into`) looks up Plan 19-06's `PickerState::cached_prompt`
+/// for the current theme and passes `Some(&forked)` when a fork landed;
+/// `None` falls back to the self-drawn SAMPLE_TOKENS prompt per D-04.
+/// This renderer stays fork-agnostic.
 fn render_full_preview<W: io::Write>(
     out: &mut W,
     state: &PickerState,
     flash_text: Option<&str>,
     _cols: u16,
     rows: u16,
+    prompt_line_override: Option<&str>,
 ) -> Result<()> {
     queue_io(queue!(out, Clear(ClearType::All), MoveTo(0, 0)))?;
 
@@ -236,9 +246,18 @@ fn render_full_preview<W: io::Write>(
 
     let current_theme = state.get_current_theme()?;
     let tier = compose::decide_fold_tier(rows);
-    // Plan 19-07 event_loop glue may swap `None` for the forked starship
-    // prompt. Compose self-draws when None.
-    let body = compose::compose_full(&current_theme.palette, tier, roles.as_ref(), None);
+    // Plan 19-07 Task 02: prompt_line_override is forwarded straight to
+    // compose_full. When event_loop's Tab branch populates
+    // PickerState::prompt_cache via Plan 19-06's fork_starship_prompt,
+    // render_into picks it up via cached_prompt and passes it here; on
+    // fork failure the cache stays empty so this receives None and
+    // compose_full self-draws (D-04 silent fallback).
+    let body = compose::compose_full(
+        &current_theme.palette,
+        tier,
+        roles.as_ref(),
+        prompt_line_override,
+    );
     // Prepend 2-space indent to every line so alt-screen layout matches
     // the list-dominant indent width.
     let indented = body.replace('\n', "\r\n  ");
@@ -583,6 +602,33 @@ mod tests {
                 "expected description '{desc}' in non-selected row; got:\n{visible}"
             );
         }
+    }
+
+    /// Plan 19-07 Task 02: `render_full_preview` accepts a
+    /// `prompt_line_override: Option<&str>` and forwards it into
+    /// `compose::compose_full` so Plan 19-06's starship fork can inject
+    /// the real forked prompt into the `◆ Prompt` block.
+    ///
+    /// Contract proof: when called with `Some("__FORK_MARKER__")` the
+    /// rendered alt-screen output contains that marker in the prompt
+    /// slot. `None` falls back to the self-drawn SAMPLE_TOKENS prompt
+    /// (already covered by `mode_dispatch_uses_preview_mode_full`).
+    #[test]
+    fn render_full_preview_forwards_prompt_override() {
+        let mut state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid).unwrap();
+        state.preview_mode_full = true;
+        let marker = "__FORK_MARKER__";
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        render_full_preview(&mut buf, &state, None, 80, 24, Some(marker))
+            .expect("render_full_preview with override must succeed");
+        let bytes = buf.into_inner();
+        let visible = strip_ansi(&bytes);
+        assert!(
+            visible.contains(marker),
+            "render_full_preview must forward prompt_line_override into the \
+             ◆ Prompt block so Plan 19-06 starship fork output lands in the \
+             preview. Got:\n{visible}"
+        );
     }
 
     /// D-12: `render_into` dispatches on `state.preview_mode_full`.
