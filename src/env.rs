@@ -7,6 +7,13 @@ use std::path::{Path, PathBuf};
 /// - Dependency injection: all path resolution goes through SlateEnv
 /// - Test isolation: tests can inject a tempdir via with_home()
 /// - Single source of truth: all adapters and config code use SlateEnv methods
+///
+/// `Clone` is derived so Phase 19 `RollbackGuard` (and the companion
+/// `install_rollback_panic_hook` closure) can own an env snapshot
+/// independent of the caller's borrow. All fields are owned `PathBuf`s,
+/// so cloning is O(paths) with no shared state — safe regardless of call
+/// site.
+#[derive(Clone)]
 pub struct SlateEnv {
     home: PathBuf,
     xdg_config_home: PathBuf,
