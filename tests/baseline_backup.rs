@@ -32,8 +32,29 @@ fn test_baseline_has_correct_metadata() {
     // Baseline should snapshot the fixed target list, including absent files.
     assert_eq!(
         baseline.entries.len(),
-        19,
+        22,
         "Baseline should capture the full pre-slate target set"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "kitty"),
+        "Baseline should track kitty.conf so restore can roll back slate-added include/remote-control lines"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "nvim-init-lua"),
+        "Baseline should track nvim init.lua so restore can remove the slate marker block"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "nvim-init-vim"),
+        "Baseline should track nvim init.vim so restore can remove the slate marker block"
     );
     assert!(
         baseline

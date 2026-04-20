@@ -57,11 +57,14 @@ fn baseline_snapshot_targets(env: &SlateEnv) -> Vec<SnapshotTarget> {
         .integration_config_path_with_env(env)
         .unwrap_or_else(|_| env.xdg_config_home().join("ghostty/config.ghostty"));
     let alacritty_path = env.xdg_config_home().join("alacritty/alacritty.toml");
+    let kitty_path = env.xdg_config_home().join("kitty/kitty.conf");
     let starship_path = std::env::var("STARSHIP_CONFIG")
         .ok()
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| env.xdg_config_home().join("starship.toml"));
+    let nvim_init_lua = env.xdg_config_home().join("nvim/init.lua");
+    let nvim_init_vim = env.xdg_config_home().join("nvim/init.vim");
 
     vec![
         SnapshotTarget {
@@ -108,9 +111,28 @@ fn baseline_snapshot_targets(env: &SlateEnv) -> Vec<SnapshotTarget> {
             path: alacritty_path,
         },
         SnapshotTarget {
+            tool_key: "kitty",
+            display_tool: "Kitty",
+            path: kitty_path,
+        },
+        SnapshotTarget {
             tool_key: "starship",
             display_tool: "Starship",
             path: starship_path,
+        },
+        // nvim init files get a slate marker block (pcall(require, 'slate'))
+        // on setup; baseline must capture the pre-install state so restore
+        // can remove the block. Both .lua and .vim are included because
+        // slate writes to whichever exists.
+        SnapshotTarget {
+            tool_key: "nvim-init-lua",
+            display_tool: "Neovim (init.lua)",
+            path: nvim_init_lua,
+        },
+        SnapshotTarget {
+            tool_key: "nvim-init-vim",
+            display_tool: "Neovim (init.vim)",
+            path: nvim_init_vim,
         },
         SnapshotTarget {
             tool_key: "slate-current",
