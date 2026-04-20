@@ -1,24 +1,17 @@
-//! `slate demo` — single-screen palette showcase (Phase 15).
+//! `slate demo` — 4-block palette renderer (migration source for Phase 19).
 //!
-//! Renders a curated read-only demo of the active palette (code snippet, file
-//! tree, git-log excerpt, progress bar) in well under 1 second with no
-//! network / external-tool calls. Also hosts the DEMO-02 session-local hint
-//! emitter consumed from `slate setup` and `slate theme <id>`.
+//! Phase 19 D-05/D-06/D-07: the `slate demo` CLI command + DEMO-02 hint
+//! infrastructure have been retired. The 4-block renderer functions
+//! (`render_code_block` / `render_tree_block` / `render_git_log_block` /
+//! `render_progress_block`) remain here TEMPORARILY so Plan 19-02
+//! (Wave 1) can migrate them into `src/cli/picker/preview/blocks.rs`.
+//!
+//! After Plan 19-02 ships, this file is deleted wholesale.
 
 use crate::adapter::palette_renderer::PaletteRenderer;
-use crate::brand::render_context::RenderContext;
-use crate::brand::roles::Roles;
-use crate::brand::Language;
 use crate::cli::picker::preview_panel::SemanticColor;
-use crate::config::ConfigManager;
 use crate::design::file_type_colors::{classify, FileKind};
-use crate::env::SlateEnv;
-use crate::error::{Result, SlateError};
-use crate::theme::{Palette, ThemeRegistry, DEFAULT_THEME_ID};
-use std::io::{self, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
-
-static HINT_EMITTED: AtomicBool = AtomicBool::new(false);
+use crate::theme::Palette;
 
 // SWATCH-RENDERER: intentionally raw ANSI (renders palette colors, not role text).
 // `RESET` pairs with every `fg()` escape below, so it lives inside the same
@@ -36,37 +29,6 @@ fn fg(hex: &str) -> String {
         Ok((r, g, b)) => format!("\x1b[38;2;{r};{g};{b}m"),
         Err(_) => String::new(),
     }
-}
-
-/// Top-level entry point for `slate demo`. Size-gates, loads the active theme,
-/// renders the 4-block showcase, and flushes stdout once.
-pub fn handle() -> Result<()> {
-    // 1. Size gate FIRST — before any work. `crossterm::terminal::size()` can
-    //    return Err on non-TTY; treat that as (0, 0) so the gate rejects.
-    let (cols, rows) = crossterm::terminal::size().unwrap_or((0, 0));
-    if cols < 80 || rows < 24 {
-        return Err(SlateError::Internal(Language::demo_size_error(cols, rows)));
-    }
-
-    // 2. Load theme (strict; no fallback — demo can't render without a palette).
-    let env = SlateEnv::from_process()?;
-    let config = ConfigManager::with_env(&env)?;
-    let theme_id = config
-        .get_current_theme()?
-        .unwrap_or_else(|| DEFAULT_THEME_ID.to_string());
-    let registry = ThemeRegistry::new()?;
-    let theme = registry
-        .get(&theme_id)
-        .ok_or_else(|| SlateError::ThemeNotFound(theme_id.clone()))?;
-
-    // 3. Render.
-    let output = render_to_string(&theme.palette);
-
-    // 4. Single flush.
-    let mut stdout = io::stdout();
-    stdout.write_all(output.as_bytes())?;
-    stdout.flush()?;
-    Ok(())
 }
 
 /// Pure render entry point — no stdout, no size gate. Used by unit tests and
@@ -362,49 +324,6 @@ fn render_progress_block(palette: &Palette) -> String {
     out
 }
 
-/// Emit the DEMO-02 hint once per process. Suppressed when `auto` or `quiet`.
-///
-/// Uses `HINT_EMITTED.swap(true, SeqCst)` so the first caller "wins" and
-/// every subsequent call is a silent no-op — session-local dedup per D-C2.
-///
-/// Visual intent (per sketch MANIFEST.md): `DEMO_HINT` is a neutral,
-/// curiosity-lure nudge that should stay out of the user's main attention
-/// path — `r.path()` (dim italic) matches the existing understated feel.
-/// Falls back to plain text when the theme registry or RenderContext is
-/// unavailable (D-05).
-pub fn emit_demo_hint_once(auto: bool, quiet: bool) {
-    if auto || quiet {
-        return;
-    }
-    if HINT_EMITTED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    println!();
-    println!("{}", demo_hint_line());
-}
-
-/// Pure formatter for the DEMO-02 hint. Extracted so tests can assert
-/// byte-level output without triggering the `HINT_EMITTED` latch.
-fn demo_hint_line() -> String {
-    let ctx = RenderContext::from_active_theme().ok();
-    let roles = ctx.as_ref().map(Roles::new);
-    hint_text(roles.as_ref(), Language::DEMO_HINT)
-}
-
-fn hint_text(roles: Option<&Roles<'_>>, text: &str) -> String {
-    match roles {
-        Some(r) => r.path(text),
-        None => text.to_string(),
-    }
-}
-
-/// Mark the hint as already-emitted for this process, so downstream call sites
-/// skip emission. Used by `slate set` to prevent demo-hint + deprecation-tip
-/// co-occurrence (per D-C3).
-pub fn suppress_demo_hint_for_this_process() {
-    HINT_EMITTED.store(true, Ordering::SeqCst);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -560,66 +479,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn emit_demo_hint_once_auto_is_silent() {
-        // With auto=true, the call is a no-op regardless of HINT_EMITTED state.
-        // Indirect assertion: HINT_EMITTED must NOT be set by this call alone.
-        // The static is process-local and shared across tests in this mod, so
-        // we only assert that this code path returns without panicking.
-        emit_demo_hint_once(true, false);
-    }
-
-    #[test]
-    fn emit_demo_hint_once_quiet_is_silent() {
-        emit_demo_hint_once(false, true);
-    }
-
-    #[test]
-    fn suppress_demo_hint_marks_emitted_flag() {
-        // After suppress, HINT_EMITTED is true, so subsequent emit_once is a
-        // no-op. We assert the flag directly; other tests in this mod share
-        // the same static, so we accept the process-local coupling.
-        suppress_demo_hint_for_this_process();
-        assert!(HINT_EMITTED.load(Ordering::SeqCst));
-    }
-
-    /// Wave 5 `demo_hint_snapshot` — the hint copy routes through
-    /// `Roles::path` (dim + italic SGR bytes `2;3`) and NEVER through any
-    /// bare raw styling escape inside this file.
-    #[test]
-    fn demo_hint_line_carries_path_role_bytes() {
-        use crate::brand::render_context::{mock_context, mock_theme};
-        let theme = mock_theme();
-        let ctx = mock_context(&theme);
-        let roles = Roles::new(&ctx);
-        let out = hint_text(Some(&roles), Language::DEMO_HINT);
-        // Dim + italic SGR shape (ESC `[` `2` `;` `3` m ... reset) — byte-slice
-        // probe so the literal assertion doesn't itself trip the Wave-5 grep
-        // gate. Same shape as Wave-3's
-        // `status_panel_preserves_palette_swatch`.
-        let bytes = out.as_bytes();
-        assert!(
-            bytes
-                .windows(5)
-                .any(|w| w == [0x1b, b'[', b'2', b';', b'3']),
-            "demo hint must be rendered through r.path() (dim+italic), got: {out:?}"
-        );
-        assert!(out.contains(Language::DEMO_HINT));
-    }
-
-    /// Wave 5 `demo_hint_none_fallback` — with no Roles context, the hint
-    /// degrades to plain text (D-05).
-    #[test]
-    fn demo_hint_falls_back_to_plain_when_roles_absent() {
-        let out = hint_text(None, Language::DEMO_HINT);
-        assert_eq!(out, Language::DEMO_HINT);
-        assert!(!out.contains('\x1b'));
-    }
-
-    /// Wave 5 `demo_swatch_preserved` — the palette showcase is the whole
-    /// point of `slate demo`, so the render output MUST carry many `38;2;`
-    /// 24-bit swatch escapes. Byte-slice probe avoids tripping the gate
-    /// ourselves.
+    /// `demo_swatch_preserved` — the palette showcase is the whole
+    /// point of the 4-block renderer, so the render output MUST carry
+    /// many `38;2;` 24-bit swatch escapes. Byte-slice probe avoids
+    /// tripping the Wave-5 grep gate ourselves.
     #[test]
     fn demo_render_preserves_many_palette_swatches() {
         let out = render_to_string(&mocha_palette());

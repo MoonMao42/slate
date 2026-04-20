@@ -1,5 +1,60 @@
 use slate_cli::theme::ThemeRegistry;
 
+/// Phase 19 D-05: `slate demo` command has been retired. Re-adding a Demo
+/// variant to the `Commands` enum (or an `emit_demo_hint_once` call site)
+/// would silently resurrect DEMO-02 and betray the Phase 19 CONTEXT
+/// §domain "Gemini: previewing is a purchasing behavior, not a possession
+/// behavior". This test locks the absence of the symbols at the source
+/// level (sibling to `brand::migration::tests::no_raw_styling_ansi_...`).
+#[test]
+fn slate_demo_surface_stays_retired_post_phase_19() {
+    use std::fs;
+    use std::path::Path;
+
+    fn read_all_rust_files(dir: &Path, out: &mut Vec<String>) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    // Skip target/ and .git/
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if name == "target" || name == ".git" || name.starts_with('.') {
+                        continue;
+                    }
+                    read_all_rust_files(&path, out);
+                } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        out.push(format!("{}\n{}", path.display(), content));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut bundle: Vec<String> = Vec::new();
+    read_all_rust_files(Path::new("src"), &mut bundle);
+    let haystack = bundle.join("\n---FILE---\n");
+
+    // Commands::Demo variant must not reappear (benches + tests allowed
+    // to reference deleted symbols only in *comments* — we scan src/ only).
+    assert!(
+        !haystack.contains("Commands::Demo"),
+        "Phase 19 D-05: `Commands::Demo` enum variant must stay retired — found a reference in src/"
+    );
+    assert!(
+        !haystack.contains("emit_demo_hint_once"),
+        "Phase 19 D-06: `emit_demo_hint_once` must stay retired — found a reference in src/"
+    );
+    assert!(
+        !haystack.contains("suppress_demo_hint_for_this_process"),
+        "Phase 19 D-06: `suppress_demo_hint_for_this_process` must stay retired — found a reference in src/"
+    );
+    assert!(
+        !haystack.contains("Language::DEMO_HINT") && !haystack.contains("pub const DEMO_HINT"),
+        "Phase 19 D-06: `DEMO_HINT` Language constant must stay retired"
+    );
+}
+
 #[test]
 fn test_all_themes_load() {
     let registry = ThemeRegistry::new().expect("Failed to create registry");

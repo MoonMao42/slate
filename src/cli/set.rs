@@ -11,13 +11,6 @@ use crate::error::Result;
 /// 2. `slate set --auto` → `slate theme --auto`
 /// 3. `slate set` → theme picker + dim tip
 pub fn handle(theme_name: Option<&str>, auto: bool) -> Result<()> {
-    // D-C3: suppress the Phase 15 DEMO-02 hint for this process so the
-    // `slate set` deprecation tip does not co-occur with the demo hint.
-    // `slate set` routes to `handle_theme`, which (as of Phase 15) emits
-    // `emit_demo_hint_once(false, false)` on its `Some(name)` success branch.
-    // Setting HINT_EMITTED=true here makes that call a no-op.
-    crate::cli::demo::suppress_demo_hint_for_this_process();
-
     if auto {
         crate::cli::theme::handle_theme(None, true, false)?;
         return Ok(());

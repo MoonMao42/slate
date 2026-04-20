@@ -2,10 +2,10 @@
 //! tail of `slate setup` / `slate theme` / `slate font` / `slate config` when
 //! any successful adapter declared `RequiresNewShell` (Phase 16 D-D1/D-D4/D-D5).
 //!
-//! Emitted at most once per process. Mirrors `src/cli/demo.rs::emit_demo_hint_once`
-//! exactly: session-local `AtomicBool` flag, `--auto` / `--quiet` suppression
-//! checked BEFORE the flag swap so suppressed calls don't burn the flag
-//! (RESEARCH §Pitfall 1).
+//! Emitted at most once per process. Session-local AtomicBool latch (no
+//! longer mirrors any demo.rs code — DEMO-02 retired in Phase 19).
+//! `--auto` / `--quiet` suppression is checked BEFORE the flag swap so
+//! suppressed calls don't burn the flag (RESEARCH §Pitfall 1).
 //!
 //! The copy itself lives in `Language::new_shell_reminder()` (platform-aware;
 //! macOS gets `⌘N`, Linux gets "terminal"). This module owns only dedup +

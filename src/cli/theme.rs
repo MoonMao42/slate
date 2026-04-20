@@ -199,14 +199,6 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
             crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, quiet);
         }
 
-        // DEMO-02 (D-C1): hint only on explicit `slate theme <name>` success.
-        // NEVER from the `if auto` branch (Ghostty shell hook spam risk — Pitfall 1)
-        // NOR from the picker branch (D-C1).
-        // `quiet` flag must be forwarded so `slate theme <name> --quiet` actually
-        // suppresses the hint (D-C1 `--quiet` suppression contract). `auto` is
-        // provably false in this `else if let Some(name)` branch.
-        crate::cli::demo::emit_demo_hint_once(false, quiet);
-
         Ok(())
     } else {
         // Picker path: launch interactive picker

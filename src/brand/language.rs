@@ -169,21 +169,6 @@ impl Language {
     // CLI surface
     pub const SLATE_SET_DEPRECATION_TIP: &str = "(i) Tip: 'slate set' is transitioning to 'slate theme'. Try 'slate theme <name>' next time.";
 
-    /// Demo hint shown once per process after `slate setup` or `slate theme <id>`
-    /// success (per D-C4). Brand-voiced, curiosity-lure — NOT `(i) Tip:` advisory tone.
-    /// Start with the ✦ glyph; keep ≤76 chars so `Typography::explanation`
-    /// (2-space indent) doesn't wrap at 80 cols.
-    pub const DEMO_HINT: &str = "✦ See this palette come alive — run `slate demo`";
-
-    /// Brand-voiced size-gate rejection for `slate demo`. Reports both the
-    /// minimum required (80×24) and the actual terminal (cols, rows) so the
-    /// user understands the gap.
-    pub fn demo_size_error(cols: u16, rows: u16) -> String {
-        format!(
-            "✦ slate demo needs an 80×24 window to breathe. Your terminal is {cols}×{rows}. Resize and try again."
-        )
-    }
-
     // ────────────────────────────────────────────────────────────
     // Phase 16 (LS-03 / UX-03) — brand-voiced shell-integration copy
     // ────────────────────────────────────────────────────────────
@@ -215,7 +200,7 @@ impl Language {
     /// LS-03 (D-B4): one-time macOS BSD-`ls` capability message emitted from
     /// the setup preflight when `gls` (GNU ls from coreutils) is absent.
     /// Shape: observation → consequence → `brew install coreutils`. Tone
-    /// mirrors `demo_size_error`: gentle, brand-voiced, ends with the fix.
+    /// is gentle, brand-voiced, and ends with the fix.
     /// Multi-line so it breathes inside the preflight printout block.
     pub fn ls_capability_message() -> &'static str {
         "✦ This macOS ships with BSD `ls`; the slate-managed LS_COLORS needs GNU `ls` to render.\n  Install it with `brew install coreutils` and your next shell lights up."
@@ -332,37 +317,6 @@ mod tests {
         assert!(summary.contains("2026-04-09T10-00-00Z"));
         assert!(summary.contains("Catppuccin Mocha"));
         assert!(summary.contains("5"));
-    }
-
-    #[test]
-    fn test_demo_hint_format() {
-        let hint = Language::DEMO_HINT;
-        assert!(hint.starts_with('✦'), "hint must start with ✦ glyph");
-        assert!(
-            hint.contains("slate demo"),
-            "hint must mention `slate demo`"
-        );
-        assert!(
-            !hint.starts_with("(i)"),
-            "hint must NOT use `(i) Tip:` advisory tone per D-C4"
-        );
-        assert!(
-            hint.chars().count() <= 76,
-            "hint is {} chars; must be ≤76 so 2-space-indent output doesn't wrap at 80 cols",
-            hint.chars().count()
-        );
-    }
-
-    #[test]
-    fn test_demo_size_error_mentions_required_and_actual() {
-        let msg = Language::demo_size_error(79, 23);
-        assert!(msg.contains("80"), "error must mention minimum cols");
-        assert!(msg.contains("79"), "error must include actual cols");
-        assert!(msg.contains("23"), "error must include actual rows");
-        assert!(
-            msg.contains("slate demo"),
-            "error must name the failing command"
-        );
     }
 
     // ────────────────────────────────────────────────────────────

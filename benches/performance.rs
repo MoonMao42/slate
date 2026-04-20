@@ -1,6 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use slate_cli::adapter::ToolRegistry;
-use slate_cli::cli::demo;
 use slate_cli::theme::ThemeRegistry;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -26,16 +25,5 @@ fn bench_apply_theme(c: &mut Criterion) {
     });
 }
 
-fn bench_demo_render(c: &mut Criterion) {
-    let registry = ThemeRegistry::new().expect("Failed to create theme registry");
-    let theme = registry
-        .get("catppuccin-mocha")
-        .expect("Catppuccin Mocha not found");
-
-    c.bench_function("demo_render_all_blocks", |b| {
-        b.iter(|| demo::render_to_string(black_box(&theme.palette)))
-    });
-}
-
-criterion_group!(benches, bench_apply_theme, bench_demo_render);
+criterion_group!(benches, bench_apply_theme);
 criterion_main!(benches);
