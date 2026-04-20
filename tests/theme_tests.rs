@@ -249,6 +249,57 @@ fn test_non_catppuccin_themes_have_semantic_bg_fields() {
     );
 }
 
+/// Phase 19 · VALIDATION row 1 — PickerState must surface its `theme_ids`
+/// array grouped by `FAMILY_SORT_ORDER`.
+///
+/// We walk the returned ids, resolve each to its family, and assert the
+/// family-index in `FAMILY_SORT_ORDER` is monotonically non-decreasing.
+/// If the order ever regresses — e.g. a Catppuccin variant appearing after
+/// a Tokyo Night one — the family grouping contract is broken.
+///
+/// No filesystem writes; pure data check on in-memory state.
+#[test]
+fn picker_launches_with_family_grouping() {
+    use slate_cli::cli::picker::PickerState;
+    use slate_cli::opacity::OpacityPreset;
+    use slate_cli::theme::{ThemeRegistry, FAMILY_SORT_ORDER};
+
+    let state = PickerState::new("catppuccin-mocha", OpacityPreset::Solid)
+        .expect("picker state must build");
+    let registry = ThemeRegistry::new().expect("registry");
+
+    let mut last_family_idx: Option<usize> = None;
+    let mut distinct_families: std::collections::BTreeSet<usize> =
+        std::collections::BTreeSet::new();
+
+    for id in state.theme_ids() {
+        let theme = registry.get(id).expect("id from registry");
+        let idx = FAMILY_SORT_ORDER
+            .iter()
+            .position(|f| *f == theme.family.as_str())
+            .unwrap_or_else(|| {
+                panic!(
+                    "theme {id} family {:?} must appear in FAMILY_SORT_ORDER",
+                    theme.family
+                )
+            });
+        if let Some(last) = last_family_idx {
+            assert!(
+                idx >= last,
+                "family order violated at {id}: family {} (idx {idx}) came after idx {last}",
+                theme.family
+            );
+        }
+        last_family_idx = Some(idx);
+        distinct_families.insert(idx);
+    }
+
+    assert!(
+        distinct_families.len() >= 2,
+        "picker must surface at least 2 families; got {distinct_families:?}"
+    );
+}
+
 #[test]
 fn test_catppuccin_extras_mapping() {
     let registry = ThemeRegistry::new().expect("Failed to create registry");
