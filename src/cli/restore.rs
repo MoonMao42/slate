@@ -122,19 +122,30 @@ fn handle_restore_direct(restore_id: &str, r: Option<&Roles<'_>>) -> Result<()> 
     println!("{}", tree_end_text(r, "Back on track"));
     println!();
 
-    // Re-apply the restored theme so managed files match the restored state
+    // Re-apply the restored theme so managed files match the restored state.
+    //
+    // Baseline restore is the exception: the whole point of restoring to
+    // baseline-pre-slate is to undo slate entirely, so re-applying the last
+    // theme on top of the just-restored pristine files would defeat the
+    // operation ("slate says restored but nothing changed"). Skip the
+    // re-apply and leave the current-theme state wherever the restored
+    // files put it — which, for baseline, is "absent" since the slate
+    // state files were OriginalFileState::Absent at baseline capture.
     let env = crate::env::SlateEnv::from_process()?;
     let config = crate::config::ConfigManager::with_env(&env)?;
-    if let Ok(Some(theme_id)) = config.get_current_theme() {
-        let registry = crate::theme::ThemeRegistry::new()?;
-        if let Some(theme) = registry.get(&theme_id) {
-            println!(
-                "{}",
-                status_success_line(r, &format!("Re-applying theme: {}", theme.name)),
-            );
-            // Apply without snapshotting again (we just restored)
-            let report = crate::cli::theme_apply::ThemeApplyCoordinator::new(&env).apply(theme)?;
-            crate::cli::theme_apply::log_apply_report(&report);
+    if !is_baseline_restore_point(&restore_point) {
+        if let Ok(Some(theme_id)) = config.get_current_theme() {
+            let registry = crate::theme::ThemeRegistry::new()?;
+            if let Some(theme) = registry.get(&theme_id) {
+                println!(
+                    "{}",
+                    status_success_line(r, &format!("Re-applying theme: {}", theme.name)),
+                );
+                // Apply without snapshotting again (we just restored)
+                let report =
+                    crate::cli::theme_apply::ThemeApplyCoordinator::new(&env).apply(theme)?;
+                crate::cli::theme_apply::log_apply_report(&report);
+            }
         }
     }
 
