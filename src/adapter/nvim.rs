@@ -30,9 +30,7 @@ use crate::design::nvim_highlights::{lualine_theme, HighlightSpec, Style, HIGHLI
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::{Palette, ThemeRegistry, ThemeVariant};
-use atomic_write_file::AtomicWriteFile;
 use std::fmt::Write as FmtWrite;
-use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
 
 /// Render ONE variant's highlight-group table as a Lua sub-table literal.
@@ -224,9 +222,7 @@ pub fn write_state_file(env: &SlateEnv, variant_id: &str) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let content = format!("return {}\n", lua_string_literal(variant_id));
-    let mut file = AtomicWriteFile::open(&path)?;
-    file.write_all(content.as_bytes())?;
-    file.commit()?;
+    crate::config::atomic_write_synced(&path, content.as_bytes())?;
     Ok(())
 }
 
@@ -515,14 +511,11 @@ impl NvimAdapter {
     }
 }
 
-/// Atomic write helper: fsync + rename semantics guarantee exactly one
-/// `fs_event` fire on the Lua watcher (same load-bearing property as
-/// [`write_state_file`]).
+/// Atomic write helper: fsync + rename + parent-dir fsync semantics
+/// guarantee exactly one `fs_event` fire on the Lua watcher (same
+/// load-bearing property as [`write_state_file`]).
 fn write_atomic(path: &Path, content: &str) -> Result<()> {
-    let mut file = AtomicWriteFile::open(path)?;
-    file.write_all(content.as_bytes())?;
-    file.commit()?;
-    Ok(())
+    crate::config::atomic_write_synced(path, content.as_bytes())
 }
 
 impl ToolAdapter for NvimAdapter {

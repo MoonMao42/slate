@@ -177,12 +177,8 @@ impl AlacrittyAdapter {
             return Ok(());
         }
 
-        // Atomic write back to file
-        use atomic_write_file::AtomicWriteFile;
-        use std::io::Write;
-        let mut file = AtomicWriteFile::open(integration_path)?;
-        file.write_all(doc.to_string().as_bytes())?;
-        file.commit()?;
+        // Atomic write back to file via the shared helper.
+        crate::config::atomic_write_synced(integration_path, doc.to_string().as_bytes())?;
 
         Ok(())
     }

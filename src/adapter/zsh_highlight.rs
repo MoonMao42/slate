@@ -10,7 +10,6 @@ use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 
 /// zsh-syntax-highlighting adapter implementing the ToolAdapter trait.
@@ -93,10 +92,7 @@ impl ToolAdapter for ZshHighlightAdapter {
         fs::create_dir_all(&managed_dir)?;
 
         let highlight_file = managed_dir.join("highlight-styles.sh");
-        use atomic_write_file::AtomicWriteFile;
-        let mut file = AtomicWriteFile::open(&highlight_file)?;
-        file.write_all(highlight_styles.as_bytes())?;
-        file.commit()?;
+        crate::config::atomic_write_synced(&highlight_file, highlight_styles.as_bytes())?;
 
         // zsh-syntax-highlighting styles are sourced during shell init;
         // already-running shells won't pick up new colors until restart.

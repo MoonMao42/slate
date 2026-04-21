@@ -4,11 +4,10 @@ use super::{
     backup_directory, backup_directory_with_env, manifest_path, restore_point_directory,
     restore_point_directory_with_env, OriginalFileState, RestoreEntry, RestorePoint,
 };
+use crate::config::atomic_write_synced;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
-use atomic_write_file::AtomicWriteFile;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 
 /// Result of a single file restoration attempt.
@@ -153,25 +152,9 @@ fn restore_entry(entry: &RestoreEntry, content: Option<&[u8]>) -> Result<()> {
         })?;
     }
 
-    let mut file = AtomicWriteFile::open(original_path).map_err(|e| {
+    atomic_write_synced(original_path, content).map_err(|e| {
         SlateError::BackupFailed(format!(
-            "Failed to open config for writing {}: {}",
-            original_path.display(),
-            e
-        ))
-    })?;
-
-    file.write_all(content).map_err(|e| {
-        SlateError::BackupFailed(format!(
-            "Failed to write restored content to {}: {}",
-            original_path.display(),
-            e
-        ))
-    })?;
-
-    file.commit().map_err(|e| {
-        SlateError::BackupFailed(format!(
-            "Failed to commit restored file {}: {}",
+            "Failed to restore file {}: {}",
             original_path.display(),
             e
         ))

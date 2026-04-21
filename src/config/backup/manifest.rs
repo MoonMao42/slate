@@ -1,8 +1,7 @@
 use super::{manifest_path, BackupSession, OriginalFileState, RestoreEntry, RestorePoint};
+use crate::config::atomic_write_synced;
 use crate::error::{Result, SlateError};
-use atomic_write_file::AtomicWriteFile;
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -25,14 +24,8 @@ pub(super) fn write_manifest_raw(manifest_path: &Path, manifest: &RestoreManifes
         SlateError::BackupFailed(format!("Failed to serialize manifest.toml: {}", e))
     })?;
 
-    let mut file = AtomicWriteFile::open(manifest_path).map_err(|e| {
-        SlateError::BackupFailed(format!("Failed to open manifest.toml for writing: {}", e))
-    })?;
-
-    file.write_all(content.as_bytes())
-        .map_err(|e| SlateError::BackupFailed(format!("Failed to write manifest.toml: {}", e)))?;
-    file.commit()
-        .map_err(|e| SlateError::BackupFailed(format!("Failed to commit manifest.toml: {}", e)))
+    atomic_write_synced(manifest_path, content.as_bytes())
+        .map_err(|e| SlateError::BackupFailed(format!("Failed to write manifest.toml: {}", e)))
 }
 
 pub(crate) fn read_manifest_raw(manifest_path: &Path) -> Result<RestoreManifest> {

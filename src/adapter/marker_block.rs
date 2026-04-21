@@ -15,9 +15,7 @@
 //! ```
 
 use crate::error::SlateError;
-use atomic_write_file::AtomicWriteFile;
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 /// Start marker for managed blocks
@@ -181,10 +179,7 @@ fn upsert_managed_block_bytes(content: &[u8], block: &[u8]) -> Vec<u8> {
 }
 
 fn write_atomic(path: &Path, content: &[u8]) -> Result<(), SlateError> {
-    let mut file = AtomicWriteFile::open(path)?;
-    file.write_all(content)?;
-    file.commit()?;
-    Ok(())
+    crate::config::atomic_write_synced(path, content)
 }
 
 /// Upsert a managed block in a file, creating the file if it does not exist.
