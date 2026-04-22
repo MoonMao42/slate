@@ -10,6 +10,8 @@ use crate::error::Result;
 use crate::theme::ThemeVariant;
 use std::path::{Path, PathBuf};
 
+pub mod tmtheme;
+
 /// bat adapter implementing the ToolAdapter trait.
 pub struct BatAdapter;
 
