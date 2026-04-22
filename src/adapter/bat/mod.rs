@@ -129,11 +129,7 @@ impl BatAdapter {
     /// `bat cache --build` capability-gated (silent skip if bat is missing).
     /// Cost: ~60KB total atomic writes — negligible compared to the
     /// rest of `slate theme set`.
-    pub fn apply_tmtheme_files(
-        &self,
-        themes: &[ThemeVariant],
-        target_dir: &Path,
-    ) -> Result<()> {
+    pub fn apply_tmtheme_files(&self, themes: &[ThemeVariant], target_dir: &Path) -> Result<()> {
         std::fs::create_dir_all(target_dir).map_err(|e| {
             SlateError::ConfigWriteError(target_dir.display().to_string(), e.to_string())
         })?;
@@ -168,8 +164,7 @@ impl BatAdapter {
         env: &SlateEnv,
     ) -> Result<ApplyOutcome> {
         let registry = ThemeRegistry::new()?;
-        let all_owned: Vec<ThemeVariant> =
-            registry.all().into_iter().cloned().collect();
+        let all_owned: Vec<ThemeVariant> = registry.all().into_iter().cloned().collect();
         let target_dir = self.themes_dir(env);
         self.apply_tmtheme_files(&all_owned, &target_dir)?;
         Ok(ApplyOutcome::applied_needs_new_shell())
@@ -283,8 +278,7 @@ mod tests {
 
         // Use the embedded registry: pure data, no env mutation.
         let registry = ThemeRegistry::new().expect("registry loads");
-        let themes: Vec<ThemeVariant> =
-            registry.all().into_iter().take(3).cloned().collect();
+        let themes: Vec<ThemeVariant> = registry.all().into_iter().take(3).cloned().collect();
         let ids: Vec<String> = themes.iter().map(|t| t.id.clone()).collect();
 
         let adapter = BatAdapter;

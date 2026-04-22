@@ -251,7 +251,10 @@ mod tests {
     #[test]
     fn render_tmtheme_substitutes_all_tokens() {
         let xml = render_tmtheme(&sample_palette(), "catppuccin-mocha");
-        assert!(!xml.contains("{{"), "no placeholder tokens may remain in output");
+        assert!(
+            !xml.contains("{{"),
+            "no placeholder tokens may remain in output"
+        );
         assert!(xml.contains("<string>slate-catppuccin-mocha</string>"));
         assert!(xml.contains("<plist version=\"1.0\">"));
         assert!(xml.contains("<key>uuid</key>"));
