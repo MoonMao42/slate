@@ -460,4 +460,237 @@ crust = "#111111"
             );
         }
     }
+
+    /// The 6 representative pill bgs used by `pick_light_powerline_fg`.
+    /// Mirror of the slate hardcoded inside `crate::wcag::pick_light_powerline_fg`
+    /// kept in sync via this test (drift here means drift in production).
+    fn light_pill_bgs(p: &crate::theme::Palette) -> [String; 6] {
+        let mauve_or_magenta = p
+            .mauve
+            .clone()
+            .or_else(|| p.extras.get("mauve").cloned())
+            .unwrap_or_else(|| p.magenta.clone());
+        [
+            p.cyan.clone(),
+            mauve_or_magenta,
+            p.blue.clone(),
+            p.yellow.clone(),
+            p.red.clone(),
+            p.green.clone(),
+        ]
+    }
+
+    /// Parse `[palettes.slate].powerline_fg` out of a rendered starship.toml.
+    fn extract_powerline_fg(rendered: &str) -> String {
+        let doc: DocumentMut = rendered.parse().expect("rendered must be valid TOML");
+        let value = doc["palettes"]["slate"]["powerline_fg"]
+            .as_str()
+            .expect("powerline_fg must be a string");
+        value.to_string()
+    }
+
+    /// Diagnostic helper: dumps per-candidate MIN-contrast for every Light
+    /// theme. Marked `#[ignore]` so it does not run in the default sweep
+    /// invoke with `cargo test ... -- --ignored --nocapture` when triaging
+    /// invariant failures.
+    #[test]
+    #[ignore]
+    fn diag_dump_light_theme_candidate_contrasts() {
+        use crate::theme::{ThemeAppearance, ThemeRegistry};
+
+        let registry = ThemeRegistry::new().unwrap();
+        for theme in registry
+            .all()
+            .into_iter()
+            .filter(|t| t.appearance == ThemeAppearance::Light)
+        {
+            let p = &theme.palette;
+            let bg_darkest = p.bg_darkest.clone().unwrap_or_else(|| p.black.clone());
+            let candidates: [(&str, String); 3] = [
+                ("bg_darkest", bg_darkest),
+                ("background", p.background.clone()),
+                ("foreground", p.foreground.clone()),
+            ];
+            let pill_bgs = light_pill_bgs(p);
+
+            eprintln!("\n=== {} ===", theme.id);
+            for (name, hex) in &candidates {
+                let min = pill_bgs
+                    .iter()
+                    .map(|bg| crate::wcag::contrast_hex(hex, bg))
+                    .fold(f64::INFINITY, f64::min);
+                eprintln!("  {:11} {:>7}  min_contrast={:.2}", name, hex, min);
+            }
+            eprintln!("  pills: {:?}", pill_bgs);
+        }
+    }
+
+    /// STARSHIP-01 picker correctness sweep: the rendered `powerline_fg` for
+    /// every Light theme must equal the MAX-of-MIN candidate across the
+    /// 3-candidate slate `[bg_darkest|black, background, foreground]`. This
+    /// proves the picker is doing its job — no candidate that the picker
+    /// rejected can outperform the picker's choice.
+    /// **NOTE on the 4.5:1 WCAG AA floor.** CONTEXT specified the
+    /// 3-candidate slate `{bg_darkest, background, foreground}` with the
+    /// expectation that at least one candidate would always hit ≥4.5:1
+    /// across the 6 pills. That holds for 4 of 7 Light themes shipped today
+    /// (everforest-light, gruvbox-light, kanagawa-lotus, tokyo-night-light).
+    /// For `catppuccin-latte`, `rose-pine-dawn`, and `solarized-light` the
+    /// pill sets mix dark accents with light pastels (e.g.,
+    /// catppuccin-latte's `mauve = #ca9ee6`). No single foreground can
+    /// simultaneously hit ≥4.5:1 against both extremes — it is a palette
+    /// luminance constraint, not a picker defect. Per-theme floors are
+    /// asserted by `adaptive_powerline_fg_min_contrast_baseline_per_light_theme`
+    /// below; lifting the WCAG AA floor is a deferred follow-up that needs
+    /// either palette tuning or per-pill `powerline_fg_<color>` overrides.
+    /// Self-extending: any future Light theme added to `themes.toml` is
+    /// automatically swept by this picker-correctness check.
+    #[test]
+    fn adaptive_powerline_fg_picks_max_of_min_for_all_light_themes() {
+        use crate::theme::{ThemeAppearance, ThemeRegistry};
+
+        let registry = ThemeRegistry::new().expect("theme registry must load");
+        let light_themes: Vec<_> = registry
+            .all()
+            .into_iter()
+            .filter(|t| t.appearance == ThemeAppearance::Light)
+            .collect();
+
+        assert!(
+            !light_themes.is_empty(),
+            "registry must contain at least one Light theme"
+        );
+
+        for theme in &light_themes {
+            let p = &theme.palette;
+            let pill_bgs = light_pill_bgs(p);
+
+            // Replicate the picker's 3-candidate slate in the same preference
+            // order (bg_darkest|black, background, foreground).
+            let bg_darkest = p.bg_darkest.clone().unwrap_or_else(|| p.black.clone());
+            let candidates_owned = [bg_darkest, p.background.clone(), p.foreground.clone()];
+            let mins: Vec<f64> = candidates_owned
+                .iter()
+                .map(|c| {
+                    pill_bgs
+                        .iter()
+                        .map(|bg| crate::wcag::contrast_hex(c, bg))
+                        .fold(f64::INFINITY, f64::min)
+                })
+                .collect();
+
+            // First-in-order tie-break (strict `>`) replicates the picker.
+            let mut best_idx = 0usize;
+            let mut best_min = f64::NEG_INFINITY;
+            for (i, m) in mins.iter().enumerate() {
+                if *m > best_min {
+                    best_min = *m;
+                    best_idx = i;
+                }
+            }
+            let expected = &candidates_owned[best_idx];
+
+            let rendered = themed_config_from_content("", theme)
+                .expect("themed_config_from_content must succeed");
+            let emitted = extract_powerline_fg(&rendered);
+
+            assert_eq!(
+                &emitted, expected,
+                "theme {} emitted {} but MAX-of-MIN candidate was {} (mins={:?})",
+                theme.id, emitted, expected, mins
+            );
+        }
+    }
+
+    /// Per-theme MIN-contrast regression baseline.
+    /// Locks the actual MIN contrast each Light theme achieves with the
+    /// adaptive picker. Any palette edit that drops a theme below its current
+    /// floor will fail this test loudly. Future plans that lift palettes
+    /// above 4.5:1 should raise these floors accordingly.
+    /// Floors are slightly under measured values (2026-04-28) to absorb f64
+    /// rounding noise.
+    #[test]
+    fn adaptive_powerline_fg_min_contrast_baseline_per_light_theme() {
+        use crate::theme::ThemeRegistry;
+
+        // (theme_id, lower_bound_for_min_contrast)
+        let baselines: &[(&str, f64)] = &[
+            ("catppuccin-latte", 1.90),
+            ("everforest-light", 6.00),
+            ("gruvbox-light", 5.30),
+            ("kanagawa-lotus", 4.60),
+            ("rose-pine-dawn", 2.00),
+            ("solarized-light", 4.00),
+            ("tokyo-night-light", 5.20),
+        ];
+
+        let registry = ThemeRegistry::new().unwrap();
+        for (id, floor) in baselines {
+            let theme = registry
+                .get(id)
+                .unwrap_or_else(|| panic!("theme {id} must exist in registry"));
+            let rendered = themed_config_from_content("", theme).unwrap();
+            let emitted = extract_powerline_fg(&rendered);
+            let pill_bgs = light_pill_bgs(&theme.palette);
+            let min = pill_bgs
+                .iter()
+                .map(|bg| crate::wcag::contrast_hex(&emitted, bg))
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                min >= *floor,
+                "{} regression: MIN contrast dropped to {:.2} (baseline floor {:.2})",
+                id,
+                min,
+                floor
+            );
+        }
+    }
+
+    /// Round-trip guard: the `powerline_fg` rendered into the TOML must match
+    /// the helper's choice byte-for-byte. Catches accidental drift between
+    /// `pick_light_powerline_fg` and the adapter call site.
+    #[test]
+    fn powerline_fg_emitted_matches_helper_pick() {
+        use crate::theme::ThemeRegistry;
+
+        let registry = ThemeRegistry::new().unwrap();
+        let theme = registry
+            .get("solarized-light")
+            .expect("solarized-light is the canonical mid-tone-accent regression case");
+
+        let rendered = themed_config_from_content("", theme).unwrap();
+        let emitted = extract_powerline_fg(&rendered);
+        let helper_pick = crate::wcag::pick_light_powerline_fg(&theme.palette);
+
+        assert_eq!(
+            emitted, helper_pick,
+            "rendered powerline_fg must equal helper pick (drift between adapter and wcag helper)"
+        );
+    }
+
+    /// Dark-path non-regression: ensure the unchanged Dark branch still emits
+    /// `bg_darkest` (with cascade to `black`).
+    #[test]
+    fn dark_theme_powerline_fg_unchanged_uses_bg_darkest_cascade() {
+        use crate::theme::ThemeRegistry;
+
+        let registry = ThemeRegistry::new().unwrap();
+        let theme = registry
+            .get("catppuccin-mocha")
+            .expect("catppuccin-mocha must exist");
+
+        let rendered = themed_config_from_content("", theme).unwrap();
+        let emitted = extract_powerline_fg(&rendered);
+
+        let expected = theme
+            .palette
+            .bg_darkest
+            .clone()
+            .unwrap_or_else(|| theme.palette.black.clone());
+
+        assert_eq!(
+            emitted, expected,
+            "Dark-path powerline_fg must remain bg_darkest|black"
+        );
+    }
 }
