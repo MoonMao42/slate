@@ -57,6 +57,7 @@ thiserror = "1"
 toml = "0.8"
 toml_edit = "0.22"
 url = "2"
+uuid = { version = "1", features = ["v5"] }
 which = "5"
 zbus = "4"
 
