@@ -155,11 +155,16 @@ fn inject_slate_palette(doc: &mut DocumentMut, theme: &ThemeVariant) {
         // crust: semantic darkest background
         sp["crust"] = toml_edit::value(p.bg_darkest.as_deref().unwrap_or(&p.black));
 
-        // powerline_fg: adaptive high-contrast foreground for segment text
-        let powerline_fg = if theme.appearance == crate::theme::ThemeAppearance::Light {
-            &p.foreground
+        // powerline_fg: adaptive high-contrast foreground for segment text.
+        // Light themes: pick from {bg_darkest|black, background, foreground}
+        // by maximising the MIN WCAG 2.1 contrast across the 6 representative
+        // starship pill bgs (cyan, mauve|magenta, blue, yellow, red, green).
+        // See `crate::wcag::pick_light_powerline_fg` and CONTEXT.
+        // Dark themes: unchanged — bg_darkest with cascade to black.
+        let powerline_fg: String = if theme.appearance == crate::theme::ThemeAppearance::Light {
+            crate::wcag::pick_light_powerline_fg(p)
         } else {
-            p.bg_darkest.as_ref().unwrap_or(&p.black)
+            p.bg_darkest.as_ref().unwrap_or(&p.black).clone()
         };
         sp["powerline_fg"] = toml_edit::value(powerline_fg.as_str());
 
