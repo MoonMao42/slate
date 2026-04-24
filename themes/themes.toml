@@ -7,7 +7,7 @@ auto_pair = "catppuccin-latte"
 
 [theme.tool_refs]
 alacritty = "catppuccin_frappe"
-bat = "Catppuccin Frappé"
+bat = "slate-catppuccin-frappe"
 delta = "catppuccin_frappe"
 eza = "catppuccin_frappe"
 fastfetch = "catppuccin_frappe"
@@ -84,7 +84,7 @@ auto_pair = "catppuccin-mocha"
 
 [theme.tool_refs]
 alacritty = "catppuccin_latte"
-bat = "Catppuccin Latte"
+bat = "slate-catppuccin-latte"
 delta = "catppuccin_latte"
 eza = "catppuccin_latte"
 fastfetch = "catppuccin_latte"
@@ -161,7 +161,7 @@ auto_pair = "catppuccin-latte"
 
 [theme.tool_refs]
 alacritty = "catppuccin_macchiato"
-bat = "Catppuccin Macchiato"
+bat = "slate-catppuccin-macchiato"
 delta = "catppuccin_macchiato"
 eza = "catppuccin_macchiato"
 fastfetch = "catppuccin_macchiato"
@@ -238,7 +238,7 @@ auto_pair = "catppuccin-latte"
 
 [theme.tool_refs]
 alacritty = "catppuccin_mocha"
-bat = "Catppuccin Mocha"
+bat = "slate-catppuccin-mocha"
 delta = "catppuccin_mocha"
 eza = "catppuccin_mocha"
 fastfetch = "catppuccin_mocha"
@@ -315,7 +315,7 @@ auto_pair = "dracula"
 
 [theme.tool_refs]
 alacritty = "dracula"
-bat = "Dracula"
+bat = "slate-dracula"
 delta = "dracula"
 eza = "dracula"
 fastfetch = "dracula"
@@ -392,7 +392,7 @@ auto_pair = "everforest-light"
 
 [theme.tool_refs]
 alacritty = "everforest_dark"
-bat = "Everforest Dark"
+bat = "slate-everforest-dark"
 delta = "everforest_dark"
 eza = "everforest_dark"
 fastfetch = "everforest_dark"
@@ -449,7 +449,7 @@ auto_pair = "everforest-dark"
 
 [theme.tool_refs]
 alacritty = "everforest_light"
-bat = "Everforest Light"
+bat = "slate-everforest-light"
 delta = "everforest_light"
 eza = "everforest_light"
 fastfetch = "everforest_light"
@@ -506,7 +506,7 @@ auto_pair = "gruvbox-light"
 
 [theme.tool_refs]
 alacritty = "gruvbox_dark"
-bat = "Gruvbox Dark"
+bat = "slate-gruvbox-dark"
 delta = "gruvbox_dark"
 eza = "gruvbox_dark"
 fastfetch = "gruvbox_dark"
@@ -569,7 +569,7 @@ auto_pair = "gruvbox-dark"
 
 [theme.tool_refs]
 alacritty = "gruvbox_light"
-bat = "Gruvbox Light"
+bat = "slate-gruvbox-light"
 delta = "gruvbox_light"
 eza = "gruvbox_light"
 fastfetch = "gruvbox_light"
@@ -632,7 +632,7 @@ auto_pair = "kanagawa-lotus"
 
 [theme.tool_refs]
 alacritty = "kanagawa_dragon"
-bat = "Kanagawa Dragon"
+bat = "slate-kanagawa-dragon"
 delta = "kanagawa_dragon"
 eza = "kanagawa_dragon"
 fastfetch = "kanagawa_dragon"
@@ -689,7 +689,7 @@ auto_pair = "kanagawa-wave"
 
 [theme.tool_refs]
 alacritty = "kanagawa_lotus"
-bat = "Kanagawa Lotus"
+bat = "slate-kanagawa-lotus"
 delta = "kanagawa_lotus"
 eza = "kanagawa_lotus"
 fastfetch = "kanagawa_lotus"
@@ -746,7 +746,7 @@ auto_pair = "kanagawa-lotus"
 
 [theme.tool_refs]
 alacritty = "kanagawa_wave"
-bat = "Kanagawa Wave"
+bat = "slate-kanagawa-wave"
 delta = "kanagawa_wave"
 eza = "kanagawa_wave"
 fastfetch = "kanagawa_wave"
@@ -803,7 +803,7 @@ auto_pair = "nord"
 
 [theme.tool_refs]
 alacritty = "nord"
-bat = "Nord"
+bat = "slate-nord"
 delta = "nord"
 eza = "nord"
 fastfetch = "nord"
@@ -866,7 +866,7 @@ auto_pair = "rose-pine-main"
 
 [theme.tool_refs]
 alacritty = "rose_pine_dawn"
-bat = "Rosé Pine Dawn"
+bat = "slate-rose-pine-dawn"
 delta = "rose_pine_dawn"
 eza = "rose_pine_dawn"
 fastfetch = "rose_pine_dawn"
@@ -943,7 +943,7 @@ auto_pair = "rose-pine-dawn"
 
 [theme.tool_refs]
 alacritty = "rose_pine"
-bat = "Rosé Pine"
+bat = "slate-rose-pine-main"
 delta = "rose_pine"
 eza = "rose_pine"
 fastfetch = "rose_pine"
@@ -1020,7 +1020,7 @@ auto_pair = "rose-pine-dawn"
 
 [theme.tool_refs]
 alacritty = "rose_pine_moon"
-bat = "Rosé Pine Moon"
+bat = "slate-rose-pine-moon"
 delta = "rose_pine_moon"
 eza = "rose_pine_moon"
 fastfetch = "rose_pine_moon"
@@ -1097,7 +1097,7 @@ auto_pair = "tokyo-night-light"
 
 [theme.tool_refs]
 alacritty = "tokyo_night"
-bat = "Tokyo Night"
+bat = "slate-tokyo-night-dark"
 delta = "tokyo_night"
 eza = "tokyo_night"
 fastfetch = "tokyo_night"
@@ -1154,7 +1154,7 @@ auto_pair = "tokyo-night-dark"
 
 [theme.tool_refs]
 alacritty = "tokyo_night_light"
-bat = "Tokyo Night Light"
+bat = "slate-tokyo-night-light"
 delta = "tokyo_night_light"
 eza = "tokyo_night_light"
 fastfetch = "tokyo_night_light"
@@ -1211,7 +1211,7 @@ auto_pair = "solarized-light"
 
 [theme.tool_refs]
 alacritty = "solarized_dark"
-bat = "Solarized (dark)"
+bat = "slate-solarized-dark"
 delta = "Solarized (dark)"
 eza = "solarized_dark"
 fastfetch = "solarized_dark"
@@ -1287,7 +1287,7 @@ auto_pair = "solarized-dark"
 
 [theme.tool_refs]
 alacritty = "solarized_light"
-bat = "Solarized (light)"
+bat = "slate-solarized-light"
 delta = "Solarized (light)"
 eza = "solarized_light"
 fastfetch = "solarized_light"
