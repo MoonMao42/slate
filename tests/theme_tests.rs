@@ -384,8 +384,12 @@ fn test_catppuccin_extras_mapping() {
 /// against future drift (e.g. someone "tidying"
 /// `Solarized (dark)` to `solarized-dark`).
 /// Verified upstream (21-RESEARCH §3, 2026-04-27):
-/// bat 1337 `Solarized (dark)` / `Solarized (light)`
 /// delta 0.19 `Solarized (dark)` / `Solarized (light)`
+/// (BAT-LIGHT-01) repointed `tool_refs.bat` from upstream
+/// names to the slate-tuned `slate-<id>` files written by.
+/// `bat` assertions pin the slate-prefixed values; `delta` still pins
+/// the upstream names because delta consumes bat's bundled corpus
+/// directly and does not generate slate-tuned delta themes.
 #[test]
 fn test_solarized_bat_delta_match_upstream() {
     let registry = ThemeRegistry::new().expect("Failed to create registry");
@@ -395,8 +399,8 @@ fn test_solarized_bat_delta_match_upstream() {
         .expect("solarized-dark variant must exist");
     assert_eq!(
         dark.tool_refs.get("bat").map(String::as_str),
-        Some("Solarized (dark)"),
-        "bat: solarized-dark.tool_refs.bat must be 'Solarized (dark)' to match shipped bat tmTheme upstream corpus"
+        Some("slate-solarized-dark"),
+        "bat: solarized-dark.tool_refs.bat must be 'slate-solarized-dark' ( slate-tuned tmTheme name)"
     );
     assert_eq!(
         dark.tool_refs.get("delta").map(String::as_str),
@@ -409,8 +413,8 @@ fn test_solarized_bat_delta_match_upstream() {
         .expect("solarized-light variant must exist");
     assert_eq!(
         light.tool_refs.get("bat").map(String::as_str),
-        Some("Solarized (light)"),
-        "bat: solarized-light.tool_refs.bat must be 'Solarized (light)' to match shipped bat tmTheme upstream corpus"
+        Some("slate-solarized-light"),
+        "bat: solarized-light.tool_refs.bat must be 'slate-solarized-light' ( slate-tuned tmTheme name)"
     );
     assert_eq!(
         light.tool_refs.get("delta").map(String::as_str),

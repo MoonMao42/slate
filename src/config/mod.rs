@@ -505,7 +505,7 @@ format = "..."
         let env_zsh_path = temp.path().join("managed/shell/env.zsh");
         let content = std::fs::read_to_string(&env_zsh_path).unwrap();
 
-        assert!(content.contains("export BAT_THEME='Tokyo Night'"));
+        assert!(content.contains("export BAT_THEME='slate-tokyo-night-dark'"));
         assert!(temp.path().join("managed/shell/env.bash").exists());
         assert!(temp.path().join("managed/shell/env.fish").exists());
     }
@@ -521,7 +521,7 @@ format = "..."
         let env_zsh_path = temp.path().join("managed/shell/env.zsh");
         let content = std::fs::read_to_string(&env_zsh_path).unwrap();
 
-        assert!(content.contains("export BAT_THEME='Catppuccin Mocha'"));
+        assert!(content.contains("export BAT_THEME='slate-catppuccin-mocha'"));
     }
 
     #[test]

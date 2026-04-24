@@ -701,9 +701,35 @@ mod tests {
         );
         assert_eq!(
             theme.tool_refs.get("bat").map(String::as_str),
-            Some("Catppuccin Mocha")
+            Some("slate-catppuccin-mocha")
         );
         assert_eq!(theme.tool_refs.get("unknown"), None);
+    }
+
+    /// Regression guard for the slate-tuned bat theme naming convention.
+    /// writes `~/.config/bat/themes/slate-<id>.tmTheme` for every
+    /// theme in the registry, then `bat cache --build` makes those names
+    /// resolvable. rewires every `[[theme]]` block in
+    /// `themes/themes.toml` so `tool_refs.bat = "slate-<id>"` matches the
+    /// generated tmTheme file. Any future theme added to the registry without
+    /// the `slate-` prefix would silently fall back to a bundled bat theme
+    /// (DEFAULT bat output, not slate output) — this test fails CI immediately
+    /// if that happens.
+    #[test]
+    fn bat_tool_refs_use_slate_prefix_for_all_themes() {
+        let registry = ThemeRegistry::new().expect("registry constructs");
+        for theme in registry.all() {
+            let bat_ref = theme
+                .tool_refs
+                .get("bat")
+                .unwrap_or_else(|| panic!("theme '{}' has no bat tool_ref", theme.id));
+            let expected = format!("slate-{}", theme.id);
+            assert_eq!(
+                bat_ref, &expected,
+                "bat tool_ref for theme '{}' must be '{}' (got '{}')",
+                theme.id, expected, bat_ref
+            );
+        }
     }
 
     /// Regression guard for the Ghostty theme-name naming convention.
