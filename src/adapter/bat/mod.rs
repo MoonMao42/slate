@@ -13,8 +13,6 @@ use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::{ThemeRegistry, ThemeVariant};
-use atomic_write_file::AtomicWriteFile;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -41,6 +39,15 @@ impl BatAdapter {
             }
         }
         config_home.join("bat").join("config")
+    }
+
+    fn resolve_themes_dir(config_dir: Option<&str>, config_home: &Path) -> PathBuf {
+        if let Some(val) = config_dir {
+            if !val.is_empty() {
+                return PathBuf::from(val).join("themes");
+            }
+        }
+        config_home.join("bat").join("themes")
     }
 }
 
@@ -104,32 +111,18 @@ impl BatAdapter {
         }
     }
 
-    /// Resolve `<bat-config-dir>/themes/`.
-    /// Mirrors the env-injection contract of `integration_config_path_with_env`
-    /// (BAT_CONFIG_PATH wins → BAT_CONFIG_DIR/themes → XDG default). The
-    /// integration config file lives at `<bat-config-dir>/config`, so the
-    /// `themes/` directory is its sibling regardless of which env var
-    /// resolved the path.
+    /// Resolve bat's custom `themes/` directory.
+    /// `BAT_CONFIG_DIR` changes the config directory and therefore the custom
+    /// assets directory. `BAT_CONFIG_PATH` points at a specific config file but
+    /// does not change where bat looks for `themes/`, so it is intentionally
+    /// ignored here.
     pub fn themes_dir(&self, env: &SlateEnv) -> PathBuf {
-        let config_path = self
-            .integration_config_path_with_env(env)
-            .unwrap_or_else(|_| env.xdg_config_home().join("bat").join("config"));
-        config_path
-            .parent()
-            .map(|p| p.join("themes"))
-            .unwrap_or_else(|| env.xdg_config_home().join("bat").join("themes"))
+        let config_home = env.xdg_config_home().to_path_buf();
+        let config_dir = std::env::var("BAT_CONFIG_DIR").ok();
+        Self::resolve_themes_dir(config_dir.as_deref(), &config_home)
     }
 
-    /// Per-apply idempotent sync: writes ALL slate-tuned tmThemes to
-    /// `target_dir`, overwriting any existing `slate-<id>.tmTheme`.
-    /// Each write uses `AtomicWriteFile::open` directly (per F6
-    /// the consumer `bat cache --build` runs in the same process tree
-    /// immediately after, so cross-process parent-dir fsync
-    /// helper is not needed here). After all 20 writes, invokes
-    /// `bat cache --build` capability-gated (silent skip if bat is missing).
-    /// Cost: ~60KB total atomic writes — negligible compared to the
-    /// rest of `slate theme set`.
-    pub fn apply_tmtheme_files(&self, themes: &[ThemeVariant], target_dir: &Path) -> Result<()> {
+    fn write_tmtheme_files(&self, themes: &[ThemeVariant], target_dir: &Path) -> Result<()> {
         std::fs::create_dir_all(target_dir).map_err(|e| {
             SlateError::ConfigWriteError(target_dir.display().to_string(), e.to_string())
         })?;
@@ -139,18 +132,24 @@ impl BatAdapter {
             let file_name = format!("slate-{}.tmTheme", theme.id);
             let file_path = target_dir.join(&file_name);
 
-            let mut file = AtomicWriteFile::open(&file_path).map_err(|e| {
-                SlateError::ConfigWriteError(file_path.display().to_string(), e.to_string())
-            })?;
-            file.write_all(xml.as_bytes()).map_err(|e| {
-                SlateError::ConfigWriteError(file_path.display().to_string(), e.to_string())
-            })?;
-            file.commit().map_err(|e| {
+            crate::config::atomic_write_synced(&file_path, xml.as_bytes()).map_err(|e| {
                 SlateError::ConfigWriteError(file_path.display().to_string(), e.to_string())
             })?;
         }
 
-        invoke_bat_cache_rebuild();
+        Ok(())
+    }
+
+    /// Per-apply idempotent sync: writes ALL slate-tuned tmThemes to
+    /// `target_dir`, overwriting any existing `slate-<id>.tmTheme`.
+    /// Each write uses slate's shared `atomic_write_synced` helper so the
+    /// parent directory is fsynced before the immediate `bat cache --build`
+    /// subprocess reads it. Cost: ~160KB total atomic writes — negligible
+    /// compared to the rest of `slate theme set`.
+    pub fn apply_tmtheme_files(&self, themes: &[ThemeVariant], target_dir: &Path) -> Result<()> {
+        self.write_tmtheme_files(themes, target_dir)?;
+        let config_dir = target_dir.parent().unwrap_or_else(|| Path::new("."));
+        invoke_bat_cache_rebuild(config_dir)?;
         Ok(())
     }
 
@@ -173,25 +172,40 @@ impl BatAdapter {
 
 /// Invoke `bat cache --build` if bat is on PATH. Silent no-op when bat
 /// is absent (matches the existing `apply_theme` no-op behaviour for
-/// missing-bat). On non-zero exit, surface stderr via `eprintln!`
-/// matches the `tmux source-file` precedent in
-/// `src/adapter/tmux.rs:133-146`. is polish; routing this
-/// through a structured event API is a candidate, intentionally
-/// out of scope here.
-fn invoke_bat_cache_rebuild() {
+/// missing-bat). Once bat is present, cache rebuild errors are fatal because
+/// shell integration now exports `BAT_THEME=slate-<id>`.
+fn invoke_bat_cache_rebuild(config_dir: &Path) -> Result<()> {
     if which::which("bat").is_err() {
-        return;
+        return Ok(());
     }
-    match Command::new("bat").args(["cache", "--build"]).output() {
-        Ok(out) if out.status.success() => {}
+    match Command::new("bat")
+        .env("BAT_CONFIG_DIR", config_dir.as_os_str())
+        .env_remove("BAT_THEME")
+        .args(["cache", "--build"])
+        .output()
+    {
+        Ok(out) if out.status.success() => Ok(()),
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            eprintln!("⚠ bat cache --build failed: {}", stderr.trim());
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let details = if stderr.trim().is_empty() {
+                stdout.trim().to_string()
+            } else {
+                stderr.trim().to_string()
+            };
+            Err(SlateError::ConfigWriteError(
+                "bat cache --build".to_string(),
+                details,
+            ))
         }
         Err(err) => {
             // which::which("bat") said yes but spawn failed (race or
-            // permissions). Non-fatal — user's existing themes still work.
-            eprintln!("⚠ bat cache --build could not start: {err}");
+            // permissions). This must be fatal because shell integration now
+            // exports BAT_THEME=slate-<id>, which requires a rebuilt cache.
+            Err(SlateError::ConfigWriteError(
+                "bat cache --build".to_string(),
+                err.to_string(),
+            ))
         }
     }
 }
@@ -232,6 +246,18 @@ mod tests {
     }
 
     #[test]
+    fn test_bat_resolve_themes_dir_uses_config_dir() {
+        let result = BatAdapter::resolve_themes_dir(Some("/bat/dir"), &PathBuf::from("/config"));
+        assert_eq!(result, PathBuf::from("/bat/dir/themes"));
+    }
+
+    #[test]
+    fn test_bat_resolve_themes_dir_ignores_config_path_shape() {
+        let result = BatAdapter::resolve_themes_dir(None, &PathBuf::from("/config"));
+        assert_eq!(result, PathBuf::from("/config/bat/themes"));
+    }
+
+    #[test]
     fn test_bat_integration_config_path_with_env() {
         let tempdir = tempfile::tempdir().unwrap();
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
@@ -267,12 +293,12 @@ mod tests {
         );
     }
 
-    /// `apply_tmtheme_files` writes one `slate-<id>.tmTheme` per supplied
-    /// theme into the target directory. The capability gate on
-    /// `bat cache --build` lets this run on a CI host without bat
-    /// installed (silent no-op via `which::which("bat")`).
+    /// `write_tmtheme_files` writes one `slate-<id>.tmTheme` per supplied
+    /// theme into the target directory. The cache rebuild is intentionally not
+    /// part of this test so a developer machine with bat installed does not
+    /// rebuild the real user cache while running unit tests.
     #[test]
-    fn test_apply_tmtheme_files_writes_one_per_theme() {
+    fn test_write_tmtheme_files_writes_one_per_theme() {
         let tempdir = tempfile::tempdir().unwrap();
         let target_dir = tempdir.path().join("themes");
 
@@ -283,8 +309,8 @@ mod tests {
 
         let adapter = BatAdapter;
         adapter
-            .apply_tmtheme_files(&themes, &target_dir)
-            .expect("apply_tmtheme_files succeeds");
+            .write_tmtheme_files(&themes, &target_dir)
+            .expect("write_tmtheme_files succeeds");
 
         for id in &ids {
             let file = target_dir.join(format!("slate-{id}.tmTheme"));

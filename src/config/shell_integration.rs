@@ -90,7 +90,7 @@ format = """
 
 [os]
 disabled = false
-style = "bg:red fg:powerline_fg"
+style = "bg:red fg:powerline_fg_red"
 format = '[ $symbol ]($style)'
 
 [os.symbols]
@@ -98,12 +98,12 @@ Macos = "󰀵"
 
 [username]
 show_always = true
-style_user = "bg:red fg:powerline_fg"
-style_root = "bg:red fg:powerline_fg"
+style_user = "bg:red fg:powerline_fg_red"
+style_root = "bg:red fg:powerline_fg_red"
 format = '[$user ]($style)'
 
 [directory]
-style = "bg:peach fg:powerline_fg"
+style = "bg:peach fg:powerline_fg_peach"
 format = '[ $path ]($style)'
 truncation_length = 3
 truncate_to_repo = false
@@ -122,16 +122,16 @@ symbol = ' '
 [git_branch]
 symbol = ""
 style = "bg:yellow"
-format = '[[ $symbol $branch ](fg:powerline_fg bg:yellow)]($style)'
+format = '[[ $symbol $branch ](fg:powerline_fg_yellow bg:yellow)]($style)'
 
 [git_status]
 style = "bg:yellow"
-format = '[[($all_status$ahead_behind )](fg:powerline_fg bg:yellow)]($style)'
+format = '[[($all_status$ahead_behind )](fg:powerline_fg_yellow bg:yellow)]($style)'
 
 [python]
 symbol = ""
 style = "bg:green"
-format = '[[ $symbol( $version)(\(#$virtualenv\)) ](fg:powerline_fg bg:green)]($style)'
+format = '[[ $symbol( $version)(\(#$virtualenv\)) ](fg:powerline_fg_green bg:green)]($style)'
 detect_extensions = []
 detect_files = []
 detect_folders = []
@@ -139,33 +139,33 @@ detect_folders = []
 [nodejs]
 symbol = ""
 style = "bg:green"
-format = '[[ $symbol( $version) ](fg:powerline_fg bg:green)]($style)'
+format = '[[ $symbol( $version) ](fg:powerline_fg_green bg:green)]($style)'
 
 [rust]
 symbol = ""
 style = "bg:green"
-format = '[[ $symbol( $version) ](fg:powerline_fg bg:green)]($style)'
+format = '[[ $symbol( $version) ](fg:powerline_fg_green bg:green)]($style)'
 
 [golang]
 symbol = ""
 style = "bg:green"
-format = '[[ $symbol( $version) ](fg:powerline_fg bg:green)]($style)'
+format = '[[ $symbol( $version) ](fg:powerline_fg_green bg:green)]($style)'
 
 [c]
 symbol = " "
 style = "bg:green"
-format = '[[ $symbol( $version) ](fg:powerline_fg bg:green)]($style)'
+format = '[[ $symbol( $version) ](fg:powerline_fg_green bg:green)]($style)'
 
 [docker_context]
 symbol = ""
 style = "bg:sapphire"
-format = '[[ $symbol( $context) ](fg:powerline_fg bg:sapphire)]($style)'
+format = '[[ $symbol( $context) ](fg:powerline_fg_sapphire bg:sapphire)]($style)'
 
 [time]
 disabled = false
 time_format = "%R"
 style = "bg:lavender"
-format = '[[  $time ](fg:powerline_fg bg:lavender)]($style)'
+format = '[[  $time ](fg:powerline_fg_lavender bg:lavender)]($style)'
 
 [cmd_duration]
 min_time = 2000
@@ -535,6 +535,32 @@ fn render_fish_shell(model: &SharedShellModel) -> String {
     content
 }
 
+fn default_powerline_fg(theme: &ThemeVariant) -> String {
+    let p = &theme.palette;
+    if theme.appearance == crate::theme::ThemeAppearance::Light {
+        crate::wcag::pick_light_powerline_fg(p)
+    } else {
+        p.bg_darkest.clone().unwrap_or_else(|| p.black.clone())
+    }
+}
+
+fn powerline_fg_for_bg(theme: &ThemeVariant, bg: &str) -> String {
+    let p = &theme.palette;
+    let bg_darkest = p.bg_darkest.as_deref().unwrap_or(&p.black);
+    let default_fg = default_powerline_fg(theme);
+    crate::wcag::pick_accessible_fg_for_bg(
+        &[
+            default_fg.as_str(),
+            bg_darkest,
+            p.foreground.as_str(),
+            p.background.as_str(),
+            p.black.as_str(),
+            p.white.as_str(),
+        ],
+        bg,
+    )
+}
+
 fn starship_palette_value(theme: &ThemeVariant, key: &str) -> String {
     let p = &theme.palette;
     match key {
@@ -593,12 +619,21 @@ fn starship_palette_value(theme: &ThemeVariant, key: &str) -> String {
             .or_else(|| p.extras.get("pink").cloned())
             .unwrap_or_else(|| p.bright_magenta.clone()),
         "crust" => p.bg_darkest.clone().unwrap_or_else(|| p.black.clone()),
-        "powerline_fg" => {
-            if theme.appearance == crate::theme::ThemeAppearance::Light {
-                p.foreground.clone()
-            } else {
-                p.bg_darkest.clone().unwrap_or_else(|| p.black.clone())
-            }
+        "powerline_fg" => default_powerline_fg(theme),
+        "powerline_fg_red" => powerline_fg_for_bg(theme, &p.red),
+        "powerline_fg_peach" => {
+            let bg = starship_palette_value(theme, "peach");
+            powerline_fg_for_bg(theme, &bg)
+        }
+        "powerline_fg_yellow" => powerline_fg_for_bg(theme, &p.yellow),
+        "powerline_fg_green" => powerline_fg_for_bg(theme, &p.green),
+        "powerline_fg_sapphire" => {
+            let bg = starship_palette_value(theme, "sapphire");
+            powerline_fg_for_bg(theme, &bg)
+        }
+        "powerline_fg_lavender" => {
+            let bg = starship_palette_value(theme, "lavender");
+            powerline_fg_for_bg(theme, &bg)
         }
         _ => String::new(),
     }
@@ -625,6 +660,12 @@ fn with_slate_palette(base: &str, theme: &ThemeVariant) -> String {
         "pink",
         "crust",
         "powerline_fg",
+        "powerline_fg_red",
+        "powerline_fg_peach",
+        "powerline_fg_yellow",
+        "powerline_fg_green",
+        "powerline_fg_sapphire",
+        "powerline_fg_lavender",
     ] {
         content.push_str(&format!(
             "{key} = \"{}\"\n",
@@ -976,7 +1017,19 @@ mod tests {
 
         assert!(content.contains("[palettes.slate]"));
         assert!(content.contains("powerline_fg = "));
+        assert!(content.contains("powerline_fg_red = "));
         assert!(content.contains("peach = "));
+    }
+
+    #[test]
+    fn test_default_starship_content_uses_per_segment_powerline_fgs() {
+        let content = starter_starship_content();
+
+        assert!(content.contains("bg:red fg:powerline_fg_red"));
+        assert!(content.contains("fg:powerline_fg_yellow bg:yellow"));
+        assert!(content.contains("fg:powerline_fg_green bg:green"));
+        assert!(content.contains("fg:powerline_fg_sapphire bg:sapphire"));
+        assert!(content.contains("fg:powerline_fg_lavender bg:lavender"));
     }
 
     #[test]

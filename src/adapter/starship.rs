@@ -16,12 +16,60 @@ use toml_edit::{DocumentMut, Item, Value};
 /// Starship adapter implementing the ToolAdapter trait.
 pub struct StarshipAdapter;
 
+fn is_style_ident_continue(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'
+}
+
+fn replace_token_aware(value: &str, needle: &str, replacement: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value;
+
+    while let Some(pos) = rest.find(needle) {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + needle.len()..];
+        if after.chars().next().is_some_and(is_style_ident_continue) {
+            out.push_str(needle);
+        } else {
+            out.push_str(replacement);
+        }
+        rest = after;
+    }
+
+    out.push_str(rest);
+    out
+}
+
+fn rewrite_powerline_fg_tokens(value: &str) -> String {
+    let mut rewritten = value.replace("fg:crust", "fg:powerline_fg");
+
+    for (bg, fg) in [
+        ("red", "powerline_fg_red"),
+        ("peach", "powerline_fg_peach"),
+        ("yellow", "powerline_fg_yellow"),
+        ("green", "powerline_fg_green"),
+        ("sapphire", "powerline_fg_sapphire"),
+        ("lavender", "powerline_fg_lavender"),
+    ] {
+        rewritten = rewritten.replace(
+            &format!("fg:powerline_fg bg:{bg}"),
+            &format!("fg:{fg} bg:{bg}"),
+        );
+        rewritten = replace_token_aware(
+            &rewritten,
+            &format!("bg:{bg} fg:powerline_fg"),
+            &format!("bg:{bg} fg:{fg}"),
+        );
+    }
+
+    rewritten
+}
+
 fn replace_fg_crust_in_value(value: &mut Value) {
     match value {
         Value::String(formatted) => {
-            if formatted.value().contains("fg:crust") {
+            let replaced = rewrite_powerline_fg_tokens(formatted.value());
+            if replaced != formatted.value().as_str() {
                 let decor = formatted.decor().clone();
-                let replaced = formatted.value().replace("fg:crust", "fg:powerline_fg");
                 *formatted = toml_edit::Formatted::new(replaced);
                 *formatted.decor_mut() = decor;
             }
@@ -167,6 +215,32 @@ fn inject_slate_palette(doc: &mut DocumentMut, theme: &ThemeVariant) {
             p.bg_darkest.as_ref().unwrap_or(&p.black).clone()
         };
         sp["powerline_fg"] = toml_edit::value(powerline_fg.as_str());
+
+        // Per-segment fg entries for slate's default powerline prompt. A
+        // single fg cannot satisfy WCAG across mixed pastel + dark accents in
+        // several Light palettes, so default prompt strings reference these
+        // bg-specific entries while `powerline_fg` remains available for
+        // custom user configs.
+        let bg_darkest = p.bg_darkest.as_deref().unwrap_or(&p.black);
+        let fg_for_bg = |bg: &str| {
+            crate::wcag::pick_accessible_fg_for_bg(
+                &[
+                    powerline_fg.as_str(),
+                    bg_darkest,
+                    p.foreground.as_str(),
+                    p.background.as_str(),
+                    p.black.as_str(),
+                    p.white.as_str(),
+                ],
+                bg,
+            )
+        };
+        sp["powerline_fg_red"] = toml_edit::value(fg_for_bg(&p.red).as_str());
+        sp["powerline_fg_peach"] = toml_edit::value(fg_for_bg(&peach).as_str());
+        sp["powerline_fg_yellow"] = toml_edit::value(fg_for_bg(&p.yellow).as_str());
+        sp["powerline_fg_green"] = toml_edit::value(fg_for_bg(&p.green).as_str());
+        sp["powerline_fg_sapphire"] = toml_edit::value(fg_for_bg(&sapphire).as_str());
+        sp["powerline_fg_lavender"] = toml_edit::value(fg_for_bg(&lavender).as_str());
 
         palettes["slate"] = toml_edit::Item::Table(sp);
     }
@@ -395,6 +469,23 @@ crust = "#111111"
     }
 
     #[test]
+    fn rewrite_powerline_fg_tokens_targets_known_segment_backgrounds() {
+        let input = concat!(
+            "[x](bg:red fg:powerline_fg)",
+            "[y](fg:powerline_fg bg:yellow)",
+            "[z](bg:red fg:powerline_fg_red)",
+            "[custom](fg:powerline_fg bg:custom)"
+        );
+        let rewritten = rewrite_powerline_fg_tokens(input);
+
+        assert!(rewritten.contains("[x](bg:red fg:powerline_fg_red)"));
+        assert!(rewritten.contains("[y](fg:powerline_fg_yellow bg:yellow)"));
+        assert!(rewritten.contains("[z](bg:red fg:powerline_fg_red)"));
+        assert!(rewritten.contains("[custom](fg:powerline_fg bg:custom)"));
+        assert!(!rewritten.contains("powerline_fg_red_red"));
+    }
+
+    #[test]
     fn test_get_current_theme_returns_none() {
         let adapter = StarshipAdapter;
         let result = adapter.get_current_theme();
@@ -480,13 +571,18 @@ crust = "#111111"
         ]
     }
 
+    /// Parse a `[palettes.slate]` value out of a rendered starship.toml.
+    fn extract_slate_palette_value(rendered: &str, key: &str) -> String {
+        let doc: DocumentMut = rendered.parse().expect("rendered must be valid TOML");
+        let value = doc["palettes"]["slate"][key]
+            .as_str()
+            .unwrap_or_else(|| panic!("{key} must be a string"));
+        value.to_string()
+    }
+
     /// Parse `[palettes.slate].powerline_fg` out of a rendered starship.toml.
     fn extract_powerline_fg(rendered: &str) -> String {
-        let doc: DocumentMut = rendered.parse().expect("rendered must be valid TOML");
-        let value = doc["palettes"]["slate"]["powerline_fg"]
-            .as_str()
-            .expect("powerline_fg must be a string");
-        value.to_string()
+        extract_slate_palette_value(rendered, "powerline_fg")
     }
 
     /// Diagnostic helper: dumps per-candidate MIN-contrast for every Light
@@ -599,6 +695,56 @@ crust = "#111111"
                 "theme {} emitted {} but MAX-of-MIN candidate was {} (mins={:?})",
                 theme.id, emitted, expected, mins
             );
+        }
+    }
+
+    /// STARSHIP-01 hard acceptance for slate's default powerline prompt:
+    /// each default segment bg gets its own foreground key, and every Light
+    /// theme must clear WCAG AA for every default pill.
+    #[test]
+    fn per_segment_powerline_fgs_pass_min_contrast_for_all_light_themes() {
+        use crate::theme::{ThemeAppearance, ThemeRegistry};
+
+        let registry = ThemeRegistry::new().expect("theme registry must load");
+        let light_themes: Vec<_> = registry
+            .all()
+            .into_iter()
+            .filter(|t| t.appearance == ThemeAppearance::Light)
+            .collect();
+
+        assert!(
+            !light_themes.is_empty(),
+            "registry must contain at least one Light theme"
+        );
+
+        let pairs = [
+            ("powerline_fg_red", "red"),
+            ("powerline_fg_peach", "peach"),
+            ("powerline_fg_yellow", "yellow"),
+            ("powerline_fg_green", "green"),
+            ("powerline_fg_sapphire", "sapphire"),
+            ("powerline_fg_lavender", "lavender"),
+        ];
+
+        for theme in light_themes {
+            let rendered = themed_config_from_content("", theme)
+                .expect("themed_config_from_content must succeed");
+
+            for (fg_key, bg_key) in pairs {
+                let fg = extract_slate_palette_value(&rendered, fg_key);
+                let bg = extract_slate_palette_value(&rendered, bg_key);
+                let ratio = crate::wcag::contrast_hex(&fg, &bg);
+                assert!(
+                    ratio >= 4.5,
+                    "{} {} ({}) on {} ({}) contrast {:.2} must be >= 4.5",
+                    theme.id,
+                    fg_key,
+                    fg,
+                    bg_key,
+                    bg,
+                    ratio
+                );
+            }
         }
     }
 

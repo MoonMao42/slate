@@ -274,6 +274,28 @@ pub fn pick_light_powerline_fg(palette: &Palette) -> String {
     pick_min_max_fg(&candidates, &pill_bgs).to_string()
 }
 
+/// Pick a readable foreground for a single background.
+/// The caller supplies preferred palette colors in priority order. The first
+/// preferred color that reaches WCAG AA contrast (4.5:1) wins, preserving theme
+/// taste where possible. If no preferred color passes, this falls back to pure
+/// black/white and picks whichever has the higher contrast. For any valid
+/// `#RRGGBB` background, one of black or white is guaranteed to clear AA.
+pub fn pick_accessible_fg_for_bg(preferred: &[&str], bg_hex: &str) -> String {
+    for candidate in preferred {
+        if contrast_hex(candidate, bg_hex) >= 4.5 {
+            return (*candidate).to_string();
+        }
+    }
+
+    let black = "#000000";
+    let white = "#FFFFFF";
+    if contrast_hex(black, bg_hex) >= contrast_hex(white, bg_hex) {
+        black.to_string()
+    } else {
+        white.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,6 +417,26 @@ mod tests {
                 || picked == p.background
                 || picked == *p.bg_darkest.as_ref().unwrap(),
             "picked {picked} must be one of the three candidate slots"
+        );
+    }
+
+    #[test]
+    fn pick_accessible_fg_for_bg_prefers_palette_candidate_that_passes() {
+        let picked = pick_accessible_fg_for_bg(&["#111111", "#FFFFFF"], "#fdf6e3");
+        assert_eq!(picked, "#111111");
+    }
+
+    #[test]
+    fn pick_accessible_fg_for_bg_falls_back_to_black_or_white() {
+        let picked = pick_accessible_fg_for_bg(&["#777777"], "#777777");
+        let ratio = contrast_hex(&picked, "#777777");
+        assert!(
+            picked == "#000000" || picked == "#FFFFFF",
+            "fallback must be black or white, got {picked}"
+        );
+        assert!(
+            ratio >= 4.5,
+            "fallback must meet WCAG AA against the background, got {ratio:.2}"
         );
     }
 }
