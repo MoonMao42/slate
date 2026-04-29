@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="./assets/promo/01-picker-hero.gif" alt="slate theme picker swapping Solarized Dark and Light" width="700" />
+  <img src="./assets/theme-demo.gif" alt="slate theme picker swapping Solarized Dark and Light" width="700" />
   <br />
   <sub>Pick a theme — slate previews the whole stack live, no reload.</sub>
 </p>
