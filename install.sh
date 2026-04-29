@@ -3,6 +3,7 @@ set -eu
 
 REPO="${SLATE_REPO:-MoonMao42/slate}"
 VERSION="${SLATE_VERSION:-latest}"
+APP_NAME="${SLATE_APP_NAME:-slate-cli}"
 BIN_NAME="${SLATE_BIN_NAME:-slate}"
 
 detect_arch() {
@@ -69,19 +70,21 @@ resolve_download_base() {
 ARCH="$(detect_arch)"
 PLATFORM="$(detect_platform)"
 TARGET="${ARCH}-${PLATFORM}"
-ASSET="${BIN_NAME}-${TARGET}.tar.gz"
+ASSET="${APP_NAME}-${TARGET}.tar.xz"
 URL="$(resolve_download_base)/${ASSET}"
 INSTALL_DIR="$(resolve_install_dir)"
 
 if [ "${SLATE_INSTALL_DRY_RUN:-0}" = "1" ]; then
   echo "TARGET_TRIPLE=${TARGET}"
+  echo "APP_NAME=${APP_NAME}"
+  echo "BIN_NAME=${BIN_NAME}"
   echo "ASSET=${ASSET}"
   echo "URL=${URL}"
   echo "INSTALL_DIR=${INSTALL_DIR}"
   exit 0
 fi
 
-echo "Installing slate for ${TARGET}..."
+echo "Installing ${BIN_NAME} for ${TARGET}..."
 
 WORK_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/slate-install.XXXXXX")"
 trap 'rm -rf "$WORK_TMPDIR"' EXIT
@@ -120,14 +123,14 @@ fi
 
 EXTRACT_DIR="$WORK_TMPDIR/extracted"
 mkdir -p "$EXTRACT_DIR"
-if ! tar xzf "$WORK_TMPDIR/$ASSET" -C "$EXTRACT_DIR" --no-same-owner --no-same-permissions; then
+if ! tar xf "$WORK_TMPDIR/$ASSET" -C "$EXTRACT_DIR" --no-same-owner --no-same-permissions; then
   echo "Error: failed to extract $ASSET" >&2
   exit 1
 fi
 
 # cargo-dist archives contain a single top-level dir named after the asset; binary lives one level deep.
 # Constrain the search so a crafted archive can't smuggle a sibling binary earlier in find order.
-EXPECTED_DIR="${ASSET%.tar.gz}"
+EXPECTED_DIR="${ASSET%.tar.xz}"
 CANDIDATE="$EXTRACT_DIR/$EXPECTED_DIR/$BIN_NAME"
 if [ -f "$CANDIDATE" ]; then
   BIN_PATH="$CANDIDATE"

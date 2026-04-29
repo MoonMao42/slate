@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-29
+
+### Fixed
+- `install.sh` now downloads the correct `slate-cli-<target>.tar.xz` asset
+  cargo-dist actually publishes; v0.3.0 was looking for `slate-<target>.tar.gz`
+  and would fail outright on a fresh `curl ... | sh` install.
+- `bat` cache rebuild now falls back to the `batcat` binary, so theme apply
+  no longer no-ops on Debian/Ubuntu where bat ships under that name.
+- Short-lived `slate` invocations now flush the SFX queue before exit, so the
+  apply / success / failure sounds actually play instead of being dropped when
+  the process tears down inside the 60ms coalesce window.
+- `ensure_cache` rewrites WAV samples whose contents differ from the embedded
+  bytes, so an upgrade that ships fresher samples actually replaces stale
+  files in `~/.cache/slate/sounds`.
+
+### Changed
+- Homebrew install line tightened to `brew install MoonMao42/tap/slate-cli`
+  (Homebrew expands `tap` → `homebrew-tap` automatically). The README,
+  CHANGELOG, distribution doc, and release-time tap check all match.
+- `scripts/render-theme-gallery.sh` now ships in the published crate so
+  downstream packagers can regenerate the README's swatch table from
+  `themes/themes.toml` without cloning the repo.
+
 ## [0.3.0] - 2026-04-28
 
 ### Added
@@ -20,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Subtle interaction sound — short, brand-coherent SFX on theme apply, menu
   navigation, setup completion, and errors. Default on, opt-out via
   `slate config set sound off`. Respects `--quiet` and `--auto`. (v0.3.0
-  ships with placeholder samples; the curated SFX library lands in v2.2.x.)
+  ships with placeholder samples; the curated SFX library lands in a future release.)
 
 ### Changed
 - Unified visual language across every command via the new `Roles<'a>`
@@ -33,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 12 WCAG contrast repairs across the Solarized variants (4 dark + 8 light).
   Every theme-token pair now clears the 4.5:1 readability bar; the canonical
   Schoonover hex stays preserved alongside the repaired ANSI slots.
-- README rewritten for v2.2 — new hero recording, 9-family theme gallery,
+- README rewritten for v0.3.0 — new hero recording, 9-family theme gallery,
   Tier 1 / 2 / 3 platform matrix, and an honest accounting of what is and
   isn't supported.
 
@@ -104,8 +127,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Snapshot-based restore system (`slate restore`)
 - Font management (`slate font`)
 - Three-tier config architecture (managed / integration / user override)
-- Homebrew tap distribution (`brew install MoonMao42/homebrew-tap/slate-cli`)
+- Homebrew tap distribution (`brew install MoonMao42/tap/slate-cli`)
 
+[0.3.1]: https://github.com/MoonMao42/slate/releases/tag/v0.3.1
 [0.3.0]: https://github.com/MoonMao42/slate/releases/tag/v0.3.0
 [0.2.0]: https://github.com/MoonMao42/slate/releases/tag/v0.2.0
 [0.1.2]: https://github.com/MoonMao42/slate/releases/tag/v0.1.2

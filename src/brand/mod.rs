@@ -9,8 +9,8 @@ pub mod sound_sink;
 pub mod symbols;
 
 pub use events::{
-    dispatch, ensure_default_sink, set_sink, BrandEvent, EventSink, FailureKind, NavKind, NoopSink,
-    SelectKind, SuccessKind,
+    dispatch, ensure_default_sink, flush, set_sink, BrandEvent, EventSink, FailureKind, NavKind,
+    NoopSink, SelectKind, SuccessKind,
 };
 pub use language::Language;
 pub use palette::BRAND_LAVENDER_FIXED;

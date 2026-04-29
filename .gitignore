@@ -41,6 +41,7 @@ scripts/*
 !scripts/curate-sfx.sh
 !scripts/bake-audio.sh
 !scripts/parse_tape_sfx.py
+!scripts/render-theme-gallery.sh
 
 # Misc
 plot_25min.png

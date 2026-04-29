@@ -20,14 +20,16 @@ run_case() {
   )"
 
   [[ "$output" == *"TARGET_TRIPLE=${expected_target}"* ]]
+  [[ "$output" == *"APP_NAME=slate-cli"* ]]
+  [[ "$output" == *"BIN_NAME=slate"* ]]
   [[ "$output" == *"ASSET=${expected_asset}"* ]]
   [[ "$output" == *"INSTALL_DIR=/tmp/slate-bin"* ]]
 }
 
-run_case "Darwin" "x86_64" "x86_64-apple-darwin" "slate-x86_64-apple-darwin.tar.gz"
-run_case "Darwin" "arm64" "aarch64-apple-darwin" "slate-aarch64-apple-darwin.tar.gz"
-run_case "Linux" "x86_64" "x86_64-unknown-linux-gnu" "slate-x86_64-unknown-linux-gnu.tar.gz"
-run_case "Linux" "aarch64" "aarch64-unknown-linux-gnu" "slate-aarch64-unknown-linux-gnu.tar.gz"
+run_case "Darwin" "x86_64" "x86_64-apple-darwin" "slate-cli-x86_64-apple-darwin.tar.xz"
+run_case "Darwin" "arm64" "aarch64-apple-darwin" "slate-cli-aarch64-apple-darwin.tar.xz"
+run_case "Linux" "x86_64" "x86_64-unknown-linux-gnu" "slate-cli-x86_64-unknown-linux-gnu.tar.xz"
+run_case "Linux" "aarch64" "aarch64-unknown-linux-gnu" "slate-cli-aarch64-unknown-linux-gnu.tar.xz"
 
 versioned_output="$(
   SLATE_INSTALL_DRY_RUN=1 \
@@ -37,7 +39,7 @@ versioned_output="$(
   SLATE_INSTALL_DIR="/tmp/slate-bin" \
   sh "$INSTALL_SCRIPT"
 )"
-[[ "$versioned_output" == *"/releases/download/v0.1.0/slate-x86_64-unknown-linux-gnu.tar.gz"* ]]
+[[ "$versioned_output" == *"/releases/download/v0.1.0/slate-cli-x86_64-unknown-linux-gnu.tar.xz"* ]]
 
 if SLATE_INSTALL_DRY_RUN=1 SLATE_OS_OVERRIDE="FreeBSD" sh "$INSTALL_SCRIPT" >/dev/null 2>&1; then
   echo "install.sh unexpectedly accepted an unsupported OS" >&2

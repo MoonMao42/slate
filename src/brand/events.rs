@@ -73,6 +73,8 @@ pub enum SelectKind {
 /// `OnceLock<Arc<dyn EventSink>>` can be shared across threads.
 pub trait EventSink: Send + Sync {
     fn dispatch(&self, event: BrandEvent);
+
+    fn flush(&self) {}
 }
 
 /// Default no-op sink — zero behavior change when no sink is registered.
@@ -117,6 +119,19 @@ pub fn dispatch(event: BrandEvent) {
     sink.dispatch(event);
 }
 
+/// Flush any asynchronous sink work submitted before this call. The default
+/// sink is a no-op; `SoundSink` uses this to start pending playback before the
+/// short-lived CLI process exits.
+pub fn flush() {
+    let sink = {
+        let state = sink_state()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.sink.clone()
+    };
+    sink.flush();
+}
+
 /// Register a sink. Returns `Err(sink)` if the `OnceLock` has already
 /// been initialized (either by a prior `set_sink` or by `dispatch`
 /// triggering the `NoopSink` default) — the caller can then log a
@@ -141,12 +156,29 @@ pub fn ensure_default_sink() {
     let _ = sink_state();
 }
 
+/// Cross-test serialization for the global `SINK` singleton. Cargo runs unit
+/// tests in parallel by default, and the OnceLock + dispatched-flag state is
+/// shared across the whole binary — without this lock, two sink tests can
+/// interleave their reset / dispatch / set_sink calls and produce sporadic
+/// CI failures that don't reproduce locally.
 #[cfg(test)]
-pub(crate) fn reset_sink_for_tests() {
+static SINK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) struct SinkTestGuard {
+    _inner: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+pub(crate) fn reset_sink_for_tests() -> SinkTestGuard {
+    let guard = SINK_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut state = sink_state()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     *state = SinkState::default();
+    SinkTestGuard { _inner: guard }
 }
 
 #[cfg(test)]
@@ -159,7 +191,7 @@ mod tests {
     /// confirms the `NoopSink` default).
     #[test]
     fn dispatch_with_default_sink_is_noop() {
-        reset_sink_for_tests();
+        let _sink_guard = reset_sink_for_tests();
         dispatch(BrandEvent::SetupComplete);
         dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
         // If this line is reached, the default sink did not panic.
@@ -180,7 +212,7 @@ mod tests {
     /// lib-test process.
     #[test]
     fn set_sink_routes_subsequent_dispatches() {
-        reset_sink_for_tests();
+        let _sink_guard = reset_sink_for_tests();
         let flag = Arc::new(AtomicBool::new(false));
         let sink = Arc::new(TestSink { flag: flag.clone() }) as Arc<dyn EventSink>;
 
@@ -199,14 +231,14 @@ mod tests {
     /// from `main.rs::run()` and from test setup.
     #[test]
     fn ensure_default_sink_is_idempotent() {
-        reset_sink_for_tests();
+        let _sink_guard = reset_sink_for_tests();
         ensure_default_sink();
         ensure_default_sink();
     }
 
     #[test]
     fn set_sink_can_replace_default_before_first_dispatch() {
-        reset_sink_for_tests();
+        let _sink_guard = reset_sink_for_tests();
         ensure_default_sink();
 
         let flag = Arc::new(AtomicBool::new(false));
@@ -222,7 +254,7 @@ mod tests {
 
     #[test]
     fn set_sink_fails_after_first_dispatch() {
-        reset_sink_for_tests();
+        let _sink_guard = reset_sink_for_tests();
         dispatch(BrandEvent::SetupComplete);
 
         let sink = Arc::new(TestSink {
@@ -235,7 +267,7 @@ mod tests {
     /// SFX mapping stays broad-category, not per-detail.
     #[test]
     fn brand_event_has_six_top_level_variants() {
-        reset_sink_for_tests();
+        let _sink_guard = reset_sink_for_tests();
         let all: &[BrandEvent] = &[
             BrandEvent::Success(SuccessKind::ThemeApplied),
             BrandEvent::Failure(FailureKind::ThemeApplyFailed),

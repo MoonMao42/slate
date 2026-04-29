@@ -175,10 +175,10 @@ impl BatAdapter {
 /// missing-bat). Once bat is present, cache rebuild errors are fatal because
 /// shell integration now exports `BAT_THEME=slate-<id>`.
 fn invoke_bat_cache_rebuild(config_dir: &Path) -> Result<()> {
-    if which::which("bat").is_err() {
+    let Ok(bat_binary) = which::which("bat").or_else(|_| which::which("batcat")) else {
         return Ok(());
-    }
-    match Command::new("bat")
+    };
+    match Command::new(bat_binary)
         .env("BAT_CONFIG_DIR", config_dir.as_os_str())
         .env_remove("BAT_THEME")
         .args(["cache", "--build"])

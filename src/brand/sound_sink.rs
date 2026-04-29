@@ -128,6 +128,7 @@ fn spawn_platform_player(_path: &Path) {
 /// the `Sender` closes the channel and the consumer's `recv()` returns `Err`.
 enum Msg {
     Event(BrandEvent),
+    Flush(Sender<()>),
 }
 
 /// The sound sink. `install` wires it into the EventSink
@@ -194,6 +195,13 @@ impl EventSink for SoundSink {
         // we never want a brand-event dispatch to surface an error.
         let _ = self.tx.send(Msg::Event(event));
     }
+
+    fn flush(&self) {
+        let (ack_tx, ack_rx) = channel();
+        if self.tx.send(Msg::Flush(ack_tx)).is_ok() {
+            let _ = ack_rx.recv_timeout(Duration::from_millis(FOLD_WINDOW_MS + 120));
+        }
+    }
 }
 
 /// Consumer loop — owns the mpsc receiver and the player backend for the
@@ -204,21 +212,32 @@ fn player_loop<P: PlayBackend>(rx: Receiver<Msg>, backend: P) {
     loop {
         let first = match rx.recv() {
             Ok(Msg::Event(e)) => e,
+            Ok(Msg::Flush(ack)) => {
+                let _ = ack.send(());
+                continue;
+            }
             Err(_) => return,
         };
-        let best = coalesce_window(&rx, first);
+        let (best, flush_acks) = coalesce_window(&rx, first);
         if !passes_debounce(&best, &last_picker_ms) {
+            for ack in flush_acks {
+                let _ = ack.send(());
+            }
             continue;
         }
         backend.play(sample_for(&best));
+        for ack in flush_acks {
+            let _ = ack.send(());
+        }
     }
 }
 
 /// Drains `rx` for up to 60ms after the first event, tracking the
 /// highest-priority event seen. Returns the winner for playback.
-fn coalesce_window(rx: &Receiver<Msg>, first: BrandEvent) -> BrandEvent {
+fn coalesce_window(rx: &Receiver<Msg>, first: BrandEvent) -> (BrandEvent, Vec<Sender<()>>) {
     let deadline = Instant::now() + Duration::from_millis(FOLD_WINDOW_MS);
     let mut best = first;
+    let mut flush_acks = Vec::new();
     loop {
         let now = Instant::now();
         if now >= deadline {
@@ -227,10 +246,11 @@ fn coalesce_window(rx: &Receiver<Msg>, first: BrandEvent) -> BrandEvent {
         match rx.recv_timeout(deadline - now) {
             Ok(Msg::Event(next)) if priority(&next) > priority(&best) => best = next,
             Ok(Msg::Event(_)) => {}
+            Ok(Msg::Flush(ack)) => flush_acks.push(ack),
             Err(_) => break,
         }
     }
-    best
+    (best, flush_acks)
 }
 
 /// Priority ranking per . Higher number wins the 60ms fold.
@@ -295,7 +315,7 @@ fn ensure_cache(sounds_dir: &Path) -> std::io::Result<()> {
         ("click.wav", CLICK_WAV),
     ] {
         let path = sounds_dir.join(name);
-        if path.exists() {
+        if std::fs::read(&path).is_ok_and(|existing| existing == *bytes) {
             continue;
         }
         // Route through the shared helper so the parent-dir fsync invariant
@@ -440,26 +460,30 @@ mod tests {
         let _g = SINK_LOCK.lock().unwrap();
 
         // Case 1: auto=true.
-        reset_sink_for_tests();
-        let tmp1 = tempfile::TempDir::new().unwrap();
-        let env1 = SlateEnv::with_home(tmp1.path().to_path_buf());
-        SoundSink::install(&env1, /*auto=*/ true, /*quiet=*/ false);
-        let dummy = Arc::new(NoopSink) as Arc<dyn EventSink>;
-        assert!(
-            set_sink(dummy).is_err(),
-            "install(auto=true) must latch a sink slot"
-        );
+        {
+            let _sink_guard = reset_sink_for_tests();
+            let tmp1 = tempfile::TempDir::new().unwrap();
+            let env1 = SlateEnv::with_home(tmp1.path().to_path_buf());
+            SoundSink::install(&env1, /*auto=*/ true, /*quiet=*/ false);
+            let dummy = Arc::new(NoopSink) as Arc<dyn EventSink>;
+            assert!(
+                set_sink(dummy).is_err(),
+                "install(auto=true) must latch a sink slot"
+            );
+        }
 
         // Case 2: quiet=true (reset the sink state between cases).
-        reset_sink_for_tests();
-        let tmp2 = tempfile::TempDir::new().unwrap();
-        let env2 = SlateEnv::with_home(tmp2.path().to_path_buf());
-        SoundSink::install(&env2, false, true);
-        let dummy2 = Arc::new(NoopSink) as Arc<dyn EventSink>;
-        assert!(
-            set_sink(dummy2).is_err(),
-            "install(quiet=true) must latch a sink slot"
-        );
+        {
+            let _sink_guard = reset_sink_for_tests();
+            let tmp2 = tempfile::TempDir::new().unwrap();
+            let env2 = SlateEnv::with_home(tmp2.path().to_path_buf());
+            SoundSink::install(&env2, false, true);
+            let dummy2 = Arc::new(NoopSink) as Arc<dyn EventSink>;
+            assert!(
+                set_sink(dummy2).is_err(),
+                "install(quiet=true) must latch a sink slot"
+            );
+        }
     }
 
     #[test]
@@ -481,6 +505,18 @@ mod tests {
     }
 
     #[test]
+    fn flush_waits_for_pending_coalesced_event() {
+        let (mock, played) = MockPlayer::new();
+        let sink = SoundSink::with_backend_for_tests(mock);
+
+        sink.dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
+        sink.flush();
+
+        let p = played.lock().unwrap().clone();
+        assert_eq!(p, vec![Sample::Success]);
+    }
+
+    #[test]
     fn disabled_config_silent() {
         // End-to-end write sound=off under an injected SlateEnv, then
         // install — the sink slot must be latched with a silent NoopSink,
@@ -488,7 +524,7 @@ mod tests {
         // No std::env::set_var — tests stay pure per user rule
         // `feedback_no_tech_debt` (no global env var mutation in tests).
         let _g = SINK_LOCK.lock().unwrap();
-        reset_sink_for_tests();
+        let _sink_guard = reset_sink_for_tests();
         let tmp = tempfile::TempDir::new().unwrap();
         let env = SlateEnv::with_home(tmp.path().to_path_buf());
         let cm = ConfigManager::with_env(&env).unwrap();

@@ -88,7 +88,7 @@ fn test_wcag_strict_audit_all_themes_pass() {
 
 #[test]
 fn test_wcag_audit_registry_size() {
-    // Sanity check: v2.2 ships 20 themes.
+    // Sanity check: v0.3.0 ships 20 themes.
     // This number will change if new themes are added — update the expected
     // value alongside that change.
     let registry = ThemeRegistry::new().expect("Registry init");

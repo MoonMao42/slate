@@ -179,14 +179,20 @@ fn run() -> Result<()> {
     // Unified cancellation handling — clean exit with no error dump
     match result {
         Err(error::SlateError::UserCancelled) => {
+            brand::flush();
             let _ = cliclack::outro_cancel("");
             std::process::exit(130);
         }
         Err(error::SlateError::IOError(ref e)) if e.kind() == std::io::ErrorKind::Interrupted => {
+            brand::flush();
             let _ = cliclack::outro_cancel("");
             std::process::exit(130);
         }
-        other => Ok(other?),
+        other => {
+            let final_result = other.map(|_| ());
+            brand::flush();
+            Ok(final_result?)
+        }
     }
 }
 
