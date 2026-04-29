@@ -214,8 +214,8 @@ fn event_loop(env: &SlateEnv, state: &mut PickerState) -> Result<ExitAction> {
 
         if had_resize {
             dirty = true;
-            // (plan 19-06): forked starship prompts were
-            // generated with a specific `--terminal-width` arg, so a
+            // forked starship prompts were generated with a specific
+            // `--terminal-width` arg, so a
             // resize invalidates every cached entry. `invalidate_prompt_cache`
             // is a `clear()` — simpler than per-entry width tracking,
             // and correctness > cache hit-rate here.

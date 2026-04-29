@@ -68,7 +68,7 @@ pub(super) fn xml_escape(s: &str) -> Cow<'_, str> {
 pub fn render_tmtheme(palette: &Palette, theme_id: &str) -> String {
     // Substitution map: token name -> palette-derived hex. Every value
     // flows through xml_escape as defense-in-depth.
-    // Mapping reference: PLAN 23-03 Task 2 + RESEARCH §Q13.
+    // Token map matches the bat tmTheme reference grammar.
     let name_value = format!("slate-{theme_id}");
     let uuid_value = theme_uuid(theme_id).hyphenated().to_string();
 

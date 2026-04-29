@@ -536,7 +536,7 @@ mod tests {
     /// bright 8–15). This is the sample-data design contract; drift here is a
     /// product regression, not a test flake. Integration test in
     /// enforces the same invariant end-to-end; keeping it at unit level too
-    /// means wave 2 fails fast without waiting for wave 4.
+    /// means the unit suite fails fast without waiting for integration.
     #[test]
     fn render_covers_all_ansi_slots() {
         let palette = mocha_palette();
