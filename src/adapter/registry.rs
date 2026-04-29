@@ -109,7 +109,11 @@ impl ToolRegistry {
         theme: &ThemeVariant,
         allowed_tools: Option<&HashSet<String>>,
     ) -> Vec<ToolApplyResult> {
-        self.apply_theme_with_filter_inner(allowed_tools, |adapter| adapter.apply_theme(theme))
+        self.apply_theme_with_filter_inner(
+            allowed_tools,
+            |adapter| adapter.is_installed(),
+            |adapter| adapter.apply_theme(theme),
+        )
     }
 
     fn apply_theme_with_filter_env(
@@ -118,9 +122,11 @@ impl ToolRegistry {
         env: &SlateEnv,
         allowed_tools: Option<&HashSet<String>>,
     ) -> Vec<ToolApplyResult> {
-        self.apply_theme_with_filter_inner(allowed_tools, |adapter| {
-            adapter.apply_theme_with_env(theme, env)
-        })
+        self.apply_theme_with_filter_inner(
+            allowed_tools,
+            |adapter| adapter.is_installed_with_env(env),
+            |adapter| adapter.apply_theme_with_env(theme, env),
+        )
     }
 
     /// Shared body for the two public apply-with-filter variants.
@@ -131,12 +137,14 @@ impl ToolRegistry {
     /// that selects `apply_theme` vs `apply_theme_with_env`; it must be `Fn +
     /// Sync` because rayon parallelises the map. `ToolAdapter: Send + Sync`
     /// already makes adapter handles thread-safe.
-    fn apply_theme_with_filter_inner<F>(
+    fn apply_theme_with_filter_inner<I, F>(
         &self,
         allowed_tools: Option<&HashSet<String>>,
+        is_installed_call: I,
         apply_call: F,
     ) -> Vec<ToolApplyResult>
     where
+        I: Fn(&dyn ToolAdapter) -> Result<bool> + Sync,
         F: Fn(&dyn ToolAdapter) -> Result<ApplyOutcome> + Sync,
     {
         self.adapters
@@ -147,7 +155,7 @@ impl ToolRegistry {
             })
             .map(|adapter| {
                 let tool_name = adapter.tool_name().to_string();
-                let (status, requires_new_shell) = match adapter.is_installed() {
+                let (status, requires_new_shell) = match is_installed_call(adapter.as_ref()) {
                     Ok(false) => (ToolApplyStatus::Skipped(SkipReason::NotInstalled), false),
                     Ok(true) => match apply_call(adapter.as_ref()) {
                         Ok(ApplyOutcome::Applied { requires_new_shell }) => {

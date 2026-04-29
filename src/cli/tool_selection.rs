@@ -266,8 +266,17 @@ impl ReviewReceipt {
     /// Shared body — factored so snapshot tests can inject a mock `Roles`
     /// without going through registry init.
     pub(crate) fn format_for_display_with_roles(&self, r: Option<&Roles<'_>>) -> String {
+        self.format_for_display_with_terminal(r, &TerminalProfile::detect())
+    }
+
+    /// Like `format_for_display_with_roles` but with an injected `TerminalProfile`,
+    /// so snapshot tests aren't sensitive to the runner's `$TERM_PROGRAM`.
+    pub(crate) fn format_for_display_with_terminal(
+        &self,
+        r: Option<&Roles<'_>>,
+        terminal: &TerminalProfile,
+    ) -> String {
         let mut output = String::new();
-        let terminal = TerminalProfile::detect();
 
         // Heading: "◆ Review and confirm" via Roles::heading. Mirrors
         // sketch 003 tree narrative anchor.
@@ -542,7 +551,10 @@ mod tests {
             brew_kind: BrewKind::Formula,
         });
 
-        let out = receipt.format_for_display_with_roles(Some(&r));
+        // Pin the terminal so the snapshot doesn't drift with the runner's
+        // $TERM_PROGRAM (CI is `Other terminal`, dev is `Ghostty`).
+        let terminal = detection::TerminalProfile::from_env_vars(Some("ghostty"), None);
+        let out = receipt.format_for_display_with_terminal(Some(&r), &terminal);
         insta::assert_snapshot!("tool_selection_review_receipt_basic", out);
     }
 

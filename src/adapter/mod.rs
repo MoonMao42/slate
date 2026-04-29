@@ -125,6 +125,14 @@ pub trait ToolAdapter: Send + Sync {
     /// adapter is responsible for robust detection
     fn is_installed(&self) -> Result<bool>;
 
+    /// Env-aware variant of [`is_installed`] used by the preview path so a
+    /// tempdir-backed `SlateEnv` is honored when probing for the tool.
+    /// Default delegates to `is_installed()`. Adapters that detect via
+    /// `~/Applications/*.app` or `~/.config/<tool>/...` should override this.
+    fn is_installed_with_env(&self, _env: &SlateEnv) -> Result<bool> {
+        self.is_installed()
+    }
+
     /// Path to tool's primary/integration config file.
     /// This is the file user owns and modifies (entry point for includes).
     /// Example: ~/.config/ghostty/config or ~/.config/starship.toml

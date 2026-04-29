@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest]
+        os: [macos-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -70,3 +70,12 @@ jobs:
           fi
           echo "OK: Binary has no external runtime dependencies"
 
+      - name: Verify Linux runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          echo "Checking Linux shared library dependencies..."
+          ldd target/release/slate
+          if ldd target/release/slate | grep -q "not found"; then
+            echo "ERROR: missing Linux runtime dependency"
+            exit 1
+          fi

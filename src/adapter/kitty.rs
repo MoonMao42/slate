@@ -208,6 +208,10 @@ impl ToolAdapter for KittyAdapter {
         Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
+    fn is_installed_with_env(&self, env: &SlateEnv) -> Result<bool> {
+        Ok(detection::detect_tool_presence_with_env(self.tool_name(), env).installed)
+    }
+
     fn integration_config_path(&self) -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
         Ok(Self::resolve_config_path_with_env(&env))

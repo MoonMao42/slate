@@ -218,6 +218,10 @@ impl ToolAdapter for AlacrittyAdapter {
         Ok(detection::detect_tool_presence(self.tool_name()).installed)
     }
 
+    fn is_installed_with_env(&self, env: &SlateEnv) -> Result<bool> {
+        Ok(detection::detect_tool_presence_with_env(self.tool_name(), env).installed)
+    }
+
     fn integration_config_path(&self) -> Result<PathBuf> {
         Self::resolve_config_path()
     }
