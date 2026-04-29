@@ -362,7 +362,16 @@ mod tests {
         sink.dispatch(BrandEvent::SetupComplete);
         sleep(Duration::from_millis(90));
         sink.dispatch(BrandEvent::ApplyComplete);
-        sleep(Duration::from_millis(150));
+        // Wait for the player loop to drain the final fold window. CI runners
+        // are slower than local, so poll instead of relying on a fixed sleep.
+        let expected = 5;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if played.lock().unwrap().len() >= expected || Instant::now() >= deadline {
+                break;
+            }
+            sleep(Duration::from_millis(20));
+        }
         // PickerMove verified separately (picker_move_debounce test) so
         // we skip it here — this spacing interleaves with the 50ms
         // debounce and would make the assertion flaky.

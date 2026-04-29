@@ -422,11 +422,20 @@ pub(super) fn render_afterglow_receipt(
     Ok(())
 }
 
+fn build_afterglow_receipt(state: &PickerState, applied_opacity: OpacityPreset) -> Result<String> {
+    let terminal = crate::detection::TerminalProfile::detect();
+    build_afterglow_receipt_with_terminal(state, applied_opacity, &terminal)
+}
+
 // SWATCH-RENDERER: intentionally raw ANSI. The afterglow receipt composes
 // terminal-control escapes (`?1049l`, `?25h`) plus a palette-tinted swatch
 // foreground into one `String`; the aggregate migration scanner must ignore
 // this helper body the same way it ignores the write-to-stdout wrapper above.
-fn build_afterglow_receipt(state: &PickerState, applied_opacity: OpacityPreset) -> Result<String> {
+fn build_afterglow_receipt_with_terminal(
+    state: &PickerState,
+    applied_opacity: OpacityPreset,
+    terminal: &crate::detection::TerminalProfile,
+) -> Result<String> {
     let current_theme = state.get_current_theme()?;
     let text_rgb = parse_hex_color(&current_theme.palette.foreground);
 
@@ -460,7 +469,7 @@ fn build_afterglow_receipt(state: &PickerState, applied_opacity: OpacityPreset) 
         .unwrap_or_else(|| current_theme.name.clone());
 
     let theme_line = format!("  {}  {}     {}\n", brand_glyph, theme_label, theme_name);
-    let show_opacity = crate::detection::TerminalProfile::detect().supports_opacity();
+    let show_opacity = terminal.supports_opacity();
     let opacity_line = if show_opacity {
         format!(
             "  {}  {}   {}\n",
@@ -725,8 +734,11 @@ mod tests {
     #[test]
     fn afterglow_receipt_reports_applied_opacity_not_raw_selection() {
         let state = PickerState::new("catppuccin-latte", OpacityPreset::Clear).unwrap();
-        let receipt = build_afterglow_receipt(&state, OpacityPreset::Solid)
-            .expect("receipt should render for a valid picker state");
+        // Pin terminal to Ghostty so the test isn't sensitive to runner $TERM_PROGRAM.
+        let terminal = crate::detection::TerminalProfile::from_env_vars(Some("ghostty"), None);
+        let receipt =
+            build_afterglow_receipt_with_terminal(&state, OpacityPreset::Solid, &terminal)
+                .expect("receipt should render for a valid picker state");
         let visible = strip_ansi(receipt.as_bytes());
         assert!(
             visible.contains("Opacity   Solid"),
