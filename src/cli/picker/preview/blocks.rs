@@ -1,4 +1,4 @@
-//! Pure block renderers for picker preview. 
+//! Pure block renderers for picker preview.
 //! SWATCH-RENDERER: intentionally raw ANSI (renders palette colors, not
 //! role text). Allowlisted by `brand::migration::tests::no_raw_styling_ansi_anywhere_in_user_surfaces`.
 //! Migrated verbatim from `src/cli/demo.rs` in . The 4
@@ -534,7 +534,7 @@ mod tests {
     /// D-B4 coverage gate (strict unit-level check).
     /// A single render must light up ALL 16 ANSI palette slots (normal 0–7 +
     /// bright 8–15). This is the sample-data design contract; drift here is a
-    /// product regression, not a test flake. Integration test in 
+    /// product regression, not a test flake. Integration test in
     /// enforces the same invariant end-to-end; keeping it at unit level too
     /// means wave 2 fails fast without waiting for wave 4.
     #[test]

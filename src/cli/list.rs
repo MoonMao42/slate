@@ -45,7 +45,7 @@ pub fn handle(_args: &[&str]) -> Result<()> {
                 // carries the active theme's `brand_accent` ; the id and
                 // description route through `r.path(...)` for the dim italic
                 // treatment.
-                print!("{}  ", " ".repeat(2)); // 4 spaces indent per 
+                print!("{}  ", " ".repeat(2)); // 4 spaces indent per
                 print_color_blocks(&theme.palette);
                 print!("  {}", theme_name_text(r.as_ref(), &theme.name));
                 print!("  {}", path_text(r.as_ref(), &theme.id));

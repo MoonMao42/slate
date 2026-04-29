@@ -813,7 +813,7 @@ pub static HIGHLIGHT_GROUPS: &[(&str, HighlightSpec)] = &[
     // • blink.cmp — 39 entries (14 base + 25 kinds)
     // • nvim-cmp — 32 entries (6 base + 26 kinds)
     // Total: 130 plugin entries. 262-entry base + this plan's
-    // 130 = 392 total. Exceeds "~300" parity target because 
+    // 130 = 392 total. Exceeds "~300" parity target because
     // targets BASE coverage only; plugin coverage is additive.
 
     // ── Telescope (13 entries) ────────────────────────────────────────
@@ -1327,7 +1327,7 @@ mod tests {
     /// adds 6-plugin coverage (telescope + neo-tree + GitSigns +
     /// which-key + blink.cmp + nvim-cmp) for ≥ 130 entries on top = ≥ 392.
     /// reconciliation: targets ~300 groups as parity
-    /// against catppuccin/tokyonight BASE coverage. Plugin groups 
+    /// against catppuccin/tokyonight BASE coverage. Plugin groups
     /// are counted additively in this same table. 262 (base/ts/lsp)
     /// + 130 (6-plugin) = 392 is the correct final target.
     #[test]

@@ -80,7 +80,7 @@ pub fn handle_export() -> Result<()> {
 /// Parses the URI and applies theme, font, opacity, and tool toggles.
 /// On success emits the share-success line via `Roles::status_success`
 /// (theme.green per D-01a — NEVER lavender) and dispatches
-/// `BrandEvent::Success(SuccessKind::ConfigSet)` so 
+/// `BrandEvent::Success(SuccessKind::ConfigSet)` so
 /// SoundSink can ring the share-import completion moment alongside the
 /// other config-mutation surfaces.
 pub fn handle_import(uri: &str) -> Result<()> {

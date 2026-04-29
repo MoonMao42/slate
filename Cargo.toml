@@ -87,3 +87,6 @@ has-nvim = []
 [[bench]]
 name = "performance"
 harness = false
+
+[lints.clippy]
+doc_lazy_continuation = "allow"

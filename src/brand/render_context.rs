@@ -24,7 +24,7 @@ use std::sync::{Mutex, OnceLock};
 /// Rendering capability of the current terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderMode {
-    /// Full 24-bit ANSI (`#RRGGBB` → `38;2;R;G;B`). Pills render the 
+    /// Full 24-bit ANSI (`#RRGGBB` → `38;2;R;G;B`). Pills render the
     /// blend; brand anchors use `BRAND_LAVENDER_FIXED`.
     Truecolor,
     /// 256-color or lower. Pills fall back to `› text ‹` + Dim+Bold

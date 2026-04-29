@@ -530,7 +530,7 @@ mod tests {
     /// rendered as colored bytes (swatch, not role text).
     /// Built from a byte slice rather than a source-level ANSI literal
     /// so the Wave-3 grep gate `no_raw_ansi_in_wave_3_files` stays
-    /// authoritative — same pattern as 
+    /// authoritative — same pattern as
     /// `theme_switch_envelope_uses_green_not_lavender` guard.
     #[test]
     fn status_panel_preserves_palette_swatch() {

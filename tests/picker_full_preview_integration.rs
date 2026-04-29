@@ -172,7 +172,7 @@ fn picker_esc_rolls_back_managed_ghostty() {
 /// VALIDATION row 1 (Tab mode) — Tab toggles `preview_mode_full` in-memory
 /// only. The `current` file, which encodes the committed theme, must not
 /// change when the user enters/exits full preview.
-/// Complements the Esc-rollback test: together they lock the 
+/// Complements the Esc-rollback test: together they lock the
 /// two-layer ephemeral invariant from two angles (navigation AND Tab).
 #[test]
 fn picker_tab_enters_full_mode_without_persisting() {

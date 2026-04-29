@@ -127,11 +127,7 @@ mod tests {
     #[test]
     fn test_all_presets_exist() {
         let presets = PresetCatalog::all_presets();
-        assert_eq!(
-            presets.len(),
-            4,
-            "Must have exactly 4 locked presets per "
-        );
+        assert_eq!(presets.len(), 4, "Must have exactly 4 locked presets per ");
     }
 
     #[test]

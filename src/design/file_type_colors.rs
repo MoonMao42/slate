@@ -61,14 +61,14 @@ pub fn classify(name: &str, kind: FileKind) -> SemanticColor {
     SemanticColor::FileDocs
 }
 
-/// Flat (extension-without-dot, SemanticColor) pairs for 
+/// Flat (extension-without-dot, SemanticColor) pairs for
 /// `LS_COLORS` / `EZA_COLORS` generation. Order is deterministic
 /// iterates this slice to emit colors per extension.
 pub fn extension_map() -> &'static [(&'static str, SemanticColor)] {
     EXTENSION_MAP
 }
 
-/// Flat (full-filename, SemanticColor) pairs for 
+/// Flat (full-filename, SemanticColor) pairs for
 /// `LS_COLORS` / `EZA_COLORS` generation. Order is deterministic
 /// iterates this slice to emit colors for full filename matches (e.g. lock
 /// files, manifests) that must round-trip through `classify()`.
@@ -185,10 +185,7 @@ mod tests {
     #[test]
     fn extension_map_is_non_empty_and_contains_expected_entries() {
         let map = extension_map();
-        assert!(
-            !map.is_empty(),
-            "extension_map must be populated for "
-        );
+        assert!(!map.is_empty(), "extension_map must be populated for ");
         assert!(map.contains(&("ts", SemanticColor::FileCode)));
         assert!(map.contains(&("zip", SemanticColor::FileArchive)));
         assert!(map.contains(&("mp3", SemanticColor::FileAudio)));

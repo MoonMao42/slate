@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn strip_zsh_prompt_escapes_removes_wrappers() {
-        // Fixtures use the Unicode rune form of ESC (U+001B) so the 
+        // Fixtures use the Unicode rune form of ESC (U+001B) so the
         // aggregate scanner, which matches on the hex-byte literal form in
         // source, doesn't flag these as raw styling. Runtime bytes identical.
         let input = "%{\u{001b}[1m%}bold%{\u{001b}[0m%}";

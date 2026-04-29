@@ -231,7 +231,7 @@ mod tests {
     use super::*;
     use crate::brand::render_context::{mock_context, mock_context_with_mode, mock_theme};
 
-    /// Snapshot row `18-W0-roles-truecolor` — command pill emits the 
+    /// Snapshot row `18-W0-roles-truecolor` — command pill emits the
     /// blend bg + lavender fg + reset. Byte-locked via `insta`.
     #[test]
     fn snapshot_command_role_truecolor() {

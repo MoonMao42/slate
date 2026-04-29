@@ -13,7 +13,7 @@
 //! dispatching it directly from the test lands in the sink's failure
 //! counter, proving the variant exists and the wrapper in
 //! `resolve_auto_theme` / `configure_auto_theme` (which catch `Err`
-//! and re-dispatch) will land their failure event on 
+//! and re-dispatch) will land their failure event on
 //! SoundSink.
 //! 2. `BrandEvent::Success(SuccessKind::ConfigSet)` is routable — same
 //! shape as (1), covering the 9 dispatch sites planted across

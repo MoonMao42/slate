@@ -257,11 +257,11 @@ pub enum ThemeAppearance {
 /// Contains both tool_refs and palette for complete theme data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThemeVariant {
-    pub id: String,     // Unique identifier (e.g., "catppuccin-mocha") — kebab-case
-    pub name: String,   // Display name (e.g., "Catppuccin Mocha")
-    pub family: String, // Family (e.g., "Catppuccin")
+    pub id: String,          // Unique identifier (e.g., "catppuccin-mocha") — kebab-case
+    pub name: String,        // Display name (e.g., "Catppuccin Mocha")
+    pub family: String,      // Family (e.g., "Catppuccin")
     pub tool_refs: ToolRefs, // Now HashMap<String, String>
-    pub palette: Palette, // Raw colors for tools without built-in support
+    pub palette: Palette,    // Raw colors for tools without built-in support
     pub appearance: ThemeAppearance, // Dark or Light classification
     pub auto_pair: Option<String>, // Preferred paired variant ID, if applicable
 }

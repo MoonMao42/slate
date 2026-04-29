@@ -17,6 +17,7 @@ Cargo.lock
 .serena/
 
 # Planning & review artifacts (local-only, not shipped)
+.planning/
 
 *.gif
 *.mp4

@@ -68,7 +68,7 @@ fn apply_explicit_theme(theme: &ThemeVariant, quiet: bool) -> Result<ThemeApplyR
     }
 }
 
-/// Format the `slate theme <name>` success confirmation line. 
+/// Format the `slate theme <name>` success confirmation line.
 /// graceful degrade — falls back to plain `✓ Theme switched to <name>`
 /// when `Roles` is absent (registry init Err path).
 fn format_theme_switched(r: Option<&Roles<'_>>, theme_name: &str) -> String {

@@ -38,7 +38,7 @@ pub struct PickerState {
     /// session; not persisted across picker launches); `true` = full-screen
     /// preview with ◆ Heading responsive fold.
     pub preview_mode_full: bool,
-    /// Theme-id → forked starship prompt cache. Populated by 
+    /// Theme-id → forked starship prompt cache. Populated by
     /// event_loop glue when Tab mode triggers a fork for a new theme;
     /// cleared on resize (because `--terminal-width` is part of the fork
     /// args, so cached prompts no longer match the current layout).

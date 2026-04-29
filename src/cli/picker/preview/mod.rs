@@ -8,6 +8,6 @@ pub(super) mod compose;
 // promoted from `pub(super)` → `pub` so the integration test
 // suite (`tests/picker_starship_fork_fixture.rs`) can call
 // `fork_starship_prompt` + match on `StarshipForkError` without going
-// through a shim. Surface area is narrow (one fn + one enum); 
+// through a shim. Surface area is narrow (one fn + one enum);
 // may consume it too.
 pub mod starship_fork;

@@ -45,7 +45,7 @@ pub(super) fn render_into<W: io::Write>(
         // forked-prompt string. `render_into` is read-only (`&PickerState`)
         // so it does NOT perform the fork itself — that's the event_loop's
         // job (Tab arm; cache populated on new theme entry). Here we
-        // simply consult the cache via `cached_prompt` when 
+        // simply consult the cache via `cached_prompt` when
         // fork has populated it; otherwise compose self-draws per.
         let override_prompt = state.cached_prompt(state.get_current_theme_id());
         render_full_preview(out, state, flash_text, cols, rows, override_prompt)

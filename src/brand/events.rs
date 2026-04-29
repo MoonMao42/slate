@@ -1,12 +1,12 @@
 //! Brand event seam — the sound / analytics plumbing.
-//! ships the trait + `NoopSink` default only. 
+//! ships the trait + `NoopSink` default only.
 //! `SoundSink : impl EventSink` will register via [`set_sink`] on
 //! startup; no other code changes.
 //! Decisions honored:
 //! - ** / / ** — `BrandEvent` enum + `EventSink` trait +
 //! `NoopSink` default + `OnceLock<Arc<dyn EventSink>>` singleton.
 //! Six top-level variants (Success / Failure / Navigation / Selection /
-//! SetupComplete / ApplyComplete) — the 4 broad categories from 
+//! SetupComplete / ApplyComplete) — the 4 broad categories from
 //! plus two whole-flow milestones for to latch onto.
 //! ## Ordering (Pitfall 5)
 //! `set_sink` **MUST** be called before the first `dispatch` on a given
@@ -134,7 +134,7 @@ pub fn set_sink(sink: Arc<dyn EventSink>) -> std::result::Result<(), Arc<dyn Eve
     }
 }
 
-/// Explicitly register the default [`NoopSink`] — optional in 
+/// Explicitly register the default [`NoopSink`] — optional in
 /// (dispatch self-initializes) but `main.rs` calls this to make the
 /// Pitfall 5 ordering explicit so has a documented template.
 pub fn ensure_default_sink() {

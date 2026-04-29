@@ -1062,11 +1062,11 @@ mod tests {
     #[test]
     fn render_loader_size_adjusted_for_lualine() {
         // Rule 3 deviation: the plan's 256 KB upper bound was drafted on an
-        // out-of-date assumption that Plan-03's loader was ~15 KB. 
+        // out-of-date assumption that Plan-03's loader was ~15 KB.
         // own test already asserts `<= 512 KB`, and summary records
         // a baseline of 230 KB. With adding 136 plugin entries (~100 KB
         // spread across 20 variants) plus 20 spliced lualine tables (~40 KB),
-        // the realistic total lands around 370-400 KB. We keep 
+        // the realistic total lands around 370-400 KB. We keep
         // 512 KB upper bound for consistency; the lower bound moves to 8 KB
         // per the plan's stated intent of shifting the floor up for lualine.
         let out = render_loader();

@@ -141,8 +141,8 @@ impl SoundSink {
     /// Install the sink as the process-wide EventSink. Must be called before
     /// any `brand::events::dispatch` call (Pitfall 5).
     /// Short-circuits to `NoopSink` when:
-    /// - `auto || quiet` 
-    /// - `slate config set sound off` 
+    /// - `auto || quiet`
+    /// - `slate config set sound off`
     /// - cache-dir creation fails (silent degrade — no user-visible error)
     /// A double-install is a caller bug, not a user-visible error, so the
     /// `set_sink` Err path is swallowed.

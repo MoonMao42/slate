@@ -560,7 +560,7 @@ mod tests {
     // - stay silent when `gls` is on PATH (nothing to nudge about),
     // - disappear entirely on non-macOS targets (compile-time gate).
     // `is_gnu_ls_present()` reads the process PATH and is NOT injected via
-    // `SlateEnv`, so host state is what it is. Following the 
+    // `SlateEnv`, so host state is what it is. Following the
     // convention (see `is_gnu_ls_present_when_gls_on_path` in detection.rs)
     // the host-conditional tests skip gracefully when the host state doesn't
     // match their precondition — CI machines without coreutils still pass.

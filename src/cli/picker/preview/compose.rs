@@ -4,7 +4,7 @@
 //! so the brand-lavender (`#7287fd`) byte contract is honored.
 //! Block bodies come from [`super::blocks`] — this module never emits its
 //! own syntax-highlighting spans, only stacks what `blocks::*` produces.
-//! ## Fold tiers 
+//! ## Fold tiers
 //! | rows | tier | blocks |
 //! |----------|-----------|----------------------------------------------|
 //! | 0..=31 | Minimum | Palette, Prompt, Code, Files |
@@ -13,7 +13,7 @@
 //! Boundaries may tune ±1-2 rows after UAT (RESEARCH §A6); the tests lock
 //! 31→Minimum, 32→Medium, 39→Medium, 40→Large.
 //! ## Prompt injection
-//! [`compose_full`] takes an optional `prompt_line_override` so 
+//! [`compose_full`] takes an optional `prompt_line_override` so
 //! `starship_fork` can inject the real forked prompt. When `None`, the
 //! composer falls back to
 //! [`crate::cli::picker::preview_panel::self_draw_prompt_from_sample_tokens`]

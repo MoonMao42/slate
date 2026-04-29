@@ -217,7 +217,7 @@ fn state_file_atomic_write_single_event() {
     // exactly 1 event; on macOS kqueue the same atomic rename can fan
     // out into a handful of Name/Data Modify events depending on the
     // APFS driver version — so we only assert ≥1, not a tight upper
-    // bound. Flakiness on the upper bound was observed during 
+    // bound. Flakiness on the upper bound was observed during
     // development (6-event bursts on macOS 15 / nvim 0.12).
     assert!(
         relevant_events >= 1,
