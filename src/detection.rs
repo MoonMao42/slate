@@ -555,6 +555,31 @@ pub fn detect_tool_presence_with_env(tool_id: &str, env: &SlateEnv) -> ToolPrese
         "zsh-syntax-highlighting" => detect_zsh_syntax_highlighting_plugin_with_env(env)
             .map(|path| ToolPresence::installed_with(ToolEvidence::Plugin(path)))
             .unwrap_or_else(ToolPresence::missing),
+        "opencode" => {
+            // Check for opencode command in PATH
+            if let Some(path) = command_in_actual_path("opencode") {
+                ToolPresence::in_path_with(ToolEvidence::Executable(path))
+            } else if let Some(path) = command_path_with_env("opencode", env) {
+                ToolPresence::fallback_with(ToolEvidence::Executable(path))
+            } else {
+                // Check for opencode config files/directories
+                if let Some(path) = std::env::var("OPENCODE_TUI_CONFIG")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+                    .map(PathBuf::from)
+                    .filter(|path| path.exists())
+                {
+                    ToolPresence::installed_with(ToolEvidence::Config(path))
+                } else {
+                    let config_dir = env.xdg_config_home().join("opencode");
+                    if config_dir.exists() {
+                        ToolPresence::installed_with(ToolEvidence::Config(config_dir))
+                    } else {
+                        ToolPresence::missing()
+                    }
+                }
+            }
+        }
         // All other CLI tools: tiered detection
         other => detect_cli_tool_tiered(other, env),
     }

@@ -225,6 +225,7 @@ impl Default for ToolRegistry {
         registry.register(Box::new(crate::adapter::TmuxAdapter));
         registry.register(Box::new(crate::adapter::FontAdapter));
         registry.register(Box::new(crate::adapter::NvimAdapter));
+        registry.register(Box::new(crate::adapter::OpencodeAdapter));
         registry
     }
 }
@@ -300,7 +301,7 @@ mod tests {
     #[test]
     fn test_registry_default() {
         let registry = ToolRegistry::default();
-        assert_eq!(registry.adapters().len(), 14);
+        assert_eq!(registry.adapters().len(), 15);
     }
 
     #[test]

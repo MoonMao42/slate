@@ -84,6 +84,7 @@ fn handle_clean_inner() -> Result<()> {
     remove_tmux_managed_references(env.home())?;
     remove_delta_managed_references(env.home())?;
     remove_nvim_managed_references(&env)?;
+    remove_opencode_managed_references(&env)?;
     log::success(status_success_line(
         r.as_ref(),
         "Removed config-file/import/source hooks",
@@ -457,10 +458,71 @@ fn remove_delta_managed_references(home: &Path) -> Result<()> {
     crate::adapter::marker_block::remove_managed_blocks_from_file(&gitconfig_path)
 }
 
+/// Best-effort strip of Slate's OpenCode TUI theme selection. Slate only sets
+/// `theme = "system"` (plus the standard schema when creating a new file), so
+/// clean removes that value and preserves unrelated user settings.
+fn remove_opencode_managed_references(env: &SlateEnv) -> Result<()> {
+    for tui_path in crate::adapter::OpencodeAdapter::tui_config_paths(env) {
+        strip_opencode_slate_theme(&tui_path)?;
+    }
+
+    Ok(())
+}
+
+fn strip_opencode_slate_theme(tui_path: &Path) -> Result<()> {
+    if !tui_path.exists() {
+        return Ok(());
+    }
+
+    let content = match fs::read_to_string(&tui_path) {
+        Ok(content) => content,
+        Err(_) => return Ok(()),
+    };
+
+    let mut config = match crate::adapter::OpencodeAdapter::parse_tui_config(&content, tui_path) {
+        Ok(config) => config,
+        Err(_) => return Ok(()), // invalid JSON/JSONC — leave it alone
+    };
+
+    let Some(obj) = config.as_object_mut() else {
+        return Ok(());
+    };
+
+    // Only remove theme if it's set to "system" (what slate sets).
+    let removed_theme = obj
+        .get("theme")
+        .and_then(|v| v.as_str())
+        .is_some_and(|t| t == "system");
+    if !removed_theme {
+        return Ok(());
+    }
+    obj.remove("theme");
+
+    let only_slate_schema_remains = obj.len() == 1
+        && obj
+            .get("$schema")
+            .and_then(|v| v.as_str())
+            .is_some_and(|schema| schema == crate::adapter::OpencodeAdapter::TUI_SCHEMA);
+
+    // If config is now empty, or only Slate's schema addition remains, remove
+    // the file entirely.
+    if obj.is_empty() || only_slate_schema_remains {
+        let _ = fs::remove_file(&tui_path);
+    } else {
+        let content = match serde_json::to_string_pretty(&config) {
+            Ok(content) => content,
+            Err(_) => return Ok(()),
+        };
+        let _ = crate::config::atomic_write_synced(tui_path, content.as_bytes());
+    }
+
+    Ok(())
+}
+
 /// Remove every slate-owned file under `~/.config/nvim/` plus the
 /// state file in `~/.cache/slate/`, and best-effort strip the
-/// `pcall(require, 'slate')` marker block from init.lua / init.vim
-/// . Non-slate files in `colors/` are preserved.
+/// `pcall(require, 'slate')` marker block from init.lua / init.vim.
+/// Non-slate files in `colors/` are preserved.
 /// Each step is best-effort — a missing file or directory is NOT
 /// an error (mirrors `remove_fish_loader`'s posture). The orphan
 /// safety of `pcall(require, 'slate')` means failure on the
@@ -727,6 +789,81 @@ mod tests {
         assert!(remove_nvim_managed_references(&env).is_ok());
         // No side effects — no directory materialized.
         assert!(!td.path().join(".config/nvim").exists());
+    }
+
+    #[test]
+    fn remove_opencode_managed_references_deletes_slate_only_tui_config() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let tui_path = td.path().join(".config/opencode/tui.json");
+        std::fs::create_dir_all(tui_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &tui_path,
+            serde_json::json!({
+                "$schema": crate::adapter::OpencodeAdapter::TUI_SCHEMA,
+                "theme": "system"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        remove_opencode_managed_references(&env).unwrap();
+
+        assert!(
+            !tui_path.exists(),
+            "Slate-only OpenCode TUI config should be removed"
+        );
+    }
+
+    #[test]
+    fn remove_opencode_managed_references_preserves_user_settings() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let tui_path = td.path().join(".config/opencode/tui.json");
+        std::fs::create_dir_all(tui_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &tui_path,
+            serde_json::json!({
+                "$schema": crate::adapter::OpencodeAdapter::TUI_SCHEMA,
+                "theme": "system",
+                "mouse": false,
+                "scroll_speed": 5
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        remove_opencode_managed_references(&env).unwrap();
+
+        let after: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&tui_path).unwrap()).unwrap();
+        assert!(after.get("theme").is_none());
+        assert_eq!(after["mouse"], false);
+        assert_eq!(after["scroll_speed"], 5);
+    }
+
+    #[test]
+    fn remove_opencode_managed_references_handles_tui_jsonc() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let tui_path = td.path().join(".config/opencode/tui.jsonc");
+        std::fs::create_dir_all(tui_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &tui_path,
+            r#"{
+                // user setting should survive
+                "theme": "system",
+                "mouse": false,
+            }"#,
+        )
+        .unwrap();
+
+        remove_opencode_managed_references(&env).unwrap();
+
+        let after: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&tui_path).unwrap()).unwrap();
+        assert!(after.get("theme").is_none());
+        assert_eq!(after["mouse"], false);
     }
 
     #[test]
