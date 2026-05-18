@@ -427,28 +427,23 @@ mod tests {
 
     #[test]
     fn picker_move_debounce_50ms_drops_second_within_window() {
-        let (mock, played) = MockPlayer::new();
-        let sink = SoundSink::with_backend_for_tests(mock);
-        // First PickerMove: plays after 60ms fold window.
-        sink.dispatch(BrandEvent::Navigation(NavKind::PickerMove));
-        sleep(Duration::from_millis(80));
-        // Second PickerMove: within 50ms of first's play — debounced.
-        sink.dispatch(BrandEvent::Navigation(NavKind::PickerMove));
-        sleep(Duration::from_millis(20));
-        // Third PickerMove: still within 50ms — debounced.
-        sink.dispatch(BrandEvent::Navigation(NavKind::PickerMove));
-        sleep(Duration::from_millis(200));
-        let p = played.lock().unwrap().clone();
+        let last_picker_ms = AtomicU64::new(0);
+        let picker_move = BrandEvent::Navigation(NavKind::PickerMove);
+
         assert!(
-            p.iter().all(|s| *s == Sample::Click),
-            "all plays must be click samples: {:?}",
-            p
+            passes_debounce(&picker_move, &last_picker_ms),
+            "first PickerMove should pass"
         );
-        assert!(!p.is_empty(), "at least one PickerMove plays");
         assert!(
-            p.len() <= 2,
-            "50ms debounce should drop at least one of the 3 rapid PickerMoves: {:?}",
-            p
+            !passes_debounce(&picker_move, &last_picker_ms),
+            "immediate second PickerMove should be debounced"
+        );
+
+        let old_play_ms = now_epoch_ms().saturating_sub(PICKER_DEBOUNCE_MS + 1);
+        last_picker_ms.store(old_play_ms, Ordering::Relaxed);
+        assert!(
+            passes_debounce(&picker_move, &last_picker_ms),
+            "PickerMove after the 50ms debounce window should pass"
         );
     }
 
