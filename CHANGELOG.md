@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.3.3] - 2026-05-18
+
+### Fixed
+- Default Starship Node.js segment now uses the current Nerd Font Node icon.
+- `slate config set --help` now lists every supported key:
+  `opacity`, `auto-theme`, `fastfetch`, `sound`, and `editor`.
+- `resources/sfx/SHA256SUMS` now matches the checked-in WAV files, and CI
+  locks the checksum contract through the docs invariant test.
+- SFX package documentation no longer contains scaffold-era placeholder notes.
+
+### Changed
+- Removed unused production dependencies from the crate and moved `regex` to
+  dev-dependencies.
+- README sound copy now reflects the current state: README recordings are
+  silent, while the installed CLI includes runtime SFX.
+
 ## [0.3.1] - 2026-04-29
 
 ### Fixed
@@ -129,6 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Three-tier config architecture (managed / integration / user override)
 - Homebrew tap distribution (`brew install MoonMao42/tap/slate-cli`)
 
+[Unreleased]: https://github.com/MoonMao42/slate/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/MoonMao42/slate/releases/tag/v0.3.3
 [0.3.1]: https://github.com/MoonMao42/slate/releases/tag/v0.3.1
 [0.3.0]: https://github.com/MoonMao42/slate/releases/tag/v0.3.0
 [0.2.0]: https://github.com/MoonMao42/slate/releases/tag/v0.2.0

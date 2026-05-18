@@ -62,7 +62,7 @@ Then run `slate setup`.
 - 🌓 Auto dark/light pairing — native watcher on macOS, XDG Desktop Portal (with GNOME fallback) on Linux.
 - Non-destructive: slate writes into managed include files and never edits your dotfiles in place. Snapshots before every change; one command to roll back.
 - One visual language across every command. Headings, severity markers, and tree receipts all flow through the same render contract, so `slate setup`, `slate status`, and an error message all look like they came from the same tool.
-- Small sounds on theme apply, picker navigation, setup completion, and errors. Quiet by design; turn it off with `slate config set sound off`. (v0.3.0 recordings below are silent — see footnote at the bottom of this section.)
+- Small sounds on theme apply, picker navigation, setup completion, and errors. Quiet by design; turn it off with `slate config set sound off`. (The README recordings are silent; runtime feedback is included.)
 
 <p align="center">
   <img src="./assets/fastfetch-preview.png" alt="fastfetch themed output" width="600" />
@@ -76,7 +76,7 @@ Then run `slate setup`.
   <sub><code>slate list</code> — 9 family bands, Solarized landing right after Catppuccin.</sub>
 </p>
 
-<sub>* Recordings render silently in v0.3.0; a future release will refresh with audio once the curated SFX library lands.</sub>
+<sub>* GitHub README recordings render silently; the installed CLI still plays the curated runtime SFX unless disabled.</sub>
 
 ## Neovim follows along
 

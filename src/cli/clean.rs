@@ -474,7 +474,7 @@ fn strip_opencode_slate_theme(tui_path: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let content = match fs::read_to_string(&tui_path) {
+    let content = match fs::read_to_string(tui_path) {
         Ok(content) => content,
         Err(_) => return Ok(()),
     };
@@ -507,7 +507,7 @@ fn strip_opencode_slate_theme(tui_path: &Path) -> Result<()> {
     // If config is now empty, or only Slate's schema addition remains, remove
     // the file entirely.
     if obj.is_empty() || only_slate_schema_remains {
-        let _ = fs::remove_file(&tui_path);
+        let _ = fs::remove_file(tui_path);
     } else {
         let content = match serde_json::to_string_pretty(&config) {
             Ok(content) => content,

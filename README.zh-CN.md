@@ -62,7 +62,7 @@ cargo install slate-cli
 - 🌓 自动跟随系统深浅色：macOS 走原生 watcher，Linux 优先走 XDG Desktop Portal（GNOME 可退回 `gsettings`）。
 - 不改你的 dotfile：slate 写进自己管的 include 文件里，每次改动前先快照，一条命令可回滚。
 - 所有命令共用一套视觉语言。标题、提示符号、树形结果都走同一个渲染契约，所以 `slate setup`、`slate status`、报错信息看起来都像出自一手。
-- 主题应用、选择器翻动、配置完成和报错都有轻微反馈音。默认安静设计，不喜欢就 `slate config set sound off`。（v0.3.0 录像目前是无声的，原因见下方脚注。）
+- 主题应用、选择器翻动、配置完成和报错都有轻微反馈音。默认安静设计，不喜欢就 `slate config set sound off`。（README 录屏是无声的；实际运行时已包含反馈音。）
 
 <p align="center">
   <img src="./assets/fastfetch-preview.png" alt="fastfetch themed output" width="600" />
@@ -76,7 +76,7 @@ cargo install slate-cli
   <sub><code>slate list</code> —— 9 个家族分组，Solarized 紧跟在 Catppuccin 后面。</sub>
 </p>
 
-<sub>* v0.3.0 的录像是无声渲染；等完整 SFX 库做好后，会在后续版本重录带声音版本。</sub>
+<sub>* GitHub README 录屏无声；安装后的 CLI 仍会播放内置反馈音，除非手动关闭。</sub>
 
 ## Neovim 一起跟
 

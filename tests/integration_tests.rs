@@ -65,6 +65,21 @@ fn test_set_subcommand_help() {
 }
 
 #[test]
+fn test_config_help_lists_all_supported_keys() {
+    let mut cmd = Command::cargo_bin("slate").unwrap();
+
+    let output = cmd.args(["config", "set", "--help"]).output().unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    for key in ["opacity", "auto-theme", "fastfetch", "sound", "editor"] {
+        assert!(
+            stdout.contains(key),
+            "config set help should mention supported key {key}; got:\n{stdout}"
+        );
+    }
+}
+
+#[test]
 fn test_status_subcommand_help() {
     let mut cmd = Command::cargo_bin("slate").unwrap();
 

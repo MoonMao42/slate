@@ -53,7 +53,7 @@ enum Commands {
         /// Font name (optional; if omitted, launches picker)
         name: Option<String>,
     },
-    /// Configure slate settings (opacity, auto-theme)
+    /// Configure slate settings (opacity, auto-theme, fastfetch, sound, editor)
     Config {
         /// Subcommand (currently: set)
         #[command(subcommand)]
@@ -105,7 +105,7 @@ enum Commands {
 enum ConfigSubcommand {
     /// Set a configuration value
     Set {
-        /// Key to set (opacity, auto-theme)
+        /// Key to set (opacity, auto-theme, fastfetch, sound, editor)
         key: String,
         /// Value to set
         value: String,

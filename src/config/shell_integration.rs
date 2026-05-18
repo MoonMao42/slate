@@ -137,7 +137,7 @@ detect_files = []
 detect_folders = []
 
 [nodejs]
-symbol = ""
+symbol = ""
 style = "bg:green"
 format = '[[ $symbol( $version) ](fg:powerline_fg_green bg:green)]($style)'
 
