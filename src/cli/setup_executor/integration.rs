@@ -138,7 +138,16 @@ pub(crate) fn ensure_tool_configs(
             }
         }
 
-        if let Err(err) = fs::File::create(path) {
+        let comment = match tool_id {
+            "ghostty" => "# Ghostty configuration — managed by ~/.config/slate/managed/ghostty/\n",
+            "alacritty" => "# Alacritty configuration — managed imports in general.import\n",
+            "kitty" => "# Kitty configuration — managed imports\n",
+            "bat" => "# bat configuration — managed imports\n",
+            "delta" => "# git configuration — managed imports\n",
+            _ => "# Slate configuration\n",
+        };
+
+        if let Err(err) = fs::write(path, comment) {
             issues.push(format!(
                 "Could not initialize {} config file at {}: {}",
                 tool_id,

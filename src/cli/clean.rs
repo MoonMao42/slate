@@ -6,7 +6,7 @@ use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::{config::ConfigManager, platform};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Handle `slate clean` command
 /// Removes managed files, stops the auto-theme watcher, and removes.zshrc marker block
@@ -222,16 +222,33 @@ fn remove_fish_loader(env: &SlateEnv) -> Result<()> {
 /// `slate restore <baseline>`'s job).
 /// - `[palettes.slate]` table removed unconditionally.
 /// - empty `[palettes]` table removed after cleanup.
-/// Honors STARSHIP_CONFIG env override. Silently skips if the file is
-/// non-UTF-8 or unparseable — clean is best-effort and shouldn't fail
-/// the whole uninstall on a malformed config.
+/// Honors STARSHIP_CONFIG env override during normal runs. When SLATE_HOME
+/// is set, ignore STARSHIP_CONFIG so sandboxed/test clean runs cannot follow
+/// the developer shell's live Starship config outside the injected home.
+/// Silently skips if the file is non-UTF-8 or unparseable — clean is
+/// best-effort and shouldn't fail the whole uninstall on a malformed config.
 fn remove_starship_managed_references(env: &SlateEnv) -> Result<()> {
-    let integration_path = std::env::var("STARSHIP_CONFIG")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| env.xdg_config_home().join("starship.toml"));
+    let starship_config = std::env::var("STARSHIP_CONFIG").ok();
+    let integration_path = resolve_starship_clean_path(
+        env,
+        starship_config.as_deref(),
+        std::env::var_os("SLATE_HOME").is_some(),
+    );
     strip_starship_slate_palette(&integration_path)
+}
+
+fn resolve_starship_clean_path(
+    env: &SlateEnv,
+    starship_config: Option<&str>,
+    slate_home_override_present: bool,
+) -> PathBuf {
+    if !slate_home_override_present {
+        if let Some(path) = starship_config.filter(|value| !value.is_empty()) {
+            return PathBuf::from(path);
+        }
+    }
+
+    env.xdg_config_home().join("starship.toml")
 }
 
 /// Pure path-level helper — split from `remove_starship_managed_references`
@@ -894,6 +911,19 @@ green = "#0f0"
         assert!(after.contains("green = \"#0f0\""));
         // User format setting untouched.
         assert!(after.contains("format = \"$all\""));
+    }
+
+    #[test]
+    fn starship_clean_path_ignores_starship_config_when_slate_home_is_set() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let host_starship = "/Users/example/.config/starship.toml";
+
+        let sandboxed = resolve_starship_clean_path(&env, Some(host_starship), true);
+        assert_eq!(sandboxed, env.xdg_config_home().join("starship.toml"));
+
+        let normal = resolve_starship_clean_path(&env, Some(host_starship), false);
+        assert_eq!(normal, PathBuf::from(host_starship));
     }
 
     #[test]

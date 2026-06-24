@@ -427,6 +427,18 @@ error_symbol = "[>](bold red)"
     }
 
     #[test]
+    fn test_setup_initializes_delta_gitconfig_with_context_comment() {
+        let tempdir = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let issues = ensure_tool_configs(&env, &["delta".to_string()], &["delta".to_string()]);
+
+        assert!(issues.is_empty());
+        let content = std::fs::read_to_string(env.home().join(".gitconfig")).unwrap();
+        assert!(content.contains("git configuration"));
+        assert!(content.contains("managed imports"));
+    }
+
+    #[test]
     fn test_font_release_urls_match_official_asset_names() {
         let jetbrains = FontCatalog::get_font("jetbrains-mono").unwrap();
         let hack = FontCatalog::get_font("hack").unwrap();

@@ -107,6 +107,13 @@ impl ToolAdapter for DeltaAdapter {
         // Validate theme has palette data
         theme.palette.validate()?;
 
+        let gitconfig_path = Self::gitconfig_path_with_env(env)?;
+        if !gitconfig_path.exists() {
+            return Ok(ApplyOutcome::Skipped(
+                crate::adapter::SkipReason::MissingIntegrationConfig,
+            ));
+        }
+
         // Render delta colors config
         let delta_colors = Self::render_delta_colors(theme);
 
@@ -114,7 +121,6 @@ impl ToolAdapter for DeltaAdapter {
         let config_mgr = ConfigManager::with_env(env)?;
         config_mgr.write_managed_file("delta", "colors", &delta_colors)?;
 
-        let gitconfig_path = Self::gitconfig_path_with_env(env)?;
         let managed_path = config_mgr.managed_dir("delta").join("colors");
         let new_block = Self::render_delta_config(theme, &managed_path);
         marker_block::upsert_managed_block_file(&gitconfig_path, &new_block)?;
@@ -255,6 +261,23 @@ mod tests {
             !output.contains("dark = true"),
             "Light theme must not emit dark = true (was the bug — washed out context lines on cream Ghostty bg); got:\n{output}"
         );
+    }
+
+    #[test]
+    fn apply_theme_skips_without_creating_missing_gitconfig() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let adapter = DeltaAdapter;
+        let theme = create_test_theme();
+
+        let outcome = adapter.apply_theme_with_env(&theme, &env).unwrap();
+
+        assert_eq!(
+            outcome,
+            ApplyOutcome::Skipped(crate::adapter::SkipReason::MissingIntegrationConfig)
+        );
+        assert!(!env.home().join(".gitconfig").exists());
+        assert!(!env.config_dir().join("managed/delta/colors").exists());
     }
 
     #[test]

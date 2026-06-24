@@ -65,7 +65,12 @@ jobs:
           grep -q 'x86_64-unknown-linux-gnu' dist-workspace.toml
           grep -q 'aarch64-unknown-linux-gnu' dist-workspace.toml
       - name: Verify package payload
-        run: cargo package --allow-dirty --list > /tmp/slate-package-list.txt
+        run: |
+          cargo package --allow-dirty --list > /tmp/slate-package-list.txt
+          if grep -E '(^|/)\.DS_Store$' /tmp/slate-package-list.txt; then
+            echo "ERROR: package payload contains macOS .DS_Store metadata"
+            exit 1
+          fi
       - name: Cache dist
         uses: actions/upload-artifact@v6
         with:

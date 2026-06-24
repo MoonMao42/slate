@@ -1,6 +1,6 @@
 [package]
 name = "slate-cli"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 build = "build.rs"
 description = "Cross-platform terminal beautification kit for macOS and Linux"
@@ -26,6 +26,7 @@ include = [
     "/CHANGELOG.md",
     "/CONTRIBUTING.md",
     "/dist-workspace.toml",
+    "!**/.DS_Store",
 ]
 
 [package.metadata.dist]

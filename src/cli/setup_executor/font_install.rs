@@ -42,11 +42,29 @@ pub fn copy_font_from_caskroom(font_name_or_id: &str, env: &SlateEnv) -> Result<
     let home = dirs_font_target(env);
     fs::create_dir_all(&home)?;
 
+    let mut copied_any = false;
+    let mut last_err = None;
     for src in &font_files {
         if let Some(filename) = src.file_name() {
             let dest = home.join(filename);
-            fs::copy(src, &dest)?;
+            match fs::copy(src, &dest) {
+                Ok(_) => {
+                    copied_any = true;
+                }
+                Err(err) => {
+                    last_err = Some(err);
+                }
+            }
         }
+    }
+
+    if !copied_any {
+        if let Some(err) = last_err {
+            return Err(err.into());
+        }
+        return Err(crate::error::SlateError::Internal(
+            "No font files could be copied".to_string(),
+        ));
     }
 
     let _ = crate::platform::fonts::refresh_font_cache();
@@ -159,17 +177,32 @@ pub fn download_font_release(font_name_or_id: &str, env: &SlateEnv) -> Result<()
             e
         ))
     })?;
+    let mut copied_any = false;
+    let mut last_err = None;
     for src in &font_files {
         if let Some(filename) = src.file_name() {
-            std::fs::copy(src, target.join(filename)).map_err(|e| {
-                crate::error::SlateError::Internal(format!(
-                    "Cannot install font file {} to {}: {}",
-                    filename.to_string_lossy(),
-                    target.display(),
-                    e
-                ))
-            })?;
+            match std::fs::copy(src, target.join(filename)) {
+                Ok(_) => {
+                    copied_any = true;
+                }
+                Err(err) => {
+                    last_err = Some(err);
+                }
+            }
         }
+    }
+
+    if !copied_any {
+        if let Some(err) = last_err {
+            return Err(crate::error::SlateError::Internal(format!(
+                "Failed to install font files to {}: {}",
+                target.display(),
+                err
+            )));
+        }
+        return Err(crate::error::SlateError::Internal(
+            "No font files could be installed".to_string(),
+        ));
     }
 
     let _ = crate::platform::fonts::refresh_font_cache();

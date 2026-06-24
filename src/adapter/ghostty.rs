@@ -293,7 +293,8 @@ impl ToolAdapter for GhosttyAdapter {
         // starship, bat, etc.), eliminating cross-tool color drift.
         let p = &theme.palette;
         let managed_content = format!(
-            "background = {bg}\n\
+            "theme =\n\
+             background = {bg}\n\
              foreground = {fg}\n\
              cursor-color = {cursor}\n\
              selection-background = {sel_bg}\n\
@@ -753,6 +754,11 @@ mod tests {
             managed_theme.exists(),
             "expected managed theme.conf inside tempdir at {:?}",
             managed_theme
+        );
+        let managed_content = fs::read_to_string(&managed_theme).unwrap();
+        assert!(
+            managed_content.starts_with("theme =\n"),
+            "managed theme.conf must reset any Ghostty built-in theme loaded from higher-priority macOS config files"
         );
 
         // Integration file inside the tempdir must reference the managed path.

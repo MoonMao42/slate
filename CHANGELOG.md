@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-06-24
+
+### Fixed
+- Sound debounce tests are now deterministic, reducing timing-dependent CI flakes
+  around the runtime SFX event queue.
+- Delta theme application now skips cleanly when `~/.gitconfig` is absent
+  instead of creating an integration file outside the setup initializer.
+- Ghostty managed theme files now reset any previously loaded built-in Ghostty
+  theme, preventing macOS Application Support config entries from leaving the
+  titlebar/window chrome out of sync with Slate's active palette.
+- `slate clean` now ignores host `STARSHIP_CONFIG` when `SLATE_HOME` is set,
+  keeping sandboxed tests from stripping Slate palette entries out of a
+  developer's live Starship config.
+- Font installation now tolerates individual font-file copy failures as long as
+  at least one font file is installed successfully.
+- Setup-created integration files now include context comments so newly seeded
+  terminal and tool config files are easier to recognize.
+- macOS `.DS_Store` metadata files are now excluded from the packaged crate
+  payload, and the release workflow fails if they reappear in package contents.
+
 ## [0.3.3] - 2026-05-18
 
 ### Fixed
@@ -147,7 +167,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Three-tier config architecture (managed / integration / user override)
 - Homebrew tap distribution (`brew install MoonMao42/tap/slate-cli`)
 
-[Unreleased]: https://github.com/MoonMao42/slate/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/MoonMao42/slate/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/MoonMao42/slate/releases/tag/v0.3.4
 [0.3.3]: https://github.com/MoonMao42/slate/releases/tag/v0.3.3
 [0.3.1]: https://github.com/MoonMao42/slate/releases/tag/v0.3.1
 [0.3.0]: https://github.com/MoonMao42/slate/releases/tag/v0.3.0
