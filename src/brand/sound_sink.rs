@@ -333,7 +333,7 @@ fn ensure_cache(sounds_dir: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use crate::brand::events::{
-        dispatch, reset_sink_for_tests, FailureKind, SelectKind, SuccessKind,
+        dispatch, reset_sink_for_tests, FailureKind, NavKind, SelectKind, SuccessKind,
     };
     use std::sync::Mutex;
     use std::thread::sleep;
@@ -371,36 +371,29 @@ mod tests {
     fn routing_maps_each_brand_event_to_correct_sample() {
         let (mock, played) = MockPlayer::new();
         let sink = SoundSink::with_backend_for_tests(mock);
-        // Space events past the 60ms fold window so each one plays
-        // independently:
+
+        // Flush after each event so the test waits for the async player loop
+        // instead of depending on CI thread scheduling and fixed sleeps.
         sink.dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
-        sleep(Duration::from_millis(90));
+        sink.flush();
         sink.dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
-        sleep(Duration::from_millis(90));
+        sink.flush();
+        sink.dispatch(BrandEvent::Navigation(NavKind::WizardNext));
+        sink.flush();
         sink.dispatch(BrandEvent::Selection(SelectKind::PickerEnter));
-        sleep(Duration::from_millis(90));
+        sink.flush();
         sink.dispatch(BrandEvent::SetupComplete);
-        sleep(Duration::from_millis(90));
+        sink.flush();
         sink.dispatch(BrandEvent::ApplyComplete);
-        // Wait for the player loop to drain the final fold window. CI runners
-        // are slower than local, so poll instead of relying on a fixed sleep.
-        let expected = 5;
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            if played.lock().unwrap().len() >= expected || Instant::now() >= deadline {
-                break;
-            }
-            sleep(Duration::from_millis(20));
-        }
-        // PickerMove verified separately (picker_move_debounce test) so
-        // we skip it here — this spacing interleaves with the 50ms
-        // debounce and would make the assertion flaky.
+        sink.flush();
+
         let p = played.lock().unwrap().clone();
         assert_eq!(
             p,
             vec![
                 Sample::Success,
                 Sample::Failure,
+                Sample::Click,
                 Sample::Select,
                 Sample::Hero,
                 Sample::Apply,

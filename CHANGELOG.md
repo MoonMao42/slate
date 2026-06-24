@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.4] - 2026-06-24
 
 ### Fixed
-- Sound debounce tests are now deterministic, reducing timing-dependent CI flakes
-  around the runtime SFX event queue.
+- Sound sink routing/debounce tests are now deterministic, reducing
+  timing-dependent CI flakes around the runtime SFX event queue.
 - Delta theme application now skips cleanly when `~/.gitconfig` is absent
   instead of creating an integration file outside the setup initializer.
 - Ghostty managed theme files now reset any previously loaded built-in Ghostty
