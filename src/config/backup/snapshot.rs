@@ -48,9 +48,6 @@ pub fn create_backup_with_session(
 }
 
 fn baseline_snapshot_targets(env: &SlateEnv) -> Vec<SnapshotTarget> {
-    let ghostty_path = crate::adapter::GhosttyAdapter
-        .integration_config_path_with_env(env)
-        .unwrap_or_else(|_| env.xdg_config_home().join("ghostty/config.ghostty"));
     let alacritty_path = env.xdg_config_home().join("alacritty/alacritty.toml");
     let kitty_path = env.xdg_config_home().join("kitty/kitty.conf");
     let starship_path = std::env::var("STARSHIP_CONFIG")
@@ -61,7 +58,7 @@ fn baseline_snapshot_targets(env: &SlateEnv) -> Vec<SnapshotTarget> {
     let nvim_init_lua = env.xdg_config_home().join("nvim/init.lua");
     let nvim_init_vim = env.xdg_config_home().join("nvim/init.vim");
 
-    vec![
+    let mut targets = vec![
         SnapshotTarget {
             tool_key: "zshrc",
             display_tool: "Zsh",
@@ -95,11 +92,11 @@ fn baseline_snapshot_targets(env: &SlateEnv) -> Vec<SnapshotTarget> {
             display_tool: "tmux",
             path: env.home().join(".tmux.conf"),
         },
-        SnapshotTarget {
-            tool_key: "ghostty",
-            display_tool: "Ghostty",
-            path: ghostty_path,
-        },
+    ];
+
+    targets.extend(ghostty_snapshot_targets(env));
+
+    targets.extend([
         SnapshotTarget {
             tool_key: "alacritty",
             display_tool: "Alacritty",
@@ -179,7 +176,43 @@ fn baseline_snapshot_targets(env: &SlateEnv) -> Vec<SnapshotTarget> {
             display_tool: "Slate shell env (fish)",
             path: env.config_dir().join("managed/shell/env.fish"),
         },
-    ]
+    ]);
+
+    targets
+}
+
+fn ghostty_snapshot_targets(env: &SlateEnv) -> Vec<SnapshotTarget> {
+    const GHOSTTY_KEYS: &[&str] = if cfg!(target_os = "macos") {
+        &[
+            "ghostty-xdg-config-ghostty",
+            "ghostty-xdg-config",
+            "ghostty-macos-app-support-config-ghostty",
+            "ghostty-macos-app-support-config",
+        ]
+    } else {
+        &["ghostty-xdg-config-ghostty", "ghostty-xdg-config"]
+    };
+
+    let adapter = crate::adapter::GhosttyAdapter;
+    let paths = adapter
+        .integration_candidate_paths_with_env(env)
+        .unwrap_or_else(|_| {
+            vec![
+                env.xdg_config_home().join("ghostty/config.ghostty"),
+                env.xdg_config_home().join("ghostty/config"),
+            ]
+        });
+
+    GHOSTTY_KEYS
+        .iter()
+        .copied()
+        .zip(paths)
+        .map(|(tool_key, path)| SnapshotTarget {
+            tool_key,
+            display_tool: "Ghostty",
+            path,
+        })
+        .collect()
 }
 
 fn write_restore_manifest(

@@ -134,9 +134,9 @@ pub(crate) fn validate_restore_point_data(restore_point: &RestorePoint) -> Resul
                 ))
             })?;
 
-            if metadata.len() == 0 {
+            if !metadata.is_file() {
                 return Err(SlateError::BackupFailed(format!(
-                    "Backup file is empty: {}",
+                    "Backup path is not a file: {}",
                     path.display()
                 )));
             }
@@ -166,4 +166,34 @@ pub(crate) fn read_manifest(manifest_path: &Path) -> Result<RestorePoint> {
         ));
     }
     Ok(restore_point)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::SystemTime;
+    use tempfile::TempDir;
+
+    #[test]
+    fn validate_restore_point_data_allows_empty_present_backup_file() {
+        let td = TempDir::new().unwrap();
+        let backup_path = td.path().join("ghostty-xdg-config-ghostty.backup");
+        fs::write(&backup_path, []).unwrap();
+
+        let restore_point = RestorePoint {
+            id: "baseline-empty-ghostty".to_string(),
+            theme_name: "baseline".to_string(),
+            created_at: SystemTime::UNIX_EPOCH,
+            entries: vec![RestoreEntry {
+                tool_key: "ghostty-xdg-config-ghostty".to_string(),
+                display_tool: "Ghostty".to_string(),
+                original_path: td.path().join(".config/ghostty/config.ghostty"),
+                backup_path: Some(backup_path),
+                original_state: OriginalFileState::Present,
+            }],
+            is_baseline: true,
+        };
+
+        validate_restore_point_data(&restore_point).unwrap();
+    }
 }

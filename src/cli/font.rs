@@ -1,10 +1,13 @@
 use crate::adapter::font::{FontAdapter, FontDiscovery};
+use crate::adapter::{AlacrittyAdapter, GhosttyAdapter, KittyAdapter};
 use crate::brand::events::{dispatch, BrandEvent, FailureKind, SuccessKind};
 use crate::brand::render_context::RenderContext;
 use crate::brand::roles::Roles;
 use crate::cli::font_selection::FontCatalog;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 fn font_uses_basic_prompt(font_name: &str) -> bool {
     !FontAdapter::is_nerd_font_name(font_name)
@@ -14,6 +17,19 @@ fn font_uses_basic_prompt(font_name: &str) -> bool {
 pub(crate) enum ResolvedFontChoice {
     Installed(String),
     Catalog(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FontApplyReport {
+    applied: Vec<&'static str>,
+    skipped: Vec<(&'static str, &'static str)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalRefSyntax {
+    Ghostty,
+    Alacritty,
+    Kitty,
 }
 
 impl ResolvedFontChoice {
@@ -68,6 +84,200 @@ pub(crate) fn resolve_font_choice(name: &str) -> Result<ResolvedFontChoice> {
     resolve_font_choice_with_discovery(name, &discovery)
 }
 
+fn file_contains_managed_ref(path: &Path, managed_path: &Path, syntax: TerminalRefSyntax) -> bool {
+    match syntax {
+        TerminalRefSyntax::Ghostty => {
+            text_file_contains_directive_path(path, managed_path, &[b"config-file", b"include"])
+        }
+        TerminalRefSyntax::Alacritty => alacritty_file_contains_import(path, managed_path),
+        TerminalRefSyntax::Kitty => {
+            text_file_contains_directive_path(path, managed_path, &[b"include"])
+        }
+    }
+}
+
+fn text_file_contains_directive_path(path: &Path, managed_path: &Path, keys: &[&[u8]]) -> bool {
+    let managed = managed_path.display().to_string();
+    let Ok(content) = fs::read(path) else {
+        return false;
+    };
+    let managed = managed.as_bytes();
+
+    content
+        .split(|b| *b == b'\n')
+        .any(|line| line_contains_directive_path(line, managed, keys))
+}
+
+fn alacritty_file_contains_import(path: &Path, managed_path: &Path) -> bool {
+    let managed = managed_path.display().to_string();
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(doc) = content.parse::<toml_edit::DocumentMut>() else {
+        return false;
+    };
+
+    toml_import_array_contains_managed(
+        doc.get("general").and_then(|general| general.get("import")),
+        &managed,
+    ) || toml_import_array_contains_managed(doc.get("import"), &managed)
+}
+
+fn toml_import_array_contains_managed(item: Option<&toml_edit::Item>, managed_path: &str) -> bool {
+    item.and_then(|item| item.as_array()).is_some_and(|array| {
+        array
+            .iter()
+            .any(|value| value.as_str().is_some_and(|path| path == managed_path))
+    })
+}
+
+fn line_contains_directive_path(line: &[u8], managed_path: &[u8], keys: &[&[u8]]) -> bool {
+    let line = trim_ascii_space(line);
+    if line.is_empty() || line.starts_with(b"#") {
+        return false;
+    }
+
+    let key_end = line
+        .iter()
+        .position(|b| *b == b'=' || b.is_ascii_whitespace())
+        .unwrap_or(line.len());
+    let key = trim_ascii_space(&line[..key_end]);
+
+    keys.iter().any(|candidate| *candidate == key) && contains_path_reference(line, managed_path)
+}
+
+fn contains_path_reference(line: &[u8], managed_path: &[u8]) -> bool {
+    if managed_path.is_empty() || line.len() < managed_path.len() {
+        return false;
+    }
+
+    line.windows(managed_path.len())
+        .enumerate()
+        .any(|(idx, window)| {
+            if window != managed_path {
+                return false;
+            }
+
+            let previous = if idx == 0 {
+                None
+            } else {
+                line.get(idx - 1).copied()
+            };
+
+            path_reference_starts_at_value_boundary(previous)
+                && path_reference_ends_at_value_boundary(
+                    line.get(idx + managed_path.len()).copied(),
+                )
+        })
+}
+
+fn path_reference_starts_at_value_boundary(previous: Option<u8>) -> bool {
+    match previous {
+        Some(b'=') | Some(b'"') | Some(b'\'') | Some(b'[') | Some(b'(') | Some(b'{')
+        | Some(b',') => true,
+        Some(prev) => prev.is_ascii_whitespace(),
+        None => true,
+    }
+}
+
+fn path_reference_ends_at_value_boundary(next: Option<u8>) -> bool {
+    match next {
+        Some(b'"') | Some(b'\'') | Some(b',') | Some(b']') | Some(b')') | Some(b'}')
+        | Some(b'\r') | Some(b'\n') | None => true,
+        Some(next) => next.is_ascii_whitespace(),
+    }
+}
+
+fn trim_ascii_space(bytes: &[u8]) -> &[u8] {
+    let start = bytes
+        .iter()
+        .position(|b| !b.is_ascii_whitespace())
+        .unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .rposition(|b| !b.is_ascii_whitespace())
+        .map(|idx| idx + 1)
+        .unwrap_or(start);
+    &bytes[start..end]
+}
+
+fn target_status(
+    name: &'static str,
+    entry_paths: Vec<PathBuf>,
+    managed_path: PathBuf,
+    syntax: TerminalRefSyntax,
+    missing_reason: &'static str,
+    unlinked_reason: &'static str,
+) -> (&'static str, Option<(&'static str, &'static str)>) {
+    let existing = entry_paths
+        .iter()
+        .filter(|path| path.exists())
+        .collect::<Vec<_>>();
+
+    if existing
+        .iter()
+        .any(|path| file_contains_managed_ref(path, &managed_path, syntax))
+    {
+        return (name, None);
+    }
+
+    let reason = if existing.is_empty() {
+        missing_reason
+    } else {
+        unlinked_reason
+    };
+    (name, Some((name, reason)))
+}
+
+fn collect_font_apply_report(env: &SlateEnv) -> FontApplyReport {
+    let config_dir = env.config_dir();
+    let ghostty_adapter = GhosttyAdapter;
+    let ghostty_paths = ghostty_adapter
+        .integration_candidate_paths_with_env(env)
+        .unwrap_or_default();
+    let alacritty_path = AlacrittyAdapter::integration_config_path_with_env(env);
+    let kitty_path = KittyAdapter::resolve_config_path_with_env(env);
+
+    let checks = [
+        target_status(
+            "Ghostty",
+            ghostty_paths,
+            config_dir.join("managed/ghostty/font.conf"),
+            TerminalRefSyntax::Ghostty,
+            "missing Ghostty config",
+            "no Slate font include found",
+        ),
+        target_status(
+            "Alacritty",
+            vec![alacritty_path],
+            config_dir.join("managed/alacritty/font.toml"),
+            TerminalRefSyntax::Alacritty,
+            "missing alacritty.toml",
+            "no Slate font import found",
+        ),
+        target_status(
+            "Kitty",
+            vec![kitty_path],
+            config_dir.join("managed/kitty/font.conf"),
+            TerminalRefSyntax::Kitty,
+            "missing kitty.conf",
+            "no Slate font include found",
+        ),
+    ];
+
+    let mut applied = Vec::new();
+    let mut skipped = Vec::new();
+    for (name, skip) in checks {
+        if let Some(skip) = skip {
+            skipped.push(skip);
+        } else {
+            applied.push(name);
+        }
+    }
+
+    FontApplyReport { applied, skipped }
+}
+
 /// Handle `slate font` command
 /// Supports two modes:
 /// 1. `slate font <name>` — Apply explicit font directly
@@ -108,6 +318,11 @@ pub fn handle_font(font_name: Option<&str>) -> Result<()> {
         FontAdapter::apply_font(&env, &resolved_font)?;
 
         println!("{}", format_font_updated(roles.as_ref(), &resolved_font));
+        if let Some(report) =
+            format_font_apply_report(roles.as_ref(), &collect_font_apply_report(&env))
+        {
+            println!("{report}");
+        }
         // UX-02 (D-D2 + D-D3): the font adapter is always RequiresNewShell=true
         // per D-C3, and this handler bypasses `apply_all`, so we emit inline.
         // Positioned BEFORE the font-specific `activation_hint` line so the
@@ -156,6 +371,34 @@ fn format_font_updated(r: Option<&Roles<'_>>, font_name: &str) -> String {
             font_name
         ),
     }
+}
+
+fn format_font_apply_report(r: Option<&Roles<'_>>, report: &FontApplyReport) -> Option<String> {
+    if report.applied.is_empty() && report.skipped.is_empty() {
+        return None;
+    }
+
+    let applied = if report.applied.is_empty() {
+        "none".to_string()
+    } else {
+        report.applied.join(", ")
+    };
+    let skipped = if report.skipped.is_empty() {
+        "none".to_string()
+    } else {
+        report
+            .skipped
+            .iter()
+            .map(|(tool, reason)| format!("{tool} ({reason})"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let line = format!("Terminal font refs: applied to {applied}; skipped {skipped}.");
+
+    Some(match r {
+        Some(r) => r.path(&line),
+        None => format!("(i) {line}"),
+    })
 }
 
 /// Format `✗ Download failed: <reason>` via `Roles::status_error`
@@ -333,6 +576,9 @@ fn show_font_picker(roles: Option<&Roles<'_>>) -> Result<()> {
         FontAdapter::apply_font(&env, &bare_name)?;
 
         println!("{}", format_font_updated(roles, &bare_name));
+        if let Some(report) = format_font_apply_report(roles, &collect_font_apply_report(&env)) {
+            println!("{report}");
+        }
 
         if font_uses_basic_prompt(&bare_name) {
             println!("(i) Basic Starship mode enabled for new shells because this font does not include Nerd Font glyphs.");
@@ -386,13 +632,17 @@ fn download_catalog_font(font_name: &str, env: &SlateEnv) -> std::result::Result
 #[cfg(test)]
 mod tests {
     use super::{
+        collect_font_apply_report, file_contains_managed_ref, format_font_apply_report,
         format_font_download_failed, format_font_downloaded, format_font_updated,
-        format_no_fonts_found, resolve_font_choice_with_discovery, ResolvedFontChoice,
+        format_no_fonts_found, resolve_font_choice_with_discovery, FontApplyReport,
+        ResolvedFontChoice, TerminalRefSyntax,
     };
     use crate::adapter::font::FontDiscovery;
     use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
     use crate::brand::roles::Roles;
     use crate::cli::new_shell_reminder::REMINDER_TEST_LOCK;
+    use crate::env::SlateEnv;
+    use tempfile::TempDir;
 
     /// Mirrors the explicit-name branch emit in `handle_font`: the font
     /// adapter is always RequiresNewShell=true per D-C3, so the inline
@@ -444,6 +694,145 @@ mod tests {
             .to_string();
 
         assert!(err.contains("Font 'Definitely Not A Font' not found"));
+    }
+
+    #[test]
+    fn font_apply_report_marks_real_refs_and_missing_entry_files() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let ghostty_dir = env.xdg_config_home().join("ghostty");
+        let alacritty_dir = env.xdg_config_home().join("alacritty");
+        std::fs::create_dir_all(&ghostty_dir).unwrap();
+        std::fs::create_dir_all(&alacritty_dir).unwrap();
+
+        let ghostty_font = env.config_dir().join("managed/ghostty/font.conf");
+        let alacritty_font = env.config_dir().join("managed/alacritty/font.toml");
+        std::fs::create_dir_all(ghostty_font.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(alacritty_font.parent().unwrap()).unwrap();
+        std::fs::write(&ghostty_font, "font-family = \"JetBrains Mono\"\n").unwrap();
+        std::fs::write(
+            &alacritty_font,
+            "[font.normal]\nfamily = \"JetBrains Mono\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ghostty_dir.join("config.ghostty"),
+            format!("config-file = \"{}\"\n", ghostty_font.display()),
+        )
+        .unwrap();
+        std::fs::write(alacritty_dir.join("alacritty.toml"), "[general]\n").unwrap();
+
+        let report = collect_font_apply_report(&env);
+
+        assert_eq!(report.applied, vec!["Ghostty"]);
+        assert!(report
+            .skipped
+            .contains(&("Alacritty", "no Slate font import found")));
+        assert!(report.skipped.contains(&("Kitty", "missing kitty.conf")));
+    }
+
+    #[test]
+    fn font_apply_report_plain_formatter_lists_applied_and_skipped_targets() {
+        let report = FontApplyReport {
+            applied: vec!["Ghostty"],
+            skipped: vec![("Kitty", "missing kitty.conf")],
+        };
+
+        let out = format_font_apply_report(None, &report).unwrap();
+
+        assert_eq!(
+            out,
+            "(i) Terminal font refs: applied to Ghostty; skipped Kitty (missing kitty.conf)."
+        );
+    }
+
+    #[test]
+    fn font_apply_report_ignores_commented_or_prefix_only_font_refs() {
+        let td = TempDir::new().unwrap();
+        let config = td.path().join("ghostty.conf");
+        let managed = td.path().join("managed/ghostty/font.conf");
+        std::fs::create_dir_all(managed.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config,
+            format!(
+                "# config-file = \"{}\"\nconfig-file = \"{}-old\"\nconfig-file = \"/tmp{}\"\ninclude = \"{}/child\"\n",
+                managed.display(),
+                managed.display(),
+                managed.display(),
+                managed.display()
+            ),
+        )
+        .unwrap();
+
+        assert!(!file_contains_managed_ref(
+            &config,
+            &managed,
+            TerminalRefSyntax::Ghostty
+        ));
+    }
+
+    #[test]
+    fn font_apply_report_ignores_non_include_lines_with_managed_paths() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let ghostty_dir = env.xdg_config_home().join("ghostty");
+        let alacritty_dir = env.xdg_config_home().join("alacritty");
+        let kitty_dir = env.xdg_config_home().join("kitty");
+        std::fs::create_dir_all(&ghostty_dir).unwrap();
+        std::fs::create_dir_all(&alacritty_dir).unwrap();
+        std::fs::create_dir_all(&kitty_dir).unwrap();
+
+        let ghostty_font = env.config_dir().join("managed/ghostty/font.conf");
+        let alacritty_font = env.config_dir().join("managed/alacritty/font.toml");
+        let kitty_font = env.config_dir().join("managed/kitty/font.conf");
+
+        std::fs::write(
+            ghostty_dir.join("config.ghostty"),
+            format!("note = \"{}\"\n", ghostty_font.display()),
+        )
+        .unwrap();
+        std::fs::write(
+            alacritty_dir.join("alacritty.toml"),
+            format!("[general]\nnotes = [\"{}\"]\n", alacritty_font.display()),
+        )
+        .unwrap();
+        std::fs::write(
+            kitty_dir.join("kitty.conf"),
+            format!("font_note {}\n", kitty_font.display()),
+        )
+        .unwrap();
+
+        let report = collect_font_apply_report(&env);
+
+        assert!(report.applied.is_empty());
+        assert!(report
+            .skipped
+            .contains(&("Ghostty", "no Slate font include found")));
+        assert!(report
+            .skipped
+            .contains(&("Alacritty", "no Slate font import found")));
+        assert!(report
+            .skipped
+            .contains(&("Kitty", "no Slate font include found")));
+    }
+
+    #[test]
+    fn font_apply_report_marks_alacritty_import_as_applied() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let alacritty_dir = env.xdg_config_home().join("alacritty");
+        std::fs::create_dir_all(&alacritty_dir).unwrap();
+
+        let alacritty_font = env.config_dir().join("managed/alacritty/font.toml");
+        std::fs::write(
+            alacritty_dir.join("alacritty.toml"),
+            format!("[general]\nimport = [\"{}\"]\n", alacritty_font.display()),
+        )
+        .unwrap();
+
+        let report = collect_font_apply_report(&env);
+
+        assert_eq!(report.applied, vec!["Alacritty"]);
     }
 
     /// snapshot — `slate font <name>` success confirmation line

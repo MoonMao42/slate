@@ -34,6 +34,7 @@ fn test_cli_help_shows_commands() {
     assert!(stdout.contains("setup"));
     assert!(stdout.contains("set"));
     assert!(stdout.contains("status"));
+    assert!(stdout.contains("doctor"));
     assert!(stdout.contains("list"));
     assert!(!stdout.contains("reset"));
     assert!(stdout.contains("theme"));
@@ -87,6 +88,17 @@ fn test_status_subcommand_help() {
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(stdout.contains("status"));
+}
+
+#[test]
+fn test_doctor_subcommand_help() {
+    let mut cmd = Command::cargo_bin("slate").unwrap();
+
+    let output = cmd.args(["doctor", "--help"]).output().unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(stdout.contains("doctor"));
+    assert!(stdout.contains("ghostty"));
 }
 
 #[test]
@@ -735,8 +747,16 @@ fn test_full_pipeline() {
     // Step 6b: verify clean actually removed Slate-owned config state
     let slate_config_dir = tempdir.path().join(".config/slate");
     assert!(
-        !slate_config_dir.exists(),
-        "slate config dir should be removed after clean"
+        !slate_config_dir.join("managed").exists(),
+        "slate managed config should be removed after clean"
+    );
+    assert!(
+        !slate_config_dir.join("current").exists(),
+        "slate current theme state should be removed after clean"
+    );
+    assert!(
+        !slate_config_dir.join("current-font").exists(),
+        "slate current font state should be removed after clean"
     );
 
     // Step 6c: shell marker block should also be gone
@@ -1063,6 +1083,72 @@ fn test_clean_removes_ghostty_managed_config_references() {
     let content = std::fs::read_to_string(&ghostty_config).unwrap();
     assert!(content.contains("font-family = Menlo"));
     assert!(!content.contains("config-file = "));
+}
+
+#[test]
+fn test_doctor_ghostty_reports_duplicate_managed_refs() {
+    let tempdir = TempDir::new().unwrap();
+    let ghostty_dir = tempdir.path().join(".config/ghostty");
+    std::fs::create_dir_all(&ghostty_dir).unwrap();
+
+    let managed_root = tempdir.path().join(".config/slate/managed/ghostty");
+    for file_name in ["config.ghostty", "config"] {
+        std::fs::write(
+            ghostty_dir.join(file_name),
+            format!("config-file = \"{}/theme.conf\"\n", managed_root.display()),
+        )
+        .unwrap();
+    }
+
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["doctor", "ghostty"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "doctor ghostty failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Ghostty doctor"));
+    assert!(stdout.contains("duplicate Slate-managed refs"));
+    assert!(stdout.contains("theme.conf"));
+}
+
+#[test]
+fn test_doctor_ghostty_json_reports_duplicate_managed_refs() {
+    let tempdir = TempDir::new().unwrap();
+    let ghostty_dir = tempdir.path().join(".config/ghostty");
+    std::fs::create_dir_all(&ghostty_dir).unwrap();
+
+    let managed_root = tempdir.path().join(".config/slate/managed/ghostty");
+    for file_name in ["config.ghostty", "config"] {
+        std::fs::write(
+            ghostty_dir.join(file_name),
+            format!("config-file = \"{}/theme.conf\"\n", managed_root.display()),
+        )
+        .unwrap();
+    }
+
+    let output = slate_cmd_isolated(&tempdir)
+        .args(["doctor", "ghostty", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "doctor ghostty --json failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["target"], "ghostty");
+    assert_eq!(parsed["cycle_risk"], true);
+    assert_eq!(
+        parsed["duplicate_refs"][0]["slate_ref"],
+        format!("{}/theme.conf", managed_root.display())
+    );
+    assert_eq!(parsed["validation"]["status"], "skipped");
 }
 
 #[test]

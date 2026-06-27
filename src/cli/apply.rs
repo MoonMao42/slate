@@ -550,7 +550,7 @@ mod tests {
         // path doesn't short-circuit with MissingIntegrationConfig. This is
         // the "live preview on Ghostty" scenario — picker navigation with a
         // real Ghostty session running.
-        let ghostty_integration = tempdir.path().join(".config/ghostty/config");
+        let ghostty_integration = tempdir.path().join(".config/ghostty/config.ghostty");
         std::fs::create_dir_all(ghostty_integration.parent().unwrap()).unwrap();
         let mut file = std::fs::File::create(&ghostty_integration).unwrap();
         writeln!(file, "# managed by slate").unwrap();

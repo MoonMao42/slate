@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-27
+
+### Added
+- `slate doctor ghostty` now reports Ghostty config entry candidates, selected
+  entry, Slate-managed reference counts, and duplicate refs that can trigger
+  Ghostty `cycle detected` errors.
+- `slate doctor ghostty` also runs Ghostty's own `+validate-config` when it can
+  safely validate the current HOME, surfacing the exact config parser errors.
+- `slate doctor ghostty --json` now emits a machine-readable report for
+  automated checks and scripts.
+- `slate doctor ghostty` now distinguishes duplicate Slate-managed refs from
+  plain Ghostty `config-file` cycles, including self-referential dotfile loops.
+- `slate doctor ghostty` now explains why a Ghostty entry was selected and
+  exposes each candidate's load-order index in text and JSON output.
+- `slate doctor ghostty` now reports which Ghostty binary was used for
+  `+validate-config`, making PATH and `.app` bundle resolution easier to debug.
+
+### Fixed
+- Ghostty managed themes now pin `window-theme` to the active Slate theme
+  appearance and use the transparent macOS titlebar style, keeping window
+  chrome visually attached to Slate's light and dark terminal backgrounds.
+- Ghostty integration and font detection now follow Ghostty's load order across
+  `config.ghostty`, legacy `config`, and macOS App Support candidates.
+- Ghostty integration now targets the last-loaded existing config file and
+  `slate clean` removes Slate references from every Ghostty config candidate.
+- Ghostty theme/font applies now remove duplicate Slate-owned references from
+  other Ghostty config candidates, avoiding `cycle detected` errors when XDG
+  and macOS App Support configs both exist.
+- Ghostty theme applies now rebuild the selected config entry's Slate refs as a
+  complete set in one pass, reducing partial-ref states if a later cleanup write
+  fails.
+- Ghostty ref rebuilding is now tested against symlinked entry configs so
+  dotfile-managed Ghostty configs keep their links intact.
+- Restore snapshots now track each Ghostty config candidate separately so
+  multi-root Ghostty setups can be rolled back accurately.
+- `slate clean` now preserves the user override tier at `~/.config/slate/user`
+  while removing Slate-owned generated state.
+- `slate font` now reports which terminal config refs were actually updated
+  and which were skipped because their entry config is missing or unlinked.
+- `slate theme <name>` now warns when installed tools such as Ghostty are
+  skipped because their integration config is missing, instead of implying the
+  terminal app changed silently.
+- Shell integration files now quote PATH membership checks correctly when
+  Slate-managed paths contain spaces.
+- `slate set --quiet` now stays silent like `slate theme --quiet`.
+- Ghostty font detection now ignores style-specific keys such as
+  `font-family-bold` when resolving the primary font.
+
 ## [0.3.4] - 2026-06-24
 
 ### Fixed
@@ -167,7 +215,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Three-tier config architecture (managed / integration / user override)
 - Homebrew tap distribution (`brew install MoonMao42/tap/slate-cli`)
 
-[Unreleased]: https://github.com/MoonMao42/slate/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/MoonMao42/slate/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/MoonMao42/slate/releases/tag/v0.4.0
 [0.3.4]: https://github.com/MoonMao42/slate/releases/tag/v0.3.4
 [0.3.3]: https://github.com/MoonMao42/slate/releases/tag/v0.3.3
 [0.3.1]: https://github.com/MoonMao42/slate/releases/tag/v0.3.1

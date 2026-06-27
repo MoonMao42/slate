@@ -61,6 +61,14 @@ enum Commands {
     },
     /// Show current configuration
     Status,
+    /// Diagnose terminal configuration issues
+    Doctor {
+        /// Diagnostic target (currently: ghostty)
+        target: Option<String>,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List available themes
     List,
     /// Clean up slate-managed configuration
@@ -148,7 +156,7 @@ fn run() -> Result<()> {
         Some(Commands::Setup { quick, force, only }) => {
             cli::setup::handle_with_env(quick, force, only, &env)
         }
-        Some(Commands::Set { theme }) => cli::set::handle(theme.as_deref(), cli.auto),
+        Some(Commands::Set { theme }) => cli::set::handle(theme.as_deref(), cli.auto, cli.quiet),
         Some(Commands::Theme { list, args }) => {
             handle_theme_command(list, args, cli.auto, cli.quiet)
         }
@@ -157,6 +165,7 @@ fn run() -> Result<()> {
             ConfigSubcommand::Set { key, value } => cli::config::handle_config_set(&key, &value),
         },
         Some(Commands::Status) => cli::status::handle(&[]),
+        Some(Commands::Doctor { target, json }) => cli::doctor::handle(target.as_deref(), json),
         Some(Commands::List) => cli::list::handle(&[]),
         Some(Commands::Clean) => cli::clean::handle_clean(),
         Some(Commands::Restore { id, list, delete }) => {

@@ -30,10 +30,33 @@ fn test_baseline_has_correct_metadata() {
     let baseline = begin_restore_point_baseline(home).expect("Failed to create baseline");
 
     // Baseline should snapshot the fixed target list, including absent files.
+    let expected_target_count = if cfg!(target_os = "macos") { 25 } else { 23 };
     assert_eq!(
         baseline.entries.len(),
-        22,
+        expected_target_count,
         "Baseline should capture the full pre-slate target set"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "ghostty-xdg-config-ghostty"),
+        "Baseline should track Ghostty's current XDG config.ghostty path"
+    );
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "ghostty-xdg-config"),
+        "Baseline should track Ghostty's legacy XDG config path"
+    );
+    #[cfg(target_os = "macos")]
+    assert!(
+        baseline
+            .entries
+            .iter()
+            .any(|entry| entry.tool_key == "ghostty-macos-app-support-config"),
+        "Baseline should track Ghostty's macOS App Support config path"
     );
     assert!(
         baseline
@@ -115,6 +138,56 @@ fn test_baseline_has_correct_metadata() {
 
     // Baseline ID should be non-empty
     assert!(!baseline.id.is_empty(), "Baseline ID should not be empty");
+}
+
+#[test]
+fn test_baseline_snapshots_all_existing_ghostty_candidates() {
+    let temp_home = TempDir::new().expect("Failed to create temp home");
+    let home = temp_home.path();
+    let xdg_ghostty = home.join(".config/ghostty");
+    std::fs::create_dir_all(&xdg_ghostty).unwrap();
+    std::fs::write(
+        xdg_ghostty.join("config.ghostty"),
+        "font-family = XDG Current\n",
+    )
+    .unwrap();
+    std::fs::write(xdg_ghostty.join("config"), "font-family = XDG Legacy\n").unwrap();
+
+    #[cfg(target_os = "macos")]
+    {
+        let app_support = home.join("Library/Application Support/com.mitchellh.ghostty");
+        std::fs::create_dir_all(&app_support).unwrap();
+        std::fs::write(
+            app_support.join("config"),
+            "font-family = App Support Legacy\n",
+        )
+        .unwrap();
+    }
+
+    let baseline = begin_restore_point_baseline(home).expect("Failed to create baseline");
+
+    for key in ["ghostty-xdg-config-ghostty", "ghostty-xdg-config"] {
+        let entry = baseline
+            .entries
+            .iter()
+            .find(|entry| entry.tool_key == key)
+            .unwrap_or_else(|| panic!("missing baseline entry for {key}"));
+        assert_eq!(entry.original_state, OriginalFileState::Present);
+        assert!(
+            entry.backup_path.as_ref().is_some_and(|path| path.exists()),
+            "present Ghostty target {key} should have a backup file"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let entry = baseline
+            .entries
+            .iter()
+            .find(|entry| entry.tool_key == "ghostty-macos-app-support-config")
+            .expect("missing macOS App Support Ghostty baseline entry");
+        assert_eq!(entry.original_state, OriginalFileState::Present);
+    }
 }
 
 /// Test that baseline protection flag is set

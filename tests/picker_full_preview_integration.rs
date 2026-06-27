@@ -42,7 +42,7 @@ fn managed_ghostty_theme_path(env: &SlateEnv) -> std::path::PathBuf {
 }
 
 /// The Ghostty adapter's `apply_theme_with_env` returns `Skipped` when the
-/// user has no integration config file (`~/.config/ghostty/config`) on
+/// user has no integration config file (`~/.config/ghostty/config.ghostty`) on
 /// disk — that file is the opt-in signal that the user wants Slate to
 /// manage their Ghostty. Our tempdir `SlateEnv` starts empty, so we must
 /// materialise an integration config stub before the adapter will write
@@ -52,7 +52,7 @@ fn managed_ghostty_theme_path(env: &SlateEnv) -> std::path::PathBuf {
 /// integration test is that `silent_preview_apply` then populates
 /// `managed/ghostty/theme.conf`.
 fn seed_ghostty_integration(env: &SlateEnv) {
-    let integration = env.xdg_config_home().join("ghostty").join("config");
+    let integration = env.xdg_config_home().join("ghostty").join("config.ghostty");
     fs::create_dir_all(integration.parent().unwrap()).unwrap();
     if !integration.exists() {
         fs::write(&integration, "# slate-integration-test placeholder\n").unwrap();

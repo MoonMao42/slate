@@ -137,7 +137,7 @@ pub trait ToolAdapter: Send + Sync {
 
     /// Path to tool's primary/integration config file.
     /// This is the file user owns and modifies (entry point for includes).
-    /// Example: ~/.config/ghostty/config or ~/.config/starship.toml
+    /// Example: ~/.config/ghostty/config.ghostty or ~/.config/starship.toml
     fn integration_config_path(&self) -> Result<PathBuf>;
 
     /// Path where slate writes managed configuration.

@@ -145,6 +145,7 @@ slate export                  # export current config as URI
 slate import <uri>            # re-apply from URI
 slate share                   # screenshot terminal with watermark
 slate status                  # show current config
+slate doctor ghostty          # inspect Ghostty config issues
 slate list                    # list available themes
 slate restore                 # pick a snapshot to roll back
 slate restore --list          # list restore points

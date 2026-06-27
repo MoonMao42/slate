@@ -5,6 +5,7 @@ use crate::brand::roles::Roles;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::{config::ConfigManager, platform};
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -93,17 +94,20 @@ fn handle_clean_inner() -> Result<()> {
 
     // Step 3: Delete Slate-owned config directory
     log::step("Removing Slate-managed config state...")?;
-    let config_dir = env.config_dir();
-    if config_dir.exists() {
-        fs::remove_dir_all(config_dir)?;
-        log::success(status_success_line(r.as_ref(), "Removed ~/.config/slate"))?;
+    if remove_slate_owned_config_state(&env)? {
+        log::success(status_success_line(
+            r.as_ref(),
+            "Removed Slate-owned config state",
+        ))?;
         removed_sections.push("managed config state");
+    } else if env.config_dir().exists() {
+        log::remark("  (only ~/.config/slate/user remains)")?;
     } else {
         log::remark("  (~/.config/slate already removed)")?;
     }
 
     // Step 4: Reload running terminals so the theme actually drops.
-    // Removing the config-file line from ~/.config/ghostty/config only takes effect on the
+    // Removing the config-file line from ~/.config/ghostty/config.ghostty only takes effect on the
     // next reload; without this, users see "clean succeeded" but the background + palette
     // stay applied until they restart Ghostty themselves. Best-effort — if the terminal
     // isn't running we silently move on.
@@ -209,6 +213,36 @@ fn remove_fish_loader(env: &SlateEnv) -> Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err.into()),
     }
+}
+
+fn remove_slate_owned_config_state(env: &SlateEnv) -> Result<bool> {
+    let config_dir = env.config_dir();
+    if !config_dir.exists() {
+        return Ok(false);
+    }
+
+    let mut removed_any = false;
+    for entry in fs::read_dir(config_dir)? {
+        let entry = entry?;
+        if entry.file_name().as_os_str() == OsStr::new("user") {
+            continue;
+        }
+
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+        removed_any = true;
+    }
+
+    if !config_dir.join("user").exists() && fs::read_dir(config_dir)?.next().is_none() {
+        fs::remove_dir(config_dir)?;
+    }
+
+    Ok(removed_any)
 }
 
 /// Strip slate's in-place edits from the user's `starship.toml`.
@@ -358,37 +392,10 @@ fn remove_kitty_managed_references(env: &SlateEnv) -> Result<()> {
 
 fn remove_ghostty_managed_references(env: &SlateEnv) -> Result<()> {
     let adapter = crate::adapter::GhosttyAdapter;
-    let integration_path = adapter.integration_config_path_with_env(env)?;
-    if !integration_path.exists() {
-        return Ok(());
+    for integration_path in adapter.integration_candidate_paths_with_env(env)? {
+        crate::adapter::GhosttyAdapter::strip_managed_references_from_path(env, &integration_path)?;
     }
 
-    let managed_prefix = env
-        .config_dir()
-        .join("managed")
-        .join("ghostty")
-        .to_string_lossy()
-        .to_string();
-    let content = fs::read(&integration_path)?;
-    let mut cleaned: Vec<u8> = Vec::with_capacity(content.len());
-
-    for line in content.split_inclusive(|b| *b == b'\n') {
-        let trimmed = line
-            .iter()
-            .copied()
-            .skip_while(|b| b.is_ascii_whitespace())
-            .collect::<Vec<u8>>();
-        if trimmed.starts_with(b"config-file")
-            && trimmed
-                .windows(managed_prefix.len())
-                .any(|w| w == managed_prefix.as_bytes())
-        {
-            continue;
-        }
-        cleaned.extend_from_slice(line);
-    }
-
-    fs::write(integration_path, cleaned)?;
     Ok(())
 }
 
@@ -986,6 +993,32 @@ red = "#f00"
     }
 
     #[test]
+    fn remove_slate_owned_config_state_preserves_user_tier() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let config_dir = env.config_dir();
+        let user_file = config_dir.join("user/ghostty/local.conf");
+        let managed_file = config_dir.join("managed/ghostty/theme.conf");
+        std::fs::create_dir_all(user_file.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(managed_file.parent().unwrap()).unwrap();
+        std::fs::write(&user_file, "font-size = 14\n").unwrap();
+        std::fs::write(&managed_file, "background = #000000\n").unwrap();
+        std::fs::write(config_dir.join("current"), "catppuccin-mocha\n").unwrap();
+
+        assert!(remove_slate_owned_config_state(&env).unwrap());
+
+        assert!(user_file.exists(), "user tier must survive slate clean");
+        assert!(
+            !managed_file.exists(),
+            "managed tier must be removed by slate clean"
+        );
+        assert!(
+            !config_dir.join("current").exists(),
+            "state files must be removed by slate clean"
+        );
+    }
+
+    #[test]
     fn remove_kitty_managed_references_strips_slate_lines_and_keeps_user_content() {
         let td = TempDir::new().unwrap();
         let env = SlateEnv::with_home(td.path().to_path_buf());
@@ -1061,7 +1094,7 @@ red = "#f00"
     fn remove_ghostty_managed_references_preserves_non_utf8_bytes() {
         let td = TempDir::new().unwrap();
         let env = SlateEnv::with_home(td.path().to_path_buf());
-        let integration_path = td.path().join(".config/ghostty/config");
+        let integration_path = td.path().join(".config/ghostty/config.ghostty");
         std::fs::create_dir_all(integration_path.parent().unwrap()).unwrap();
 
         let mut content = vec![0xff, b'\n'];
@@ -1081,5 +1114,32 @@ red = "#f00"
         let cleaned_str = String::from_utf8_lossy(&cleaned);
         assert!(!cleaned_str.contains("config-file ="));
         assert!(cleaned_str.contains("user-setting = true"));
+    }
+
+    #[test]
+    fn remove_ghostty_managed_references_cleans_all_candidate_configs() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let ghostty_dir = td.path().join(".config/ghostty");
+        std::fs::create_dir_all(&ghostty_dir).unwrap();
+
+        for file_name in ["config.ghostty", "config"] {
+            std::fs::write(
+                ghostty_dir.join(file_name),
+                format!(
+                    "config-file = \"{}/managed/ghostty/theme.conf\"\nuser-setting = true\n",
+                    env.config_dir().display()
+                ),
+            )
+            .unwrap();
+        }
+
+        remove_ghostty_managed_references(&env).unwrap();
+
+        for file_name in ["config.ghostty", "config"] {
+            let cleaned = std::fs::read_to_string(ghostty_dir.join(file_name)).unwrap();
+            assert!(!cleaned.contains("config-file ="));
+            assert!(cleaned.contains("user-setting = true"));
+        }
     }
 }

@@ -219,7 +219,7 @@ mod tests {
         let entry = RestoreEntry {
             tool_key: "ghostty".to_string(),
             display_tool: "Ghostty".to_string(),
-            original_path: PathBuf::from("~/.config/ghostty/config"),
+            original_path: PathBuf::from("~/.config/ghostty/config.ghostty"),
             backup_path: Some(PathBuf::from(
                 "~/.cache/slate/backups/2026-04-09T10-00-00Z/ghostty.backup",
             )),

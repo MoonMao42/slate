@@ -65,6 +65,32 @@ fn quiet_flag_works_at_subcommand_position() {
 }
 
 #[test]
+fn set_alias_respects_quiet_flag() {
+    let td = TempDir::new().unwrap();
+    let out = slate_cmd_isolated(&td)
+        .args(["--quiet", "set", "catppuccin-mocha"])
+        .output()
+        .unwrap();
+
+    assert!(
+        out.status.success(),
+        "slate --quiet set catppuccin-mocha failed (status: {:?}, stderr: {})",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "quiet set alias must not write stdout, got: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        out.stderr.is_empty(),
+        "quiet set alias must not write stderr, got: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn auto_flag_works_at_root_position() {
     let td = TempDir::new().unwrap();
     let out = slate_cmd_isolated(&td)

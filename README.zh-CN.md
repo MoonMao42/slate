@@ -145,6 +145,7 @@ slate export                  # 把当前配置导成 URI
 slate import <uri>            # 从 URI 恢复配置
 slate share                   # 截取带水印的终端图
 slate status                  # 查看当前配置
+slate doctor ghostty          # 检查 Ghostty 配置问题
 slate list                    # 列出所有主题
 slate restore                 # 选一个快照回滚
 slate restore --list          # 列出所有回滚点

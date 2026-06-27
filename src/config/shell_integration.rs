@@ -238,8 +238,8 @@ pub(crate) struct ShellIntegrationFiles {
 
 #[derive(Debug, Clone)]
 struct PathEntry {
-    raw: String,
     quoted: String,
+    posix_case_pattern: String,
 }
 
 #[derive(Debug, Clone)]
@@ -283,23 +283,25 @@ impl PosixShell {
 }
 
 impl SharedShellModel {
+    fn path_entry(path: String) -> PathEntry {
+        let quoted = shell_quote(&path);
+        PathEntry {
+            posix_case_pattern: format!("*:{quoted}:*"),
+            quoted,
+        }
+    }
+
     fn new(theme: &ThemeVariant, options: &ShellIntegrationOptions<'_>) -> Self {
         let mut path_entries = Vec::new();
 
         if let Some(prefix) = options.homebrew_prefix {
             for path in [format!("{}/bin", prefix), format!("{}/sbin", prefix)] {
-                path_entries.push(PathEntry {
-                    raw: path.clone(),
-                    quoted: shell_quote(&path),
-                });
+                path_entries.push(Self::path_entry(path));
             }
         }
 
         if let Some(local_bin) = options.user_local_bin {
-            path_entries.push(PathEntry {
-                raw: local_bin.to_string(),
-                quoted: shell_quote(local_bin),
-            });
+            path_entries.push(Self::path_entry(local_bin.to_string()));
         }
 
         // D-A6: project the active palette into shell-ready
@@ -363,9 +365,9 @@ pub(crate) fn build_shell_integration_files(
 fn render_posix_path_entries(content: &mut String, model: &SharedShellModel) {
     for entry in &model.path_entries {
         content.push_str(&format!(
-            "if [ -d {quoted} ]; then\n  case \":$PATH:\" in\n    *:{raw}:*) ;;\n    *) export PATH={quoted}:\"$PATH\" ;;\n  esac\nfi\n",
+            "if [ -d {quoted} ]; then\n  case \":$PATH:\" in\n    {pattern}) ;;\n    *) export PATH={quoted}:\"$PATH\" ;;\n  esac\nfi\n",
             quoted = entry.quoted,
-            raw = entry.raw
+            pattern = entry.posix_case_pattern
         ));
     }
 }
@@ -738,6 +740,22 @@ mod tests {
         assert!(files
             .zsh
             .contains("export PATH='/opt/homebrew/sbin':\"$PATH\""));
+    }
+
+    #[test]
+    fn posix_path_membership_patterns_quote_paths_with_spaces() {
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        let mut options = sample_options();
+        options.homebrew_prefix = Some("/opt/home brew");
+        options.user_local_bin = Some("/tmp/local bin");
+
+        let files = build_shell_integration_files(&theme, &options);
+
+        assert!(files.zsh.contains("*:'/opt/home brew/bin':*) ;;"));
+        assert!(files.zsh.contains("*:'/opt/home brew/sbin':*) ;;"));
+        assert!(files.zsh.contains("*:'/tmp/local bin':*) ;;"));
+        assert!(!files.zsh.contains("*:/opt/home brew/bin:*"));
+        assert!(!files.bash.contains("*:/tmp/local bin:*"));
     }
 
     #[test]

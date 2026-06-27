@@ -9,22 +9,26 @@ use crate::error::Result;
 /// 1. `slate set <theme>` → `slate theme <theme>` + dim tip
 /// 2. `slate set --auto` → `slate theme --auto`
 /// 3. `slate set` → theme picker + dim tip
-pub fn handle(theme_name: Option<&str>, auto: bool) -> Result<()> {
+pub fn handle(theme_name: Option<&str>, auto: bool, quiet: bool) -> Result<()> {
     if auto {
-        crate::cli::theme::handle_theme(None, true, false)?;
+        crate::cli::theme::handle_theme(None, true, quiet)?;
         return Ok(());
     }
 
     if let Some(theme_arg) = theme_name {
-        crate::cli::theme::handle_theme(Some(theme_arg.to_string()), false, false)?;
+        crate::cli::theme::handle_theme(Some(theme_arg.to_string()), false, quiet)?;
 
-        print_dim_tip();
+        if !quiet {
+            print_dim_tip();
+        }
         Ok(())
     } else {
         let env = SlateEnv::from_process()?;
         crate::cli::picker::launch_picker(&env)?;
 
-        print_dim_tip();
+        if !quiet {
+            print_dim_tip();
+        }
         Ok(())
     }
 }

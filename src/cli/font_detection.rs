@@ -89,8 +89,14 @@ fn parse_ghostty_font_config_bytes(content: &[u8]) -> Option<String> {
             continue;
         }
 
-        if trimmed.starts_with(b"font-family") {
-            let value_part = trimmed.splitn(2, |b| *b == b'=').nth(1)?;
+        let mut parts = trimmed.splitn(2, |b| *b == b'=');
+        let key = trim_ascii_space(parts.next().unwrap_or_default());
+        let value_part = parts.next();
+
+        if key == b"font-family" {
+            let Some(value_part) = value_part else {
+                continue;
+            };
             let font = value_part
                 .iter()
                 .copied()
@@ -106,6 +112,19 @@ fn parse_ghostty_font_config_bytes(content: &[u8]) -> Option<String> {
     }
 
     None
+}
+
+fn trim_ascii_space(bytes: &[u8]) -> &[u8] {
+    let start = bytes
+        .iter()
+        .position(|b| !b.is_ascii_whitespace())
+        .unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .rposition(|b| !b.is_ascii_whitespace())
+        .map(|idx| idx + 1)
+        .unwrap_or(start);
+    &bytes[start..end]
 }
 
 fn trim_ascii_quotes_and_space(bytes: &[u8]) -> &[u8] {
@@ -127,11 +146,18 @@ fn parse_ghostty_font_config(content: &str) -> Option<String> {
 }
 
 fn ghostty_config_paths_with_env(env: &SlateEnv) -> Vec<PathBuf> {
-    let config_base = env.xdg_config_home();
-    vec![
-        config_base.join("ghostty/config.ghostty"),
-        config_base.join("ghostty/config"),
-    ]
+    let adapter = crate::adapter::GhosttyAdapter;
+    let mut paths = adapter
+        .integration_candidate_paths_with_env(env)
+        .unwrap_or_else(|_| {
+            let config_base = env.xdg_config_home();
+            vec![
+                config_base.join("ghostty/config.ghostty"),
+                config_base.join("ghostty/config"),
+            ]
+        });
+    paths.reverse();
+    paths
 }
 
 #[cfg(test)]
@@ -155,6 +181,17 @@ mod tests {
 
         let font = parse_ghostty_font_config(content);
         assert_eq!(font.as_deref(), Some("JetBrains Mono Nerd Font"));
+    }
+
+    #[test]
+    fn test_parse_ghostty_font_config_ignores_style_specific_font_family_keys() {
+        let content = r#"
+            font-family-bold = "Bold Font"
+            font-family-italic = "Italic Font"
+            font-family = "Main Font"
+        "#;
+        let font = parse_ghostty_font_config(content);
+        assert_eq!(font.as_deref(), Some("Main Font"));
     }
 
     #[test]
@@ -209,5 +246,54 @@ mod tests {
         let result = detect_current_font_with_env(&env);
         assert!(result.is_ok());
         // Result should be None since no configs exist in tempdir
+    }
+
+    #[test]
+    fn test_detect_current_font_prefers_last_loaded_ghostty_config() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let ghostty_dir = env.xdg_config_home().join("ghostty");
+        std::fs::create_dir_all(&ghostty_dir).unwrap();
+        std::fs::write(
+            ghostty_dir.join("config.ghostty"),
+            "font-family = \"Active Font\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ghostty_dir.join("config"),
+            "font-family = \"Legacy Font\"\n",
+        )
+        .unwrap();
+
+        let font = detect_current_font_with_env(&env).unwrap();
+
+        assert_eq!(font.as_deref(), Some("Legacy Font"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_detect_current_font_prefers_macos_app_support_over_xdg() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
+        let ghostty_dir = env.xdg_config_home().join("ghostty");
+        let app_support_dir = tempdir
+            .path()
+            .join("Library/Application Support/com.mitchellh.ghostty");
+        std::fs::create_dir_all(&ghostty_dir).unwrap();
+        std::fs::create_dir_all(&app_support_dir).unwrap();
+        std::fs::write(
+            ghostty_dir.join("config.ghostty"),
+            "font-family = \"XDG Font\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            app_support_dir.join("config"),
+            "font-family = \"App Support Font\"\n",
+        )
+        .unwrap();
+
+        let font = detect_current_font_with_env(&env).unwrap();
+
+        assert_eq!(font.as_deref(), Some("App Support Font"));
     }
 }

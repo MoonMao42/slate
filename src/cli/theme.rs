@@ -1,3 +1,4 @@
+use crate::adapter::{SkipReason, ToolApplyStatus};
 use crate::brand::events::{dispatch, BrandEvent, FailureKind, SuccessKind};
 use crate::brand::render_context::RenderContext;
 use crate::brand::roles::Roles;
@@ -92,6 +93,65 @@ fn format_theme_auto_switched(r: Option<&Roles<'_>>, theme_name: &str) -> String
     }
 }
 
+fn format_theme_no_targets(r: Option<&Roles<'_>>, theme_name: &str) -> String {
+    let plain = format!(
+        "No terminal configs were updated for '{theme_name}'. Run `slate setup` or create a terminal config first."
+    );
+    match r {
+        Some(r) => r.status_warn(&format!(
+            "No terminal configs were updated for {}. Run {} or create a terminal config first.",
+            r.theme_name(theme_name),
+            r.code("slate setup")
+        )),
+        None => format!("⚠ {plain}"),
+    }
+}
+
+fn format_missing_integration_warning(
+    r: Option<&Roles<'_>>,
+    report: &ThemeApplyReport,
+) -> Option<String> {
+    let missing = missing_integration_config_labels(report);
+    if missing.is_empty() {
+        return None;
+    }
+
+    let tools = missing.join(", ");
+    let plain = format!("Missing integration configs: {tools}. Run `slate setup` to connect them.");
+    Some(match r {
+        Some(r) => r.status_warn(&format!(
+            "Missing integration configs: {tools}. Run {} to connect them.",
+            r.code("slate setup")
+        )),
+        None => format!("⚠ {plain}"),
+    })
+}
+
+fn missing_integration_config_labels(report: &ThemeApplyReport) -> Vec<&'static str> {
+    report
+        .results
+        .iter()
+        .filter_map(|result| {
+            if !matches!(
+                result.status,
+                ToolApplyStatus::Skipped(SkipReason::MissingIntegrationConfig)
+            ) {
+                return None;
+            }
+
+            match result.tool_name.as_str() {
+                "ghostty" => Some("Ghostty"),
+                "alacritty" => Some("Alacritty"),
+                "kitty" => Some("Kitty"),
+                "starship" => Some("Starship"),
+                "delta" => Some("Delta"),
+                "opencode" => Some("OpenCode"),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 /// Handle `slate theme` command
 /// Supports three modes:
 /// 1. `slate theme <name>` — Apply explicit theme directly
@@ -129,25 +189,42 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         // NOTE: the binding name must not be bare `_` — bare `_` drops immediately and
         // restores stderr before `apply` runs, defeating quiet mode. `.ok()` gracefully
         // degrades to non-quiet if the redirect couldn't be established.
-        if quiet {
+        let report = if quiet {
             let _stderr_guard = StderrRedirectGuard::silence().ok();
-            if let Err(err) =
-                ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip).apply(theme)
+            match ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip)
+                .apply(theme)
             {
-                dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
-                return Err(err);
+                Ok(report) => report,
+                Err(err) => {
+                    dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
+                    return Err(err);
+                }
             }
         } else {
-            if let Err(err) = apply_theme_selection(theme) {
-                dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
-                return Err(err);
-            }
+            let report = match apply_theme_selection(theme) {
+                Ok(report) => report,
+                Err(err) => {
+                    dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
+                    return Err(err);
+                }
+            };
             let ctx = RenderContext::from_active_theme().ok();
             let roles = ctx.as_ref().map(Roles::new);
-            println!(
-                "{}",
-                format_theme_auto_switched(roles.as_ref(), &theme.name)
-            );
+            if report.applied_count() == 0 {
+                println!("{}", format_theme_no_targets(roles.as_ref(), &theme.name));
+            } else {
+                println!(
+                    "{}",
+                    format_theme_auto_switched(roles.as_ref(), &theme.name)
+                );
+                if let Some(warning) = format_missing_integration_warning(roles.as_ref(), &report) {
+                    println!("{warning}");
+                }
+            }
+            report
+        };
+        if report.applied_count() == 0 {
+            return Ok(());
         }
         // auto-theme apply success → ThemeApplied + ApplyComplete
         // (paired: ApplyComplete is the whole-flow milestone; ThemeApplied
@@ -181,7 +258,17 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         if !quiet {
             let ctx = RenderContext::from_active_theme().ok();
             let roles = ctx.as_ref().map(Roles::new);
-            println!("{}", format_theme_switched(roles.as_ref(), &theme.name));
+            if report.applied_count() == 0 {
+                println!("{}", format_theme_no_targets(roles.as_ref(), &theme.name));
+            } else {
+                println!("{}", format_theme_switched(roles.as_ref(), &theme.name));
+                if let Some(warning) = format_missing_integration_warning(roles.as_ref(), &report) {
+                    println!("{warning}");
+                }
+            }
+        }
+        if report.applied_count() == 0 {
+            return Ok(());
         }
         // explicit-name apply success → ThemeApplied + ApplyComplete.
         dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
@@ -214,10 +301,15 @@ mod tests {
     //! decision shape used in `handle_theme` so a future refactor that drops
     //! the aggregator gate or forgets to forward `quiet` will flip these
     //! tests red.
-    use super::{format_theme_auto_switched, format_theme_switched};
+    use super::{
+        format_missing_integration_warning, format_theme_auto_switched, format_theme_no_targets,
+        format_theme_switched,
+    };
     use crate::adapter::registry::{ToolApplyResult, ToolApplyStatus};
+    use crate::adapter::SkipReason;
     use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
     use crate::brand::roles::Roles;
+    use crate::cli::apply::ThemeApplyReport;
     use crate::cli::new_shell_reminder::REMINDER_TEST_LOCK;
 
     fn applied(name: &str, requires_new_shell: bool) -> ToolApplyResult {
@@ -358,6 +450,29 @@ mod tests {
         assert_eq!(
             format_theme_auto_switched(None, "catppuccin-mocha"),
             "✓ Theme auto-switched to 'catppuccin-mocha' (system appearance)"
+        );
+        assert_eq!(
+            format_theme_no_targets(None, "catppuccin-mocha"),
+            "⚠ No terminal configs were updated for 'catppuccin-mocha'. Run `slate setup` or create a terminal config first."
+        );
+    }
+
+    #[test]
+    fn missing_integration_warning_names_skipped_terminal_configs() {
+        let report = ThemeApplyReport {
+            results: vec![
+                applied("bat", false),
+                ToolApplyResult {
+                    tool_name: "ghostty".to_string(),
+                    status: ToolApplyStatus::Skipped(SkipReason::MissingIntegrationConfig),
+                    requires_new_shell: false,
+                },
+            ],
+        };
+
+        assert_eq!(
+            format_missing_integration_warning(None, &report).unwrap(),
+            "⚠ Missing integration configs: Ghostty. Run `slate setup` to connect them."
         );
     }
 
