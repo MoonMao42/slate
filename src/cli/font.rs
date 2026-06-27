@@ -143,7 +143,7 @@ fn line_contains_directive_path(line: &[u8], managed_path: &[u8], keys: &[&[u8]]
         .unwrap_or(line.len());
     let key = trim_ascii_space(&line[..key_end]);
 
-    keys.iter().any(|candidate| *candidate == key) && contains_path_reference(line, managed_path)
+    keys.contains(&key) && contains_path_reference(line, managed_path)
 }
 
 fn contains_path_reference(line: &[u8], managed_path: &[u8]) -> bool {
