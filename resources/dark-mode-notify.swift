@@ -11,6 +11,11 @@ func isDarkMode() -> Bool {
 }
 
 func runCommand() {
+    if CommandLine.arguments.dropFirst().first == "--events" {
+        print(isDarkMode() ? "dark" : "light")
+        fflush(stdout)
+        return
+    }
     let args = Array(CommandLine.arguments.dropFirst())
     guard !args.isEmpty else { return }
 
@@ -25,7 +30,20 @@ func runCommand() {
     task.waitUntilExit()
 }
 
+// Managed mode is a passive event source. If its Rust owner dies, stop even
+// while the desktop is idle; never leave an orphan that can apply themes.
+var parentTimer: Timer?
+if CommandLine.arguments.dropFirst().first == "--events" {
+    guard CommandLine.arguments.count == 3,
+          let parent = Int32(CommandLine.arguments[2]), parent > 1 else { exit(2) }
+    if getppid() != parent { exit(0) }
+    parentTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
+        if getppid() != parent { exit(0) }
+    }
+}
+
 // Run once on startup to sync state
+NSApplication.shared.setActivationPolicy(.prohibited)
 runCommand()
 
 // Listen for appearance changes

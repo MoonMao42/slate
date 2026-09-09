@@ -1,17 +1,13 @@
-//! Responsive fold composer for picker live-preview.
-//! Pure fns: palette + rows + roles → String. No I/O; no state mutation.
+//! Block composer for picker live-preview.
+//! Pure fns: palette + block tier + roles → String. No I/O; no state mutation.
 //! Every `◆ Heading` label flows through [`crate::brand::roles::Roles::heading`]
 //! so the brand-lavender (`#7287fd`) byte contract is honored.
 //! Block bodies come from [`super::blocks`] — this module never emits its
 //! own syntax-highlighting spans, only stacks what `blocks::*` produces.
-//! ## Fold tiers
-//! | rows | tier | blocks |
-//! |----------|-----------|----------------------------------------------|
-//! | 0..=31 | Minimum | Palette, Prompt, Code, Files |
-//! | 32..=39 | Medium | + Git, Diff |
-//! | 40..=∞ | Large | + Lazygit, Nvim |
-//! Boundaries may tune ±1-2 rows after UAT (RESEARCH §A6); the tests lock
-//! 31→Minimum, 32→Medium, 39→Medium, 40→Large.
+//! The full picker uses Large (all eight blocks) at every height. Its renderer
+//! reserves header/footer rows and pages the resulting document, including long
+//! external prompts. The smaller block tiers remain available to pure composers;
+//! terminal row count no longer decides which blocks a user can inspect.
 //! ## Prompt injection
 //! [`compose_full`] takes an optional `prompt_line_override` so
 //! `starship_fork` can inject the real forked prompt. When `None`, the
@@ -31,34 +27,16 @@ use crate::theme::Palette;
 
 use super::blocks;
 
-/// Responsive fold tier derived from terminal row count.
-/// Thresholds were re-calibrated after UAT (2026-04-20) against the measured
-/// heights of each compose tier (including the ◆ Heading labels and blank
-/// separators) plus ~3 rows of picker chrome (logo + "preview · Tab to
-/// return" breadcrumb + blank). Minimum content = ~29 rows, Medium = ~42,
-/// Large = ~50. Original thresholds (32/40) were "number of blocks" not
-/// "row budget" and clipped the top of the preview in any real terminal.
-#[allow(dead_code)] // Wired by render::render mode dispatch.
+/// Block selection for pure composition; the paged picker always uses Large.
+#[allow(dead_code)] // Smaller compositions remain covered independently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FoldTier {
-    /// < 45 rows — stack 4 blocks: Palette / Prompt / Code / Files.
+    /// Stack 4 blocks: Palette / Prompt / Code / Files.
     Minimum,
-    /// 45..=53 rows — stack 6 blocks (+ Git, Diff).
+    /// Stack 6 blocks (+ Git, Diff).
     Medium,
-    /// ≥ 54 rows — stack 8 blocks (+ Lazygit, Nvim).
+    /// Stack all 8 blocks (+ Lazygit, Nvim).
     Large,
-}
-
-/// Decide the fold tier for `rows` terminal rows per.
-/// Boundaries reflect actual compose output heights + picker chrome, not
-/// raw block counts — see `FoldTier` docstring.
-#[allow(dead_code)] // Wired by render::render mode dispatch.
-pub(crate) fn decide_fold_tier(rows: u16) -> FoldTier {
-    match rows {
-        0..=44 => FoldTier::Minimum,
-        45..=53 => FoldTier::Medium,
-        _ => FoldTier::Large,
-    }
 }
 
 /// Compose the 3-line mini-preview for list-dominant mode.
@@ -98,14 +76,34 @@ pub(crate) fn compose_full(
     roles: Option<&Roles<'_>>,
     prompt_line_override: Option<&str>,
 ) -> String {
+    compose_full_in(
+        palette,
+        tier,
+        roles,
+        prompt_line_override,
+        crate::config::ui_language::UiLanguage::English,
+    )
+}
+
+pub(crate) fn compose_full_in(
+    palette: &Palette,
+    tier: FoldTier,
+    roles: Option<&Roles<'_>>,
+    prompt_line_override: Option<&str>,
+    language: crate::config::ui_language::UiLanguage,
+) -> String {
+    let label = |zh, en| crate::config::ui_language::Text { zh, en }.get(language);
     let mut out = String::with_capacity(8192);
 
-    push_heading(&mut out, roles, "Palette");
+    push_heading(&mut out, roles, label("调色板", "Palette"));
     out.push_str(&blocks::render_palette_swatch(palette, true));
 
-    push_heading(&mut out, roles, "Prompt");
+    push_heading(&mut out, roles, label("命令提示符", "Prompt"));
     match prompt_line_override {
         Some(fork) => {
+            // All prompt overrides cross this display boundary, including the
+            // disabled-prompt username and callers other than the Starship fork.
+            let prompt = super::prompt_text::sanitize(fork);
             // starship's `add_newline = true` config option (enabled in
             // slate's managed plain.toml) prepends a `\n` to its output so
             // each invocation visually separates from the previous command.
@@ -113,8 +111,10 @@ pub(crate) fn compose_full(
             // an unwanted blank line between `◆ Prompt` and the prompt
             // itself. Strip leading newlines so the prompt butts directly
             // under its heading.
-            out.push_str(fork.trim_start_matches('\n'));
-            if !fork.ends_with('\n') {
+            out.push_str(super::prompt_text::RESET);
+            out.push_str(prompt.trim_start_matches('\n'));
+            out.push_str(super::prompt_text::RESET);
+            if !prompt.ends_with('\n') {
                 out.push('\n');
             }
         }
@@ -126,11 +126,11 @@ pub(crate) fn compose_full(
         }
     }
 
-    push_heading(&mut out, roles, "Code");
+    push_heading(&mut out, roles, label("代码", "Code"));
     out.push_str(&blocks::render_code_block(palette));
     out.push('\n');
 
-    push_heading(&mut out, roles, "Files");
+    push_heading(&mut out, roles, label("文件", "Files"));
     out.push_str(&blocks::render_tree_block(palette));
     out.push('\n');
 
@@ -138,7 +138,7 @@ pub(crate) fn compose_full(
         push_heading(&mut out, roles, "Git");
         out.push_str(&blocks::render_git_log_block(palette));
         out.push('\n');
-        push_heading(&mut out, roles, "Diff");
+        push_heading(&mut out, roles, label("差异", "Diff"));
         out.push_str(&render_diff_placeholder(palette));
         out.push('\n');
     }
@@ -222,6 +222,39 @@ fn rgb_fg(hex: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn localized_preview_changes_only_headings_and_preserves_samples() {
+        use crate::config::ui_language::UiLanguage;
+        for tier in [FoldTier::Minimum, FoldTier::Medium, FoldTier::Large] {
+            let palette = mock_palette();
+            let en = compose_full_in(
+                &palette,
+                tier,
+                None,
+                Some("demo ❯ git status"),
+                UiLanguage::English,
+            );
+            let zh = compose_full_in(
+                &palette,
+                tier,
+                None,
+                Some("demo ❯ git status"),
+                UiLanguage::Chinese,
+            );
+            let expected = en
+                .replace("◆ Palette\n", "◆ 调色板\n")
+                .replace("◆ Prompt\n", "◆ 命令提示符\n")
+                .replace("◆ Code\n", "◆ 代码\n")
+                .replace("◆ Files\n", "◆ 文件\n")
+                .replace("◆ Diff\n", "◆ 差异\n");
+            assert_eq!(zh, expected);
+            assert_eq!(
+                en,
+                compose_full(&palette, tier, None, Some("demo ❯ git status"))
+            );
+        }
+    }
+
     /// Strip ANSI escape sequences (CSI … final byte) so visible-content
     /// assertions aren't brittle against the SGR codes blocks::* emits.
     /// Iterates chars (NOT bytes) so multi-byte UTF-8 glyphs like `◆` and
@@ -255,21 +288,6 @@ mod tests {
     }
 
     // ── Task 19-04-01 tests ─────────────────────────────────────────────
-
-    /// Responsive fold thresholds — re-calibrated 2026-04-20 to match actual
-    /// compose heights + picker chrome. Boundary assertions:
-    /// 44→Minimum, 45→Medium, 53→Medium, 54→Large.
-    #[test]
-    fn fold_thresholds_45_54() {
-        assert!(matches!(decide_fold_tier(0), FoldTier::Minimum));
-        assert!(matches!(decide_fold_tier(32), FoldTier::Minimum));
-        assert!(matches!(decide_fold_tier(44), FoldTier::Minimum));
-        assert!(matches!(decide_fold_tier(45), FoldTier::Medium));
-        assert!(matches!(decide_fold_tier(46), FoldTier::Medium));
-        assert!(matches!(decide_fold_tier(53), FoldTier::Medium));
-        assert!(matches!(decide_fold_tier(54), FoldTier::Large));
-        assert!(matches!(decide_fold_tier(80), FoldTier::Large));
-    }
 
     /// mini-preview contract — exactly 3 `\n` characters: swatch row, prompt row, separator row.
     /// `compose_mini` must stay compact because render.rs layers its help line below.
@@ -417,6 +435,27 @@ mod tests {
     /// contract — `prompt_line_override = Some(fork)` replaces
     /// the self-drawn prompt verbatim. The override string must appear
     /// and the self-draw signature must be absent.
+    #[test]
+    // SWATCH-RENDERER: test-only external prompt styles and terminal-control payloads.
+    fn prompt_output_isolates_controls_and_styles_from_following_blocks() {
+        let palette = mock_palette();
+        let prompt = "\x1b[31m可读❯\x1b]52;c;PRIVATE_CLIPBOARD\x07\x1b[999;1H\x1b[?1049l";
+        let out = compose_full(&palette, FoldTier::Minimum, None, Some(prompt));
+        assert!(
+            !out.contains("PRIVATE_CLIPBOARD"),
+            "OSC payload reached the renderer"
+        );
+        assert!(!out.contains("\x1b[999;1H") && !out.contains("\x1b[?1049l"));
+        assert!(out.contains("\x1b[0m\x1b[31m可读❯\x1b[0m\n◆ Code"));
+        let multiline = compose_full(
+            &palette,
+            FoldTier::Minimum,
+            None,
+            Some("\n\r\n\x1b[1mone\r\ntwo\n"),
+        );
+        assert!(multiline.contains("◆ Prompt\n\x1b[0m\x1b[1mone\ntwo\n\x1b[0m◆ Code"));
+    }
+
     #[test]
     fn prompt_override_replaces_self_draw() {
         let palette = mock_palette();

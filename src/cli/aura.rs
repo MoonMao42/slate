@@ -144,9 +144,7 @@ fn load_theme_colors() -> (String, String) {
     let Ok(env) = SlateEnv::from_process() else {
         return (default_accent, default_subtext);
     };
-    let Ok(config) = ConfigManager::with_env(&env) else {
-        return (default_accent, default_subtext);
-    };
+    let config = ConfigManager::from_env_paths(&env);
     let Ok(Some(theme_id)) = config.get_current_theme() else {
         return (default_accent, default_subtext);
     };

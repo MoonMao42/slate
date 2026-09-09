@@ -2,10 +2,97 @@ use crate::adapter::GhosttyAdapter;
 use crate::detection::{self, ToolEvidence};
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+
+mod auto_theme;
+use crate::adapter::ghostty::references as ghostty_references;
+mod ghostty_menu;
+mod ghostty_scan;
+mod ghostty_validation;
+mod ghostty_window_style;
+mod integrations;
+
+/// Public targets also used by static completion generation.
+pub const TARGETS: [&str; 18] = [
+    "ghostty",
+    "kitty",
+    "alacritty",
+    "nvim",
+    "zsh",
+    "bash",
+    "fish",
+    "opencode",
+    "btop",
+    "starship",
+    "yazi",
+    "zellij",
+    "lazygit",
+    "eza",
+    "fastfetch",
+    "opacity",
+    "font",
+    "auto-theme",
+];
+
+/// Restricted menu checks, shared by the catalog, detail pages and routing.
+pub(crate) const TOOL_FILE_CHECKS: [(&str, &str, &str); 10] = [
+    (
+        "fastfetch",
+        "Fastfetch",
+        "预设文件与已保存主题 · 不检查启动效果",
+    ),
+    ("btop", "btop", "主题引用与生成配色"),
+    ("eza", "eza", "生成配色、配置目录与环境覆盖"),
+    (
+        "starship",
+        "Starship Prompt",
+        "配置选择、配色、提示符样式与启用设置",
+    ),
+    ("yazi", "Yazi", "主题引用、界面与语法配色、个人覆盖"),
+    ("zellij", "Zellij", "主题槽位、生成配色与同名冲突"),
+    ("lazygit", "Lazygit", "生成配色与配置文件选择"),
+    (
+        "ghostty",
+        "Ghostty",
+        "配置引用、循环与标题栏覆盖 · 不启动原生校验",
+    ),
+    (
+        "kitty",
+        "Kitty",
+        "直接主题引用与远程控制设置 · 不启动 Kitty",
+    ),
+    (
+        "alacritty",
+        "Alacritty",
+        "有效导入列表与 TOML 语法 · 不启动 Alacritty",
+    ),
+];
+
+pub(super) fn tool_file_check_hint(id: &str, chinese: &'static str) -> &'static str {
+    super::ui_language::tr(
+        chinese,
+        match id {
+            "fastfetch" => "Preset files and saved theme; startup not checked",
+            "btop" => "Theme reference and generated colors",
+            "eza" => "Generated colors, config directory and environment overrides",
+            "starship" => "Config selection, colors, layout and activation preference",
+            "yazi" => "Theme reference, UI and syntax colors, personal overrides",
+            "zellij" => "Theme selection, generated colors and name conflicts",
+            "lazygit" => "Generated colors and config selection",
+            "ghostty" => "Config references, cycles and window overrides; no native validation",
+            "kitty" => "Direct theme reference and remote-control settings; Kitty not launched",
+            "alacritty" => "Effective imports and TOML syntax; Alacritty not launched",
+            _ => "Read-only file check",
+        },
+    )
+}
+
+pub(crate) fn has_tool_file_check(target: &str) -> bool {
+    TOOL_FILE_CHECKS.iter().any(|(id, _, _)| *id == target)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GhosttyConfigEntry {
@@ -24,57 +111,199 @@ struct GhosttyDoctorReport {
     config_file_cycles: Vec<Vec<PathBuf>>,
     selected_reason: String,
     validation: GhosttyValidation,
+    scan_issues: Vec<ghostty_scan::Issue>,
+    window_style_overrides: Vec<ghostty_window_style::Assignment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum GhosttyValidation {
-    Passed { binary: PathBuf },
-    Failed { binary: PathBuf, output: String },
+    Passed {
+        binary: PathBuf,
+    },
+    Failed {
+        binary: PathBuf,
+        output: String,
+    },
+    TimedOut {
+        binary: PathBuf,
+    },
+    OutputLimit {
+        binary: PathBuf,
+        output: String,
+    },
+    Unavailable {
+        binary: PathBuf,
+        reason: &'static str,
+    },
     Skipped(&'static str),
 }
 
+impl GhosttyValidation {
+    fn binary(&self) -> Option<&Path> {
+        match self {
+            Self::Passed { binary }
+            | Self::Failed { binary, .. }
+            | Self::TimedOut { binary }
+            | Self::OutputLimit { binary, .. }
+            | Self::Unavailable { binary, .. } => Some(binary),
+            Self::Skipped(_) => None,
+        }
+    }
+
+    fn status(&self) -> &'static str {
+        match self {
+            Self::Passed { .. } => "passed",
+            Self::Failed { .. } => "failed",
+            Self::TimedOut { .. } => "timed_out",
+            Self::OutputLimit { .. } => "output_limit",
+            Self::Unavailable { .. } => "error",
+            Self::Skipped(_) => "skipped",
+        }
+    }
+
+    fn message(&self) -> Option<&str> {
+        match self {
+            Self::Passed { .. } => None,
+            Self::Failed { output, .. } | Self::OutputLimit { output, .. } => Some(output),
+            Self::TimedOut { .. } => Some("Validator timed out; this invocation was terminated"),
+            Self::Unavailable { reason, .. } | Self::Skipped(reason) => Some(reason),
+        }
+    }
+}
+
+const GHOSTTY_SCOPE: &str = "Best-effort scan of literal config-file references, not a complete Ghostty parser or proof of live appearance. Candidate order and reference syntax follow Ghostty 1.3.1, not an installed-version probe. Selection names Slate's last-existing write target, with XDG config.ghostty as its fallback; native preferred-file checks and process overrides are not modeled. Missing required files, overlong lines and unmodeled cross-file list resets make the scan incomplete. Reads are limited to 8 MiB/file, 32 MiB total, 256 paths, 4096 references and 64 include levels. Ordinary config symlinks are supported; references resolving outside an isolated profile are reported instead of read. Files are observed separately, not atomically; external directory changes are not locked out. Slate does not modify settings; native validation runs Ghostty itself and its bounded output may contain configuration values. An incomplete scan skips native validation.";
+
 pub fn handle(target: Option<&str>, json: bool) -> Result<()> {
+    handle_with_version_check(target, json, false)
+}
+
+pub(super) fn handle_auto_theme_with_env(env: &SlateEnv, json: bool) -> Result<()> {
+    auto_theme::handle(env, json)
+}
+
+pub(super) fn handle_auto_theme_menu(env: &SlateEnv) -> Result<()> {
+    auto_theme::handle_menu(env)
+}
+
+/// Preserve file-only Neovim diagnostics unless native checking is requested.
+pub fn handle_with_version_check(
+    target: Option<&str>,
+    json: bool,
+    check_version: bool,
+) -> Result<()> {
+    handle_with_options(target, json, check_version, false)
+}
+
+pub fn handle_with_options(
+    target: Option<&str>,
+    json: bool,
+    check_version: bool,
+    files_only: bool,
+) -> Result<()> {
+    if files_only && (target.unwrap_or("ghostty") != "ghostty" || check_version) {
+        return Err(SlateError::InvalidConfig(
+            "--files-only is supported only for Ghostty, without --check-version; no native check was run".into(),
+        ));
+    }
+    if check_version && target != Some("nvim") {
+        return Err(SlateError::InvalidConfig(
+            "--check-version is only supported with `slate doctor nvim`; no native check was run"
+                .into(),
+        ));
+    }
     match target.unwrap_or("ghostty") {
+        "auto-theme" => handle_auto_theme_with_env(&SlateEnv::from_process()?, json),
         "ghostty" => {
             let env = SlateEnv::from_process()?;
-            let report = build_ghostty_report(&env)?;
-            if json {
-                println!("{}", format_ghostty_report_json(&report)?);
+            let report = if files_only {
+                build_ghostty_report_with_validator(&env, None)?
             } else {
-                print!("{}", format_ghostty_report(&report));
-            }
-            Ok(())
+                build_ghostty_report(&env)?
+            };
+            let output = if json {
+                format!("{}\n", format_ghostty_report_json(&report)?)
+            } else {
+                format_ghostty_report(&report)
+            };
+            write_report(&output)
+        }
+        target @ ("kitty" | "alacritty" | "nvim" | "zsh" | "bash" | "fish" | "opencode"
+        | "opacity" | "font" | "btop" | "starship" | "yazi" | "zellij" | "lazygit"
+        | "eza" | "fastfetch") => {
+            let env = SlateEnv::from_process()?;
+            integrations::handle(target, &env, json, check_version)
         }
         other => Err(SlateError::InvalidConfig(format!(
-            "Unknown doctor target '{}'. Try `slate doctor ghostty`.",
-            other
+            "Unknown doctor target '{}'. Choose {}.",
+            other.escape_default(),
+            TARGETS.join(", ")
         ))),
     }
 }
 
-fn ghostty_candidate_labels() -> Vec<&'static str> {
-    let mut labels = vec!["XDG config.ghostty", "XDG config"];
-    if cfg!(target_os = "macos") {
-        labels.push("macOS App Support config.ghostty");
-        labels.push("macOS App Support config");
+/// Restricted menu route: never use Ghostty's native validator from this page.
+pub(super) fn show_tool_files(env: &SlateEnv, target: &str, back: &str) -> Result<()> {
+    // Prepare before entering the scratch screen so failures remain visible.
+    let report = tool_file_report(env, target)?;
+    let mut page = super::menu::ReadOnlyPage::enter()?;
+    let title = format!(
+        "{target} · {}",
+        super::ui_language::tr("配置检查", "Configuration Check")
+    );
+    let result = page.view(&report, &title, back).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::Interrupted {
+            SlateError::UserCancelled
+        } else {
+            SlateError::IOError(error)
+        }
+    });
+    page.finish(result)
+}
+
+/// Build the same file-only observations for a scrollable read-only page.
+pub(super) fn tool_file_report(env: &SlateEnv, target: &str) -> Result<String> {
+    if target == "ghostty" {
+        let report = build_ghostty_report_with_validator(env, None)?;
+        return Ok(ghostty_menu::render(&report));
     }
-    labels
+    if has_tool_file_check(target) {
+        Ok(integrations::menu_output(target, env))
+    } else {
+        Err(SlateError::InvalidConfig(
+            "Unsupported file-only tool check".into(),
+        ))
+    }
+}
+
+fn write_report(output: &str) -> Result<()> {
+    match std::io::stdout().lock().write_all(output.as_bytes()) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn build_ghostty_report(env: &SlateEnv) -> Result<GhosttyDoctorReport> {
+    build_ghostty_report_with_validator(env, Some(run_ghostty_validation))
+}
+
+fn build_ghostty_report_with_validator(
+    env: &SlateEnv,
+    validator: Option<fn(&SlateEnv) -> GhosttyValidation>,
+) -> Result<GhosttyDoctorReport> {
     let adapter = GhosttyAdapter;
     let selected = adapter.integration_config_path_with_env(env)?;
-    let candidates = adapter.integration_candidate_paths_with_env(env)?;
-    let managed_root = env.config_dir().join("managed").join("ghostty");
+    let candidates = GhosttyAdapter::config_candidates_with_env(env)?;
+    let mut scan = ghostty_scan::Scan::new(env);
 
-    let entries = ghostty_candidate_labels()
+    let entries = candidates
         .into_iter()
-        .zip(candidates)
         .enumerate()
-        .map(|(idx, (label, path))| {
-            let refs = read_slate_refs(&path, &managed_root);
+        .map(|(idx, candidate)| {
+            let path = candidate.path;
+            let refs = scan.slate_refs(&path);
             GhosttyConfigEntry {
-                label,
+                label: candidate.label,
                 exists: path.exists(),
                 selected: path == selected,
                 path,
@@ -98,12 +327,22 @@ fn build_ghostty_report(env: &SlateEnv) -> Result<GhosttyDoctorReport> {
         .filter(|(_, paths)| paths.len() > 1)
         .collect();
 
+    scan.visit_all(entries.iter().map(|entry| entry.path.clone()));
+    let validation = match validator {
+        None => GhosttyValidation::Skipped("file-only check; native validation was not requested"),
+        Some(validate) if scan.issues.is_empty() => validate(env),
+        Some(_) => GhosttyValidation::Skipped(
+            "configuration scan incomplete; inspect scan issues before native validation",
+        ),
+    };
     Ok(GhosttyDoctorReport {
-        config_file_cycles: detect_config_file_cycles(&entries, env.home()),
+        config_file_cycles: scan.cycles,
         selected_reason: selected_entry_reason(&entries),
         entries,
         duplicate_refs,
-        validation: run_ghostty_validation(env),
+        validation,
+        scan_issues: scan.issues,
+        window_style_overrides: scan.window_style_overrides.into_values().collect(),
     })
 }
 
@@ -114,20 +353,20 @@ fn selected_entry_reason(entries: &[GhosttyConfigEntry]) -> String {
 
     if selected.exists {
         format!(
-            "{} is the last existing entry in Ghostty load order",
+            "{} is the last existing candidate in Ghostty 1.3.1 default-file order (Slate write target)",
             selected.label
         )
     } else {
         format!(
-            "{} is the default entry because no Ghostty config candidates exist yet",
+            "{} is Slate's default write target because no Ghostty config candidates exist yet",
             selected.label
         )
     }
 }
 
 fn run_ghostty_validation(env: &SlateEnv) -> GhosttyValidation {
-    if std::env::var_os("SLATE_HOME").is_some() {
-        return GhosttyValidation::Skipped("SLATE_HOME is set; skipping host Ghostty validation");
+    if env.session().is_isolated() {
+        return GhosttyValidation::Skipped("isolated profile; skipping host Ghostty validation");
     }
     if std::env::var_os("HOME").is_some_and(|home| home != env.home().as_os_str()) {
         return GhosttyValidation::Skipped("non-process HOME; skipping host Ghostty validation");
@@ -136,24 +375,7 @@ fn run_ghostty_validation(env: &SlateEnv) -> GhosttyValidation {
     let Some(binary) = ghostty_binary_path(env) else {
         return GhosttyValidation::Skipped("Ghostty CLI not found");
     };
-    let output = match Command::new(&binary).arg("+validate-config").output() {
-        Ok(output) => output,
-        Err(_) => return GhosttyValidation::Skipped("Ghostty CLI not found"),
-    };
-
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    if output.status.success() && combined.trim().is_empty() {
-        GhosttyValidation::Passed { binary }
-    } else {
-        GhosttyValidation::Failed {
-            binary,
-            output: combined,
-        }
-    }
+    ghostty_validation::run(&binary, ghostty_validation::TIMEOUT)
 }
 
 fn ghostty_binary_path(env: &SlateEnv) -> Option<PathBuf> {
@@ -184,214 +406,6 @@ fn ghostty_app_binary(app_bundle: &Path) -> Option<PathBuf> {
     binary.exists().then_some(binary)
 }
 
-fn read_slate_refs(path: &Path, managed_root: &Path) -> Vec<String> {
-    let Ok(content) = fs::read(path) else {
-        return Vec::new();
-    };
-    let managed = managed_root.display().to_string();
-    let managed_bytes = managed.as_bytes();
-
-    content
-        .split(|b| *b == b'\n')
-        .filter_map(|line| extract_slate_ref(line, managed_bytes))
-        .collect()
-}
-
-fn extract_slate_ref(line: &[u8], managed_root: &[u8]) -> Option<String> {
-    let trimmed = trim_ascii(line);
-    if trimmed.starts_with(b"#") || trimmed.is_empty() {
-        return None;
-    }
-
-    let key = line_key(trimmed);
-    if key != b"config-file" && key != b"include" {
-        return None;
-    }
-
-    let idx = find_managed_root_index(trimmed, managed_root)?;
-    let path = &trimmed[idx..];
-    let quote = trimmed[..idx]
-        .iter()
-        .rev()
-        .find(|b| matches!(**b, b'"' | b'\''))
-        .copied();
-    let end = match quote {
-        Some(quote) => path.iter().position(|b| *b == quote).unwrap_or(path.len()),
-        None => path
-            .iter()
-            .position(|b| matches!(*b, b'\r' | b' ' | b'\t'))
-            .unwrap_or(path.len()),
-    };
-    String::from_utf8(path[..end].to_vec()).ok()
-}
-
-fn find_managed_root_index(line: &[u8], managed_root: &[u8]) -> Option<usize> {
-    if managed_root.is_empty() || line.len() < managed_root.len() {
-        return None;
-    }
-
-    line.windows(managed_root.len())
-        .enumerate()
-        .find_map(|(idx, window)| {
-            if window != managed_root {
-                return None;
-            }
-
-            let previous = if idx == 0 {
-                None
-            } else {
-                line.get(idx - 1).copied()
-            };
-            if !path_reference_starts_at_value_boundary(previous) {
-                return None;
-            }
-
-            match line.get(idx + managed_root.len()).copied() {
-                Some(b'/') | Some(b'\\') | Some(b'"') | Some(b'\'') | Some(b'\r') | Some(b'\n')
-                | None => Some(idx),
-                Some(next) if next.is_ascii_whitespace() => Some(idx),
-                _ => None,
-            }
-        })
-}
-
-fn detect_config_file_cycles(entries: &[GhosttyConfigEntry], home: &Path) -> Vec<Vec<PathBuf>> {
-    let mut stack = Vec::new();
-    let mut completed = BTreeSet::new();
-    let mut emitted = BTreeSet::new();
-    let mut cycles = Vec::new();
-
-    for entry in entries.iter().filter(|entry| entry.exists) {
-        let start = normalize_config_path(&entry.path);
-        visit_config_file(
-            &start,
-            home,
-            &mut stack,
-            &mut completed,
-            &mut emitted,
-            &mut cycles,
-            0,
-        );
-    }
-
-    cycles
-}
-
-fn visit_config_file(
-    path: &Path,
-    home: &Path,
-    stack: &mut Vec<PathBuf>,
-    completed: &mut BTreeSet<PathBuf>,
-    emitted: &mut BTreeSet<String>,
-    cycles: &mut Vec<Vec<PathBuf>>,
-    depth: usize,
-) {
-    let path = normalize_config_path(path);
-    if let Some(pos) = stack.iter().position(|entry| entry == &path) {
-        let mut cycle = stack[pos..].to_vec();
-        cycle.push(path);
-        let signature = cycle
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\0");
-        if emitted.insert(signature) {
-            cycles.push(cycle);
-        }
-        return;
-    }
-    if completed.contains(&path) || depth > 64 || !path.exists() {
-        return;
-    }
-
-    let refs = read_config_file_refs(&path, home);
-    stack.push(path.clone());
-    for referenced in refs {
-        visit_config_file(
-            &referenced,
-            home,
-            stack,
-            completed,
-            emitted,
-            cycles,
-            depth + 1,
-        );
-    }
-    stack.pop();
-    completed.insert(path);
-}
-
-fn read_config_file_refs(path: &Path, home: &Path) -> Vec<PathBuf> {
-    let Ok(content) = fs::read(path) else {
-        return Vec::new();
-    };
-    let current_dir = path.parent().unwrap_or_else(|| Path::new("/"));
-
-    content
-        .split(|b| *b == b'\n')
-        .filter_map(|line| extract_config_file_ref(line, current_dir, home))
-        .collect()
-}
-
-fn extract_config_file_ref(line: &[u8], current_dir: &Path, home: &Path) -> Option<PathBuf> {
-    let trimmed = trim_ascii(line);
-    if trimmed.starts_with(b"#") || trimmed.is_empty() {
-        return None;
-    }
-
-    let key = line_key(trimmed);
-    if key != b"config-file" {
-        return None;
-    }
-
-    let value = if let Some(eq_idx) = trimmed.iter().position(|b| *b == b'=') {
-        trim_ascii(&trimmed[eq_idx + 1..])
-    } else {
-        trim_ascii(&trimmed[key.len()..])
-    };
-    let raw_path = extract_path_value(value)?;
-    let raw_path = String::from_utf8(raw_path.to_vec()).ok()?;
-
-    Some(resolve_config_ref_path(&raw_path, current_dir, home))
-}
-
-fn extract_path_value(value: &[u8]) -> Option<&[u8]> {
-    if value.is_empty() {
-        return None;
-    }
-
-    if matches!(value.first(), Some(b'"' | b'\'')) {
-        let quote = value[0];
-        return value[1..]
-            .iter()
-            .position(|b| *b == quote)
-            .map(|end| &value[1..1 + end]);
-    }
-
-    let end = value
-        .iter()
-        .position(|b| matches!(*b, b'\r' | b' ' | b'\t'))
-        .unwrap_or(value.len());
-    Some(&value[..end])
-}
-
-fn resolve_config_ref_path(raw_path: &str, current_dir: &Path, home: &Path) -> PathBuf {
-    let expanded = if raw_path == "~" {
-        home.to_path_buf()
-    } else if let Some(rest) = raw_path.strip_prefix("~/") {
-        home.join(rest)
-    } else {
-        PathBuf::from(raw_path)
-    };
-    let absolute = if expanded.is_absolute() {
-        expanded
-    } else {
-        current_dir.join(expanded)
-    };
-
-    normalize_config_path(&absolute)
-}
-
 fn normalize_config_path(path: &Path) -> PathBuf {
     if let Ok(canonical) = fs::canonicalize(path) {
         return canonical;
@@ -411,36 +425,6 @@ fn normalize_config_path(path: &Path) -> PathBuf {
     normalized
 }
 
-fn line_key(line: &[u8]) -> &[u8] {
-    let key_end = line
-        .iter()
-        .position(|b| *b == b'=' || b.is_ascii_whitespace())
-        .unwrap_or(line.len());
-    trim_ascii(&line[..key_end])
-}
-
-fn path_reference_starts_at_value_boundary(previous: Option<u8>) -> bool {
-    match previous {
-        Some(b'=') | Some(b'"') | Some(b'\'') | Some(b'[') | Some(b'(') | Some(b'{')
-        | Some(b',') => true,
-        Some(prev) => prev.is_ascii_whitespace(),
-        None => true,
-    }
-}
-
-fn trim_ascii(bytes: &[u8]) -> &[u8] {
-    let start = bytes
-        .iter()
-        .position(|b| !b.is_ascii_whitespace())
-        .unwrap_or(bytes.len());
-    let end = bytes
-        .iter()
-        .rposition(|b| !b.is_ascii_whitespace())
-        .map(|idx| idx + 1)
-        .unwrap_or(start);
-    &bytes[start..end]
-}
-
 fn format_ghostty_report(report: &GhosttyDoctorReport) -> String {
     let mut out = String::new();
     out.push_str("◆ Ghostty doctor\n");
@@ -449,7 +433,7 @@ fn format_ghostty_report(report: &GhosttyDoctorReport) -> String {
         .entries
         .iter()
         .find(|entry| entry.selected)
-        .map(|entry| entry.path.display().to_string())
+        .map(|entry| terminal_path(&entry.path))
         .unwrap_or_else(|| "(none)".to_string());
     out.push_str(&format!("selected entry: {selected}\n"));
     out.push_str(&format!("selected reason: {}\n", report.selected_reason));
@@ -466,19 +450,23 @@ fn format_ghostty_report(report: &GhosttyDoctorReport) -> String {
             entry.load_order_index + 1,
             entry.slate_refs.len()
         ));
-        out.push_str(&format!("    {}\n", entry.path.display()));
+        out.push_str(&format!("    {}\n", terminal_path(&entry.path)));
     }
 
     if report.duplicate_refs.is_empty() && report.config_file_cycles.is_empty() {
-        out.push_str("cycle risk: none from duplicate Slate-managed refs or config-file cycles\n");
+        if report.scan_issues.is_empty() {
+            out.push_str("cycle risk: none from inspected duplicate Slate-managed refs or config-file cycles\n");
+        } else {
+            out.push_str("cycle risk: unknown; configuration scan is incomplete\n");
+        }
     } else {
         out.push_str("cycle risk: Ghostty config-file issues detected\n");
         if !report.duplicate_refs.is_empty() {
             out.push_str("duplicate Slate-managed refs:\n");
             for (slate_ref, paths) in &report.duplicate_refs {
-                out.push_str(&format!("  - {slate_ref}\n"));
+                out.push_str(&format!("  - {}\n", integrations::terminal_text(slate_ref)));
                 for path in paths {
-                    out.push_str(&format!("    in {}\n", path.display()));
+                    out.push_str(&format!("    in {}\n", terminal_path(path)));
                 }
             }
         }
@@ -487,7 +475,7 @@ fn format_ghostty_report(report: &GhosttyDoctorReport) -> String {
             for cycle in &report.config_file_cycles {
                 let rendered = cycle
                     .iter()
-                    .map(|path| path.display().to_string())
+                    .map(|path| terminal_path(path))
                     .collect::<Vec<_>>()
                     .join(" -> ");
                 out.push_str(&format!("  - {rendered}\n"));
@@ -496,34 +484,68 @@ fn format_ghostty_report(report: &GhosttyDoctorReport) -> String {
         out.push_str("fix: remove the repeated config-file edge, run `slate theme <current-theme>` to rebuild Slate refs in one entry, or `slate clean` to remove Slate refs.\n");
     }
 
+    if !report.scan_issues.is_empty() {
+        out.push_str("scan incomplete:\n");
+        for issue in &report.scan_issues {
+            out.push_str(&format!(
+                "  - {}: {}\n    {}{}\n",
+                issue.code,
+                integrations::terminal_text(&issue.message),
+                integrations::terminal_text(&issue.path),
+                if issue.path_is_lossy {
+                    " (lossy display; not an exact path)"
+                } else {
+                    ""
+                }
+            ));
+        }
+    }
+    out.push_str(&ghostty_window_style::format(
+        &report.window_style_overrides,
+        report.scan_issues.is_empty(),
+    ));
     out.push_str(&format_ghostty_validation(&report.validation));
+    out.push_str(GHOSTTY_SCOPE);
+    out.push('\n');
 
     out
 }
 
+fn terminal_path(path: &Path) -> String {
+    let mut text = integrations::terminal_text(&path.display().to_string());
+    if path.to_str().is_none() {
+        text.push_str(" (lossy display; not an exact path)");
+    }
+    text
+}
+
 fn format_ghostty_validation(validation: &GhosttyValidation) -> String {
-    match validation {
-        GhosttyValidation::Passed { binary } => {
-            format!("ghostty validate: ok ({})\n", binary.display())
-        }
-        GhosttyValidation::Skipped(reason) => format!("ghostty validate: skipped ({reason})\n"),
-        GhosttyValidation::Failed { binary, output } => {
-            let excerpt = output
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .take(8)
-                .collect::<Vec<_>>()
-                .join("\n");
-            if excerpt.is_empty() {
-                format!("ghostty validate: failed ({})\n", binary.display())
-            } else {
-                format!(
-                    "ghostty validate: failed ({})\n{excerpt}\n",
-                    binary.display()
-                )
-            }
+    let status = if matches!(validation, GhosttyValidation::Passed { .. }) {
+        "ok"
+    } else {
+        validation.status()
+    };
+    let mut text = format!("ghostty validate: {status}");
+    if let Some(binary) = validation.binary() {
+        text.push_str(&format!(" ({})", terminal_path(binary)));
+    }
+    text.push('\n');
+    if let Some(message) = validation.message() {
+        for line in message
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .take(8)
+        {
+            text.push_str(&integrations::terminal_text(line));
+            text.push('\n');
         }
     }
+    if matches!(validation, GhosttyValidation::OutputLimit { .. }) {
+        text.push_str(
+            "Validator exceeded 64 KiB of output; invocation terminated and output truncated.\n",
+        );
+    }
+    text
 }
 
 fn format_ghostty_report_json(report: &GhosttyDoctorReport) -> Result<String> {
@@ -539,6 +561,7 @@ fn format_ghostty_report_json(report: &GhosttyDoctorReport) -> Result<String> {
             serde_json::json!({
                 "label": entry.label,
                 "path": entry.path.display().to_string(),
+                "path_is_lossy": entry.path.to_str().is_none(),
                 "exists": entry.exists,
                 "selected": entry.selected,
                 "load_order_index": entry.load_order_index,
@@ -570,26 +593,49 @@ fn format_ghostty_report_json(report: &GhosttyDoctorReport) -> Result<String> {
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    let validation = match &report.validation {
-        GhosttyValidation::Passed { binary } => serde_json::json!({
-            "status": "passed",
-            "message": null,
-            "binary": binary.display().to_string(),
-        }),
-        GhosttyValidation::Skipped(reason) => serde_json::json!({
-            "status": "skipped",
-            "message": reason,
-            "binary": null,
-        }),
-        GhosttyValidation::Failed { binary, output } => serde_json::json!({
-            "status": "failed",
-            "message": output,
-            "binary": binary.display().to_string(),
-        }),
-    };
+    let validation = serde_json::json!({
+        "status": report.validation.status(),
+        "message": report.validation.message(),
+        "binary": report.validation.binary().map(|path| path.display().to_string()),
+        "binary_path_is_lossy": report.validation.binary().is_some_and(|path| path.to_str().is_none()),
+        "output_truncated": matches!(report.validation, GhosttyValidation::OutputLimit { .. }),
+        "timeout_ms": ghostty_validation::TIMEOUT.as_millis(),
+        "output_limit_bytes": ghostty_validation::MAX_OUTPUT,
+    });
+    let paths_are_lossy = report
+        .entries
+        .iter()
+        .any(|entry| entry.path.to_str().is_none())
+        || report
+            .duplicate_refs
+            .iter()
+            .flat_map(|(_, paths)| paths)
+            .any(|path| path.to_str().is_none())
+        || report
+            .config_file_cycles
+            .iter()
+            .flatten()
+            .any(|path| path.to_str().is_none())
+        || report.scan_issues.iter().any(|issue| issue.path_is_lossy)
+        || report
+            .window_style_overrides
+            .iter()
+            .any(|assignment| assignment.path_is_lossy)
+        || report
+            .validation
+            .binary()
+            .is_some_and(|path| path.to_str().is_none());
 
     serde_json::to_string_pretty(&serde_json::json!({
         "target": "ghostty",
+        "schema_version": 1,
+        "reference_syntax": "ghostty-1.3.1",
+        "entry_order": "ghostty-1.3.1-defaults",
+        "scope": GHOSTTY_SCOPE,
+        "scan_complete": report.scan_issues.is_empty(),
+        "scan_issues": report.scan_issues,
+        "window_style": ghostty_window_style::json(&report.window_style_overrides, report.scan_issues.is_empty()),
+        "paths_are_lossy": paths_are_lossy,
         "selected_entry": selected_entry,
         "selected_reason": report.selected_reason,
         "entries": entries,
@@ -635,6 +681,13 @@ mod tests {
             format!("{}/theme.conf", managed.display())
         );
         assert!(format_ghostty_report(&report).contains("duplicate Slate-managed refs"));
+        let file_only = build_ghostty_report_with_validator(&env, None).unwrap();
+        assert_eq!(file_only.duplicate_refs, report.duplicate_refs);
+        assert_eq!(file_only.config_file_cycles, report.config_file_cycles);
+        assert!(matches!(
+            file_only.validation,
+            GhosttyValidation::Skipped("file-only check; native validation was not requested")
+        ));
     }
 
     #[test]
@@ -670,17 +723,19 @@ mod tests {
         let env = SlateEnv::with_home(td.path().to_path_buf());
         let ghostty_dir = env.xdg_config_home().join("ghostty");
         fs::create_dir_all(&ghostty_dir).unwrap();
-        fs::write(ghostty_dir.join("config.ghostty"), "# first\n").unwrap();
-        fs::write(ghostty_dir.join("config"), "# later\n").unwrap();
+        fs::write(ghostty_dir.join("config"), "# first\n").unwrap();
+        fs::write(ghostty_dir.join("config.ghostty"), "# later\n").unwrap();
 
         let report = build_ghostty_report(&env).unwrap();
         let output = format_ghostty_report(&report);
 
         assert_eq!(
             report.selected_reason,
-            "XDG config is the last existing entry in Ghostty load order"
+            "XDG config.ghostty is the last existing candidate in Ghostty 1.3.1 default-file order (Slate write target)"
         );
-        assert!(output.contains("selected reason: XDG config is the last existing entry"));
+        assert!(
+            output.contains("selected reason: XDG config.ghostty is the last existing candidate")
+        );
         assert!(output.contains("load-order=1"));
         assert!(output.contains("load-order=2"));
     }
@@ -776,8 +831,9 @@ mod tests {
     }
 
     #[test]
+    // SWATCH-RENDERER: hostile path bytes in this JSON serialization fixture are intentional.
     fn ghostty_report_json_is_machine_readable() {
-        let report = GhosttyDoctorReport {
+        let mut report = GhosttyDoctorReport {
             entries: vec![GhosttyConfigEntry {
                 label: "XDG config.ghostty",
                 path: PathBuf::from("/tmp/ghostty/config.ghostty"),
@@ -788,7 +844,9 @@ mod tests {
             }],
             duplicate_refs: Vec::new(),
             config_file_cycles: Vec::new(),
-            selected_reason: "XDG config.ghostty is the last existing entry in Ghostty load order"
+            scan_issues: Vec::new(),
+            window_style_overrides: Vec::new(),
+            selected_reason: "XDG config.ghostty is the last existing candidate in Ghostty 1.3.1 default-file order (Slate write target)"
                 .to_string(),
             validation: GhosttyValidation::Passed {
                 binary: PathBuf::from("/Applications/Ghostty.app/Contents/MacOS/ghostty"),
@@ -800,10 +858,8 @@ mod tests {
 
         assert_eq!(parsed["target"], "ghostty");
         assert_eq!(parsed["cycle_risk"], false);
-        assert_eq!(
-            parsed["selected_reason"],
-            "XDG config.ghostty is the last existing entry in Ghostty load order"
-        );
+        assert_eq!(parsed["selected_reason"], report.selected_reason);
+        assert_eq!(parsed["entry_order"], "ghostty-1.3.1-defaults");
         assert_eq!(parsed["config_file_cycles"].as_array().unwrap().len(), 0);
         assert_eq!(parsed["validation"]["status"], "passed");
         assert_eq!(
@@ -812,6 +868,43 @@ mod tests {
         );
         assert_eq!(parsed["entries"][0]["load_order_index"], 0);
         assert_eq!(parsed["entries"][0]["slate_ref_count"], 1);
+        assert_eq!(parsed["schema_version"], 1);
+        assert_eq!(parsed["scan_complete"], true);
+        assert_eq!(parsed["paths_are_lossy"], false);
+        use std::os::unix::ffi::OsStringExt;
+        report.entries[0].path = PathBuf::from(std::ffi::OsString::from_vec(
+            b"/tmp/config-\xff\x1b[31m".to_vec(),
+        ));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&format_ghostty_report_json(&report).unwrap()).unwrap();
+        assert_eq!(parsed["paths_are_lossy"], true);
+        assert_eq!(parsed["entries"][0]["path_is_lossy"], true);
+        let text = format_ghostty_report(&report);
+        assert!(text.contains("lossy display; not an exact path"));
+        assert!(!text.contains('\u{1b}'));
+
+        // A nested finding can be the only lossy path in an otherwise ordinary
+        // report. Keep the aggregate flag and terminal escaping accurate too.
+        report.window_style_overrides = vec![ghostty_window_style::Assignment::new(
+            &report.entries[0].path,
+            3,
+        )];
+        report.entries[0].path = PathBuf::from("/tmp/ghostty/config.ghostty");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&format_ghostty_report_json(&report).unwrap()).unwrap();
+        assert_eq!(parsed["paths_are_lossy"], true);
+        assert_eq!(
+            parsed["window_style"]["managed_overrides"][0]["path_is_lossy"],
+            true
+        );
+        assert_eq!(
+            parsed["window_style"]["managed_overrides"][0]["first_assignment_line"],
+            3
+        );
+        assert_eq!(parsed["window_style"]["status"], "managed_override");
+        let text = format_ghostty_report(&report);
+        assert!(text.contains("lossy display; not an exact path"));
+        assert!(!text.contains('\u{1b}'));
     }
 
     #[test]

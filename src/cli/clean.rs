@@ -7,7 +7,21 @@ use crate::error::Result;
 use crate::{config::ConfigManager, platform};
 use std::ffi::OsStr;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+mod edits;
+mod preflight;
+mod preview;
+
+pub fn handle_preview(env: &SlateEnv, json: bool) -> Result<()> {
+    preview::handle(env, json)
+}
+
+/// Called before main acquires its writer lock or initializes sound caches.
+/// The full target preflight is repeated under the lock in the handler.
+pub fn validate_storage_paths(env: &SlateEnv) -> Result<()> {
+    preflight::validate_storage_paths(env)
+}
 
 /// Handle `slate clean` command
 /// Removes managed files, stops the auto-theme watcher, and removes.zshrc marker block
@@ -27,6 +41,9 @@ pub fn handle_clean() -> Result<()> {
 
 fn handle_clean_inner() -> Result<()> {
     use cliclack::{intro, log};
+    let env = SlateEnv::from_process()?;
+    validate_storage_paths(&env)?;
+    let _write_guard = crate::config::ConfigWriteGuard::acquire(&env)?;
 
     // Build a RenderContext up-front so every user-visible status line
     // shares the same byte contract (sketch 003 tree narrative
@@ -37,81 +54,121 @@ fn handle_clean_inner() -> Result<()> {
 
     intro(intro_title(r.as_ref(), "Clean Up Slate"))?;
 
-    let env = SlateEnv::from_process()?;
-    let config = ConfigManager::with_env(&env)?;
+    // Inspection must not initialize state before a recoverable snapshot exists.
+    let config = ConfigManager::from_env_paths(&env);
+    let targets = preflight::snapshot_targets(&env)?;
 
     let mut removed_sections: Vec<&'static str> = Vec::new();
 
     // Step 0: Snapshot the current state so the user can undo this clean. Without this
     // the only restore point after clean is the pre-slate baseline, which is the wrong
-    // target if the user just wants to roll back the clean itself. Best-effort — we don't
-    // want a backup hiccup to block the clean.
-    {
+    // target if the user just wants to roll back the clean itself. Fail closed:
+    // deleting files that were not backed up is not a successful cleanup.
+    let snapshot = {
         let label = config
             .get_current_theme()
             .ok()
             .flatten()
             .map(|theme| format!("pre-clean-{}", theme))
             .unwrap_or_else(|| "pre-clean".to_string());
-        if let Err(err) = crate::config::snapshot_current_state_with_env(&env, &label) {
-            log::remark(format!("  (couldn't create pre-clean snapshot: {})", err))?;
-        } else {
-            log::success(status_success_line(
-                r.as_ref(),
-                &format!("Saved pre-clean snapshot ({})", label),
-            ))?;
-        }
-    }
-
-    // Step 1: Stop watcher + clear config flag
-    log::step("Stopping auto-theme watcher...")?;
-    if let Err(err) = config.set_auto_theme_enabled(false) {
-        log::remark(format!("  (couldn't update auto-theme flag: {})", err))?;
-    }
-    platform::dark_mode_notify::stop()?;
-    platform::dark_mode_notify::remove_binary(&config)?;
-    log::success(status_success_line(r.as_ref(), "Watcher stopped"))?;
-    removed_sections.push("auto-theme watcher");
-
-    // Step 2: Remove integration references before deleting managed files
-    log::step("Removing integration references...")?;
-    remove_marker_block_from_zshrc(env.home())?;
-    remove_marker_blocks_from_bash(&env)?;
-    remove_fish_loader(&env)?;
-    remove_ghostty_managed_references(&env)?;
-    remove_alacritty_managed_references(&env)?;
-    remove_kitty_managed_references(&env)?;
-    remove_starship_managed_references(&env)?;
-    remove_tmux_managed_references(env.home())?;
-    remove_delta_managed_references(env.home())?;
-    remove_nvim_managed_references(&env)?;
-    remove_opencode_managed_references(&env)?;
-    log::success(status_success_line(
-        r.as_ref(),
-        "Removed config-file/import/source hooks",
-    ))?;
-    removed_sections.push("shell + tool hooks");
-
-    // Step 3: Delete Slate-owned config directory
-    log::step("Removing Slate-managed config state...")?;
-    if remove_slate_owned_config_state(&env)? {
+        let snapshot = crate::config::snapshot_clean_targets_with_env(&env, &label, &targets)
+            .map_err(|err| {
+                crate::error::SlateError::BackupFailed(format!(
+                    "Clean cancelled before removing files: pre-clean snapshot failed: {err}"
+                ))
+            })?;
         log::success(status_success_line(
             r.as_ref(),
-            "Removed Slate-owned config state",
+            &format!("Saved pre-clean snapshot: {}", snapshot.id),
         ))?;
-        removed_sections.push("managed config state");
-    } else if env.config_dir().exists() {
-        log::remark("  (only ~/.config/slate/user remains)")?;
-    } else {
-        log::remark("  (~/.config/slate already removed)")?;
-    }
+        snapshot
+    };
+
+    // Any failure after the snapshot must include a usable recovery reference.
+    let result = (|| -> Result<()> {
+        // Step 1: Stop watcher + clear config flag
+        log::step("Stopping auto-theme watcher...")?;
+        if env.session().is_isolated() {
+            log::remark("  (isolated profile: running watchers left untouched)")?;
+        } else {
+            config.set_auto_theme_enabled(false)?;
+            platform::dark_mode_notify::stop_with_env(&env)?;
+            log::success(status_success_line(r.as_ref(), "Watcher stopped"))?;
+            removed_sections.push("auto-theme watcher");
+        }
+        // The managed binary is removed with the already-snapshotted managed tree.
+
+        // Step 2: Remove integration references before deleting managed files
+        log::step("Removing integration references...")?;
+        crate::adapter::marker_block::remove_managed_blocks_from_file(&env.zshrc_path())?;
+        remove_marker_blocks_from_bash(&env)?;
+        remove_fish_loader(&env)?;
+        remove_ghostty_managed_references(&env)?;
+        remove_alacritty_managed_references(&env)?;
+        remove_kitty_managed_references(&env)?;
+        remove_starship_managed_references(&env)?;
+        remove_tmux_managed_references(&env)?;
+        remove_delta_managed_references(env.home())?;
+        remove_nvim_managed_references(&env)?;
+        remove_opencode_managed_references(&env)?;
+        edits::apply(&crate::adapter::BtopAdapter::config_path(&env), |bytes| {
+            edits::btop(&env, bytes)
+        })?;
+        edits::apply(
+            &crate::adapter::BtopAdapter::theme_path(&env),
+            edits::btop_theme,
+        )?;
+        edits::apply(&crate::adapter::YaziAdapter::config_path(&env), edits::yazi)?;
+        let [zellij_config, zellij_theme] = crate::adapter::ZellijAdapter::paths(&env)?;
+        edits::apply(&zellij_config, edits::zellij)?;
+        edits::apply(&zellij_theme, edits::zellij_theme)?;
+        edits::apply(&crate::adapter::YaziAdapter::flavor_path(&env), |bytes| {
+            edits::yazi_asset(bytes, false)
+        })?;
+        edits::apply(&crate::adapter::YaziAdapter::syntax_path(&env), |bytes| {
+            edits::yazi_asset(bytes, true)
+        })?;
+        log::success(status_success_line(
+            r.as_ref(),
+            "Removed config-file/import/source hooks",
+        ))?;
+        removed_sections.push("shell + tool hooks");
+
+        // Step 3: Delete Slate-owned config directory
+        log::step("Removing Slate-managed config state...")?;
+        if remove_slate_owned_config_state(&env)? {
+            log::success(status_success_line(
+                r.as_ref(),
+                "Removed Slate-owned config state",
+            ))?;
+            removed_sections.push("managed config state");
+        } else if env.config_dir().exists() {
+            log::remark(format!(
+                "  (only {} remains)",
+                env.config_dir().join("user").display()
+            ))?;
+        } else {
+            log::remark(format!(
+                "  ({} already removed)",
+                env.config_dir().display()
+            ))?;
+        }
+
+        Ok(())
+    })();
+    result.map_err(|err| crate::error::SlateError::InvalidConfig(format!(
+        "Clean stopped: {err}. Some files may have changed. Inspect the saved files with `slate restore {} --dry-run`.",
+        snapshot.id,
+    )))?;
 
     // Step 4: Reload running terminals so the theme actually drops.
     // Removing the config-file line from ~/.config/ghostty/config.ghostty only takes effect on the
     // next reload; without this, users see "clean succeeded" but the background + palette
     // stay applied until they restart Ghostty themselves. Best-effort — if the terminal
     // isn't running we silently move on.
-    let _ = GhosttyAdapter.reload();
+    if env.session().can_reload_terminal() {
+        let _ = GhosttyAdapter.reload();
+    }
 
     // completion receipt is a static tree-narrative anchor — bypass
     // cliclack and println! via Roles::heading / tree_branch / tree_end.
@@ -130,11 +187,13 @@ fn handle_clean_inner() -> Result<()> {
     // Exit message: Clarify clean vs restore boundary. Routed through
     // log::info so cliclack's lavender-bar SlateTheme renders the chrome
     // while the body is whatever the Language copy says today.
-    log::info(
+    log::info(format!(
         "clean removed Slate-owned shell hooks, watcher artifacts, and config state. \
 Third-party tools installed through Homebrew remain installed. \
-Use 'slate restore' before cleanup if you want to roll back to a snapshot instead.",
-    )?;
+Inspect saved files with 'slate restore {} --dry-run' before restoring. \
+File restoration does not restore running application state.",
+        snapshot.id,
+    ))?;
 
     // clean success → paired `CleanComplete` (category) +
     // `ApplyComplete` (whole-flow milestone) so can latch onto
@@ -189,21 +248,15 @@ fn tree_end_text(r: Option<&Roles<'_>>, text: &str) -> String {
     }
 }
 
-/// Remove marker block from.zshrc
-/// Handles multiple blocks and preserves rest of file content
-fn remove_marker_block_from_zshrc(home: &Path) -> Result<()> {
-    let zshrc_path = home.join(".zshrc");
-    crate::adapter::marker_block::remove_managed_blocks_from_file(&zshrc_path)
-}
-
 /// Remove marker blocks from any bash rc file Slate might have written to.
-/// On macOS we may have written to `.bash_profile` (login-shell convention); on Linux we
-/// write to `.bashrc`. Sweep both so a reinstall/clean across machines or a migration from
+/// On macOS we may have written to a login entry; on Linux we write to `.bashrc`.
+/// Sweep all supported entries so a reinstall across machines or a migration from
 /// an older slate version still leaves no orphaned loaders. `remove_managed_blocks_from_file`
 /// is a no-op on missing files, so unconditional calls are safe.
 fn remove_marker_blocks_from_bash(env: &SlateEnv) -> Result<()> {
-    crate::adapter::marker_block::remove_managed_blocks_from_file(&env.bashrc_path())?;
-    crate::adapter::marker_block::remove_managed_blocks_from_file(&env.bash_profile_path())?;
+    for path in env.bash_startup_paths() {
+        crate::adapter::marker_block::remove_managed_blocks_from_file(&path)?;
+    }
     Ok(())
 }
 
@@ -256,138 +309,36 @@ fn remove_slate_owned_config_state(env: &SlateEnv) -> Result<bool> {
 /// `slate restore <baseline>`'s job).
 /// - `[palettes.slate]` table removed unconditionally.
 /// - empty `[palettes]` table removed after cleanup.
-/// Honors STARSHIP_CONFIG env override during normal runs. When SLATE_HOME
-/// is set, ignore STARSHIP_CONFIG so sandboxed/test clean runs cannot follow
-/// the developer shell's live Starship config outside the injected home.
-/// Silently skips if the file is non-UTF-8 or unparseable — clean is
-/// best-effort and shouldn't fail the whole uninstall on a malformed config.
+/// Uses the same integration path as apply and backup. STARSHIP_CONFIG may
+/// point at a generated fallback or an unrelated file and must not select a
+/// different cleanup target.
+/// Leaves non-UTF-8 or unparseable files unchanged with a warning.
 fn remove_starship_managed_references(env: &SlateEnv) -> Result<()> {
-    let starship_config = std::env::var("STARSHIP_CONFIG").ok();
-    let integration_path = resolve_starship_clean_path(
-        env,
-        starship_config.as_deref(),
-        std::env::var_os("SLATE_HOME").is_some(),
-    );
+    let integration_path = crate::adapter::StarshipAdapter::integration_config_path_with_env(env);
     strip_starship_slate_palette(&integration_path)
 }
 
-fn resolve_starship_clean_path(
-    env: &SlateEnv,
-    starship_config: Option<&str>,
-    slate_home_override_present: bool,
-) -> PathBuf {
-    if !slate_home_override_present {
-        if let Some(path) = starship_config.filter(|value| !value.is_empty()) {
-            return PathBuf::from(path);
-        }
-    }
-
-    env.xdg_config_home().join("starship.toml")
-}
-
-/// Pure path-level helper — split from `remove_starship_managed_references`
-/// so tests can exercise the edit logic on a tempdir path without having
-/// to mutate the process-wide `STARSHIP_CONFIG` env var (feedback:
-/// no global env var mutation in tests).
+/// Path-level write wrapper around the same pure transform used by preview.
 fn strip_starship_slate_palette(integration_path: &Path) -> Result<()> {
-    if !integration_path.exists() {
-        return Ok(());
-    }
-
-    let bytes = fs::read(integration_path)?;
-    let Ok(content) = String::from_utf8(bytes) else {
-        return Ok(()); // non-UTF-8 — leave it alone
-    };
-
-    let mut doc: toml_edit::DocumentMut = match content.parse() {
-        Ok(doc) => doc,
-        Err(_) => return Ok(()), // malformed TOML — leave it alone
-    };
-
-    let mut changed = false;
-
-    if doc
-        .get("palette")
-        .and_then(|value| value.as_str())
-        .is_some_and(|value| value == "slate")
-    {
-        doc.remove("palette");
-        changed = true;
-    }
-
-    if let Some(palettes) = doc
-        .get_mut("palettes")
-        .and_then(|value| value.as_table_mut())
-    {
-        if palettes.remove("slate").is_some() {
-            changed = true;
-        }
-        if palettes.is_empty() {
-            doc.remove("palettes");
-        }
-    }
-
-    if changed {
-        fs::write(integration_path, doc.to_string())?;
-    }
-    Ok(())
+    edits::apply(integration_path, edits::starship)
 }
 
 /// Strip slate-owned lines from `~/.config/kitty/kitty.conf`.
 /// Only removes lines that slate can positively identify as slate-owned:
 /// - `include` lines pointing anywhere under `~/.config/slate/managed/kitty/`
 /// (theme.conf, opacity.conf, font.conf)
-/// - `listen_on` lines whose socket path contains the slate-specific
-/// marker "kitty-slate" — `listen_on` was prepended by the live-preview
+/// - `listen_on` directives with an absolute Unix socket path whose exact
+/// basename is "kitty-slate" — `listen_on` was prepended by the live-preview
 /// wiring in kitty.rs to enable `kitten @ set-colors`.
 /// Lines slate also prepends but that the user may legitimately want to
 /// keep (`allow_remote_control socket-only`, `dynamic_background_opacity yes`)
 /// are NOT stripped — they don't carry a slate-specific marker and the
 /// safer posture is to leave them in place than to nuke a pre-existing
 /// user setting.
-/// Byte-oriented to preserve non-UTF-8 content elsewhere in the file.
+/// Whole continuation groups are edited; all retained bytes are preserved.
 fn remove_kitty_managed_references(env: &SlateEnv) -> Result<()> {
-    let integration_path = crate::adapter::KittyAdapter::resolve_config_path_with_env(env);
-    if !integration_path.exists() {
-        return Ok(());
-    }
-
-    let managed_prefix = env
-        .config_dir()
-        .join("managed")
-        .join("kitty")
-        .to_string_lossy()
-        .to_string();
-    let content = fs::read(&integration_path)?;
-    let mut cleaned: Vec<u8> = Vec::with_capacity(content.len());
-
-    for line in content.split_inclusive(|b| *b == b'\n') {
-        let trimmed = line
-            .iter()
-            .copied()
-            .skip_while(|b| b.is_ascii_whitespace())
-            .collect::<Vec<u8>>();
-        // Drop `include /…/managed/kitty/…` — slate-owned theme includes.
-        if trimmed.starts_with(b"include")
-            && trimmed
-                .windows(managed_prefix.len())
-                .any(|w| w == managed_prefix.as_bytes())
-        {
-            continue;
-        }
-        // Drop `listen_on unix:…/kitty-slate` — slate-owned socket marker.
-        if trimmed.starts_with(b"listen_on")
-            && trimmed
-                .windows(b"kitty-slate".len())
-                .any(|w| w == b"kitty-slate")
-        {
-            continue;
-        }
-        cleaned.extend_from_slice(line);
-    }
-
-    fs::write(integration_path, cleaned)?;
-    Ok(())
+    let path = crate::adapter::KittyAdapter::resolve_config_path_with_env(env);
+    edits::apply(&path, |bytes| edits::kitty(env, bytes))
 }
 
 fn remove_ghostty_managed_references(env: &SlateEnv) -> Result<()> {
@@ -400,81 +351,17 @@ fn remove_ghostty_managed_references(env: &SlateEnv) -> Result<()> {
 }
 
 fn remove_alacritty_managed_references(env: &SlateEnv) -> Result<()> {
-    let integration_path =
-        crate::adapter::alacritty::AlacrittyAdapter::integration_config_path_with_env(env);
-    if !integration_path.exists() {
-        return Ok(());
+    for path in crate::adapter::AlacrittyAdapter::integration_candidate_paths_with_env(env) {
+        edits::apply(&path, |bytes| edits::alacritty(env, bytes))?;
     }
-
-    let managed_prefix = env
-        .config_dir()
-        .join("managed")
-        .join("alacritty")
-        .to_string_lossy()
-        .to_string();
-    let content = match fs::read(&integration_path) {
-        Ok(bytes) => match String::from_utf8(bytes) {
-            Ok(content) => content,
-            Err(_) => return Ok(()),
-        },
-        Err(err) => return Err(err.into()),
-    };
-    let mut doc: toml_edit::DocumentMut = if content.trim().is_empty() {
-        toml_edit::DocumentMut::new()
-    } else {
-        content.parse().map_err(|e| {
-            crate::error::SlateError::InvalidConfig(format!(
-                "Failed to parse Alacritty TOML during clean: {}",
-                e
-            ))
-        })?
-    };
-
-    if let Some(imports) = doc
-        .get_mut("general")
-        .and_then(|general| general.get_mut("import"))
-        .and_then(|imports| imports.as_array_mut())
-    {
-        let retained: Vec<String> = imports
-            .iter()
-            .filter_map(|item| item.as_str())
-            .filter(|path| !path.contains(&managed_prefix))
-            .map(ToString::to_string)
-            .collect();
-
-        imports.clear();
-        for path in retained {
-            imports.push(path);
-        }
-    }
-
-    if doc
-        .get("general")
-        .and_then(|general| general.as_table())
-        .and_then(|table| table.get("import"))
-        .and_then(|imports| imports.as_array())
-        .is_some_and(|imports| imports.is_empty())
-    {
-        if let Some(general) = doc.get_mut("general").and_then(|item| item.as_table_mut()) {
-            general.remove("import");
-        }
-    }
-
-    if doc
-        .get("general")
-        .and_then(|general| general.as_table())
-        .is_some_and(|table| table.is_empty())
-    {
-        doc.remove("general");
-    }
-
-    fs::write(integration_path, doc.to_string())?;
     Ok(())
 }
 
-fn remove_tmux_managed_references(home: &Path) -> Result<()> {
-    let tmux_path = home.join(".tmux.conf");
-    crate::adapter::marker_block::remove_managed_blocks_from_file(&tmux_path)
+fn remove_tmux_managed_references(env: &SlateEnv) -> Result<()> {
+    for path in env.tmux_config_candidates() {
+        crate::adapter::marker_block::remove_managed_blocks_from_file(&path)?;
+    }
+    Ok(())
 }
 
 fn remove_delta_managed_references(home: &Path) -> Result<()> {
@@ -494,66 +381,17 @@ fn remove_opencode_managed_references(env: &SlateEnv) -> Result<()> {
 }
 
 fn strip_opencode_slate_theme(tui_path: &Path) -> Result<()> {
-    if !tui_path.exists() {
-        return Ok(());
-    }
-
-    let content = match fs::read_to_string(tui_path) {
-        Ok(content) => content,
-        Err(_) => return Ok(()),
-    };
-
-    let mut config = match crate::adapter::OpencodeAdapter::parse_tui_config(&content, tui_path) {
-        Ok(config) => config,
-        Err(_) => return Ok(()), // invalid JSON/JSONC — leave it alone
-    };
-
-    let Some(obj) = config.as_object_mut() else {
-        return Ok(());
-    };
-
-    // Only remove theme if it's set to "system" (what slate sets).
-    let removed_theme = obj
-        .get("theme")
-        .and_then(|v| v.as_str())
-        .is_some_and(|t| t == "system");
-    if !removed_theme {
-        return Ok(());
-    }
-    obj.remove("theme");
-
-    let only_slate_schema_remains = obj.len() == 1
-        && obj
-            .get("$schema")
-            .and_then(|v| v.as_str())
-            .is_some_and(|schema| schema == crate::adapter::OpencodeAdapter::TUI_SCHEMA);
-
-    // If config is now empty, or only Slate's schema addition remains, remove
-    // the file entirely.
-    if obj.is_empty() || only_slate_schema_remains {
-        let _ = fs::remove_file(tui_path);
-    } else {
-        let content = match serde_json::to_string_pretty(&config) {
-            Ok(content) => content,
-            Err(_) => return Ok(()),
-        };
-        let _ = crate::config::atomic_write_synced(tui_path, content.as_bytes());
-    }
-
-    Ok(())
+    edits::apply(tui_path, |bytes| edits::opencode(bytes, tui_path))
 }
 
 /// Remove every slate-owned file under `~/.config/nvim/` plus the
 /// state file in `~/.cache/slate/`, and best-effort strip the
 /// `pcall(require, 'slate')` marker block from init.lua / init.vim.
 /// Non-slate files in `colors/` are preserved.
-/// Each step is best-effort — a missing file or directory is NOT
-/// an error (mirrors `remove_fish_loader`'s posture). The orphan
-/// safety of `pcall(require, 'slate')` means failure on the
-/// marker-block strip is cosmetic only: nvim startup still
-/// succeeds because `pcall` swallows the missing-module error.
+/// Missing entries are harmless; IO failures must reach the command's saved
+/// snapshot receipt rather than producing a false successful cleanup.
 fn remove_nvim_managed_references(env: &SlateEnv) -> Result<()> {
-    let nvim_home = env.home().join(".config/nvim");
+    let nvim_home = env.nvim_config_dir();
 
     // 1. Remove every `slate-*.lua` shim under ~/.config/nvim/colors/.
     // User-owned files (my-custom.lua, theme.lua, …) are preserved
@@ -564,8 +402,8 @@ fn remove_nvim_managed_references(env: &SlateEnv) -> Result<()> {
         for entry in fs::read_dir(&colors_dir)? {
             let entry = entry?;
             let name = entry.file_name();
-            if name.to_string_lossy().starts_with("slate-") {
-                let _ = fs::remove_file(entry.path());
+            if preflight::is_nvim_shim(&name) {
+                fs::remove_file(entry.path())?;
             }
         }
     }
@@ -573,17 +411,12 @@ fn remove_nvim_managed_references(env: &SlateEnv) -> Result<()> {
     // 2. Remove the loader dir ~/.config/nvim/lua/slate/ (slate-owned).
     let loader_dir = nvim_home.join("lua").join("slate");
     if loader_dir.exists() {
-        let _ = fs::remove_dir_all(&loader_dir);
+        fs::remove_dir_all(&loader_dir)?;
     }
 
-    // 3. Best-effort strip the marker block from init.lua / init.vim.
-    // Primitive is a no-op on missing files, so both calls are safe
-    // unconditionally. Errors are swallowed so a corrupted init file
-    // on one path doesn't abort the clean of the other.
-    let _ =
-        crate::adapter::marker_block::remove_managed_blocks_from_file(&nvim_home.join("init.lua"));
-    let _ =
-        crate::adapter::marker_block::remove_managed_blocks_from_file(&nvim_home.join("init.vim"));
+    // 3. Strip the marker block from both init files (no-op when missing).
+    crate::adapter::marker_block::remove_managed_blocks_from_file(&nvim_home.join("init.lua"))?;
+    crate::adapter::marker_block::remove_managed_blocks_from_file(&nvim_home.join("init.vim"))?;
 
     // 4. Remove the state file ~/.cache/slate/current_theme.lua.
     // `Step 3: Remove Slate-managed config state` in handle_clean
@@ -592,7 +425,7 @@ fn remove_nvim_managed_references(env: &SlateEnv) -> Result<()> {
     // here guarantees no orphan state file survives.
     let state_file = env.slate_cache_dir().join("current_theme.lua");
     if state_file.exists() {
-        let _ = fs::remove_file(&state_file);
+        fs::remove_file(&state_file)?;
     }
 
     Ok(())
@@ -604,6 +437,105 @@ mod tests {
     use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};
     use crate::theme::ThemeRegistry;
     use tempfile::TempDir;
+
+    #[test]
+    fn session_context_tmux_paths_and_cleanup_preserve_user_config() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::from_vars(|key| match key {
+            "HOME" => Some(td.path().as_os_str().to_owned()),
+            "XDG_CONFIG_HOME" => Some(td.path().join("custom config").into_os_string()),
+            _ => None,
+        })
+        .unwrap();
+        let candidates = env.tmux_config_candidates();
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(env.tmux_config_path(), candidates[0]);
+        for candidate in candidates.iter().rev() {
+            fs::create_dir_all(candidate.parent().unwrap()).unwrap();
+            fs::write(
+                candidate,
+                format!(
+                    "set -g mouse on\n{}\nsource-file '/managed/colors.conf'\n{}\nset -g status-position top\n",
+                    crate::adapter::marker_block::START,
+                    crate::adapter::marker_block::END,
+                ),
+            )
+            .unwrap();
+            assert_eq!(env.tmux_config_path(), *candidate);
+        }
+        remove_tmux_managed_references(&env).unwrap();
+        for candidate in candidates {
+            let content = fs::read_to_string(candidate).unwrap();
+            assert!(content.contains("set -g mouse on"));
+            assert!(content.contains("set -g status-position top"));
+            assert!(!content.contains("source-file"));
+            assert!(!content.contains(crate::adapter::marker_block::START));
+        }
+    }
+
+    #[test]
+    fn custom_paths_setup_backup_restore_and_clean_use_the_same_profile() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::from_vars(|key| match key {
+            "HOME" => Some(td.path().as_os_str().to_owned()),
+            "XDG_CONFIG_HOME" => Some(td.path().join("config root").into_os_string()),
+            "XDG_CACHE_HOME" => Some(td.path().join("cache root").into_os_string()),
+            "ZDOTDIR" => Some(td.path().join("shell").into_os_string()),
+            "NVIM_APPNAME" => Some("profiles/work".into()),
+            _ => None,
+        })
+        .unwrap();
+        fs::create_dir_all(env.nvim_config_dir()).unwrap();
+        fs::create_dir_all(env.zshrc_path().parent().unwrap()).unwrap();
+        let init = env.nvim_config_dir().join("init.vim");
+        fs::write(&init, "set number\n").unwrap();
+        fs::write(env.zshrc_path(), "# user shell\n").unwrap();
+        let baseline = crate::config::begin_restore_point_baseline_with_env(&env).unwrap();
+        // Refuse to exercise restore if any target escapes this fixture.
+        assert!(baseline
+            .entries
+            .iter()
+            .all(|entry| entry.original_path.starts_with(td.path())));
+        assert!(baseline
+            .entries
+            .iter()
+            .any(|entry| entry.original_path == init));
+        assert!(baseline
+            .entries
+            .iter()
+            .any(|entry| entry.original_path == env.zshrc_path()));
+
+        let registry = ThemeRegistry::new().unwrap();
+        crate::adapter::NvimAdapter::setup(&env, registry.get("catppuccin-mocha").unwrap())
+            .unwrap();
+        crate::cli::setup::apply_activation_choice_a(&env).unwrap();
+        assert!(fs::read_to_string(&init)
+            .unwrap()
+            .contains("lua pcall(require, 'slate')"));
+        assert!(!env.nvim_config_dir().join("init.lua").exists());
+        let loader = fs::read_to_string(env.nvim_config_dir().join("lua/slate/init.lua")).unwrap();
+        assert!(loader.contains(&format!(
+            "local STATE_PATH = {:?}",
+            env.slate_cache_dir()
+                .join("current_theme.lua")
+                .to_string_lossy()
+        )));
+        assert!(!td.path().join(".config/nvim").exists());
+
+        crate::config::execute_restore_with_env(&env, &baseline.id).unwrap();
+        assert_eq!(fs::read_to_string(&init).unwrap(), "set number\n");
+        assert_eq!(
+            fs::read_to_string(env.zshrc_path()).unwrap(),
+            "# user shell\n"
+        );
+        let user_theme = env.nvim_config_dir().join("colors/my-theme.lua");
+        fs::write(&user_theme, "-- user theme\n").unwrap();
+        remove_nvim_managed_references(&env).unwrap();
+        assert!(user_theme.exists());
+        assert!(!env.nvim_config_dir().join("lua/slate").exists());
+        assert!(!env.slate_cache_dir().join("current_theme.lua").exists());
+        assert_eq!(fs::read_to_string(&init).unwrap(), "set number\n");
+    }
 
     /// Helper: render the completion tree receipt against the given
     /// RenderMode. Mirrors the `println!` block inside `handle_clean_inner`
@@ -884,10 +816,11 @@ mod tests {
 
         remove_opencode_managed_references(&env).unwrap();
 
-        let after: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&tui_path).unwrap()).unwrap();
-        assert!(after.get("theme").is_none());
-        assert_eq!(after["mouse"], false);
+        let after = std::fs::read_to_string(&tui_path).unwrap();
+        crate::adapter::opencode::config::Document::parse(&after, &tui_path).unwrap();
+        assert!(after.contains("// user setting should survive"));
+        assert!(!after.contains("\"theme\""));
+        assert!(after.contains("\"mouse\": false,"));
     }
 
     #[test]
@@ -921,16 +854,14 @@ green = "#0f0"
     }
 
     #[test]
-    fn starship_clean_path_ignores_starship_config_when_slate_home_is_set() {
+    fn starship_clean_uses_the_apply_and_snapshot_path() {
         let td = TempDir::new().unwrap();
         let env = SlateEnv::with_home(td.path().to_path_buf());
-        let host_starship = "/Users/example/.config/starship.toml";
-
-        let sandboxed = resolve_starship_clean_path(&env, Some(host_starship), true);
-        assert_eq!(sandboxed, env.xdg_config_home().join("starship.toml"));
-
-        let normal = resolve_starship_clean_path(&env, Some(host_starship), false);
-        assert_eq!(normal, PathBuf::from(host_starship));
+        let path = crate::adapter::StarshipAdapter::integration_config_path_with_env(&env);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "palette = \"slate\"\n").unwrap();
+        remove_starship_managed_references(&env).unwrap();
+        assert!(!fs::read_to_string(path).unwrap().contains("slate"));
     }
 
     #[test]

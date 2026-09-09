@@ -4,7 +4,6 @@
 //! Detects tmux installation but doesn't require it (optional tool).
 
 use crate::adapter::{marker_block, ApplyOutcome, ApplyStrategy, ToolAdapter};
-use crate::config::ConfigManager;
 use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
@@ -16,14 +15,14 @@ use std::process::Command;
 pub struct TmuxAdapter;
 
 impl TmuxAdapter {
-    /// Path to ~/.tmux.conf (integration file)
+    /// Active default config entry: legacy home path, then XDG candidates.
     fn tmux_conf_path() -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
         Ok(Self::tmux_conf_path_with_env(&env))
     }
 
     fn tmux_conf_path_with_env(env: &SlateEnv) -> PathBuf {
-        env.home().join(".tmux.conf")
+        env.tmux_config_path()
     }
 
     /// Render tmux status bar color configuration
@@ -37,6 +36,8 @@ impl TmuxAdapter {
     /// 7. message-command-style (bg/fg)
     pub fn render_tmux_colors(theme: &ThemeVariant) -> String {
         let palette = &theme.palette;
+        let active_foreground = active_window_foreground(theme);
+        let mode_foreground = readable_foreground(theme, &palette.black, &palette.blue);
 
         format!(
             "# tmux status bar colors managed by slate\n\
@@ -50,27 +51,59 @@ impl TmuxAdapter {
             palette.background, // status bg
             palette.foreground, // status fg
             palette.blue,       // active window bg (accent)
-            palette.foreground, // active window fg
+            active_foreground,  // active window fg, readable on accent
             palette.black,      // inactive pane fg (muted)
             palette.blue,       // active pane fg (accent)
             palette.background, // message bg
             palette.foreground, // message fg
             palette.black,      // mode selection bg (muted)
-            palette.blue,       // mode selection fg (accent)
+            mode_foreground,    // readable mode selection fg
             palette.background, // message-command bg
             palette.foreground  // message-command fg
         )
     }
 
     /// Render managed block with source-file directive
-    fn render_tmux_block(managed_path: &Path) -> String {
-        let managed_str = managed_path.display().to_string();
-        format!(
+    fn render_tmux_block(managed_path: &Path) -> Result<String> {
+        let managed_str = detection::shell_quote(&literal_source_path(managed_path)?);
+        Ok(format!(
             "{}\nsource-file {}\n{}\n",
             marker_block::START,
             managed_str,
             marker_block::END
-        )
+        ))
+    }
+}
+
+fn active_window_foreground(theme: &ThemeVariant) -> &str {
+    readable_foreground(theme, &theme.palette.blue, &theme.palette.foreground)
+}
+
+fn readable_foreground<'a>(
+    theme: &'a ThemeVariant,
+    background: &str,
+    preferred: &'a str,
+) -> &'a str {
+    let palette = &theme.palette;
+    // Keep the original foreground when it is readable. Prefer the theme's
+    // background for inversion, then palette neutrals before a black/white fallback.
+    for color in [
+        preferred,
+        &palette.foreground,
+        &palette.background,
+        &palette.black,
+        &palette.white,
+        &palette.bright_black,
+        &palette.bright_white,
+    ] {
+        if crate::wcag::contrast_hex(color, background) >= 4.5 {
+            return color;
+        }
+    }
+    if crate::wcag::contrast_hex("#000000", background) >= 4.5 {
+        "#000000"
+    } else {
+        "#ffffff"
     }
 }
 
@@ -80,7 +113,11 @@ impl ToolAdapter for TmuxAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        Ok(detection::detect_tool_presence(self.tool_name()).installed)
+        self.is_installed_with_env(&SlateEnv::from_process()?)
+    }
+
+    fn is_installed_with_env(&self, env: &SlateEnv) -> Result<bool> {
+        Ok(detection::detect_tool_presence_with_env(self.tool_name(), env).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
@@ -112,14 +149,43 @@ impl ToolAdapter for TmuxAdapter {
         // Render tmux color configuration
         let tmux_colors = Self::render_tmux_colors(theme);
 
-        // Write managed colors file
-        let config_mgr = ConfigManager::with_env(env)?;
-        config_mgr.write_managed_file("tmux", "colors.conf", &tmux_colors)?;
-
         let tmux_conf_path = Self::tmux_conf_path_with_env(env);
-        let managed_colors_path = config_mgr.managed_dir("tmux").join("colors.conf");
-        let new_block = Self::render_tmux_block(&managed_colors_path);
-        marker_block::upsert_managed_block_file(&tmux_conf_path, &new_block)?;
+        crate::config::recovery_paths::validate_file_path(env, &tmux_conf_path, "tmux")?;
+        let destination =
+            super::integration_publish::destination(&tmux_conf_path, "tmux configuration")?;
+        let original = crate::config::file_read::read(
+            &tmux_conf_path,
+            crate::config::file_read::MAX_TOOL_CONFIG_BYTES,
+            crate::config::file_read::Links::Reject,
+        )
+        .map_err(|_| {
+            SlateError::InvalidConfig(
+                "Cannot safely read tmux configuration; no files were changed.".into(),
+            )
+        })?;
+        let managed_colors_path = env.managed_file("managed/tmux/colors.conf");
+        let new_block = Self::render_tmux_block(&managed_colors_path)?;
+        let updated = marker_block::upsert_managed_block_bytes(
+            original
+                .as_ref()
+                .map_or(&[], |source| source.bytes.as_slice()),
+            new_block.as_bytes(),
+        )?;
+        if updated.len() as u64 > crate::config::file_read::MAX_TOOL_CONFIG_BYTES {
+            return Err(SlateError::InvalidConfig(
+                "Adding tmux's theme include would exceed 8 MiB; no files were changed.".into(),
+            ));
+        }
+        // A single adapter must not initialize unrelated profile state.
+        super::managed_fragment::write(env, &managed_colors_path, tmux_colors.as_bytes(), "tmux")?;
+        super::integration_publish::publish(
+            env,
+            &tmux_conf_path,
+            &destination,
+            original.as_ref(),
+            &updated,
+            "tmux configuration",
+        )?;
 
         // tmux source-file is issued in reload() against the running server
         // so existing sessions pick up the new colors immediately.
@@ -127,149 +193,110 @@ impl ToolAdapter for TmuxAdapter {
     }
 
     fn reload(&self) -> Result<()> {
-        // Attempt to reload tmux server if running
-        let tmux_conf_path = Self::tmux_conf_path()?;
-        let result = Command::new("tmux")
-            .arg("source-file")
-            .arg(&tmux_conf_path)
-            .output();
-
-        match result {
-            Ok(output) if output.status.success() => Ok(()),
-            Ok(_) => Err(SlateError::ReloadFailed(
-                "tmux".to_string(),
-                "tmux reload failed. Check .tmux.conf syntax.".to_string(),
-            )),
-            Err(_) => Err(SlateError::ReloadFailed(
-                "tmux".to_string(),
-                "tmux not running or not found.".to_string(),
-            )),
-        }
+        self.reload_with_env(&SlateEnv::from_process()?)
     }
+
+    fn reload_with_env(&self, env: &SlateEnv) -> Result<()> {
+        if env.session().is_isolated() {
+            return Ok(());
+        }
+        if env.session().is_multiplexed() && env.session().tmux_socket().is_none() {
+            return Err(SlateError::ReloadFailed(
+                "tmux".into(),
+                "Cannot resolve the current TMUX socket".into(),
+            ));
+        }
+        let presence = detection::detect_tool_presence_with_env("tmux", env);
+        let Some(detection::ToolEvidence::Executable(binary)) = presence.evidence else {
+            return Err(SlateError::ReloadFailed(
+                "tmux".into(),
+                "Colors saved; no tmux executable was detected for reload.".into(),
+            ));
+        };
+        let mut command = Command::new(std::path::absolute(binary)?);
+        // A theme change must not start a server or execute the user's startup
+        // commands again. Load only Slate's generated color settings.
+        command.arg("-N").env_remove("TMUX").env("LC_ALL", "C");
+        if let Some(socket) = env.session().tmux_socket() {
+            command.arg("-S").arg(socket);
+        }
+        command.arg("source-file").arg(literal_source_path(
+            &env.config_dir().join("managed/tmux/colors.conf"),
+        )?);
+        run_reload(
+            &mut command,
+            crate::platform::process_output::Limits {
+                timeout: std::time::Duration::from_secs(3),
+                max_output: 64 * 1024,
+            },
+            env.session().tmux_socket().is_none(),
+        )
+    }
+}
+
+fn run_reload(
+    command: &mut Command,
+    limits: crate::platform::process_output::Limits,
+    default_server: bool,
+) -> Result<()> {
+    use crate::platform::process_output::{self, Completion};
+    let failure = |reason: String| {
+        SlateError::ReloadFailed("tmux".into(), format!(
+        "Colors saved; server reload was not confirmed: {reason}. Some options may already have applied. Inspect the target tmux session before retrying; native output omitted."
+    ))
+    };
+    let output = process_output::capture(command, limits)
+        .map_err(|error| failure(format!("could not run tmux ({})", error.kind())))?;
+    match output.completion {
+        Completion::Exited(status) if status.success() => Ok(()),
+        Completion::Exited(status)
+            if default_server
+                && status.code() == Some(1)
+                && missing_default_socket(&output.stdout, &output.stderr) =>
+        {
+            Err(SlateError::NoDefaultTmuxServer)
+        }
+        Completion::Exited(status) => Err(failure(format!("tmux exited with {status}"))),
+        Completion::TimedOut => Err(failure(format!(
+            "exceeded {} ms post-spawn deadline",
+            limits.timeout.as_millis()
+        ))),
+        Completion::OutputLimit => Err(failure(format!(
+            "exceeded {} byte output limit",
+            limits.max_output
+        ))),
+    }
+}
+
+// Only the native connection error for a missing default socket is expected
+// inactivity. Permissions, stale sockets, custom targets and config errors must
+// retain failure reporting. LC_ALL=C pins the diagnostic emitted by tmux.
+fn missing_default_socket(stdout: &[u8], stderr: &[u8]) -> bool {
+    if !stdout.is_empty() {
+        return false;
+    }
+    let Ok(text) = std::str::from_utf8(stderr) else {
+        return false;
+    };
+    text.trim()
+        .strip_prefix("error connecting to ")
+        .and_then(|text| text.strip_suffix(" (No such file or directory)"))
+        .is_some_and(|path| path.starts_with('/') && !path.chars().any(char::is_control))
+}
+
+/// source-file expands glob patterns even when passed as a single argv item.
+fn literal_source_path(path: &Path) -> Result<String> {
+    let path = path.to_str().filter(|value| !value.chars().any(char::is_control))
+        .ok_or_else(|| SlateError::InvalidConfig("tmux theme path must be UTF-8 without control characters; cannot safely generate or execute source-file.".into()))?;
+    let mut literal = String::new();
+    for ch in path.chars() {
+        if matches!(ch, '\\' | '*' | '?' | '[' | ']') {
+            literal.push('\\');
+        }
+        literal.push(ch);
+    }
+    Ok(literal)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::theme::Palette;
-
-    fn create_test_palette() -> Palette {
-        Palette {
-            foreground: "#ffffff".to_string(),
-            background: "#000000".to_string(),
-            cursor: None,
-            selection_bg: None,
-            selection_fg: None,
-            brand_accent: "#7287fd".to_string(),
-            black: "#000000".to_string(),
-            red: "#ff0000".to_string(),
-            green: "#00ff00".to_string(),
-            yellow: "#ffff00".to_string(),
-            blue: "#0000ff".to_string(),
-            magenta: "#ff00ff".to_string(),
-            cyan: "#00ffff".to_string(),
-            white: "#ffffff".to_string(),
-            bright_black: "#808080".to_string(),
-            bright_red: "#ff6b6b".to_string(),
-            bright_green: "#69ff69".to_string(),
-            bright_yellow: "#ffff69".to_string(),
-            bright_blue: "#6b69ff".to_string(),
-            bright_magenta: "#ff69ff".to_string(),
-            bright_cyan: "#69ffff".to_string(),
-            bright_white: "#ffffff".to_string(),
-            rosewater: None,
-            flamingo: None,
-            pink: None,
-            mauve: None,
-            lavender: None,
-            text: None,
-            subtext1: None,
-            subtext0: None,
-            overlay2: None,
-            overlay1: None,
-            overlay0: None,
-            surface2: None,
-            surface1: None,
-            surface0: None,
-            bg_dim: None,
-            bg_darker: None,
-            bg_darkest: None,
-            extras: std::collections::HashMap::new(),
-        }
-    }
-
-    fn create_test_theme() -> ThemeVariant {
-        ThemeVariant {
-            id: "test".to_string(),
-            name: "Test Theme".to_string(),
-            family: "Test".to_string(),
-            palette: create_test_palette(),
-            tool_refs: std::collections::HashMap::from([
-                ("ghostty".to_string(), "test".to_string()),
-                ("alacritty".to_string(), "test".to_string()),
-                ("bat".to_string(), "test".to_string()),
-                ("delta".to_string(), "test".to_string()),
-                ("starship".to_string(), "test".to_string()),
-                ("eza".to_string(), "test".to_string()),
-                ("lazygit".to_string(), "test".to_string()),
-                ("fastfetch".to_string(), "test".to_string()),
-                ("tmux".to_string(), "test".to_string()),
-                ("zsh_syntax_highlighting".to_string(), "test".to_string()),
-            ]),
-            appearance: crate::theme::ThemeAppearance::Dark,
-            auto_pair: None,
-        }
-    }
-
-    #[test]
-    fn test_tool_name() {
-        let adapter = TmuxAdapter;
-        assert_eq!(adapter.tool_name(), "tmux");
-    }
-
-    #[test]
-    fn test_apply_strategy() {
-        let adapter = TmuxAdapter;
-        assert_eq!(adapter.apply_strategy(), ApplyStrategy::WriteAndInclude);
-    }
-
-    #[test]
-    fn test_render_tmux_colors() {
-        let theme = create_test_theme();
-        let output = TmuxAdapter::render_tmux_colors(&theme);
-
-        // Verify all 7 elements are present
-        assert!(output.contains("status-style"));
-        assert!(output.contains("window-status-current-style"));
-        assert!(output.contains("pane-border-style"));
-        assert!(output.contains("pane-active-border-style"));
-        assert!(output.contains("message-style"));
-        assert!(output.contains("mode-style"));
-        assert!(output.contains("message-command-style"));
-
-        // Verify color values
-        assert!(output.contains("#000000")); // background
-        assert!(output.contains("#ffffff")); // foreground
-
-        // Verify 7 set -g directives (count)
-        let count = output.matches("set -g").count();
-        assert_eq!(count, 7, "Expected 7 set -g directives, found {}", count);
-    }
-
-    #[test]
-    fn test_render_tmux_block() {
-        let managed_path = PathBuf::from("/home/user/.config/slate/managed/tmux/colors.conf");
-        let output = TmuxAdapter::render_tmux_block(&managed_path);
-
-        assert!(output.contains(marker_block::START));
-        assert!(output.contains(marker_block::END));
-        assert!(output.contains("source-file"));
-        assert!(output.contains(".config/slate/managed/tmux/colors.conf"));
-    }
-
-    #[test]
-    fn test_is_installed() {
-        let adapter = TmuxAdapter;
-        let _result = adapter.is_installed();
-    }
-}
+mod tests;

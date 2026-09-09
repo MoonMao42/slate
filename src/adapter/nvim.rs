@@ -23,6 +23,8 @@
 
 #![allow(dead_code)]
 
+pub(crate) mod availability;
+
 use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::cli::picker::preview_panel::SemanticColor;
@@ -209,12 +211,9 @@ fn resolve_with_fallback(palette: &Palette, role: SemanticColor) -> String {
 /// Path: `<env.slate_cache_dir()>/current_theme.lua`.
 /// Content: `return "<variant-id>"\n` — a minimal Lua string literal so
 /// `dofile(path)` / `pcall(dofile, path)` returns the variant id.
-/// Atomicity: `AtomicWriteFile::commit()` performs `fsync → rename`,
-/// which fires EXACTLY ONE `fs_event` on the Lua watcher side — this
-/// is the load-bearing behaviour depends on. Never replace this
-/// with `std::fs::write` or a manual `.tmp` + rename dance; they can
-/// fire multiple events (Task 2 has an fs-event counter that
-/// would catch the regression).
+/// Atomicity: `AtomicWriteFile::commit()` performs `fsync → rename`, so
+/// readers see a complete old or new value. Filesystem events can arrive
+/// in bursts; the loader watches the parent directory and debounces them.
 /// The parent directory is created if missing (first-run safety).
 pub fn write_state_file(env: &SlateEnv, variant_id: &str) -> Result<()> {
     let path = state_file_path(env);
@@ -258,19 +257,10 @@ fn lua_string_literal(s: &str) -> String {
 // and an (empty in this plan) `LUALINE_THEMES` block, form the complete
 // `~/.config/nvim/lua/slate/init.lua` module ships through
 // `NvimAdapter::apply_setup`.
-// Six load-bearing details from 17- §Pitfalls are inlined
-// inside these strings — every unit test in this file's `mod tests`
-// block guards one of them:
-// 1. `local uv = vim.uv or vim.loop` (Pitfall 1 — nvim 0.8/0.9 compat)
-// 2. 100 ms debounce via `uv.new_timer()` (Pitfall 2 — APFS multi-fire)
-// 3. Watcher re-arm inside callback (Pitfall 6 — driver-specific close)
-// 4. `VimLeavePre` cleanup autocmd (no orphan libuv handles)
-// 5. `package.loaded['lualine']` guard (Pitfall 5 — never force-require)
-// 6. `doautocmd ColorScheme slate-<variant>` (downstream plugin hook)
-// The strings are intentionally verbatim copies of 17-RESEARCH §Pattern 2
-// lines 329-446. Do not paraphrase: integration tests parse
-// these bytes directly via `nvim --headless -c 'luafile %'`, so any
-// syntactic drift breaks the syntax gate.
+// Keep the uv compatibility shim, 100 ms debounce, owned-handle cleanup,
+// optional lualine integration, and downstream ColorScheme hook together.
+// The feature-gated Neovim tests exercise the generated Lua, including
+// directory watching across atomic replacements and queued callback races.
 
 /// Head of the loader: module prelude, uv shim, open PALETTES table.
 const LOADER_TEMPLATE_HEAD: &str = "\
@@ -320,7 +310,9 @@ function M.load(variant)
   vim.cmd('doautocmd ColorScheme ' .. vim.g.colors_name)
 end
 
-local STATE_PATH = vim.fn.expand('~/.cache/slate/current_theme.lua')
+local STATE_PATH = __SLATE_STATE_PATH__
+local STATE_DIR = vim.fn.fnamemodify(STATE_PATH, ':h')
+local STATE_NAME = vim.fn.fnamemodify(STATE_PATH, ':t')
 
 local function read_state()
   local ok, mod = pcall(dofile, STATE_PATH)
@@ -330,52 +322,98 @@ end
 
 local watcher
 local debounce_timer
+local stopped = true
 
-local function schedule_reload()
-  if debounce_timer then debounce_timer:stop() end
-  debounce_timer = uv.new_timer()
-  debounce_timer:start(100, 0, vim.schedule_wrap(function()  -- Pitfall 2: 100ms debounce
-    local variant = read_state()
-    if variant then M.load(variant) end
-    debounce_timer:close()
-    debounce_timer = nil
-  end))
+local function close_handle(handle)
+  if handle and not handle:is_closing() then
+    handle:stop()
+    handle:close()
+  end
 end
 
--- Pitfall 6: AtomicWriteFile::commit performs fsync + rename, replacing
--- the inode at STATE_PATH. The fs_event handle is bound to the original
--- inode and stops firing after the first rename. We must close the old
--- handle and create a new one on every event so subsequent renames are
--- observed. Stop+start on the same handle is NOT sufficient on macOS.
-local function start_watcher()
-  if watcher then
-    pcall(function() watcher:stop() end)
-    pcall(function() watcher:close() end)
-    watcher = nil
+function M.stop()
+  stopped = true
+  close_handle(debounce_timer)
+  debounce_timer = nil
+  close_handle(watcher)
+  watcher = nil
+end
+
+local function warn(message)
+  vim.notify('Slate: ' .. message, vim.log.levels.WARN)
+end
+
+local function schedule_reload()
+  if stopped then return end
+  close_handle(debounce_timer)
+  local timer, err = uv.new_timer()
+  debounce_timer = timer
+  if not timer then
+    warn('could not schedule theme reload: ' .. tostring(err))
+    return
   end
-  local w = uv.new_fs_event()
-  watcher = w
-  w:start(STATE_PATH, {}, vim.schedule_wrap(function(err, _fname, _events)
-    if err then return end
-    schedule_reload()
-    start_watcher()  -- recreate handle to track the new inode
+  local ok, start_err = timer:start(100, 0, vim.schedule_wrap(function()
+    -- stop() cannot cancel callbacks already queued with vim.schedule.
+    if stopped or debounce_timer ~= timer then return end
+    debounce_timer = nil
+    close_handle(timer) -- release even if a colorscheme/plugin hook raises
+    local variant = read_state()
+    if variant then M.load(variant) end
   end))
+  if not ok then
+    debounce_timer = nil
+    close_handle(timer)
+    warn('could not schedule theme reload: ' .. tostring(start_err))
+  end
+end
+
+-- Watch the directory, not the inode replaced by an atomic state write.
+-- This also observes a missing state file being recreated. Other cache
+-- writes do not trigger ColorScheme hooks or delay the pending reload.
+local function start_watcher()
+  local w, err = uv.new_fs_event()
+  if not w then return false, err end
+  watcher = w
+  local ok, start_err = w:start(STATE_DIR, {}, vim.schedule_wrap(function(event_err, fname)
+    if stopped or watcher ~= w then return end
+    if event_err then
+      M.stop()
+      warn('theme auto-reload stopped: ' .. tostring(event_err) .. '; call require("slate").setup() to retry')
+      return
+    end
+    if not fname or fname == '' or fname == STATE_NAME or fname == STATE_PATH then
+      schedule_reload()
+    end
+  end))
+  if not ok then
+    watcher = nil
+    close_handle(w)
+    return false, start_err
+  end
+  return true
 end
 
 function M.setup(opts)
   opts = opts or {}
-  local variant = read_state()
-  if variant then M.load(variant) end
-
-  start_watcher()
-
-  -- VimLeavePre cleanup -- prevents orphan libuv handles
+  M.stop()
+  local group = vim.api.nvim_create_augroup('SlateThemeWatcher', { clear = true })
   vim.api.nvim_create_autocmd('VimLeavePre', {
-    callback = function()
-      if debounce_timer then pcall(function() debounce_timer:close() end) end
-      if watcher then pcall(function() watcher:close() end) end
-    end,
+    group = group,
+    callback = M.stop,
   })
+  stopped = false
+  local ok, err = start_watcher()
+  if not ok then
+    M.stop()
+    warn('theme auto-reload unavailable: ' .. tostring(err) .. '; call require("slate").setup() to retry')
+  end
+  -- Arm before reading, so a concurrent state update cannot be missed.
+  local variant = read_state()
+  if variant then
+    local loaded, load_err = pcall(M.load, variant)
+    if not loaded then M.stop(); error(load_err) end
+  end
+  return ok, err
 end
 
 M.setup()
@@ -398,6 +436,10 @@ return M
 /// is the TOML declaration order (stable). Two calls yield byte-identical
 /// strings.
 pub fn render_loader() -> String {
+    render_loader_for_state("((vim.env.XDG_CACHE_HOME and vim.env.XDG_CACHE_HOME ~= '' and vim.env.XDG_CACHE_HOME:sub(1, 1) == '/') and vim.env.XDG_CACHE_HOME or vim.fn.expand('~/.cache')) .. '/slate/current_theme.lua'")
+}
+
+fn render_loader_for_state(state_expression: &str) -> String {
     let registry =
         ThemeRegistry::new().expect("ThemeRegistry must initialise — validated at phase-load time");
 
@@ -433,7 +475,7 @@ pub fn render_loader() -> String {
         out.push_str(&lualine_theme(&variant.palette));
         out.push_str(",\n");
     }
-    out.push_str(LOADER_TEMPLATE_TAIL);
+    out.push_str(&LOADER_TEMPLATE_TAIL.replace("__SLATE_STATE_PATH__", state_expression));
     out
 }
 
@@ -462,7 +504,7 @@ impl NvimAdapter {
     /// re-running with the same env+theme produces byte-identical files
     /// via `AtomicWriteFile`.
     pub fn setup(env: &SlateEnv, initial_theme: &ThemeVariant) -> Result<()> {
-        let nvim_home = env.home().join(".config/nvim");
+        let nvim_home = env.nvim_config_dir();
         let colors_dir = nvim_home.join("colors");
         let lua_slate_dir = nvim_home.join("lua").join("slate");
 
@@ -481,7 +523,8 @@ impl NvimAdapter {
         // 2. Write the loader file. `render_loader` splices every variant's
         // palette + lualine theme so the generated Lua is self-contained.
         let loader_path = lua_slate_dir.join("init.lua");
-        let loader_content = render_loader();
+        let loader_content =
+            render_loader_for_state(&lua_string_literal(&state_file_path(env).to_string_lossy()));
         write_atomic(&loader_path, &loader_content)?;
 
         // 3. Seed the state file so a nvim instance that starts after
@@ -511,9 +554,8 @@ impl NvimAdapter {
     }
 }
 
-/// Atomic write helper: fsync + rename + parent-dir fsync semantics
-/// guarantee exactly one `fs_event` fire on the Lua watcher (same
-/// load-bearing property as [`write_state_file`]).
+/// Atomic write helper: publish complete files with synced rename semantics,
+/// independently of the filesystem's event count (see [`write_state_file`]).
 fn write_atomic(path: &Path, content: &str) -> Result<()> {
     crate::config::atomic_write_synced(path, content.as_bytes())
 }
@@ -524,25 +566,18 @@ impl ToolAdapter for NvimAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        // Exclude-only pattern (Decision 11):
-        // - binary missing → Ok(false) (not an error).
-        // - version < 0.8.0 → Ok(false) (not an error).
-        // - version parse failure → Ok(false) (conservative: we don't
-        // write files for an nvim we can't verify).
-        let presence = crate::detection::detect_tool_presence("nvim");
-        if !presence.installed {
-            return Ok(false);
-        }
-        let ver = match crate::platform::version_check::detect_version("nvim") {
-            Ok(v) => v,
-            Err(_) => return Ok(false),
-        };
-        Ok(crate::platform::version_check::VersionPolicy::check_version("nvim", &ver).is_ok())
+        self.is_installed_with_env(&SlateEnv::from_process()?)
+    }
+
+    fn is_installed_with_env(&self, env: &SlateEnv) -> Result<bool> {
+        // Missing/old versions remain normal skips. Probe failures must reach
+        // the coordinator as errors, not masquerade as missing installations.
+        Ok(availability::detect(env)? == availability::NvimAvailability::Ready)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-        Ok(env.home().join(".config/nvim/init.lua"))
+        Ok(env.nvim_init_path())
     }
 
     fn managed_config_path(&self) -> PathBuf {
@@ -551,12 +586,16 @@ impl ToolAdapter for NvimAdapter {
         // three-tier contract still holds — we just place the managed
         // tier where nvim expects it.
         SlateEnv::from_process()
-            .map(|env| env.home().join(".config/nvim"))
+            .map(|env| env.nvim_config_dir().to_path_buf())
             .unwrap_or_else(|_| PathBuf::from(".config/nvim"))
     }
 
     fn apply_strategy(&self) -> ApplyStrategy {
         ApplyStrategy::WriteAndInclude
+    }
+
+    fn is_post_commit_notification(&self) -> bool {
+        true
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
@@ -915,8 +954,8 @@ mod tests {
         let out = render_loader();
         assert!(out.contains("VimLeavePre"), "missing VimLeavePre autocmd");
         assert!(
-            out.contains("watcher:close"),
-            "missing watcher close inside cleanup"
+            out.contains("close_handle(watcher)") && out.contains("callback = M.stop"),
+            "missing owned watcher cleanup on exit"
         );
     }
 
@@ -1106,6 +1145,7 @@ mod tests {
         let registry = ThemeRegistry::new().unwrap();
         let theme = registry.get("catppuccin-mocha").unwrap().clone();
 
+        assert!(NvimAdapter.is_post_commit_notification());
         // (a) Fast-path returns Applied { requires_new_shell: false }.
         let outcome = NvimAdapter
             .apply_theme_with_env(&theme, &env)

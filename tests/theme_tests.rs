@@ -377,48 +377,14 @@ fn test_catppuccin_extras_mapping() {
     }
 }
 
-/// Regression guard: bat + delta are the two adapters that consume
-/// `tool_refs.<name>` verbatim into shipped configs (BAT_THEME env /
-/// `[delta] syntax-theme`). Their values MUST match the upstream tool's
-/// bundled theme corpus exactly. This test pins the expected strings
-/// against future drift (e.g. someone "tidying"
-/// `Solarized (dark)` to `solarized-dark`).
-/// Verified upstream (21-RESEARCH §3, 2026-04-27):
-/// delta 0.19 `Solarized (dark)` / `Solarized (light)`
-/// (BAT-LIGHT-01) repointed `tool_refs.bat` from upstream
-/// names to the slate-tuned `slate-<id>` files written by.
-/// `bat` assertions pin the slate-prefixed values; `delta` still pins
-/// the upstream names because delta consumes bat's bundled corpus
-/// directly and does not generate slate-tuned delta themes.
+/// Bat and delta share the generated Slate syntax theme names.
 #[test]
-fn test_solarized_bat_delta_match_upstream() {
-    let registry = ThemeRegistry::new().expect("Failed to create registry");
-
-    let dark = registry
-        .get("solarized-dark")
-        .expect("solarized-dark variant must exist");
-    assert_eq!(
-        dark.tool_refs.get("bat").map(String::as_str),
-        Some("slate-solarized-dark"),
-        "bat: solarized-dark.tool_refs.bat must be 'slate-solarized-dark' ( slate-tuned tmTheme name)"
-    );
-    assert_eq!(
-        dark.tool_refs.get("delta").map(String::as_str),
-        Some("Solarized (dark)"),
-        "delta: solarized-dark.tool_refs.delta must be 'Solarized (dark)' to match shipped delta (bat-backed) syntax-theme upstream corpus"
-    );
-
-    let light = registry
-        .get("solarized-light")
-        .expect("solarized-light variant must exist");
-    assert_eq!(
-        light.tool_refs.get("bat").map(String::as_str),
-        Some("slate-solarized-light"),
-        "bat: solarized-light.tool_refs.bat must be 'slate-solarized-light' ( slate-tuned tmTheme name)"
-    );
-    assert_eq!(
-        light.tool_refs.get("delta").map(String::as_str),
-        Some("Solarized (light)"),
-        "delta: solarized-light.tool_refs.delta must be 'Solarized (light)' to match shipped delta (bat-backed) syntax-theme upstream corpus"
-    );
+fn test_solarized_bat_and_delta_use_generated_themes() {
+    let registry = ThemeRegistry::new().unwrap();
+    for id in ["solarized-dark", "solarized-light"] {
+        let theme = registry.get(id).unwrap();
+        for tool in ["bat", "delta"] {
+            assert_eq!(theme.tool_refs.get(tool), Some(&format!("slate-{id}")));
+        }
+    }
 }

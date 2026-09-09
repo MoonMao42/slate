@@ -15,9 +15,9 @@ pub enum ToolApplyStatus {
 
 /// Structured adapter result emitted by ToolRegistry.
 /// `requires_new_shell` is captured from `ApplyOutcome::Applied` when the adapter
-/// succeeds; it is `false` for `Skipped` / `Failed` outcomes since no change was
-/// made that would need a new shell. aggregates this field across the
-/// per-run result set to drive the UX-01 new-terminal reminder.
+/// succeeds; it is `false` for `Skipped` / `Failed` outcomes. Only confirmed
+/// applications drive the new-shell reminder; failures may still have partial
+/// file effects, including a saved global theme before notification failure.
 #[derive(Debug)]
 pub struct ToolApplyResult {
     pub tool_name: String,
@@ -29,6 +29,123 @@ pub struct ToolApplyResult {
 /// Manages adapter instances and coordinates theme application across tools.
 pub struct ToolRegistry {
     adapters: Vec<Box<dyn ToolAdapter>>,
+}
+
+/// Resolve availability once, before the coordinator captures potential writes.
+/// The same ready/skip/failure decisions drive execution after the checkpoint.
+pub(crate) struct PreparedThemeApply<'a> {
+    targets: Vec<PreparedTarget<'a>>,
+}
+
+struct PreparedTarget<'a> {
+    adapter: &'a dyn ToolAdapter,
+    installed: Result<bool>,
+}
+
+impl PreparedThemeApply<'_> {
+    /// Explicit tool sync requires every requested adapter to be ready. Keep
+    /// compatibility/probe errors distinct from a changed review or a success.
+    pub(crate) fn ensure_all_ready(&self) -> Result<()> {
+        for target in &self.targets {
+            let name = target.adapter.tool_name();
+            let reason = match &target.installed {
+                Ok(true) => continue,
+                Ok(false) => "not available or not supported by this adapter".to_owned(),
+                Err(error) => format!("readiness check failed: {error}"),
+            };
+            let guidance = if name == "nvim" {
+                " Use `slate doctor nvim --check-version` to inspect Neovim."
+            } else {
+                " Check installation and compatibility before syncing."
+            };
+            return Err(crate::error::SlateError::InvalidConfig(format!(
+                "{name}: {reason}. No adapter ran.{guidance}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn ready_tools(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.targets
+            .iter()
+            .filter(|target| matches!(target.installed, Ok(true)))
+            .map(|target| target.adapter.tool_name())
+    }
+
+    pub(crate) fn apply_with_env(
+        self,
+        theme: &ThemeVariant,
+        env: &SlateEnv,
+    ) -> Vec<ToolApplyResult> {
+        self.apply_with(|adapter| adapter.apply_theme_with_env(theme, env))
+    }
+
+    /// Only ready notifications are deferred. Missing tools and probe failures
+    /// retain their pre-commit result and cannot bypass the global failure gate.
+    pub(crate) fn split_post_commit(self) -> (Self, Self) {
+        let (notifications, regular) = self.targets.into_iter().partition(|target| {
+            matches!(target.installed, Ok(true)) && target.adapter.is_post_commit_notification()
+        });
+        (
+            Self { targets: regular },
+            Self {
+                targets: notifications,
+            },
+        )
+    }
+
+    pub(crate) fn skip_uncommitted(self) -> Vec<ToolApplyResult> {
+        self.apply_with(|_| Ok(ApplyOutcome::Skipped(SkipReason::ThemeNotCommitted)))
+    }
+
+    pub(crate) fn notify_after_commit(
+        self,
+        theme: &ThemeVariant,
+        env: &SlateEnv,
+    ) -> Vec<ToolApplyResult> {
+        self.apply_with(|adapter| {
+            adapter.apply_theme_with_env(theme, env).map_err(|error| {
+                crate::error::SlateError::ConfigWriteError(
+                    format!("{} post-commit notification", adapter.tool_name()),
+                    format!("Theme '{}' was already saved, but notification failed: {error}. The saved theme was not rolled back", theme.id.escape_default()),
+                )
+            })
+        })
+    }
+
+    fn apply_with(
+        self,
+        apply_call: impl Fn(&dyn ToolAdapter) -> Result<ApplyOutcome> + Sync,
+    ) -> Vec<ToolApplyResult> {
+        // Only preview-owned worker calls inherit write attribution. Unrelated
+        // threads and ordinary theme application remain outside that scope.
+        let preview_context = crate::config::preview_write::context();
+        self.targets
+            .into_par_iter()
+            .map(|target| {
+                let _preview = preview_context.as_ref().map(|context| context.enter());
+                let tool_name = target.adapter.tool_name().to_owned();
+                let (status, requires_new_shell) = match target.installed {
+                    Ok(false) => (ToolApplyStatus::Skipped(SkipReason::NotInstalled), false),
+                    Ok(true) => match apply_call(target.adapter) {
+                        Ok(ApplyOutcome::Applied { requires_new_shell }) => {
+                            (ToolApplyStatus::Applied, requires_new_shell)
+                        }
+                        Ok(ApplyOutcome::Skipped(reason)) => {
+                            (ToolApplyStatus::Skipped(reason), false)
+                        }
+                        Err(err) => (ToolApplyStatus::Failed(err), false),
+                    },
+                    Err(err) => (ToolApplyStatus::Failed(err), false),
+                };
+                ToolApplyResult {
+                    tool_name,
+                    status,
+                    requires_new_shell,
+                }
+            })
+            .collect()
+    }
 }
 
 impl ToolRegistry {
@@ -147,35 +264,36 @@ impl ToolRegistry {
         I: Fn(&dyn ToolAdapter) -> Result<bool> + Sync,
         F: Fn(&dyn ToolAdapter) -> Result<ApplyOutcome> + Sync,
     {
-        self.adapters
+        self.prepare_with_filter(allowed_tools, is_installed_call)
+            .apply_with(apply_call)
+    }
+
+    pub(crate) fn prepare_theme_with_env(
+        &self,
+        env: &SlateEnv,
+        allowed_tools: Option<&HashSet<String>>,
+    ) -> PreparedThemeApply<'_> {
+        self.prepare_with_filter(allowed_tools, |adapter| adapter.is_installed_with_env(env))
+    }
+
+    fn prepare_with_filter(
+        &self,
+        allowed_tools: Option<&HashSet<String>>,
+        is_installed_call: impl Fn(&dyn ToolAdapter) -> Result<bool> + Sync,
+    ) -> PreparedThemeApply<'_> {
+        let targets = self
+            .adapters
             .par_iter()
             .filter(|adapter| adapter.apply_strategy() != ApplyStrategy::DetectAndInstall)
             .filter(|adapter| {
                 allowed_tools.is_none_or(|allowed| allowed.contains(adapter.tool_name()))
             })
-            .map(|adapter| {
-                let tool_name = adapter.tool_name().to_string();
-                let (status, requires_new_shell) = match is_installed_call(adapter.as_ref()) {
-                    Ok(false) => (ToolApplyStatus::Skipped(SkipReason::NotInstalled), false),
-                    Ok(true) => match apply_call(adapter.as_ref()) {
-                        Ok(ApplyOutcome::Applied { requires_new_shell }) => {
-                            (ToolApplyStatus::Applied, requires_new_shell)
-                        }
-                        Ok(ApplyOutcome::Skipped(reason)) => {
-                            (ToolApplyStatus::Skipped(reason), false)
-                        }
-                        Err(err) => (ToolApplyStatus::Failed(err), false),
-                    },
-                    Err(err) => (ToolApplyStatus::Failed(err), false),
-                };
-
-                ToolApplyResult {
-                    tool_name,
-                    status,
-                    requires_new_shell,
-                }
+            .map(|adapter| PreparedTarget {
+                adapter: adapter.as_ref(),
+                installed: is_installed_call(adapter.as_ref()),
             })
-            .collect()
+            .collect();
+        PreparedThemeApply { targets }
     }
 
     /// Reload all adapters that support hot-reload
@@ -210,12 +328,15 @@ pub fn requires_new_shell(results: &[ToolApplyResult]) -> bool {
 impl Default for ToolRegistry {
     fn default() -> Self {
         let mut registry = Self::new();
-        // Register the default 14-adapter instance (bumps from 13).
+        // Shared catalog for theme application and availability reporting.
         registry.register(Box::new(crate::adapter::GhosttyAdapter));
         registry.register(Box::new(crate::adapter::AlacrittyAdapter));
         registry.register(Box::new(crate::adapter::KittyAdapter));
         registry.register(Box::new(crate::adapter::StarshipAdapter));
         registry.register(Box::new(crate::adapter::BatAdapter));
+        registry.register(Box::new(crate::adapter::BtopAdapter));
+        registry.register(Box::new(crate::adapter::YaziAdapter));
+        registry.register(Box::new(crate::adapter::ZellijAdapter));
         registry.register(Box::new(crate::adapter::DeltaAdapter));
         registry.register(Box::new(crate::adapter::EzaAdapter));
         registry.register(Box::new(crate::adapter::LazygitAdapter));
@@ -233,6 +354,60 @@ impl Default for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_theme_apply_probes_once_and_retains_ready_missing_and_failed_states() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let mut registry = ToolRegistry::new();
+        for (name, strategy) in [
+            ("ready", ApplyStrategy::EnvironmentVariable),
+            ("missing", ApplyStrategy::EnvironmentVariable),
+            ("failed", ApplyStrategy::EnvironmentVariable),
+            ("unselected", ApplyStrategy::EnvironmentVariable),
+            ("installer", ApplyStrategy::DetectAndInstall),
+        ] {
+            registry.register(Box::new(MockAdapter {
+                name,
+                strategy,
+                installed: true,
+            }));
+        }
+        let selection = ["ready", "missing", "failed", "installer"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let probes = AtomicUsize::new(0);
+        let installed = AtomicBool::new(true);
+        let prepared = registry.prepare_with_filter(Some(&selection), |adapter| {
+            probes.fetch_add(1, Ordering::SeqCst);
+            match adapter.tool_name() {
+                "ready" => Ok(installed.load(Ordering::SeqCst)),
+                "missing" => Ok(false),
+                "failed" => Err(crate::error::SlateError::Internal("probe failure".into())),
+                _ => panic!("unselected/install-only adapter must not be probed"),
+            }
+        });
+        assert_eq!(probes.load(Ordering::SeqCst), 3);
+        assert_eq!(prepared.ready_tools().collect::<Vec<_>>(), ["ready"]);
+        installed.store(false, Ordering::SeqCst);
+        let calls = AtomicUsize::new(0);
+        let results = prepared.apply_with(|adapter| {
+            assert_eq!(adapter.tool_name(), "ready");
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(ApplyOutcome::applied_needs_new_shell())
+        });
+        assert_eq!(probes.load(Ordering::SeqCst), 3);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(matches!(results[0].status, ToolApplyStatus::Applied));
+        assert!(results[0].requires_new_shell);
+        assert!(matches!(
+            results[1].status,
+            ToolApplyStatus::Skipped(SkipReason::NotInstalled)
+        ));
+        assert!(
+            matches!(&results[2].status, ToolApplyStatus::Failed(error) if error.to_string().contains("probe failure"))
+        );
+    }
 
     /// Mock adapter for testing
     struct MockAdapter {
@@ -301,7 +476,7 @@ mod tests {
     #[test]
     fn test_registry_default() {
         let registry = ToolRegistry::default();
-        assert_eq!(registry.adapters().len(), 15);
+        assert_eq!(registry.adapters().len(), 18);
     }
 
     #[test]

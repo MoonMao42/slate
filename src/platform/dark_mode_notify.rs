@@ -1,414 +1,283 @@
-use crate::config::ConfigManager;
-use crate::error::{Result, SlateError};
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-
-#[cfg(target_os = "linux")]
+use crate::config::{ConfigManager, ConfigWriteGuard};
 use crate::env::SlateEnv;
+use crate::error::{Result, SlateError};
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::mpsc::RecvTimeoutError;
+use std::time::Duration;
 
-const PROCESS_PATTERN: &str = "slate-dark-mode-notify";
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-const WATCHER_UNAVAILABLE_MESSAGE: &str =
-    "Auto-theme watcher is only available on macOS and portal-aware Linux today.";
+mod events;
+mod inspection;
+mod runtime;
+pub use inspection::{
+    inspect_installation, DirectoryAccess, InstallationInspection, InstallationState,
+};
+pub use runtime::{RuntimeInspection, RuntimeState};
 
-fn binary_path(config: &ConfigManager) -> Result<PathBuf> {
-    let bin_dir = config.managed_dir("bin");
-    Ok(bin_dir.join(PROCESS_PATTERN))
-}
-
-fn watcher_stop_succeeded(status: &std::process::ExitStatus) -> bool {
-    // pkill conventions: 0 = at least one process matched and was signalled; 1 = no matches
-    // (which is fine — watcher already gone). Any other exit code is a real failure.
-    if status.success() || status.code() == Some(1) {
-        return true;
-    }
-
-    // Under some test harnesses and process-group setups, pkill itself terminates with
-    // SIGTERM when slate is invoked inside a cascading-kill environment. Treat that as a
-    // successful stop — the watcher was either already gone or signalled before pkill
-    // could report a normal exit.
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        if matches!(status.signal(), Some(libc::SIGTERM)) {
-            return true;
-        }
-    }
-
-    false
-}
-
-fn is_running_impl() -> Result<bool> {
-    let status = std::process::Command::new("pgrep")
-        .args(["-f", PROCESS_PATTERN])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|e| {
-            SlateError::PlatformError(format!("Failed to check watcher process state: {}", e))
-        })?;
-
-    Ok(status.success())
-}
-
-fn stop_impl() -> Result<()> {
-    let status = std::process::Command::new("pkill")
-        .args(["-f", PROCESS_PATTERN])
-        .status()
-        .map_err(|e| SlateError::PlatformError(format!("Failed to stop watcher process: {}", e)))?;
-
-    if watcher_stop_succeeded(&status) {
-        return Ok(());
-    }
-
-    Err(SlateError::PlatformError(format!(
-        "Watcher stop command exited with status {}",
-        status
-    )))
-}
-
-#[cfg(target_os = "linux")]
-fn spawn_background_watcher(bin_path: &Path) -> Result<()> {
-    // Route watcher stderr to a log file under the slate cache dir so exit messages from
-    // the portal signal stream are actually observable. Falls back to /dev/null if the
-    // log file can't be opened (e.g. read-only cache dir) — we still want the watcher to
-    // start in that case.
-    let log_stderr: std::process::Stdio = match watcher_log_target() {
-        Ok(file) => file.into(),
-        Err(_) => std::process::Stdio::null(),
-    };
-
-    std::process::Command::new(bin_path)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(log_stderr)
-        .spawn()
-        .map_err(|e| {
-            SlateError::PlatformError(format!("Failed to start watcher process: {}", e))
-        })?;
-
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn watcher_log_target() -> std::io::Result<std::fs::File> {
-    let env =
-        SlateEnv::from_process().map_err(|_| std::io::Error::other("SlateEnv unavailable"))?;
-    let log_dir = env.slate_cache_dir();
-    std::fs::create_dir_all(log_dir)?;
-    std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(log_dir.join("watcher.log"))
-}
-
-#[cfg(target_os = "linux")]
-fn apply_auto_theme_quiet() -> Result<()> {
-    let env = SlateEnv::from_process()?;
-    let config = ConfigManager::with_env(&env)?;
-    let theme_id = crate::cli::auto_theme::resolve_auto_theme(&env, &config)?;
-    let registry = crate::theme::ThemeRegistry::new()?;
-    let theme = registry.get(&theme_id).ok_or_else(|| {
-        SlateError::InvalidThemeData(format!("Auto-resolved theme '{}' not found", theme_id))
-    })?;
-
-    crate::cli::apply::ThemeApplyCoordinator::with_snapshot_policy(
-        &env,
-        crate::cli::apply::SnapshotPolicy::Skip,
-    )
-    .apply(theme)?;
-
-    Ok(())
-}
+const LAUNCHER: &str = "slate-dark-mode-notify";
+const HELPER: &str = "slate-appearance-helper";
 
 #[cfg(target_os = "macos")]
-mod imp {
-    use super::{
-        binary_path, is_running_impl, run_watcher_loop_unsupported, stop_impl, ConfigManager, Path,
-        PathBuf, Result, SlateError,
+const EMBEDDED_WATCHER: &[u8] = include_bytes!(env!("WATCHER_BINARY"));
+
+fn error(message: impl Into<String>) -> SlateError {
+    SlateError::PlatformError(message.into())
+}
+
+fn installation_error(path: &std::path::Path, action: &str, cause: SlateError) -> SlateError {
+    let path = path.to_string_lossy().escape_debug().to_string();
+    let permission = matches!(&cause, SlateError::IOError(error) if error.kind() == std::io::ErrorKind::PermissionDenied);
+    let detail = cause.to_string().escape_debug().to_string();
+    error(format!(
+        "Cannot {action} at {path}: {detail}.{}",
+        if permission {
+            " Inspect this path and its parent directory's ownership, permissions and ACL rules; Slate did not change permissions."
+        } else {
+            " Review this destination before retrying; earlier helper writes may remain."
+        }
+    ))
+}
+
+fn profile_env(env: &SlateEnv) -> Vec<(&'static str, std::ffi::OsString)> {
+    vec![
+        ("HOME", env.home().as_os_str().to_owned()),
+        (
+            "XDG_CONFIG_HOME",
+            env.xdg_config_home().as_os_str().to_owned(),
+        ),
+        ("XDG_CACHE_HOME", env.cache_dir().as_os_str().to_owned()),
+        (
+            "ZDOTDIR",
+            env.zshrc_path()
+                .parent()
+                .expect("zsh root")
+                .as_os_str()
+                .to_owned(),
+        ),
+        (
+            "NVIM_APPNAME",
+            env.nvim_config_dir()
+                .strip_prefix(env.xdg_config_home())
+                .expect("nvim profile")
+                .as_os_str()
+                .to_owned(),
+        ),
+    ]
+}
+
+fn launcher_contents(env: &SlateEnv) -> Result<String> {
+    let mut script = String::from("#!/bin/sh\n# Slate watcher launcher v1\n");
+    if env.session().is_isolated() {
+        script.push_str(&format!(
+            "export SLATE_HOME={}\n",
+            crate::detection::shell_quote_path(env.home())
+        ));
+    } else {
+        // A copied host launcher must not escape an explicitly isolated shell.
+        script.push_str("if [ -n \"${SLATE_HOME:-}\" ]; then exit 0; fi\nunset SLATE_HOME\n");
+    }
+    for (key, value) in profile_env(env) {
+        script.push_str(&format!(
+            "export {key}={}\n",
+            crate::detection::shell_quote_path(std::path::Path::new(&value))
+        ));
+    }
+    script.push_str(&format!(
+        "exec {} __watch-auto-theme\n",
+        crate::detection::shell_quote_path(&std::env::current_exe()?)
+    ));
+    Ok(script)
+}
+
+/// Both platforms install a profile-bound Rust launcher. The macOS helper only
+/// emits appearance events; it no longer applies themes itself.
+pub fn ensure_binary(config: &ConfigManager) -> Result<PathBuf> {
+    let env = config.environment();
+    let previous = inspect_installation(env).launcher.state;
+    if matches!(
+        previous,
+        InstallationState::Legacy | InstallationState::Unrecognized
+    ) {
+        eprintln!("warning: replacing a legacy or unrecognized managed watcher launcher. This does not stop untracked old processes. Review any known old watcher and run `slate doctor auto-theme` after the refresh.");
+    }
+    #[cfg(target_os = "macos")]
+    if std::hint::black_box(EMBEDDED_WATCHER).is_empty() {
+        return Err(error("Auto-theme is unavailable: build Slate with Xcode Command Line Tools to include the macOS appearance helper."));
+    }
+    #[cfg(not(target_os = "macos"))]
+    if !crate::platform::desktop::detect_backend().supports_watcher() {
+        return Err(error(
+            "Auto-theme needs an XDG desktop portal or GNOME gsettings backend.",
+        ));
+    }
+    let directory = config.managed_dir("bin");
+    std::fs::create_dir_all(&directory).map_err(|cause| {
+        installation_error(&directory, "prepare watcher directory", cause.into())
+    })?;
+    #[cfg(target_os = "macos")]
+    crate::config::state_files::atomic_write_synced_mode(
+        &directory.join(HELPER),
+        EMBEDDED_WATCHER,
+        Some(0o755),
+    )
+    .map_err(|cause| {
+        installation_error(&directory.join(HELPER), "save appearance helper", cause)
+    })?;
+    let path = directory.join(LAUNCHER);
+    crate::config::state_files::atomic_write_synced_mode(
+        &path,
+        launcher_contents(env)?.as_bytes(),
+        Some(0o755),
+    )
+    .map_err(|cause| installation_error(&path, "save watcher launcher", cause))?;
+    Ok(path)
+}
+
+pub fn is_running() -> Result<bool> {
+    is_running_with_env(&SlateEnv::from_process()?)
+}
+
+pub fn is_running_with_env(env: &SlateEnv) -> Result<bool> {
+    runtime::Profile::new(env)?.is_running()
+}
+
+pub fn stop() -> Result<()> {
+    stop_with_env(&SlateEnv::from_process()?)
+}
+
+pub fn stop_with_env(env: &SlateEnv) -> Result<()> {
+    if env.session().is_isolated() {
+        return Ok(());
+    }
+    runtime::Profile::new(env)?.stop()
+}
+
+pub fn start(config: &ConfigManager) -> Result<()> {
+    let env = config.environment();
+    if env.session().is_isolated() {
+        return Ok(());
+    }
+    if !config.is_auto_theme_enabled()? {
+        return Ok(());
+    }
+    let mut command = Command::new(std::env::current_exe()?);
+    command.arg("__watch-auto-theme").env_remove("SLATE_HOME");
+    for (key, value) in profile_env(env) {
+        command.env(key, value);
+    }
+    runtime::Profile::new(env)?.start(&mut command)
+}
+
+pub fn remove_binary(config: &ConfigManager) -> Result<()> {
+    for name in [LAUNCHER, HELPER] {
+        match std::fs::remove_file(config.managed_dir("bin").join(name)) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(())
+}
+
+pub fn run_watcher_loop() -> Result<()> {
+    let env = SlateEnv::from_process()?;
+    if env.session().is_isolated() {
+        return Ok(());
+    }
+    run_with_events(
+        &env,
+        || events::Source::new(&env),
+        || apply_auto_theme_quiet_with_env(&env),
+    )
+}
+
+fn run_with_events(
+    env: &SlateEnv,
+    source: impl FnOnce() -> Result<events::Source>,
+    mut apply: impl FnMut() -> Result<bool>,
+) -> Result<()> {
+    let profile = runtime::Profile::new(env)?;
+    let Some(lease) = profile.claim()? else {
+        return Ok(());
     };
-    use std::fs;
-
-    /// The watcher binary is embedded at compile time so it travels inside the slate executable.
-    /// This eliminates the dependency on build-machine paths after distribution.
-    const EMBEDDED_WATCHER: &[u8] = include_bytes!(env!("WATCHER_BINARY"));
-
-    #[inline(never)]
-    fn embedded_watcher_missing() -> bool {
-        std::hint::black_box(EMBEDDED_WATCHER).is_empty()
+    let result = run_claimed(env, &lease, source, &mut apply);
+    if let Err(err) = lease.finish(if result.is_ok() {
+        runtime::ExitKind::Stopped
+    } else {
+        runtime::ExitKind::Failed
+    }) {
+        eprintln!("Could not record watcher exit: {err}");
     }
+    result
+}
 
-    fn binary_needs_refresh(bin_path: &Path) -> bool {
-        if !bin_path.exists() {
-            return true;
-        }
-
-        let current_exe = match std::env::current_exe() {
-            Ok(path) => path,
-            Err(_) => return false,
-        };
-
-        let bin_modified = fs::metadata(bin_path).and_then(|meta| meta.modified());
-        let exe_modified = fs::metadata(current_exe).and_then(|meta| meta.modified());
-
-        match (bin_modified, exe_modified) {
-            (Ok(bin_time), Ok(exe_time)) => exe_time > bin_time,
-            _ => false,
-        }
+fn run_claimed(
+    env: &SlateEnv,
+    lease: &runtime::Lease,
+    source: impl FnOnce() -> Result<events::Source>,
+    apply: &mut impl FnMut() -> Result<bool>,
+) -> Result<()> {
+    // An old shell hook may race disable/clean: recheck under the lifetime lock.
+    if !ConfigManager::from_env_paths(env).is_auto_theme_enabled()? {
+        return Ok(());
     }
-
-    pub fn ensure_binary(config: &ConfigManager) -> Result<PathBuf> {
-        let bin_path = binary_path(config)?;
-
-        if embedded_watcher_missing() {
-            return Err(SlateError::PlatformError(
-                "Auto-theme is not available: slate was built without swiftc (Xcode Command Line Tools). \
-                 Install them with 'xcode-select --install' and rebuild slate."
-                    .to_string(),
-            ));
-        }
-
-        if !binary_needs_refresh(&bin_path) {
-            return Ok(bin_path);
-        }
-
-        if let Some(parent) = bin_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                SlateError::PlatformError(format!("Failed to create bin directory: {}", e))
-            })?;
-        }
-
-        fs::write(&bin_path, EMBEDDED_WATCHER).map_err(|e| {
-            SlateError::PlatformError(format!(
-                "Failed to write watcher binary to {}: {}",
-                bin_path.display(),
-                e
-            ))
-        })?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = fs::Permissions::from_mode(0o755);
-            fs::set_permissions(&bin_path, perms).map_err(|e| {
-                SlateError::PlatformError(format!(
-                    "Failed to set executable permissions on watcher binary: {}",
-                    e
-                ))
-            })?;
-        }
-
-        Ok(bin_path)
-    }
-
-    pub fn is_running() -> Result<bool> {
-        is_running_impl()
-    }
-
-    pub fn stop() -> Result<()> {
-        stop_impl()
-    }
-
-    pub fn start(config: &ConfigManager) -> Result<()> {
-        if is_running()? {
+    let source = source()?;
+    lease.ready()?;
+    let mut pending = true;
+    loop {
+        if lease.should_stop()? || !ConfigManager::from_env_paths(env).is_auto_theme_enabled()? {
             return Ok(());
         }
-
-        let bin_path = binary_path(config)?;
-        if !bin_path.exists() {
-            return Err(SlateError::PlatformError(
-                "Watcher binary not found. Run 'slate config set auto-theme enable' first."
-                    .to_string(),
-            ));
-        }
-
-        let slate_bin = std::env::current_exe()
-            .ok()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "slate".to_string());
-
-        std::process::Command::new(&bin_path)
-            .args([&slate_bin, "theme", "--auto", "--quiet"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map_err(|e| {
-                SlateError::PlatformError(format!("Failed to start watcher process: {}", e))
-            })?;
-
-        Ok(())
-    }
-
-    pub fn remove_binary(config: &ConfigManager) -> Result<()> {
-        let bin_path = binary_path(config)?;
-        if bin_path.exists() {
-            fs::remove_file(&bin_path).ok();
-        }
-        Ok(())
-    }
-
-    pub fn run_watcher_loop() -> Result<()> {
-        run_watcher_loop_unsupported("Swift watcher is embedded on macOS and should not be invoked through the hidden Rust watcher entrypoint.")
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::super::watcher_stop_succeeded;
-
-        #[test]
-        fn test_binary_stop_succeeds_when_no_processes_match() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::process::ExitStatusExt;
-
-                let status = std::process::ExitStatus::from_raw(1 << 8);
-                assert!(watcher_stop_succeeded(&status));
+        match source.events.recv_timeout(Duration::from_millis(200)) {
+            Ok(events::Event::Changed) => pending = true,
+            Ok(events::Event::Failed(message)) => return Err(error(message)),
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err(error("Appearance event source closed"))
             }
+            Err(RecvTimeoutError::Timeout) => {}
         }
-
-        #[test]
-        fn test_watcher_stop_tolerates_sigterm_exit_status() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::process::ExitStatusExt;
-
-                let status = std::process::ExitStatus::from_raw(libc::SIGTERM);
-                assert!(watcher_stop_succeeded(&status));
+        if pending {
+            match apply() {
+                Ok(applied) => pending = !applied,
+                Err(err) => {
+                    eprintln!("Auto-theme event failed: {err}");
+                    pending = false;
+                }
             }
         }
     }
 }
 
-#[cfg(target_os = "linux")]
-mod imp {
-    use super::{
-        apply_auto_theme_quiet, binary_path, is_running_impl, spawn_background_watcher, stop_impl,
-        ConfigManager, PathBuf, Result, SlateError,
+fn apply_auto_theme_quiet_with_env(env: &SlateEnv) -> Result<bool> {
+    let _write_guard = match ConfigWriteGuard::acquire(env) {
+        Ok(guard) => guard,
+        Err(SlateError::ConfigurationBusy | SlateError::PreviewRecoveryPending) => {
+            return Ok(false)
+        }
+        Err(err) => return Err(err),
     };
-    use std::fs;
-
-    const LINUX_WATCHER_MESSAGE: &str =
-        "Auto-theme watcher needs XDG desktop portal support or the GNOME gsettings fallback.";
-
-    fn watcher_script_contents() -> Result<String> {
-        let current_exe = std::env::current_exe().map_err(|err| {
-            SlateError::PlatformError(format!(
-                "Failed to resolve the current slate binary for watcher setup: {}",
-                err
-            ))
-        })?;
-        let quoted = crate::detection::shell_quote_path(&current_exe);
-        Ok(format!(
-            "#!/bin/sh\nexec {quoted} __watch-auto-theme\n",
-            quoted = quoted
-        ))
+    let config = ConfigManager::from_env_paths(env);
+    if !config.is_auto_theme_enabled()? {
+        return Ok(true);
     }
-
-    pub fn ensure_binary(config: &ConfigManager) -> Result<PathBuf> {
-        if !crate::platform::desktop::detect_backend().supports_watcher() {
-            return Err(SlateError::PlatformError(LINUX_WATCHER_MESSAGE.to_string()));
-        }
-
-        let bin_path = binary_path(config)?;
-        if let Some(parent) = bin_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                SlateError::PlatformError(format!("Failed to create bin directory: {}", e))
-            })?;
-        }
-
-        fs::write(&bin_path, watcher_script_contents()?).map_err(|e| {
-            SlateError::PlatformError(format!(
-                "Failed to write Linux watcher launcher to {}: {}",
-                bin_path.display(),
-                e
-            ))
-        })?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = fs::Permissions::from_mode(0o755);
-            fs::set_permissions(&bin_path, perms).map_err(|e| {
-                SlateError::PlatformError(format!(
-                    "Failed to set executable permissions on Linux watcher launcher: {}",
-                    e
-                ))
-            })?;
-        }
-
-        Ok(bin_path)
-    }
-
-    pub fn is_running() -> Result<bool> {
-        is_running_impl()
-    }
-
-    pub fn stop() -> Result<()> {
-        stop_impl()
-    }
-
-    pub fn start(config: &ConfigManager) -> Result<()> {
-        if is_running()? {
-            return Ok(());
-        }
-
-        let bin_path = ensure_binary(config)?;
-        spawn_background_watcher(&bin_path)
-    }
-
-    pub fn remove_binary(config: &ConfigManager) -> Result<()> {
-        let bin_path = binary_path(config)?;
-        if bin_path.exists() {
-            fs::remove_file(&bin_path).ok();
-        }
-        Ok(())
-    }
-
-    pub fn run_watcher_loop() -> Result<()> {
-        crate::platform::desktop::watch_appearance_changes(|_| apply_auto_theme_quiet())
-    }
+    let theme_id = crate::cli::auto_theme::resolve_auto_theme(env, &config)?;
+    let registry = crate::theme::ThemeRegistry::new()?;
+    let theme = registry
+        .get(&theme_id)
+        .ok_or_else(|| error(format!("Auto-resolved theme '{theme_id}' not found")))?;
+    let report = crate::cli::apply::ThemeApplyCoordinator::with_snapshot_policy(
+        env,
+        crate::cli::apply::SnapshotPolicy::Skip,
+    )
+    .preserving_auto_pair()
+    .apply(theme)?;
+    crate::cli::apply::log_apply_warnings(&report);
+    report.ensure_no_failures()?;
+    Ok(true)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-mod imp {
-    use super::{
-        run_watcher_loop_unsupported, ConfigManager, PathBuf, Result, SlateError,
-        WATCHER_UNAVAILABLE_MESSAGE,
-    };
+#[cfg(test)]
+mod tests;
 
-    pub fn ensure_binary(_config: &ConfigManager) -> Result<PathBuf> {
-        Err(SlateError::PlatformError(
-            WATCHER_UNAVAILABLE_MESSAGE.to_string(),
-        ))
-    }
-
-    pub fn is_running() -> Result<bool> {
-        Ok(false)
-    }
-
-    pub fn stop() -> Result<()> {
-        Ok(())
-    }
-
-    pub fn start(_config: &ConfigManager) -> Result<()> {
-        Err(SlateError::PlatformError(
-            WATCHER_UNAVAILABLE_MESSAGE.to_string(),
-        ))
-    }
-
-    pub fn remove_binary(_config: &ConfigManager) -> Result<()> {
-        Ok(())
-    }
-
-    pub fn run_watcher_loop() -> Result<()> {
-        run_watcher_loop_unsupported(WATCHER_UNAVAILABLE_MESSAGE)
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn run_watcher_loop_unsupported(message: &str) -> Result<()> {
-    Err(SlateError::PlatformError(message.to_string()))
-}
-
-pub use imp::{ensure_binary, is_running, remove_binary, run_watcher_loop, start, stop};
+#[cfg(all(test, target_os = "macos"))]
+mod apply_tests;

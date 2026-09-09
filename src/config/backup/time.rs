@@ -13,51 +13,38 @@ pub(crate) fn generate_restore_point_id(now: SystemTime) -> String {
 }
 
 pub(crate) fn timestamp_from_string(ts_str: &str) -> Result<SystemTime> {
-    if ts_str.len() != 20 || !ts_str.ends_with('Z') {
-        return Err(SlateError::BackupFailed(format!(
-            "Invalid timestamp format: {}",
-            ts_str
-        )));
-    }
-
-    let chars: Vec<char> = ts_str.chars().collect();
-    if chars[4] != '-'
-        || chars[7] != '-'
-        || chars[10] != 'T'
-        || chars[13] != '-'
-        || chars[16] != '-'
+    let invalid = || {
+        SlateError::BackupFailed("Invalid restore timestamp; expected a real UTC date in YYYY-MM-DDTHH-MM-SSZ format (1970-9999)".into())
+    };
+    let bytes = ts_str.as_bytes();
+    if bytes.len() != 20
+        || !bytes.iter().enumerate().all(|(i, &b)| match i {
+            4 | 7 | 13 | 16 => b == b'-',
+            10 => b == b'T',
+            19 => b == b'Z',
+            _ => b.is_ascii_digit(),
+        })
     {
-        return Err(SlateError::BackupFailed(format!(
-            "Invalid timestamp format: {}",
-            ts_str
-        )));
+        return Err(invalid());
     }
-
-    let year: u64 = ts_str[0..4]
-        .parse()
-        .map_err(|_| SlateError::BackupFailed(format!("Invalid year in timestamp: {}", ts_str)))?;
-    let month: u64 = ts_str[5..7]
-        .parse()
-        .map_err(|_| SlateError::BackupFailed(format!("Invalid month in timestamp: {}", ts_str)))?;
-    let day: u64 = ts_str[8..10]
-        .parse()
-        .map_err(|_| SlateError::BackupFailed(format!("Invalid day in timestamp: {}", ts_str)))?;
-    let hour: u64 = ts_str[11..13]
-        .parse()
-        .map_err(|_| SlateError::BackupFailed(format!("Invalid hour in timestamp: {}", ts_str)))?;
-    let minute: u64 = ts_str[14..16].parse().map_err(|_| {
-        SlateError::BackupFailed(format!("Invalid minute in timestamp: {}", ts_str))
-    })?;
-    let second: u64 = ts_str[17..19].parse().map_err(|_| {
-        SlateError::BackupFailed(format!("Invalid second in timestamp: {}", ts_str))
-    })?;
-
-    let days_since_epoch = days_from_unix_epoch(year, month, day).ok_or_else(|| {
-        SlateError::BackupFailed(format!("Invalid date in timestamp: {}", ts_str))
-    })?;
+    // Every byte is now ASCII in a validated position; no Unicode slicing or
+    // unchecked component parsing. Do not echo the untrusted saved timestamp.
+    let number = |start: usize, end: usize| {
+        bytes[start..end]
+            .iter()
+            .fold(0u64, |n, b| n * 10 + u64::from(b - b'0'))
+    };
+    let (year, month, day) = (number(0, 4), number(5, 7), number(8, 10));
+    let (hour, minute, second) = (number(11, 13), number(14, 16), number(17, 19));
+    if year < 1970 || hour > 23 || minute > 59 || second > 59 {
+        return Err(invalid());
+    }
+    let days_since_epoch = days_from_unix_epoch(year, month, day).ok_or_else(invalid)?;
 
     let total_seconds = days_since_epoch * 86400 + hour * 3600 + minute * 60 + second;
-    Ok(UNIX_EPOCH + Duration::from_secs(total_seconds))
+    UNIX_EPOCH
+        .checked_add(Duration::from_secs(total_seconds))
+        .ok_or_else(invalid)
 }
 
 pub(crate) fn format_iso8601_timestamp(time: SystemTime) -> String {
@@ -198,5 +185,36 @@ mod tests {
         let ts_str = "2026-04-09T10-00-00";
         let result = timestamp_from_string(ts_str);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn restore_timestamps_validate_ascii_calendar_and_clock_without_echoing_input() {
+        for timestamp in [
+            "202é-09-05T00-00-0Z",
+            "1969-12-31T23-59-59Z",
+            "2026-01-01T24-00-00Z",
+            "2026-01-01T00-60-00Z",
+            "2026-01-01T00-00-60Z",
+            "2026-02-29T00-00-00Z",
+            "2026-00-01T00-00-00Z",
+            "2026-01-00T00-00-00Z",
+            "2026-04-31T00-00-00Z",
+            "2026-+1-01T00-00-00Z",
+            "PRIVATE_SAVED_CONTENT",
+        ] {
+            let error = timestamp_from_string(timestamp).unwrap_err().to_string();
+            assert!(!error.contains(timestamp));
+        }
+        for timestamp in [
+            "1970-01-01T00-00-00Z",
+            "2000-02-29T23-59-59Z",
+            "2024-02-29T12-34-56Z",
+            "9999-12-31T23-59-59Z",
+        ] {
+            assert_eq!(
+                format_iso8601_timestamp(timestamp_from_string(timestamp).unwrap()),
+                timestamp
+            );
+        }
     }
 }

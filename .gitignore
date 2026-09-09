@@ -12,13 +12,6 @@ Cargo.lock
 # Build caches
 .clang-module-cache/
 
-# Editor/agent workspaces
-.claude/
-.serena/
-
-# Planning & review artifacts (local-only, not shipped)
-.planning/
-
 *.gif
 *.mp4
 REVIEW.md
@@ -42,6 +35,9 @@ scripts/*
 !scripts/bake-audio.sh
 !scripts/parse_tape_sfx.py
 !scripts/render-theme-gallery.sh
+!scripts/build-dev.sh
+!scripts/install-dev.sh
+!scripts/dev-space.sh
 
 # Misc
 plot_25min.png

@@ -1,5 +1,6 @@
 use crate::brand::render_context::RenderContext;
 use crate::brand::roles::Roles;
+use crate::cli::ui_language::tr;
 use crate::error::Result;
 use crate::opacity::OpacityPreset;
 use crate::theme::{ThemeAppearance, ThemeRegistry, ThemeVariant};
@@ -15,6 +16,14 @@ use std::io::{self, Write};
 use super::preview::compose;
 use super::state::PickerState;
 
+mod layout;
+mod scroll;
+pub(super) use scroll::scroll_preview;
+#[cfg(test)]
+mod layout_tests;
+#[cfg(test)]
+mod scroll_tests;
+
 /// Public entry: writes to stdout. Reads terminal::size for layout.
 /// dispatches on `state.preview_mode_full` between the
 /// list-dominant layout (default) and the full-screen preview layout.
@@ -26,13 +35,8 @@ pub(super) fn render(state: &PickerState, flash_text: Option<&str>) -> Result<()
     Ok(())
 }
 
-/// Core renderer — writable-target-agnostic so tests can feed `Vec<u8>`.
-/// Mode-dispatches on `state.preview_mode_full`:
-/// * `false` → [`render_list_dominant`] (// — family
-/// section headers + full-width lavender pill cursor + mute description +
-/// opacity strip + help line).
-/// * `true` → [`render_full_preview`] (responsive fold
-/// preview via [`compose::compose_full`]).
+/// Writable-target-agnostic renderer. Both views budget header/body/footer rows
+/// and clip display columns without printing into the terminal's wrap column.
 pub(super) fn render_into<W: io::Write>(
     out: &mut W,
     state: &PickerState,
@@ -40,7 +44,7 @@ pub(super) fn render_into<W: io::Write>(
     cols: u16,
     rows: u16,
 ) -> Result<()> {
-    if state.preview_mode_full {
+    if state.preview_mode_full && state.has_selection() {
         // Task 02: the full-preview path accepts an optional
         // forked-prompt string. `render_into` is read-only (`&PickerState`)
         // so it does NOT perform the fork itself — that's the event_loop's
@@ -54,177 +58,31 @@ pub(super) fn render_into<W: io::Write>(
     }
 }
 
-/// List-dominant layout (default). Existing –18 chrome +
-/// family headers full-width pill cursor
-/// opacity strip.
+/// List layout: family headings share the row budget with selectable variants;
+/// optional preview/opacity chrome yields space to selection and input help.
 fn render_list_dominant<W: io::Write>(
     out: &mut W,
     state: &PickerState,
     flash_text: Option<&str>,
-    _cols: u16,
+    cols: u16,
     rows: u16,
 ) -> Result<()> {
-    queue_io(queue!(out, Clear(ClearType::All), MoveTo(0, 0)))?;
-
     let ctx = RenderContext::from_active_theme().ok();
     let roles = ctx.as_ref().map(Roles::new);
-
-    // Re-read terminal width early — needed for right-aligning the Tab hint
-    // in the chrome header as well as the selected-row pill below.
-    let (cols, _) = terminal::size().map_err(io_err).unwrap_or((80, rows));
-
-    // Picker chrome header: "✦ slate theme + opacity picker Tab ▸ preview".
-    // `r.logo()` carries the brand-lavender ✦ glyph + `slate` wordmark;
-    // `r.path()` dims the descriptor so the eye lands on the wordmark first.
-    // The right-aligned `Tab ▸ preview` hint is a permanent affordance
-    // first-time users would otherwise miss the Tab shortcut buried in the
-    // footer help line.
-    let logo = roles
-        .as_ref()
-        .map(|r| r.logo())
-        .unwrap_or_else(|| "✦ slate".to_string());
-    let tagline_text = "theme + opacity picker";
-    let tagline = roles
-        .as_ref()
-        .map(|r| r.path(tagline_text))
-        .unwrap_or_else(|| tagline_text.to_string());
-    let tab_hint_text = "Tab ▸ preview";
-    let tab_hint = roles
-        .as_ref()
-        .map(|r| r.path(tab_hint_text))
-        .unwrap_or_else(|| tab_hint_text.to_string());
-    // Visible widths (ANSI-stripped). Logo "✦ slate" = 7 visible chars;
-    // tagline + hint are plain ASCII plus one ▸ glyph counted as 1 char.
-    const LOGO_VISIBLE: usize = 7;
-    let left_visible = LOGO_VISIBLE + 3 + tagline_text.chars().count(); // logo + 3sp + tagline
-    let right_visible = tab_hint_text.chars().count();
-    let gap = (cols as usize)
-        .saturating_sub(2 + left_visible + right_visible + 1) // 2 indent + 1 right margin
-        .max(2);
-    let spacer = " ".repeat(gap);
-    queue_io(queue!(
-        out,
-        Print("\r\n  "),
-        Print(&logo),
-        Print("   "),
-        Print(&tagline),
-        Print(&spacer),
-        Print(&tab_hint),
-        Print("\r\n\r\n"),
-    ))?;
-
-    let total_rows = rows as usize;
-    let show_preview = total_rows > 20;
-    let chrome_lines: usize = if show_preview { 16 } else { 11 };
-    let max_visible = total_rows.saturating_sub(chrome_lines).max(3);
-    let total = state.theme_ids().len();
-    let cursor = state.selected_theme_index();
-    let visible = max_visible.min(total);
-    let half = visible / 2;
-    let mut start = cursor.saturating_sub(half);
-    if start + visible > total {
-        start = total.saturating_sub(visible);
-    }
-    let end = (start + visible).min(total);
-
-    let registry = ThemeRegistry::new()?;
-    let mut last_family: Option<String> = None;
-    for idx in start..end {
-        let id = &state.theme_ids()[idx];
-        let Some(theme) = registry.get(id) else {
-            // Registry miss: render the id as a fallback row (preserves
-            // the original behavior from the pre-Phase-19 loop).
-            queue_io(queue!(
-                out,
-                Print("    "),
-                Print(id.as_str()),
-                Print("\r\n")
-            ))?;
-            continue;
-        };
-
-        // family section header is a render-time band. Emitted whenever
-        // the variant's family differs from the previous row's family. Never
-        // appears in `state.theme_ids()` (see `family_headers_are_not_in_theme_ids`
-        // invariant in picker::state::tests).
-        if last_family.as_deref() != Some(theme.family.as_str()) {
-            queue_family_heading(out, roles.as_ref(), &theme.family)?;
-            last_family = Some(theme.family.clone());
-        }
-
-        let is_selected = idx == cursor;
-        queue_variant_row(out, theme, is_selected, cols, roles.as_ref())?;
-    }
-
-    queue_io(queue!(
-        out,
-        SetForegroundColor(Color::DarkGrey),
-        Print(format!("\r\n  {}/{}\r\n", cursor + 1, total)),
-        ResetColor,
-    ))?;
-
-    let current_theme = state.get_current_theme()?;
-    if show_preview {
-        let preview_raw = compose::compose_mini(&current_theme.palette, roles.as_ref());
-        let preview_output = preview_raw.replace('\n', "\r\n  ");
-        queue_io(queue!(out, Print("  ")))?;
-        queue_io(queue!(out, Print(preview_output)))?;
-        queue_io(queue!(out, Print("\r\n")))?;
-    }
-
     let supports_opacity = crate::detection::TerminalProfile::detect().supports_opacity();
-    if supports_opacity {
-        let effective = get_effective_opacity_for_rendering(state);
-        queue_io(queue!(out, Print("\r\n  Opacity:  ")))?;
-        render_opacity_slot(out, OpacityPreset::Solid, effective)?;
-        queue_io(queue!(out, Print("    ")))?;
-        render_opacity_slot(out, OpacityPreset::Frosted, effective)?;
-        queue_io(queue!(out, Print("    ")))?;
-        render_opacity_slot(out, OpacityPreset::Clear, effective)?;
-    }
-    queue_io(queue!(out, Print("\r\n\r\n")))?;
-
-    let help_body = if supports_opacity {
-        "↑↓/jk theme · ←→/hl opacity · Enter save · Esc cancel"
-    } else {
-        "↑↓/jk theme · Enter save · Esc cancel"
-    };
-    let help_line = roles
-        .as_ref()
-        .map(|r| r.path(help_body))
-        .unwrap_or_else(|| help_body.to_string());
-    let save_line = roles
-        .as_ref()
-        .map(|r| r.path("s save-auto"))
-        .unwrap_or_else(|| "s save-auto".to_string());
-    queue_io(queue!(
-        out,
-        Print("  "),
-        Print(&help_line),
-        Print("\r\n  "),
-        Print(&save_line),
-        Print("\r\n"),
-    ))?;
-
-    if let Some(text) = flash_text {
-        queue_io(queue!(
-            out,
-            Print("\r\n  "),
-            SetForegroundColor(Color::Magenta),
-            Print(text),
-            ResetColor,
-            Print("\r\n"),
-        ))?;
-    }
-
-    Ok(())
+    layout::list(
+        state,
+        flash_text,
+        cols,
+        rows,
+        roles.as_ref(),
+        supports_opacity,
+    )?
+    .write(out, cols, rows)
 }
 
-/// Full-screen preview layout . Delegates body construction to
-/// [`compose::compose_full`] — the composer picks the responsive fold tier
-/// (4/6/8 blocks) from terminal rows and stacks them with `◆ Heading`
-/// labels (see). Opacity strip + help-line chrome is
-/// intentionally hidden here (stays in list-dominant only).
+/// Full preview pages all blocks after header/footer reservation, keeping its
+/// position indicator and confirmation/cancel help visible.
 /// `prompt_line_override` is glue point: the caller (event
 /// loop / `render_into`) looks up `PickerState::cached_prompt`
 /// for the current theme and passes `Some(&forked)` when a fork landed;
@@ -234,60 +92,21 @@ fn render_full_preview<W: io::Write>(
     out: &mut W,
     state: &PickerState,
     flash_text: Option<&str>,
-    _cols: u16,
+    cols: u16,
     rows: u16,
     prompt_line_override: Option<&str>,
 ) -> Result<()> {
-    queue_io(queue!(out, Clear(ClearType::All), MoveTo(0, 0)))?;
-
     let ctx = RenderContext::from_active_theme().ok();
     let roles = ctx.as_ref().map(Roles::new);
-
-    // Minimal chrome: slate logo + "preview · Tab to return" breadcrumb.
-    let logo = roles
-        .as_ref()
-        .map(|r| r.logo())
-        .unwrap_or_else(|| "✦ slate".to_string());
-    let breadcrumb = roles
-        .as_ref()
-        .map(|r| r.path("preview · Tab to return"))
-        .unwrap_or_else(|| "preview · Tab to return".to_string());
-    queue_io(queue!(
-        out,
-        Print("\r\n  "),
-        Print(&logo),
-        Print("   "),
-        Print(&breadcrumb),
-        Print("\r\n\r\n"),
-    ))?;
-
-    let current_theme = state.get_current_theme()?;
-    let tier = compose::decide_fold_tier(rows);
-    // Task 02: prompt_line_override is forwarded straight to
-    // compose_full. When event_loop's Tab branch populates
-    // PickerState::prompt_cache via fork_starship_prompt,
-    // render_into picks it up via cached_prompt and passes it here; on
-    // fork failure the cache stays empty so this receives None and
-    // compose_full self-draws (silent fallback).
-    let body = compose::compose_full(
-        &current_theme.palette,
-        tier,
+    layout::full(
+        state,
+        flash_text,
+        cols,
+        rows,
         roles.as_ref(),
         prompt_line_override,
-    );
-    // Prepend 2-space indent to every line so alt-screen layout matches
-    // the list-dominant indent width.
-    let indented = body.replace('\n', "\r\n  ");
-    queue_io(queue!(out, Print("  "), Print(indented), Print("\r\n")))?;
-
-    if let Some(text) = flash_text {
-        let mute = roles
-            .as_ref()
-            .map(|r| r.path(text))
-            .unwrap_or_else(|| text.to_string());
-        queue_io(queue!(out, Print("\r\n  "), Print(&mute), Print("\r\n")))?;
-    }
-    Ok(())
+    )?
+    .write(out, cols, rows)
 }
 
 /// Emit a single `◆ FamilyName` section header band.
@@ -319,7 +138,7 @@ fn queue_variant_row<W: io::Write>(
     cols: u16,
     roles: Option<&Roles<'_>>,
 ) -> Result<()> {
-    let desc = crate::theme::get_theme_description(&theme.id).unwrap_or("");
+    let desc = picker_description(&theme.id, crate::cli::ui_language::current()).unwrap_or("");
     // Width budget for selected-row pill body.
     // `Roles::command` wraps the body with ONE space of internal padding on
     // each side (ANSI-BG + ` body ` + ANSI-reset), so the visible pill width
@@ -338,8 +157,8 @@ fn queue_variant_row<W: io::Write>(
         // affordance at the point of action.
         let left = format!("› {:<20}  {}", theme.name, desc);
         const TAIL: &str = "Tab ▸";
-        let tail_cols = TAIL.chars().count();
-        let left_cols = left.chars().count();
+        let tail_cols = console::measure_text_width(TAIL);
+        let left_cols = console::measure_text_width(&left);
         // Minimum 2-char gap between desc and tail so they don't visually
         // merge. If the row is too narrow to hold both + gap, drop the tail
         // and fall back to plain padding.
@@ -347,7 +166,7 @@ fn queue_variant_row<W: io::Write>(
             let gap = width - left_cols - tail_cols;
             format!("{left}{spacer}{TAIL}", spacer = " ".repeat(gap))
         } else {
-            format!("{:<width$}", left, width = width)
+            format!("{left}{}", " ".repeat(width.saturating_sub(left_cols)))
         };
         let pill = match roles {
             Some(r) => r.command(&padded),
@@ -375,6 +194,38 @@ fn queue_variant_row<W: io::Write>(
         ))?;
     }
     Ok(())
+}
+
+fn picker_description(
+    id: &str,
+    language: crate::config::ui_language::UiLanguage,
+) -> Option<&'static str> {
+    if language == crate::config::ui_language::UiLanguage::English {
+        return crate::theme::get_theme_description(id);
+    }
+    Some(match id {
+        "catppuccin-mocha" => "深暖摩卡 · 层次鲜明",
+        "catppuccin-frappe" => "柔和深色 · 低调雅致",
+        "catppuccin-macchiato" => "温润深色 · 色彩均衡",
+        "catppuccin-latte" => "明亮拿铁 · 轻盈浅色",
+        "solarized-dark" => "经典深色 · 精细配色",
+        "solarized-light" => "暖纸浅色 · 柔和对比",
+        "tokyo-night-dark" => "都市夜色 · 蓝紫点缀",
+        "tokyo-night-light" => "清爽浅色 · 东京风格",
+        "rose-pine-main" => "温馨深色 · 玫瑰点缀",
+        "rose-pine-moon" => "静谧深色 · 松林月夜",
+        "rose-pine-dawn" => "温暖浅色 · 松林晨曦",
+        "kanagawa-wave" => "浮世绘深色 · 平静海浪",
+        "kanagawa-dragon" => "浓郁深色 · 山雾暗影",
+        "kanagawa-lotus" => "静雅浅色 · 荷塘倒影",
+        "everforest-dark" => "自然深色 · 森林绿意",
+        "everforest-light" => "大地浅色 · 林间暖阳",
+        "gruvbox-dark" => "复古深色 · 大地色调",
+        "gruvbox-light" => "怀旧浅色 · 温暖柔和",
+        "dracula" => "浓郁暗色 · 鲜明点缀",
+        "nord" => "北极夜色 · 清冷蓝调",
+        _ => return crate::theme::get_theme_description(id),
+    })
 }
 
 pub(super) fn should_guard_light_theme_opacity(state: &PickerState) -> bool {
@@ -428,7 +279,7 @@ fn build_afterglow_receipt(state: &PickerState, applied_opacity: OpacityPreset) 
 }
 
 // SWATCH-RENDERER: intentionally raw ANSI. The afterglow receipt composes
-// terminal-control escapes (`?1049l`, `?25h`) plus a palette-tinted swatch
+// palette-tinted swatch escapes
 // foreground into one `String`; the aggregate migration scanner must ignore
 // this helper body the same way it ignores the write-to-stdout wrapper above.
 fn build_afterglow_receipt_with_terminal(
@@ -443,8 +294,8 @@ fn build_afterglow_receipt_with_terminal(
     let roles = ctx.as_ref().map(Roles::new);
 
     let mut output = String::new();
-    output.push_str("\x1b[?1049l");
-    output.push_str("\x1b[?25h");
+    // TerminalGuard already restored the main screen and cursor. Repeating
+    // LeaveAlternateScreen here can restore an old cursor over apply messages.
     output.push('\n');
 
     let brand_glyph = roles
@@ -457,12 +308,12 @@ fn build_afterglow_receipt_with_terminal(
         .unwrap_or_else(|| "◆".to_string());
     let theme_label = roles
         .as_ref()
-        .map(|r| r.path("Theme"))
-        .unwrap_or_else(|| "Theme".to_string());
+        .map(|r| r.path(tr("主题", "Theme")))
+        .unwrap_or_else(|| tr("主题", "Theme").to_string());
     let opacity_label = roles
         .as_ref()
-        .map(|r| r.path("Opacity"))
-        .unwrap_or_else(|| "Opacity".to_string());
+        .map(|r| r.path(tr("透明度", "Opacity")))
+        .unwrap_or_else(|| tr("透明度", "Opacity").to_string());
     let theme_name = roles
         .as_ref()
         .map(|r| r.theme_name(&current_theme.name))
@@ -538,9 +389,9 @@ fn io_err(error: io::Error) -> crate::error::SlateError {
 
 fn opacity_to_label(opacity: OpacityPreset) -> &'static str {
     match opacity {
-        OpacityPreset::Solid => "Solid",
-        OpacityPreset::Frosted => "Frosted",
-        OpacityPreset::Clear => "Clear",
+        OpacityPreset::Solid => tr("不透明", "Solid"),
+        OpacityPreset::Frosted => tr("磨砂", "Frosted"),
+        OpacityPreset::Clear => tr("透明", "Clear"),
     }
 }
 
@@ -561,6 +412,24 @@ fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn picker_descriptions_cover_catalog_in_both_languages() {
+        use crate::config::ui_language::UiLanguage;
+        for theme in ThemeRegistry::new().unwrap().all() {
+            let zh = picker_description(&theme.id, UiLanguage::Chinese).unwrap();
+            let en = picker_description(&theme.id, UiLanguage::English).unwrap();
+            assert!(
+                zh.chars().any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)),
+                "{}: {zh}",
+                theme.id
+            );
+            assert!(console::measure_text_width(zh) <= 26, "{}: {zh}", theme.id);
+            assert_eq!(Some(en), crate::theme::get_theme_description(&theme.id));
+            assert!(!zh.chars().any(char::is_control));
+        }
+        assert_eq!(picker_description("missing", UiLanguage::Chinese), None);
+    }
 
     /// Render against an in-memory buffer so tests can assert on queued
     /// bytes without touching stdout / terminal::size.
@@ -635,7 +504,8 @@ mod tests {
         // the current body-width budget (leading 2-space indent + 2-space
         // pill internal padding + 1-col right margin = 5).
         let body = selected_line.trim_start_matches(' ');
-        let width_body = body.chars().count();
+        let width_body = console::measure_text_width(body);
+        assert!(console::measure_text_width(selected_line) < cols as usize);
         assert!(
             width_body + 5 >= cols as usize,
             "pill body shorter than cols-5; got {width_body} of expected {}",
@@ -652,7 +522,8 @@ mod tests {
         // `catppuccin-frappe` is a sibling variant in the same family and
         // is expected to be in the visible window when the cursor sits on
         // `catppuccin-mocha`.
-        let desc = crate::theme::get_theme_description("catppuccin-frappe").unwrap_or("");
+        let desc = picker_description("catppuccin-frappe", crate::cli::ui_language::current())
+            .unwrap_or("");
         if !desc.is_empty() {
             assert!(
                 visible.contains(desc),
@@ -703,7 +574,7 @@ mod tests {
             "list-dominant mode must show family heading; got:\n{list_visible}"
         );
         assert!(
-            !list_visible.contains("◆ Palette"),
+            !list_visible.contains(tr("◆ 调色板", "◆ Palette")),
             "list-dominant mode must NOT show preview-block heading 'Palette'; got:\n{list_visible}"
         );
 
@@ -711,7 +582,8 @@ mod tests {
         let full_out = render_to_vec(&state, 80, 24);
         let full_visible = strip_ansi(&full_out);
         assert!(
-            full_visible.contains("◆ Palette") && full_visible.contains("◆ Code"),
+            full_visible.contains(tr("◆ 调色板", "◆ Palette"))
+                && full_visible.contains(tr("◆ 代码", "◆ Code")),
             "full-preview mode must show Palette + Code block headings; got:\n{full_visible}"
         );
     }
@@ -741,11 +613,15 @@ mod tests {
                 .expect("receipt should render for a valid picker state");
         let visible = strip_ansi(receipt.as_bytes());
         assert!(
-            visible.contains("Opacity   Solid"),
+            !receipt.contains("\x1b[?1049l"),
+            "receipt must not restore the screen/cursor over earlier diagnostics"
+        );
+        assert!(
+            visible.contains(tr("透明度   不透明", "Opacity   Solid")),
             "receipt should report the opacity that actually landed, got:\n{visible}"
         );
         assert!(
-            !visible.contains("Opacity   Clear"),
+            !visible.contains(tr("透明度   透明", "Opacity   Clear")),
             "receipt must not echo the pre-guard selection when a light-theme opacity guard \
              forced a different applied opacity. Got:\n{visible}"
         );

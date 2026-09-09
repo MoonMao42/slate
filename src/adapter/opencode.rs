@@ -6,10 +6,12 @@ use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::config::ConfigManager;
 use crate::detection;
 use crate::env::SlateEnv;
-use crate::error::{Result, SlateError};
+use crate::error::Result;
 use crate::theme::ThemeVariant;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+pub(crate) mod config;
 
 /// OpenCode adapter implementing the ToolAdapter trait.
 pub struct OpencodeAdapter;
@@ -17,34 +19,27 @@ pub struct OpencodeAdapter;
 impl OpencodeAdapter {
     pub(crate) const TUI_SCHEMA: &'static str = "https://opencode.ai/tui.json";
 
-    fn process_tui_config_override_for_env(env: &SlateEnv) -> Option<String> {
-        let process_env = SlateEnv::from_process().ok()?;
-        if process_env.home() != env.home() {
-            return None;
-        }
-
-        std::env::var("OPENCODE_TUI_CONFIG")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-    }
-
     /// Resolve the path to opencode's tui.json config file.
     pub(crate) fn tui_config_path(env: &SlateEnv) -> PathBuf {
-        let override_path = Self::process_tui_config_override_for_env(env);
-        Self::tui_config_path_with_override(env, override_path.as_deref())
+        Self::tui_config_path_with_override(env, env.opencode_tui_config())
     }
 
     pub(crate) fn tui_config_path_with_override(
         env: &SlateEnv,
-        override_path: Option<&str>,
+        override_path: Option<&Path>,
     ) -> PathBuf {
-        if let Some(path) = override_path.filter(|value| !value.trim().is_empty()) {
-            return PathBuf::from(path);
+        if let Some(path) = override_path {
+            return path.to_owned();
         }
 
         let json_path = Self::default_tui_json_path(env);
         let jsonc_path = Self::default_tui_jsonc_path(env);
-        if json_path.exists() || !jsonc_path.exists() {
+        // A blocked preferred path must be reported, not silently bypassed.
+        let genuinely_missing = |path: &std::path::Path| {
+            matches!(fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+                && crate::config::file_read::confirm_missing(path).is_ok()
+        };
+        if !genuinely_missing(&json_path) || genuinely_missing(&jsonc_path) {
             json_path
         } else {
             jsonc_path
@@ -52,17 +47,20 @@ impl OpencodeAdapter {
     }
 
     pub(crate) fn tui_config_paths(env: &SlateEnv) -> Vec<PathBuf> {
-        let override_path = Self::process_tui_config_override_for_env(env);
         let mut paths = Vec::new();
-        if let Some(path) = override_path.as_deref() {
-            paths.push(PathBuf::from(path));
-        }
-
-        for path in [
-            Self::default_tui_json_path(env),
-            Self::default_tui_jsonc_path(env),
-        ] {
-            if !paths.iter().any(|existing| existing == &path) {
+        let mut destinations = std::collections::BTreeSet::new();
+        for path in env
+            .opencode_tui_config()
+            .map(Path::to_owned)
+            .into_iter()
+            .chain([
+                Self::default_tui_json_path(env),
+                Self::default_tui_jsonc_path(env),
+            ])
+        {
+            let destination = crate::config::file_read::directory_alias_target(&path)
+                .unwrap_or_else(|| path.clone());
+            if !paths.contains(&path) && destinations.insert(destination) {
                 paths.push(path);
             }
         }
@@ -80,181 +78,6 @@ impl OpencodeAdapter {
     /// Resolve the path to opencode's config directory.
     fn config_dir(env: &SlateEnv) -> PathBuf {
         env.xdg_config_home().join("opencode")
-    }
-
-    fn strip_jsonc_comments(content: &str) -> String {
-        let mut output = String::with_capacity(content.len());
-        let mut chars = content.chars().peekable();
-        let mut in_string = false;
-        let mut escape = false;
-        let mut in_line_comment = false;
-        let mut in_block_comment = false;
-
-        while let Some(ch) = chars.next() {
-            if in_line_comment {
-                if ch == '\n' {
-                    in_line_comment = false;
-                    output.push(ch);
-                }
-                continue;
-            }
-
-            if in_block_comment {
-                if ch == '*' && chars.peek() == Some(&'/') {
-                    chars.next();
-                    in_block_comment = false;
-                }
-                continue;
-            }
-
-            if in_string {
-                output.push(ch);
-                if escape {
-                    escape = false;
-                } else if ch == '\\' {
-                    escape = true;
-                } else if ch == '"' {
-                    in_string = false;
-                }
-                continue;
-            }
-
-            if ch == '"' {
-                in_string = true;
-                output.push(ch);
-            } else if ch == '/' && chars.peek() == Some(&'/') {
-                chars.next();
-                in_line_comment = true;
-            } else if ch == '/' && chars.peek() == Some(&'*') {
-                chars.next();
-                in_block_comment = true;
-            } else {
-                output.push(ch);
-            }
-        }
-
-        output
-    }
-
-    fn remove_jsonc_trailing_commas(content: &str) -> String {
-        let chars: Vec<char> = content.chars().collect();
-        let mut output = String::with_capacity(content.len());
-        let mut i = 0;
-        let mut in_string = false;
-        let mut escape = false;
-
-        while i < chars.len() {
-            let ch = chars[i];
-
-            if in_string {
-                output.push(ch);
-                if escape {
-                    escape = false;
-                } else if ch == '\\' {
-                    escape = true;
-                } else if ch == '"' {
-                    in_string = false;
-                }
-                i += 1;
-                continue;
-            }
-
-            if ch == '"' {
-                in_string = true;
-                output.push(ch);
-                i += 1;
-                continue;
-            }
-
-            if ch == ',' {
-                let mut j = i + 1;
-                while j < chars.len() && chars[j].is_whitespace() {
-                    j += 1;
-                }
-                if j < chars.len() && (chars[j] == '}' || chars[j] == ']') {
-                    i += 1;
-                    continue;
-                }
-            }
-
-            output.push(ch);
-            i += 1;
-        }
-
-        output
-    }
-
-    pub(crate) fn parse_tui_config(content: &str, path: &Path) -> Result<serde_json::Value> {
-        match serde_json::from_str(content) {
-            Ok(value) => Ok(value),
-            Err(json_err) => {
-                let jsonc =
-                    Self::remove_jsonc_trailing_commas(&Self::strip_jsonc_comments(content));
-                serde_json::from_str(&jsonc).map_err(|jsonc_err| {
-                    SlateError::ConfigReadError(
-                        path.display().to_string(),
-                        format!("invalid JSON/JSONC: {}; {}", json_err, jsonc_err),
-                    )
-                })
-            }
-        }
-    }
-
-    /// Read existing tui.json or create a default one.
-    /// Returns the parsed JSON value.
-    pub(crate) fn read_or_create_tui_config(path: &Path) -> Result<serde_json::Value> {
-        if path.exists() {
-            let content = fs::read_to_string(path).map_err(|e| {
-                SlateError::ConfigReadError(path.display().to_string(), e.to_string())
-            })?;
-            let value = Self::parse_tui_config(&content, path)?;
-            if !value.is_object() {
-                return Err(SlateError::InvalidConfig(format!(
-                    "OpenCode TUI config at {} must be a JSON object",
-                    path.display()
-                )));
-            }
-            Ok(value)
-        } else {
-            Ok(serde_json::json!({}))
-        }
-    }
-
-    /// Write the tui.json config with theme set to "system".
-    pub(crate) fn write_tui_config(path: &Path, mut config: serde_json::Value) -> Result<()> {
-        if !config.is_object() {
-            return Err(SlateError::InvalidConfig(format!(
-                "OpenCode TUI config at {} must be a JSON object",
-                path.display()
-            )));
-        }
-
-        // Set theme to "system" for transparent background support
-        config["theme"] = serde_json::json!("system");
-
-        // Add schema reference if not present
-        if config.get("$schema").is_none() {
-            config["$schema"] = serde_json::json!(Self::TUI_SCHEMA);
-        }
-
-        let content = serde_json::to_string_pretty(&config).map_err(|e| {
-            SlateError::ConfigWriteError(path.display().to_string(), format!("JSON error: {}", e))
-        })?;
-
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                SlateError::ConfigWriteError(
-                    path.display().to_string(),
-                    format!("failed to create directory: {}", e),
-                )
-            })?;
-        }
-
-        crate::config::atomic_write_synced(path, content.as_bytes())
-            .map_err(|e| SlateError::ConfigWriteError(path.display().to_string(), e.to_string()))?;
-
-        Ok(())
     }
 }
 
@@ -295,42 +118,40 @@ impl ToolAdapter for OpencodeAdapter {
     }
 
     fn apply_theme_with_env(&self, _theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
-        let override_path = Self::process_tui_config_override_for_env(env);
-        let config_path = Self::tui_config_path_with_override(env, override_path.as_deref());
+        env.validate_opencode_tui_config()?;
+        let override_path = env.opencode_tui_config();
+        let config_path = Self::tui_config_path_with_override(env, override_path);
 
         // Avoid creating a default OpenCode config for users who have the
         // binary installed but have never initialized OpenCode's config dir.
-        if override_path.is_none() && !Self::config_dir(env).exists() {
+        if override_path.is_none()
+            && matches!(fs::symlink_metadata(Self::config_dir(env)), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+            && crate::config::file_read::confirm_missing(&Self::config_dir(env)).is_ok()
+        {
             return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
         }
 
-        // Backup before modification
-        let config_manager = ConfigManager::with_env(env)?;
-        if config_path.exists() {
-            let _backup_path = config_manager.backup_file(&config_path)?;
+        // Prepare and validate before backup/cache creation. Already connected
+        // documents are byte-for-byte no-ops, including their missing schema.
+        let prepared = config::Prepared::read(&config_path)?;
+        if !prepared.changed() {
+            return Ok(ApplyOutcome::Applied {
+                requires_new_shell: false,
+            });
         }
-
-        // Read existing config or create new one
-        let config = Self::read_or_create_tui_config(&config_path)?;
-
-        // Check if already set to system theme
-        if let Some(theme) = config.get("theme").and_then(|v| v.as_str()) {
-            if theme == "system" {
-                return Ok(ApplyOutcome::Applied {
-                    requires_new_shell: false,
-                });
-            }
+        prepared.verify()?;
+        if let Some(original) = prepared.original_bytes() {
+            ConfigManager::from_env_paths(env).backup_captured_file(&config_path, original)?;
         }
+        prepared.publish()?;
 
-        // Write updated config
-        Self::write_tui_config(&config_path, config)?;
-
-        // OpenCode doesn't support hot-reload, needs restart
-        Ok(ApplyOutcome::applied_needs_new_shell())
+        // Only the TUI file changed, not shell initialization or environment.
+        // The coordinator reports app-specific reopening guidance separately.
+        Ok(ApplyOutcome::applied_no_shell())
     }
 
     fn reload(&self) -> Result<()> {
-        // OpenCode doesn't support hot-reload
+        // Slate does not command a running OpenCode process.
         Ok(())
     }
 }
@@ -338,6 +159,37 @@ impl ToolAdapter for OpencodeAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opencode_candidates_deduplicate_directory_aliases_but_keep_final_links() {
+        use std::os::unix::fs::symlink;
+        for case in ["missing", "present", "final-link"] {
+            let td = tempfile::tempdir().unwrap();
+            let config = td.path().join(".config/opencode");
+            fs::create_dir_all(&config).unwrap();
+            let selected = if case == "final-link" {
+                fs::write(config.join("tui.json"), "{}").unwrap();
+                let link = td.path().join("linked.json");
+                symlink(config.join("tui.json"), &link).unwrap();
+                link
+            } else {
+                symlink(&config, td.path().join("alias")).unwrap();
+                if case == "present" {
+                    fs::write(config.join("tui.json"), "{}").unwrap();
+                }
+                td.path().join("alias/tui.json")
+            };
+            let env = SlateEnv::from_vars(|key| match key {
+                "HOME" => Some(td.path().as_os_str().to_owned()),
+                "OPENCODE_TUI_CONFIG" => Some(selected.as_os_str().to_owned()),
+                _ => None,
+            })
+            .unwrap();
+            let paths = OpencodeAdapter::tui_config_paths(&env);
+            assert_eq!(paths.len(), if case == "final-link" { 3 } else { 2 });
+            assert_eq!(paths[0], selected);
+        }
+    }
 
     #[test]
     fn test_tool_name() {
@@ -377,10 +229,7 @@ mod tests {
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
         let override_path = tempdir.path().join("custom/tui.jsonc");
 
-        let path = OpencodeAdapter::tui_config_path_with_override(
-            &env,
-            Some(override_path.to_str().unwrap()),
-        );
+        let path = OpencodeAdapter::tui_config_path_with_override(&env, Some(&override_path));
         assert_eq!(path, override_path);
     }
 
@@ -390,70 +239,6 @@ mod tests {
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
         let path = OpencodeAdapter::config_dir(&env);
         assert!(path.ends_with("opencode"));
-    }
-
-    #[test]
-    fn test_read_or_create_tui_config_new() {
-        let tempdir = tempfile::TempDir::new().unwrap();
-        let path = tempdir.path().join("tui.json");
-        let config = OpencodeAdapter::read_or_create_tui_config(&path).unwrap();
-        assert!(config.is_object());
-        assert!(config.as_object().unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_read_or_create_tui_config_existing() {
-        let tempdir = tempfile::TempDir::new().unwrap();
-        let path = tempdir.path().join("tui.json");
-        fs::write(&path, r#"{"scroll_speed": 5}"#).unwrap();
-        let config = OpencodeAdapter::read_or_create_tui_config(&path).unwrap();
-        assert_eq!(config["scroll_speed"], 5);
-    }
-
-    #[test]
-    fn test_read_or_create_tui_config_accepts_jsonc() {
-        let tempdir = tempfile::TempDir::new().unwrap();
-        let path = tempdir.path().join("tui.jsonc");
-        fs::write(
-            &path,
-            r#"{
-                // user comment
-                "scroll_speed": 5,
-            }"#,
-        )
-        .unwrap();
-        let config = OpencodeAdapter::read_or_create_tui_config(&path).unwrap();
-        assert_eq!(config["scroll_speed"], 5);
-    }
-
-    #[test]
-    fn test_write_tui_config() {
-        let tempdir = tempfile::TempDir::new().unwrap();
-        let path = tempdir.path().join("tui.json");
-        let config = serde_json::json!({});
-        OpencodeAdapter::write_tui_config(&path, config).unwrap();
-
-        let content = fs::read_to_string(&path).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed["theme"], "system");
-        assert_eq!(parsed["$schema"], "https://opencode.ai/tui.json");
-    }
-
-    #[test]
-    fn test_write_tui_config_preserves_existing() {
-        let tempdir = tempfile::TempDir::new().unwrap();
-        let path = tempdir.path().join("tui.json");
-        let config = serde_json::json!({
-            "scroll_speed": 5,
-            "mouse": false
-        });
-        OpencodeAdapter::write_tui_config(&path, config).unwrap();
-
-        let content = fs::read_to_string(&path).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed["theme"], "system");
-        assert_eq!(parsed["scroll_speed"], 5);
-        assert_eq!(parsed["mouse"], false);
     }
 
     #[test]

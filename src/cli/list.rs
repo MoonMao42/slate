@@ -1,71 +1,186 @@
 use crate::adapter::palette_renderer::PaletteRenderer;
-use crate::brand::render_context::RenderContext;
+use crate::brand::render_context::{detect_render_mode, RenderContext, RenderMode};
 use crate::brand::roles::Roles;
-use crate::error::Result;
-use crate::theme::{get_theme_description, ThemeRegistry, FAMILY_SORT_ORDER};
-use std::collections::HashMap;
+use crate::error::{Result, SlateError};
+use crate::theme::{
+    get_theme_description, ThemeAppearance, ThemeRegistry, ThemeVariant, FAMILY_SORT_ORDER,
+};
+use serde::Serialize;
+use std::io::Write;
 
-/// Handle `slate list` command
-/// Displays themes grouped by family with descriptions and color blocks
-/// Families displayed in opinionated sort order (Catppuccin → Tokyo Night → Rosé Pine → Kanagawa → Everforest → Dracula → Nord → Gruvbox)
-/// migration: family headings + theme name + description route
-/// through the Roles API; the per-row 4-color palette swatch stays raw
-/// (the swatch IS the visual contract — see `print_color_blocks`).
+/// Options for the read-only theme catalog. The old `theme --list` alias
+/// delegates to the defaults; search and machine output belong to `list`.
+#[derive(clap::Args, Debug, Default)]
+pub struct ListOptions {
+    /// Search ID, display name or family (quote multiple words)
+    pub query: Option<String>,
+    /// Keep only dark or light themes
+    #[arg(long, value_enum)]
+    pub appearance: Option<AppearanceFilter>,
+    /// Emit a versioned JSON catalog, without reading saved settings
+    #[arg(long, conflicts_with = "ids")]
+    pub json: bool,
+    /// Print only canonical theme IDs, one per line
+    #[arg(long, conflicts_with = "json")]
+    pub ids: bool,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AppearanceFilter {
+    Dark,
+    Light,
+}
+
+impl AppearanceFilter {
+    fn matches(self, appearance: ThemeAppearance) -> bool {
+        matches!(
+            (self, appearance),
+            (Self::Dark, ThemeAppearance::Dark) | (Self::Light, ThemeAppearance::Light)
+        )
+    }
+}
+
+fn appearance_name(appearance: ThemeAppearance) -> &'static str {
+    match appearance {
+        ThemeAppearance::Dark => "dark",
+        ThemeAppearance::Light => "light",
+    }
+}
+
+#[derive(Serialize)]
+struct Catalog<'a> {
+    schema_version: u8,
+    query: Option<&'a str>,
+    appearance: Option<AppearanceFilter>,
+    count: usize,
+    themes: Vec<CatalogTheme<'a>>,
+}
+
+#[derive(Serialize)]
+struct CatalogTheme<'a> {
+    id: &'a str,
+    name: &'a str,
+    family: &'a str,
+    appearance: &'static str,
+    description: Option<&'static str>,
+    auto_pair: Option<&'a str>,
+}
+
+fn catalog<'a>(themes: &[&'a ThemeVariant], options: &'a ListOptions) -> Catalog<'a> {
+    Catalog {
+        schema_version: 1,
+        query: options.query.as_deref(),
+        appearance: options.appearance,
+        count: themes.len(),
+        themes: themes
+            .iter()
+            .map(|theme| CatalogTheme {
+                id: &theme.id,
+                name: &theme.name,
+                family: &theme.family,
+                appearance: appearance_name(theme.appearance),
+                description: get_theme_description(&theme.id),
+                auto_pair: theme.auto_pair.as_deref(),
+            })
+            .collect(),
+    }
+}
+
+/// Preserve the original no-argument handler for the compatibility alias.
 pub fn handle(_args: &[&str]) -> Result<()> {
+    handle_with_options(&ListOptions::default())
+}
+
+pub fn handle_with_options(options: &ListOptions) -> Result<()> {
+    // Also validate direct library calls that bypass clap.
+    if options.json && options.ids {
+        return Err(SlateError::InvalidConfig(
+            "`--json` and `--ids` cannot be used together".into(),
+        ));
+    }
     let registry = ThemeRegistry::new()?;
+    let mut themes = registry.search(options.query.as_deref().unwrap_or_default());
+    themes.retain(|theme| {
+        options
+            .appearance
+            .is_none_or(|filter| filter.matches(theme.appearance))
+    });
+    // Keep the established family order and embedded variant order. Unknown
+    // future families remain visible (sorted by name), not silently omitted.
+    themes.sort_by_key(|theme| {
+        (
+            FAMILY_SORT_ORDER
+                .iter()
+                .position(|family| *family == theme.family)
+                .unwrap_or(usize::MAX),
+            theme.family.as_str(),
+        )
+    });
 
-    // Bootstrap Roles up-front so every family heading + row shares the
-    // same byte contract (sketch 003 daily chrome). Graceful
-    // degrade per — plain text when the registry fails to load.
-    let ctx = RenderContext::from_active_theme().ok();
-    let r = ctx.as_ref().map(Roles::new);
+    let output = if options.json {
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&catalog(&themes, options))?
+        )
+    } else if options.ids {
+        themes
+            .iter()
+            .map(|theme| format!("{}\n", theme.id))
+            .collect()
+    } else {
+        // No saved-config read is needed for pipes, NO_COLOR or TERM=dumb.
+        let ctx = (detect_render_mode() != RenderMode::None)
+            .then(|| RenderContext::from_active_theme().ok())
+            .flatten();
+        render_text(&themes, ctx.as_ref())
+    };
 
-    // Blank line above
-    println!();
-
-    // Group themes by family
-    let mut families: HashMap<String, Vec<&crate::theme::ThemeVariant>> = HashMap::new();
-
-    for theme in registry.all() {
-        families
-            .entry(theme.family.clone())
-            .or_default()
-            .push(theme);
+    match std::io::stdout().lock().write_all(output.as_bytes()) {
+        Ok(()) => Ok(()),
+        // Normal shell consumers may stop after the first few IDs/rows.
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(error) => Err(error.into()),
     }
+}
 
-    // Render families in static sort order
-    for family_name in FAMILY_SORT_ORDER {
-        if let Some(themes) = families.get(*family_name) {
-            // Family heading: brand-anchor lavender ◆ + family name (sketch 003)
-            println!("  {}", heading_text(r.as_ref(), family_name));
-
-            for theme in themes {
-                // Each line: 4 color blocks + display name + id + description.
-                // The display name renders through `r.theme_name(...)` so it
-                // carries the active theme's `brand_accent` ; the id and
-                // description route through `r.path(...)` for the dim italic
-                // treatment.
-                print!("{}  ", " ".repeat(2)); // 4 spaces indent per
-                print_color_blocks(&theme.palette);
-                print!("  {}", theme_name_text(r.as_ref(), &theme.name));
-                print!("  {}", path_text(r.as_ref(), &theme.id));
-
-                // Description from get_theme_description
-                if let Some(desc) = get_theme_description(&theme.id) {
-                    print!("  {}", path_text(r.as_ref(), desc));
-                }
-
-                println!();
+fn render_text(themes: &[&ThemeVariant], ctx: Option<&RenderContext<'_>>) -> String {
+    if themes.is_empty() {
+        return "No matching themes. Run `slate list` to see all themes, or broaden the search/filter.\n".into();
+    }
+    let roles = ctx.map(Roles::new);
+    let mode = ctx.map_or(RenderMode::None, |ctx| ctx.mode);
+    let mut output = String::from("\n");
+    let mut previous_family = None;
+    for theme in themes {
+        if previous_family != Some(theme.family.as_str()) {
+            if previous_family.is_some() {
+                output.push('\n');
             }
-
-            println!(); // Blank line between families
+            output.push_str(&format!(
+                "  {}\n",
+                heading_text(roles.as_ref(), &theme.family)
+            ));
+            previous_family = Some(theme.family.as_str());
         }
+        output.push_str("    ");
+        if mode == RenderMode::Truecolor {
+            output.push_str(&color_blocks(&theme.palette));
+            output.push_str("  ");
+        }
+        output.push_str(&format!(
+            "{}  {}  [{}]",
+            theme_name_text(roles.as_ref(), &theme.name),
+            path_text(roles.as_ref(), &theme.id),
+            appearance_name(theme.appearance),
+        ));
+        if let Some(description) = get_theme_description(&theme.id) {
+            output.push_str(&format!("  {}", path_text(roles.as_ref(), description)));
+        }
+        output.push('\n');
     }
-
-    // Blank line below
-    println!();
-
-    Ok(())
+    output.push('\n');
+    output
 }
 
 /// Render `◆ title` via `Roles::heading`, falling back to plain ◆ text
@@ -96,24 +211,23 @@ fn path_text(r: Option<&Roles<'_>>, text: &str) -> String {
     }
 }
 
-// SWATCH-RENDERER: per-row 4-color palette swatch (fg / bg / blue / red).
-// The bytes ARE the palette preview — `\x1b[38;2;R;G;B;m████\x1b[0m` is
-// the visual contract every list row depends on. Migrating chrome text
-// (theme name, description, family heading) was the goal of
-// this helper stays raw by design.
-fn print_color_blocks(palette: &crate::theme::Palette) {
-    let colors = vec![
+// Exact palette swatches are emitted only in truecolor mode.
+// SWATCH-RENDERER: these blocks display the selected palette's exact RGB values.
+fn color_blocks(palette: &crate::theme::Palette) -> String {
+    let colors = [
         &palette.foreground,
         &palette.background,
         &palette.blue,
         &palette.red,
     ];
 
+    let mut output = String::new();
     for hex in colors {
         if let Ok((r, g, b)) = PaletteRenderer::hex_to_rgb(hex) {
-            print!("\x1b[38;2;{};{};{}m████\x1b[0m", r, g, b);
+            output.push_str(&format!("\x1b[38;2;{};{};{}m████\x1b[0m", r, g, b));
         }
     }
+    output
 }
 
 #[cfg(test)]
@@ -125,6 +239,22 @@ mod tests {
     fn test_handle_no_args() {
         let result = handle(&[]);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn catalog_text_respects_render_mode_and_labels_appearance() {
+        let theme = mock_theme();
+        for mode in [RenderMode::None, RenderMode::Basic, RenderMode::Truecolor] {
+            let ctx = mock_context_with_mode(&theme, mode);
+            let output = render_text(&[&theme], Some(&ctx));
+            assert!(output.contains("[dark]"));
+            assert_eq!(output.contains("████"), mode == RenderMode::Truecolor);
+            if mode == RenderMode::None {
+                assert!(!output.contains('\x1b'));
+            }
+        }
+        assert!(!render_text(&[&theme], None).contains('\x1b'));
+        assert!(render_text(&[], None).contains("No matching themes"));
     }
 
     /// chrome contract — family heading carries brand-lavender

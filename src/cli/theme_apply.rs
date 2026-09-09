@@ -1,5 +1,6 @@
 pub use crate::cli::apply::{
-    log_apply_report, SnapshotPolicy, ThemeApplyCoordinator, ThemeApplyReport,
+    log_apply_report, SnapshotPolicy, ThemeApplyCoordinator, ThemeApplyReport, ThemeCommitFailure,
+    ThemeCommitStage,
 };
 use crate::env::SlateEnv;
 use crate::error::Result;

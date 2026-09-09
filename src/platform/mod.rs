@@ -4,6 +4,7 @@ pub mod desktop;
 pub mod fonts;
 pub mod packages;
 pub mod portal;
+pub(crate) mod process_output;
 pub mod share;
 pub mod shell;
 pub mod version_check;

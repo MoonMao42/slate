@@ -9,28 +9,30 @@ use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::theme::ThemeVariant;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(test)]
+use std::{fs, path::Path};
+
+pub(crate) mod integration;
+mod paths;
 
 /// Alacritty adapter implementing the ToolAdapter trait.
 pub struct AlacrittyAdapter;
 
 impl AlacrittyAdapter {
-    fn config_home_with_env(env: &SlateEnv) -> PathBuf {
-        env.xdg_config_home().to_path_buf()
-    }
-
-    /// Resolve Alacritty config path, respecting ALACRITTY_SOCKET_PATH and XDG_CONFIG_HOME.
+    /// Resolve the first user-level TOML candidate. A socket path is not a
+    /// configuration override; per-process --config paths are not inferred.
     fn resolve_config_path() -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
         Ok(Self::resolve_config_path_with_env(&env))
     }
 
     fn resolve_config_path_with_env(env: &SlateEnv) -> PathBuf {
-        let config_home = Self::config_home_with_env(env);
+        paths::resolve(env)
+    }
 
-        // Alacritty default: ~/.config/alacritty/alacritty.toml
-        config_home.join("alacritty").join("alacritty.toml")
+    pub(crate) fn integration_candidate_paths_with_env(env: &SlateEnv) -> Vec<PathBuf> {
+        paths::candidates(env)
     }
 
     pub(crate) fn integration_config_path_with_env(env: &SlateEnv) -> PathBuf {
@@ -69,117 +71,16 @@ impl AlacrittyAdapter {
         )
     }
 
-    /// Ensure integration file includes managed path in import array (idempotent).
-    /// Uses toml_edit AST to safely modify the import array.
-    /// IMPORTANT: This function does NOT create the integration file if it doesn't exist.
-    /// The file must already exist (created by setup wizard or user).
-    /// This prevents slate from destructively creating a minimal config that could override
-    /// system-level settings.
+    #[cfg(test)]
     fn ensure_integration_includes_managed(
         integration_path: &Path,
         managed_path: &Path,
     ) -> Result<()> {
-        let managed_str = managed_path.display().to_string();
-
-        // Integration file must already exist; we won't create it implicitly
-        if !integration_path.exists() {
-            return Ok(());
+        if let Some(document) = integration::Document::read(integration_path)? {
+            document
+                .prepare(&[managed_path.to_owned()], true)?
+                .publish()?;
         }
-
-        // Read existing integration file. Byte-first read + explicit UTF-8
-        // check so a stray non-UTF-8 byte in alacritty.toml (issue #3)
-        // produces an actionable "which file, where" error instead of a
-        // bare IO "stream did not contain valid UTF-8".
-        let bytes = fs::read(integration_path).map_err(|e| {
-            SlateError::ConfigReadError(integration_path.display().to_string(), e.to_string())
-        })?;
-        let content = String::from_utf8(bytes).map_err(|e| {
-            SlateError::ConfigReadError(
-                integration_path.display().to_string(),
-                format!(
-                    "contains non-UTF-8 bytes at byte offset {} — slate cannot parse this file. \
-                     Inspect with `xxd {} | head` around that offset and remove the stray bytes.",
-                    e.utf8_error().valid_up_to(),
-                    integration_path.display()
-                ),
-            )
-        })?;
-
-        // Parse as TOML AST (preserves comments and formatting)
-        let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e| {
-            SlateError::InvalidConfig(format!("Failed to parse Alacritty TOML: {}", e))
-        })?;
-
-        // Remove [font.normal] from main config if present,
-        // since slate manages fonts via the imported colors.toml.
-        // Alacritty's main file always overrides imports, so leftover
-        // font settings here would shadow our managed values.
-        let mut needs_write = false;
-        if let Some(font_table) = doc.get_mut("font") {
-            if let Some(tbl) = font_table.as_table_mut() {
-                if tbl.contains_key("normal") {
-                    tbl.remove("normal");
-                    needs_write = true;
-                }
-            }
-        }
-        // Remove empty [font] table after clearing children
-        if doc
-            .get("font")
-            .and_then(|f| f.as_table())
-            .is_some_and(|t| t.is_empty())
-        {
-            doc.remove("font");
-        }
-
-        // Migrate deprecated top-level `import` to `[general] import`
-        if doc.get("import").is_some() {
-            let old_import = doc.remove("import").unwrap();
-            if doc.get("general").is_none() {
-                doc["general"] = toml_edit::Item::Table(toml_edit::Table::new());
-            }
-            if let Some(general) = doc["general"].as_table_mut() {
-                general.insert("import", old_import);
-            }
-            needs_write = true;
-        }
-
-        // Get or create [general].import array
-        if doc.get("general").is_none() {
-            doc["general"] = toml_edit::Item::Table(toml_edit::Table::new());
-        }
-        if let Some(general) = doc["general"].as_table_mut() {
-            if general.get("import").is_none() {
-                general.insert(
-                    "import",
-                    toml_edit::Item::Value(toml_edit::Value::Array(toml_edit::Array::new())),
-                );
-            }
-        }
-
-        let import_array = doc["general"]["import"].as_array_mut().ok_or_else(|| {
-            SlateError::InvalidConfig(
-                "Alacritty 'general.import' field is not an array".to_string(),
-            )
-        })?;
-
-        // Idempotent: check if managed path already present
-        let already_present = import_array
-            .iter()
-            .any(|v| v.as_str().is_some_and(|s| s == managed_str));
-
-        if !already_present {
-            import_array.push(managed_str);
-            needs_write = true;
-        }
-
-        if !needs_write {
-            return Ok(());
-        }
-
-        // Atomic write back to file via the shared helper.
-        crate::config::atomic_write_synced(integration_path, doc.to_string().as_bytes())?;
-
         Ok(())
     }
 
@@ -187,22 +88,22 @@ impl AlacrittyAdapter {
     /// Writes only to dedicated font.toml file (not colors.toml).
     /// Does not touch colors or call theme apply.
     pub fn apply_font_only(env: &SlateEnv, font_name: &str) -> Result<()> {
-        let config_manager = ConfigManager::with_env(env)?;
+        let font_content = super::font_config::alacritty(font_name)?;
+        let config_manager = ConfigManager::from_env_paths(env);
         let integration_path = Self::resolve_config_path_with_env(env);
+        let managed_font_path = config_manager.managed_dir("alacritty").join("font.toml");
+        let prepared = integration::Document::read(&integration_path)?
+            .map(|document| document.prepare(&[managed_font_path], true))
+            .transpose()?;
+        if let Some(prepared) = &prepared {
+            prepared.verify()?;
+        }
 
         // Write only the font section to dedicated font.toml
-        let font_content = format!(
-            "[font.normal]
-family = \"{}\"
-",
-            font_name
-        );
         config_manager.write_managed_file("alacritty", "font.toml", &font_content)?;
 
-        // Ensure integration file includes the font.toml file
-        if integration_path.exists() {
-            let managed_font_path = config_manager.managed_dir("alacritty").join("font.toml");
-            Self::ensure_integration_includes_managed(&integration_path, &managed_font_path)?;
+        if let Some(prepared) = prepared {
+            prepared.publish()?;
         }
 
         Ok(())
@@ -252,9 +153,9 @@ impl ToolAdapter for AlacrittyAdapter {
     /// `silent_preview_apply`'s signature a no-op for this adapter).
     fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
         let integration_path = Self::resolve_config_path_with_env(env);
-        if !integration_path.exists() {
+        let Some(document) = integration::Document::read(&integration_path)? else {
             return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
-        }
+        };
 
         // Validate theme has palette data
         theme.palette.validate()?;
@@ -264,34 +165,32 @@ impl ToolAdapter for AlacrittyAdapter {
 
         // Step 2b: Add font-family — prefer user's saved choice, fallback to detection
         let mut final_colors_content = colors_content;
-        let config_mgr = ConfigManager::with_env(env)?;
-        let chosen_font = config_mgr.get_current_font().ok().flatten();
+        let config_mgr = ConfigManager::from_env_paths(env);
+        let chosen_font = config_mgr.get_current_font()?;
         let font_family = chosen_font.or_else(|| {
-            crate::adapter::font::FontAdapter::detect_installed_fonts()
+            crate::adapter::font::FontAdapter::preferred_installed_font_with_env(env)
                 .ok()
-                .and_then(|f| f.into_iter().next())
+                .flatten()
         });
+        let has_managed_font = font_family.is_some();
         if let Some(family) = font_family {
-            let font_section = format!("[font.normal]\nfamily = \"{}\"\n\n", family);
-            final_colors_content = font_section + &final_colors_content;
+            let font_section = super::font_config::alacritty(&family)?;
+            final_colors_content = font_section + "\n" + &final_colors_content;
         }
-        // Write managed colors file
-        config_mgr.write_managed_file("alacritty", "colors.toml", &final_colors_content)?;
         let current_opacity = config_mgr.get_current_opacity_preset()?;
-        write_opacity_config(env, current_opacity)?;
-
-        // Ensure integration file includes managed colors path
         let managed_colors_path = config_mgr.managed_dir("alacritty").join("colors.toml");
         let managed_opacity_path = config_mgr.managed_dir("alacritty").join("opacity.toml");
+        let prepared = document.prepare(
+            &[managed_colors_path, managed_opacity_path],
+            has_managed_font,
+        )?;
+        prepared.verify()?;
 
-        Self::ensure_integration_includes_managed(&integration_path, &managed_colors_path)?;
-        Self::ensure_integration_includes_managed(&integration_path, &managed_opacity_path)?;
-
-        // Touch the main config to trigger Alacritty's live_config_reload,
-        // which only watches the main file, not imported files.
-        if integration_path.exists() {
-            let _ = fs::OpenOptions::new().append(true).open(&integration_path);
-        }
+        // All local inputs are validated before the first managed write. These
+        // publications are individually atomic, not a multi-file transaction.
+        config_mgr.write_managed_file("alacritty", "colors.toml", &final_colors_content)?;
+        write_opacity_config(env, current_opacity)?;
+        prepared.publish()?;
 
         // Alacritty's live_config_reload picks up the new colors in the
         // currently-open window — no new shell required.
@@ -315,20 +214,7 @@ impl ToolAdapter for AlacrittyAdapter {
 /// Writes [window] opacity = {f32} to managed config file.
 /// Path: ~/.config/slate/managed/alacritty/opacity.toml
 pub fn write_opacity_config(env: &SlateEnv, opacity: crate::opacity::OpacityPreset) -> Result<()> {
-    let config_manager = ConfigManager::with_env(env)?;
-
-    let opacity_value = opacity.to_f32();
-    let config_content = format!(
-        "[window]
-opacity = {}
-",
-        opacity_value
-    );
-
-    // Write to managed file, will be idempotently included in import array
-    config_manager.write_managed_file("alacritty", "opacity.toml", &config_content)?;
-
-    Ok(())
+    crate::opacity::ManagedFile::AlacrittyOpacity.write(env, opacity)
 }
 
 #[cfg(test)]
@@ -448,6 +334,140 @@ mod tests {
 
         let content2 = fs::read_to_string(&temp_path).unwrap();
         assert_eq!(content1, content2);
+    }
+
+    #[test]
+    fn integration_preserves_both_import_locations_and_their_order() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("alacritty.toml");
+        let managed = td.path().join("colors.toml");
+        fs::write(&path, "# legacy list\nimport = ['base.toml', 'override.toml']\n[general]\n# deliberately shadowed list\nimport = ['inactive.toml']\nlive_config_reload = false\n").unwrap();
+        AlacrittyAdapter::ensure_integration_includes_managed(&path, &managed).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        let doc: toml_edit::DocumentMut = text.parse().unwrap();
+        assert_eq!(
+            doc.get("import")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["base.toml", "override.toml", managed.to_str().unwrap()]
+        );
+        assert_eq!(doc["general"]["import"][0].as_str(), Some("inactive.toml"));
+        assert_eq!(doc["general"]["live_config_reload"].as_bool(), Some(false));
+        assert!(text.contains("# legacy list"));
+        assert!(text.contains("# deliberately shadowed list"));
+    }
+
+    #[test]
+    fn alacritty_resolution_reuses_native_user_paths_in_precedence_order() {
+        let td = tempfile::tempdir().unwrap();
+        let home = td.path().join("home");
+        let xdg = td.path().join("custom-config");
+        fs::create_dir_all(&home).unwrap();
+        let env = SlateEnv::from_vars(|key| match key {
+            "HOME" => Some(home.clone().into_os_string()),
+            "XDG_CONFIG_HOME" => Some(xdg.clone().into_os_string()),
+            _ => None,
+        })
+        .unwrap();
+        let paths = [
+            xdg.join("alacritty/alacritty.toml"),
+            xdg.join("alacritty.toml"),
+            home.join(".config/alacritty/alacritty.toml"),
+            home.join(".alacritty.toml"),
+        ];
+        assert_eq!(
+            AlacrittyAdapter::resolve_config_path_with_env(&env),
+            paths[0]
+        );
+        for path in paths.iter().rev() {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "# user\n").unwrap();
+            assert_eq!(AlacrittyAdapter::resolve_config_path_with_env(&env), *path);
+        }
+    }
+
+    #[test]
+    fn alacritty_resolution_deduplicates_directory_aliases_and_keeps_obstructions() {
+        use std::os::unix::fs::symlink;
+        let td = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(td.path().to_owned());
+        assert_eq!(
+            AlacrittyAdapter::integration_candidate_paths_with_env(&env).len(),
+            3
+        );
+        let default = env.xdg_config_home().join("alacritty/alacritty.toml");
+        fs::create_dir_all(default.parent().unwrap()).unwrap();
+        fs::write(env.home().join(".alacritty.toml"), "# lower priority\n").unwrap();
+        let missing = env.home().join("missing-target");
+        symlink(&missing, &default).unwrap();
+        assert_eq!(
+            AlacrittyAdapter::resolve_config_path_with_env(&env),
+            default
+        );
+        assert!(integration::Document::read(&default).is_err());
+        assert!(!missing.exists());
+
+        let alias = env.home().join("xdg-alias");
+        symlink(env.xdg_config_home(), &alias).unwrap();
+        let aliased = SlateEnv::from_vars(|key| match key {
+            "HOME" => Some(env.home().as_os_str().to_owned()),
+            "XDG_CONFIG_HOME" => Some(alias.clone().into_os_string()),
+            _ => None,
+        })
+        .unwrap();
+        let paths = AlacrittyAdapter::integration_candidate_paths_with_env(&aliased);
+        assert_eq!(
+            paths.len(),
+            3,
+            "directory aliases must not duplicate snapshot targets"
+        );
+        assert_eq!(paths[0], alias.join("alacritty/alacritty.toml"));
+        assert_eq!(
+            AlacrittyAdapter::resolve_config_path_with_env(&aliased),
+            paths[0]
+        );
+    }
+
+    #[test]
+    fn integration_supports_inline_general_without_losing_imports() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("alacritty.toml");
+        let managed = td.path().join("colors.toml");
+        fs::write(
+            &path,
+            "general = { import = ['user.toml'], live_config_reload = false }\n",
+        )
+        .unwrap();
+        AlacrittyAdapter::ensure_integration_includes_managed(&path, &managed).unwrap();
+        let doc: toml_edit::DocumentMut = fs::read_to_string(&path).unwrap().parse().unwrap();
+        assert_eq!(doc["general"]["import"][0].as_str(), Some("user.toml"));
+        assert_eq!(doc["general"]["import"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn invalid_integration_fails_before_managed_output_and_omits_source() {
+        let td = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(td.path().to_owned());
+        let path = AlacrittyAdapter::resolve_config_path_with_env(&env);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "private_key = 'PRIVATE_CONTENT'\n[broken TOML").unwrap();
+        let error = AlacrittyAdapter
+            .apply_theme_with_env(&create_test_theme(), &env)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            !env.config_dir().exists(),
+            "invalid config must not initialize managed storage"
+        );
+        assert!(
+            !env.slate_cache_dir().exists(),
+            "invalid config must not initialize cache"
+        );
+        assert!(!error.contains("PRIVATE_CONTENT"));
     }
 
     #[test]

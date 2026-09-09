@@ -3,6 +3,9 @@ use crate::platform::capabilities::{CapabilityReport, SupportLevel};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+pub(crate) mod image_file;
+use image_file::CapturedImage;
+
 const GNOME_FALLBACK_REASON: &str =
     "XDG desktop portal screenshot capture was unavailable, so Slate fell back to GNOME screenshot.";
 const UNSUPPORTED_CAPTURE_REASON: &str =
@@ -78,29 +81,73 @@ pub fn capability_report() -> CapabilityReport {
 }
 
 pub fn capture_interactive(output_path: &Path) -> Result<ShareCaptureResult> {
-    if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent)?;
+    match std::fs::symlink_metadata(output_path) {
+        Ok(_) => {
+            return Err(SlateError::PlatformError(
+                "Screenshot output already exists; choose an unused path.".into(),
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
+    match capture_draft()? {
+        CaptureDraft::Captured(image) => {
+            image.save_new(output_path)?;
+            Ok(ShareCaptureResult {
+                captured: true,
+                reason: None,
+            })
+        }
+        CaptureDraft::Unavailable(result) => Ok(result),
+    }
+}
 
-    match detect_backend() {
+pub(crate) enum CaptureDraft {
+    Captured(CapturedImage),
+    Unavailable(ShareCaptureResult),
+}
+
+pub(crate) fn capture_draft() -> Result<CaptureDraft> {
+    draft_with(|path| capture_backend(detect_backend(), path))
+}
+
+fn draft_with(capture: impl FnOnce(&Path) -> Result<ShareCaptureResult>) -> Result<CaptureDraft> {
+    let scratch = tempfile::Builder::new()
+        .prefix("slate-capture-")
+        .tempdir()?;
+    let path = scratch.path().join("capture.png");
+    let result = capture(&path)?;
+    if !result.captured {
+        return Ok(CaptureDraft::Unavailable(result));
+    }
+    match CapturedImage::read(&path)? {
+        Some(image) => Ok(CaptureDraft::Captured(image)),
+        None => Ok(CaptureDraft::Unavailable(ShareCaptureResult {
+            captured: false,
+            reason: Some(
+                "Screenshot cancelled or backend produced no image; share URI is still available."
+                    .into(),
+            ),
+        })),
+    }
+}
+
+fn capture_backend(backend: ShareCaptureBackend, output_path: &Path) -> Result<ShareCaptureResult> {
+    match backend {
         ShareCaptureBackend::MacosScreenCapture => {
-            let status = Command::new("screencapture")
-                .args([
-                    "-w",
-                    "-o",
-                    output_path.to_str().unwrap_or("slate-share.png"),
-                ])
-                .status();
-            match status {
-                Ok(status) if status.success() => Ok(ShareCaptureResult {
-                    captured: true,
-                    reason: None,
-                }),
-                _ => Ok(ShareCaptureResult {
-                    captured: false,
-                    reason: Some(MACOS_CANCELLED_REASON.to_string()),
-                }),
-            }
+            let binary = crate::detection::command_in_actual_path("screencapture")
+                .or_else(|| crate::detection::command_path("screencapture"))
+                .ok_or_else(|| {
+                    SlateError::PlatformError(
+                        "Screenshot backend screencapture is unavailable.".into(),
+                    )
+                })?;
+            native_capture(
+                &binary,
+                &["-w", "-o", "-t", "png"],
+                output_path,
+                MACOS_CANCELLED_REASON,
+            )
         }
         ShareCaptureBackend::XdgDesktopPortal => {
             match crate::platform::portal::take_interactive_screenshot(output_path)? {
@@ -115,40 +162,16 @@ pub fn capture_interactive(output_path: &Path) -> Result<ShareCaptureResult> {
             }
         }
         ShareCaptureBackend::GnomeScreenshot => {
-            let Some(command) = crate::detection::command_path("gnome-screenshot") else {
+            let Some(command) = crate::detection::command_in_actual_path("gnome-screenshot")
+                .or_else(|| crate::detection::command_path("gnome-screenshot"))
+            else {
                 return Ok(ShareCaptureResult {
                     captured: false,
                     reason: Some(GNOME_MISSING_REASON.to_string()),
                 });
             };
 
-            let status = Command::new(command)
-                .args([
-                    "-a",
-                    "-f",
-                    output_path.to_str().unwrap_or("slate-share.png"),
-                ])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .map_err(|err| {
-                    SlateError::PlatformError(format!(
-                        "Failed to launch GNOME screenshot backend: {}",
-                        err
-                    ))
-                })?;
-
-            if status.success() {
-                Ok(ShareCaptureResult {
-                    captured: true,
-                    reason: None,
-                })
-            } else {
-                Ok(ShareCaptureResult {
-                    captured: false,
-                    reason: Some(GNOME_CANCELLED_REASON.to_string()),
-                })
-            }
+            native_capture(&command, &["-a", "-f"], output_path, GNOME_CANCELLED_REASON)
         }
         ShareCaptureBackend::Unsupported => Ok(ShareCaptureResult {
             captured: false,
@@ -156,6 +179,34 @@ pub fn capture_interactive(output_path: &Path) -> Result<ShareCaptureResult> {
         }),
     }
 }
+
+fn native_capture(
+    binary: &Path,
+    args: &[&str],
+    output: &Path,
+    cancelled: &str,
+) -> Result<ShareCaptureResult> {
+    let status = Command::new(binary)
+        .args(args)
+        .arg(output)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|_| {
+            SlateError::PlatformError(
+                "Failed to launch screenshot backend; native output omitted.".into(),
+            )
+        })?;
+    Ok(ShareCaptureResult {
+        captured: status.success(),
+        reason: (!status.success()).then(|| cancelled.into()),
+    })
+}
+
+#[cfg(test)]
+#[path = "share/capture_tests.rs"]
+mod capture_tests;
 
 #[cfg(test)]
 mod tests {

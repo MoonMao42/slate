@@ -85,7 +85,7 @@ pub fn detect_capabilities() -> CapabilitySnapshot {
     }
 }
 
-fn os_capability_report() -> CapabilityReport {
+pub(crate) fn os_capability_report() -> CapabilityReport {
     if cfg!(target_os = "macos") {
         CapabilityReport::supported("macos")
     } else if cfg!(target_os = "linux") {
@@ -98,7 +98,7 @@ fn os_capability_report() -> CapabilityReport {
     }
 }
 
-fn arch_capability_report() -> CapabilityReport {
+pub(crate) fn arch_capability_report() -> CapabilityReport {
     if cfg!(target_arch = "x86_64") {
         CapabilityReport::supported("x86_64")
     } else if cfg!(target_arch = "aarch64") {
@@ -112,6 +112,12 @@ fn arch_capability_report() -> CapabilityReport {
 }
 
 pub fn terminal_capability_report(profile: &TerminalProfile) -> CapabilityReport {
+    if profile.session().is_remote() {
+        return CapabilityReport::best_effort("ssh", profile.compatibility_summary());
+    }
+    if profile.session().is_multiplexed() && profile.kind() == TerminalKind::Unknown {
+        return CapabilityReport::best_effort("tmux", profile.compatibility_summary());
+    }
     match profile.kind() {
         TerminalKind::Ghostty => CapabilityReport::supported("ghostty"),
         TerminalKind::Kitty => CapabilityReport::supported("kitty"),

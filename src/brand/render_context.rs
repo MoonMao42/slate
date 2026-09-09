@@ -84,7 +84,8 @@ impl<'a> RenderContext<'a> {
 }
 
 fn current_theme_id() -> Result<Option<String>> {
-    ConfigManager::new()?.get_current_theme()
+    let env = crate::env::SlateEnv::from_process()?;
+    ConfigManager::from_env_paths(&env).get_current_theme()
 }
 
 fn resolve_active_theme_id<'a>(

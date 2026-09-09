@@ -5,7 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-09-09
+
+### Added
+
+- Chinese and English menus, with first-run language selection and a saved language preference.
+- Six independently selectable prompt layouts: Rainbow, Minimal, Compact, Classic, Focus and Branch.
+- A tool hub with workflow groups, availability checks, reviewed installation and single-tool theme sync.
+- Theme adapters for btop, Yazi and Zellij, plus expanded Fastfetch, Eza and Lazygit support.
+- File-only diagnostics for supported tools, JSON reports and shell completion.
+- Previewable configuration recovery and file restore points.
+
+### Improved
+
+- Circular menu navigation, consistent return behavior, resize handling and scrollable diagnostic pages.
+- Theme preview confirmation and cancellation, terminal-state cleanup and quieter routine output.
+- Auto-theme helper preparation, permissions diagnostics and quiet shell startup.
+- Font discovery, plain-font fallbacks and custom configuration paths on macOS and Linux.
+- Preservation of personal settings, explicit consent before installations and protection against stale configuration writes.
+- Bounded configuration reads and subprocess output; unsafe paths and malformed files are reported without exposing their contents.
+- Local build and installation scripts with smaller development artifacts and verified binary backups.
+
+### Notes
+
+- Finding an application or saving its configuration does not prove its live appearance. Some tools require reopening.
+- Recoverable partial writes are reported with recovery guidance rather than hidden.
 
 ## [0.4.0] - 2026-06-27
 
@@ -215,7 +239,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Three-tier config architecture (managed / integration / user override)
 - Homebrew tap distribution (`brew install MoonMao42/tap/slate-cli`)
 
-[Unreleased]: https://github.com/MoonMao42/slate/compare/v0.4.0...HEAD
+[0.5.0]: https://github.com/MoonMao42/slate/releases/tag/v0.5.0
 [0.4.0]: https://github.com/MoonMao42/slate/releases/tag/v0.4.0
 [0.3.4]: https://github.com/MoonMao42/slate/releases/tag/v0.3.4
 [0.3.3]: https://github.com/MoonMao42/slate/releases/tag/v0.3.3

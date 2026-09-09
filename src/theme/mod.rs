@@ -11,6 +11,8 @@ pub mod gruvbox;
 pub mod kanagawa;
 pub mod nord;
 pub mod rose_pine;
+mod search;
+mod suggestions;
 pub mod tokyo_night;
 
 /// Shared default theme ID used when Slate needs a fallback theme.
@@ -724,6 +726,12 @@ mod tests {
                 .get("bat")
                 .unwrap_or_else(|| panic!("theme '{}' has no bat tool_ref", theme.id));
             let expected = format!("slate-{}", theme.id);
+            assert_eq!(
+                theme.tool_refs.get("delta"),
+                Some(bat_ref),
+                "Delta must select the generated Bat theme for {}",
+                theme.id
+            );
             assert_eq!(
                 bat_ref, &expected,
                 "bat tool_ref for theme '{}' must be '{}' (got '{}')",

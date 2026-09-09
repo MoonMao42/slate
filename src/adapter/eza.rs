@@ -4,7 +4,6 @@
 //! environment variable to be exported by shell init.
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
-use crate::config::ConfigManager;
 use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
@@ -15,38 +14,135 @@ use std::path::PathBuf;
 pub struct EzaAdapter;
 
 impl EzaAdapter {
-    /// Get config home directory (XDG default)
-    fn config_home() -> Result<PathBuf> {
-        let env = SlateEnv::from_process()?;
-        Ok(env.xdg_config_home().to_path_buf())
+    pub fn theme_path(env: &SlateEnv) -> PathBuf {
+        env.managed_file("managed/eza/theme.yml")
     }
-
     /// Render Palette into eza YAML theme structure.
     /// Mapping guided by eza color semantics:
     /// foreground/background: text and background colors
     /// ANSI colors: map to directory/file/permission categories
-    fn render_eza_yaml(theme: &ThemeVariant) -> String {
-        let palette = &theme.palette;
-
-        format!(
-            "colors:\n  text: \"{}\"\n  background: \"{}\"\n  errors: \"{}\"\n  warning: \"{}\"\n  success: \"{}\"\n  info: \"{}\"\n  special: \"{}\"\n  modified: \"{}\"\n",
-            palette.foreground,
-            palette.background,
-            palette.red,
-            palette.yellow,
-            palette.green,
-            palette.blue,
-            palette.cyan,
-            palette.magenta,
-        )
+    pub(crate) fn render_eza_yaml(theme: &ThemeVariant) -> String {
+        use crate::cli::picker::preview_panel::SemanticColor;
+        let p = &theme.palette;
+        let directory = p.resolve(SemanticColor::FileDir);
+        let link = p.resolve(SemanticColor::FileSymlink);
+        let executable = p.resolve(SemanticColor::FileExec);
+        let special = p.resolve(SemanticColor::FileConfig);
+        let muted = p.resolve(SemanticColor::Muted);
+        // Native eza theme schema: style objects below named role groups.
+        // A generic `colors:` map is silently ignored by eza 0.23.5.
+        // Do not set icons, backgrounds, file associations or listing layout.
+        let mut out = String::from("# Managed by Slate: eza foreground colors.\n");
+        for (group, fields) in [
+            (
+                "filekinds",
+                vec![
+                    ("normal", p.foreground.as_str()),
+                    ("directory", &directory),
+                    ("symlink", &link),
+                    ("pipe", &special),
+                    ("block_device", &special),
+                    ("char_device", &special),
+                    ("socket", &executable),
+                    ("special", &special),
+                    ("executable", &executable),
+                    ("mount_point", &directory),
+                ],
+            ),
+            (
+                "perms",
+                vec![
+                    ("user_read", &p.green),
+                    ("user_write", &p.yellow),
+                    ("user_execute_file", &p.red),
+                    ("user_execute_other", &p.red),
+                    ("group_read", &p.green),
+                    ("group_write", &p.yellow),
+                    ("group_execute", &p.red),
+                    ("other_read", &p.green),
+                    ("other_write", &p.yellow),
+                    ("other_execute", &p.red),
+                    ("special_user_file", &p.magenta),
+                    ("special_other", &p.magenta),
+                    ("attribute", &muted),
+                ],
+            ),
+            (
+                "size",
+                vec![
+                    ("major", &p.yellow),
+                    ("minor", &p.yellow),
+                    ("number_byte", &p.foreground),
+                    ("number_kilo", &p.green),
+                    ("number_mega", &p.yellow),
+                    ("number_giga", &p.red),
+                    ("number_huge", &p.magenta),
+                    ("unit_byte", &muted),
+                    ("unit_kilo", &muted),
+                    ("unit_mega", &muted),
+                    ("unit_giga", &muted),
+                    ("unit_huge", &muted),
+                ],
+            ),
+            (
+                "links",
+                vec![("normal", &muted), ("multi_link_file", &p.magenta)],
+            ),
+            (
+                "users",
+                vec![
+                    ("user_you", &p.foreground),
+                    ("user_root", &p.red),
+                    ("user_other", &muted),
+                    ("group_yours", &p.foreground),
+                    ("group_root", &p.red),
+                    ("group_other", &muted),
+                ],
+            ),
+            (
+                "git",
+                vec![
+                    ("new", &p.green),
+                    ("modified", &p.yellow),
+                    ("deleted", &p.red),
+                    ("renamed", &p.blue),
+                    ("ignored", &muted),
+                    ("conflicted", &p.red),
+                ],
+            ),
+        ] {
+            out.push_str(&format!("{group}:\n"));
+            for (key, color) in fields {
+                out.push_str(&format!("  {key}: {{foreground: '{color}'}}\n"));
+            }
+        }
+        for (key, color) in [
+            ("date", &muted),
+            ("inode", &muted),
+            ("blocks", &muted),
+            ("punctuation", &muted),
+            ("header", &p.foreground),
+            ("octal", &special),
+            ("flags", &muted),
+            ("control_char", &p.red),
+            ("broken_symlink", &p.red),
+            ("broken_path_overlay", &p.red),
+        ] {
+            out.push_str(&format!("{key}: {{foreground: '{color}'}}\n"));
+        }
+        out
     }
 
     fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
         theme.palette.validate()?;
 
         let yaml_content = Self::render_eza_yaml(theme);
-        let config_manager = ConfigManager::with_env(env)?;
-        config_manager.write_managed_file("eza", "theme.yml", &yaml_content)?;
+        super::managed_fragment::write(
+            env,
+            &Self::theme_path(env),
+            yaml_content.as_bytes(),
+            "eza",
+        )?;
 
         // eza picks up EZA_CONFIG_DIR at process launch — already-running
         // shells won't see the new theme until they re-exec.
@@ -60,18 +156,15 @@ impl ToolAdapter for EzaAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        Ok(detection::detect_tool_presence(self.tool_name()).installed)
+        self.is_installed_with_env(&SlateEnv::from_process()?)
+    }
+
+    fn is_installed_with_env(&self, env: &SlateEnv) -> Result<bool> {
+        Ok(detection::detect_tool_presence_with_env(self.tool_name(), env).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
-        let config_home = Self::config_home()?;
-
-        // Respect EZA_CONFIG_DIR env var if set
-        if let Ok(custom_dir) = std::env::var("EZA_CONFIG_DIR") {
-            Ok(PathBuf::from(custom_dir))
-        } else {
-            Ok(config_home.join("eza"))
-        }
+        Ok(SlateEnv::from_process()?.eza_config_home().to_owned())
     }
 
     fn managed_config_path(&self) -> PathBuf {
@@ -115,6 +208,201 @@ mod tests {
     use super::*;
 
     #[test]
+    fn eza_paths_capture_overrides_without_leaking_into_isolated_profiles() {
+        use std::{cell::RefCell, ffi::OsString, os::unix::ffi::OsStringExt};
+        let temp = tempfile::tempdir().unwrap();
+        let custom = RefCell::new(None::<OsString>);
+        let resolve = |isolated| {
+            SlateEnv::from_vars(|name| match name {
+                "HOME" => Some(temp.path().as_os_str().to_owned()),
+                "SLATE_HOME" if isolated => Some(temp.path().join("isolated").into_os_string()),
+                "XDG_CONFIG_HOME" => Some(temp.path().join("xdg").into_os_string()),
+                "EZA_CONFIG_DIR" => custom.borrow().clone(),
+                _ => None,
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            resolve(false).eza_config_home(),
+            temp.path().join("xdg/eza")
+        );
+        for value in [
+            OsString::from("relative-palette"),
+            OsString::from(""),
+            temp.path().join("custom palette").into_os_string(),
+            OsString::from_vec(b"/private/palette-\xff".to_vec()),
+        ] {
+            *custom.borrow_mut() = Some(value.clone());
+            let captured = resolve(false);
+            let isolated = resolve(true);
+            *custom.borrow_mut() = Some(OsString::from("changed-later"));
+            assert_eq!(captured.eza_config_home().as_os_str(), value);
+            assert_eq!(
+                isolated.eza_config_home(),
+                temp.path().join("isolated/.config/eza")
+            );
+        }
+        let injected = SlateEnv::with_home(temp.path().to_owned());
+        assert_eq!(injected.eza_config_home(), temp.path().join(".config/eza"));
+        assert_eq!(
+            EzaAdapter.is_installed_with_env(&injected).unwrap(),
+            detection::detect_tool_presence_with_env("eza", &injected).installed
+        );
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    #[ignore = "requires explicit SLATE_EZA_BINARY; native long listing in a private directory"]
+    fn eza_native_long_listing_uses_palette_permissions_and_byte_size() {
+        use std::{fs, os::unix::fs::PermissionsExt, time::Duration};
+        let binary = fs::canonicalize(
+            std::env::var_os("SLATE_EZA_BINARY").expect("set native eza explicitly"),
+        )
+        .unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_owned());
+        let file = temp.path().join("sample");
+        fs::write(&file, "1234567").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o754)).unwrap();
+        for theme in crate::theme::ThemeRegistry::new().unwrap().all() {
+            EzaAdapter.apply_theme_with_env(theme, &env).unwrap();
+            let result = assert_cmd::Command::new(&binary)
+                .env_clear()
+                .env("HOME", env.home())
+                .env("EZA_CONFIG_DIR", env.managed_file("managed/eza"))
+                .args([
+                    "--color=always",
+                    "--icons=never",
+                    "--long",
+                    "--bytes",
+                    "--no-user",
+                    "--no-time",
+                ])
+                .arg(&file)
+                .timeout(Duration::from_secs(5))
+                .assert()
+                .success()
+                .stderr("");
+            let output = String::from_utf8_lossy(&result.get_output().stdout);
+            assert!(output.contains("sample"), "listing must render the fixture");
+            for (text, color) in [
+                ("r", &theme.palette.green),
+                ("w", &theme.palette.yellow),
+                ("x", &theme.palette.red),
+                ("7", &theme.palette.foreground),
+            ] {
+                let (r, g, b) =
+                    crate::adapter::palette_renderer::PaletteRenderer::hex_to_rgb(color).unwrap();
+                let pattern = format!(r"\x1b\[[0-9;]*38;2;{r};{g};{b}(?:;[0-9]+)*m{text}");
+                assert!(
+                    regex::Regex::new(&pattern).unwrap().is_match(&output),
+                    "{} {text}: {output:?}",
+                    theme.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires explicit SLATE_EZA_BINARY; native colors in a private directory"]
+    fn eza_native_output_uses_every_generated_palette_and_respects_color_overrides() {
+        use crate::cli::picker::preview_panel::SemanticColor;
+        use std::{
+            fs,
+            os::unix::fs::{symlink, PermissionsExt},
+            time::Duration,
+        };
+        let binary = fs::canonicalize(
+            std::env::var_os("SLATE_EZA_BINARY").expect("set native eza explicitly"),
+        )
+        .unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_owned());
+        let files = temp.path().join("files");
+        fs::create_dir_all(files.join("folder")).unwrap();
+        fs::write(files.join("plain"), "private fixture").unwrap();
+        fs::write(files.join("executable"), "never execute this").unwrap();
+        fs::set_permissions(files.join("executable"), fs::Permissions::from_mode(0o755)).unwrap();
+        symlink("plain", files.join("linked")).unwrap();
+        let managed = env.managed_file("managed/eza");
+        let run = |override_colors: Option<&str>| {
+            let mut cmd = assert_cmd::Command::new(&binary);
+            cmd.env_clear()
+                .env("HOME", env.home())
+                .env("EZA_CONFIG_DIR", &managed)
+                .current_dir(&files)
+                .args(["--color=always", "--icons=never", "-1"])
+                .arg(&files)
+                .timeout(Duration::from_secs(5));
+            if let Some(colors) = override_colors {
+                cmd.env("EZA_COLORS", colors);
+            }
+            String::from_utf8(
+                cmd.assert()
+                    .success()
+                    .stderr("")
+                    .get_output()
+                    .stdout
+                    .clone(),
+            )
+            .unwrap()
+        };
+        fs::create_dir_all(&managed).unwrap();
+        fs::write(managed.join("theme.yml"), "colors:\n  info: '#123456'\n").unwrap();
+        let control = run(None);
+        assert!(
+            control.contains("folder"),
+            "negative control must render the fixture"
+        );
+        assert!(
+            !control.contains("38;2;18;52;86m"),
+            "negative control: generic colors are ignored"
+        );
+        let personal = env.xdg_config_home().join("eza/theme.yml");
+        fs::create_dir_all(personal.parent().unwrap()).unwrap();
+        fs::write(&personal, "# PRIVATE PERSONAL ICONS\n").unwrap();
+        let ansi = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+        for theme in crate::theme::ThemeRegistry::new().unwrap().all() {
+            EzaAdapter.apply_theme_with_env(theme, &env).unwrap();
+            let output = run(None);
+            for (name, color) in [
+                ("folder", theme.palette.resolve(SemanticColor::FileDir)),
+                ("executable", theme.palette.resolve(SemanticColor::FileExec)),
+                ("linked", theme.palette.resolve(SemanticColor::FileSymlink)),
+                ("plain", theme.palette.foreground.clone()),
+            ] {
+                let (r, g, b) =
+                    crate::adapter::palette_renderer::PaletteRenderer::hex_to_rgb(&color).unwrap();
+                let line = output
+                    .lines()
+                    .find(|line| {
+                        let visible = ansi.replace_all(line, "");
+                        visible == name || visible.starts_with(&format!("{name} -> "))
+                    })
+                    .unwrap_or_else(|| panic!("{} missing {name}: {output:?}", theme.id));
+                assert!(
+                    line.contains(&format!("38;2;{r};{g};{b}m")),
+                    "{} {name}: {line:?}",
+                    theme.id
+                );
+            }
+            assert_eq!(
+                fs::read_to_string(&personal).unwrap(),
+                "# PRIVATE PERSONAL ICONS\n"
+            );
+        }
+        let overridden = run(Some("di=38;2;1;2;3"));
+        let directory = overridden
+            .lines()
+            .find(|line| line.contains("folder"))
+            .unwrap();
+        assert!(
+            directory.contains("38;2;1;2;3m"),
+            "environment colors take precedence: {directory:?}"
+        );
+    }
+
+    #[test]
     fn test_tool_name() {
         let adapter = EzaAdapter;
         assert_eq!(adapter.tool_name(), "eza");
@@ -129,15 +417,10 @@ mod tests {
 
     #[test]
     fn test_integration_config_path_resolves_eza_config_dir_or_default() {
-        let adapter = EzaAdapter;
-        let result = adapter.integration_config_path();
-        assert!(result.is_ok());
-
-        let path = result.unwrap();
-        // Should be either custom EZA_CONFIG_DIR or ~/.config/eza
-        assert!(
-            path.to_string_lossy().contains("eza")
-                || path.to_string_lossy().contains("EZA_CONFIG_DIR")
+        // Custom directories need not contain the tool's name.
+        assert_eq!(
+            EzaAdapter.integration_config_path().unwrap(),
+            SlateEnv::from_process().unwrap().eza_config_home()
         );
     }
 
@@ -190,18 +473,16 @@ mod tests {
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
         let yaml = EzaAdapter::render_eza_yaml(&theme);
 
-        assert!(yaml.contains("colors:"));
-        assert!(yaml.contains("text:"));
-        assert!(yaml.contains("background:"));
-        assert!(yaml.contains("errors:"));
-        assert!(yaml.contains("warning:"));
-        assert!(yaml.contains("success:"));
-        assert!(yaml.contains("info:"));
-        assert!(yaml.contains("special:"));
-        assert!(yaml.contains("modified:"));
-
-        // Verify it's valid YAML format (basic check)
-        assert!(yaml.contains("#"));
+        assert!(yaml.contains("filekinds:\n"));
+        assert!(yaml.contains("directory: {foreground: '"));
+        assert!(yaml.contains("users:\n"));
+        assert!(yaml.contains("git:\n"));
+        assert!(yaml.contains("perms:\n"));
+        assert!(yaml.contains("size:\n"));
+        assert!(yaml.contains("links:\n"));
+        assert!(!yaml.contains("colors:\n"));
+        assert!(!yaml.contains("background:"));
+        assert!(!yaml.contains("icon:"));
     }
 
     #[test]

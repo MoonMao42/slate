@@ -144,7 +144,9 @@ mod tests {
                 skip_next = false;
                 continue;
             }
-            if line.contains("TERMINAL-CONTROL:") {
+            // Test fixtures deliberately contain hostile ANSI to verify escaping
+            // and measurement; the marker exempts only the following input line.
+            if line.contains("TERMINAL-CONTROL:") || line.contains("ANSI-FIXTURE:") {
                 skip_next = true;
                 continue;
             }

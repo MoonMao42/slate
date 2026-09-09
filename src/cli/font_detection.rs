@@ -1,6 +1,7 @@
+use super::startup_detection::read_hint;
+use crate::config::file_read::MAX_TOOL_CONFIG_BYTES;
 use crate::env::SlateEnv;
 use crate::error::Result;
-use std::fs;
 use std::path::PathBuf;
 
 /// Detect current terminal font from Ghostty or Alacritty config
@@ -9,81 +10,38 @@ pub fn detect_current_font() -> Result<Option<String>> {
     detect_current_font_with_env(&env)
 }
 
-/// Detect current terminal font with injected SlateEnv (for testing)
+/// Best-effort direct-file font hint using the injected profile. Does not follow
+/// imports, inspect running windows or validate the full terminal configuration.
 pub fn detect_current_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
-    // Try Ghostty first
-    if let Ok(Some(font)) = read_ghostty_font_with_env(env) {
-        return Ok(Some(font));
-    }
-
-    // Fall back to Alacritty
-    if let Ok(Some(font)) = read_alacritty_font_with_env(env) {
-        return Ok(Some(font));
-    }
-
-    // No custom font found
-    Ok(None)
+    Ok(read_ghostty_font_with_env(env).or_else(|| read_alacritty_font_with_env(env)))
 }
 
 /// Parse Ghostty config (key=value format) for font-family setting
-fn read_ghostty_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
+fn read_ghostty_font_with_env(env: &SlateEnv) -> Option<String> {
     for config_path in ghostty_config_paths_with_env(env) {
-        if !config_path.exists() {
-            continue;
-        }
-
-        match fs::read(&config_path) {
-            Ok(content) => {
-                if let Some(font) = parse_ghostty_font_config_bytes(&content) {
-                    return Ok(Some(font));
-                }
+        if let Some(content) = read_hint(env, &config_path, MAX_TOOL_CONFIG_BYTES) {
+            if let Some(font) = parse_ghostty_font_config_bytes(&content) {
+                return Some(font);
             }
-            Err(_) => continue,
         }
     }
-
-    Ok(None)
+    None
 }
 
 /// Parse Alacritty TOML config for font setting
-fn read_alacritty_font_with_env(env: &SlateEnv) -> Result<Option<String>> {
-    let config_path = env.xdg_config_home().join("alacritty/alacritty.toml");
-
-    if !config_path.exists() {
-        return Ok(None);
-    }
-
-    match fs::read(&config_path) {
-        Ok(content) => {
-            if let Ok(content) = String::from_utf8(content) {
-                if let Ok(doc) = content.parse::<toml_edit::DocumentMut>() {
-                    // Look for [font] section, then [font.normal] section, then family field
-                    if let Some(font_table) = doc.get("font").and_then(|v| v.as_table()) {
-                        if let Some(normal_table) =
-                            font_table.get("normal").and_then(|v| v.as_table())
-                        {
-                            if let Some(family_val) =
-                                normal_table.get("family").and_then(|v| v.as_str())
-                            {
-                                return Ok(Some(family_val.to_string()));
-                            }
-                        }
-                    }
-                }
-            }
-            Ok(None)
-        }
-        Err(_) => Ok(None),
-    }
+fn read_alacritty_font_with_env(env: &SlateEnv) -> Option<String> {
+    let config_path = crate::adapter::AlacrittyAdapter::integration_config_path_with_env(env);
+    let bytes = read_hint(env, &config_path, MAX_TOOL_CONFIG_BYTES)?;
+    let content = std::str::from_utf8(&bytes).ok()?;
+    let doc = content.parse::<toml_edit::DocumentMut>().ok()?;
+    let family = doc.get("font")?.get("normal")?.get("family")?.as_str()?;
+    crate::adapter::font_config::validate_family(family).ok()?;
+    Some(family.to_owned())
 }
 
 fn parse_ghostty_font_config_bytes(content: &[u8]) -> Option<String> {
     for line in content.split(|b| *b == b'\n') {
-        let trimmed = line
-            .iter()
-            .copied()
-            .skip_while(|b| b.is_ascii_whitespace())
-            .collect::<Vec<u8>>();
+        let trimmed = trim_ascii_space(line);
 
         if trimmed.starts_with(b"#") || trimmed.is_empty() {
             continue;
@@ -97,15 +55,23 @@ fn parse_ghostty_font_config_bytes(content: &[u8]) -> Option<String> {
             let Some(value_part) = value_part else {
                 continue;
             };
-            let font = value_part
-                .iter()
-                .copied()
-                .skip_while(|b| b.is_ascii_whitespace())
-                .collect::<Vec<u8>>();
-            let font = trim_ascii_quotes_and_space(&font);
+            let value = trim_ascii_space(value_part);
+            // Match Ghostty's LineIterator: remove one pair of double quotes,
+            // not all quotes/inner whitespace. Single quotes and backslashes
+            // are ordinary font-name bytes, not shell or TOML escapes.
+            let font = if value.len() >= 2
+                && value.first() == Some(&b'"')
+                && value.last() == Some(&b'"')
+            {
+                &value[1..value.len() - 1]
+            } else {
+                value
+            };
             if !font.is_empty() {
-                if let Ok(font) = String::from_utf8(font.to_vec()) {
-                    return Some(font);
+                if let Ok(font) = std::str::from_utf8(font) {
+                    if crate::adapter::font_config::validate_family(font).is_ok() {
+                        return Some(font.to_owned());
+                    }
                 }
             }
         }
@@ -127,37 +93,18 @@ fn trim_ascii_space(bytes: &[u8]) -> &[u8] {
     &bytes[start..end]
 }
 
-fn trim_ascii_quotes_and_space(bytes: &[u8]) -> &[u8] {
-    let start = bytes
-        .iter()
-        .position(|b| !b.is_ascii_whitespace() && *b != b'"' && *b != b'\'')
-        .unwrap_or(bytes.len());
-    let end = bytes
-        .iter()
-        .rposition(|b| !b.is_ascii_whitespace() && *b != b'"' && *b != b'\'')
-        .map(|idx| idx + 1)
-        .unwrap_or(start);
-    &bytes[start..end]
-}
-
 #[cfg(test)]
 fn parse_ghostty_font_config(content: &str) -> Option<String> {
     parse_ghostty_font_config_bytes(content.as_bytes())
 }
 
 fn ghostty_config_paths_with_env(env: &SlateEnv) -> Vec<PathBuf> {
-    let adapter = crate::adapter::GhosttyAdapter;
-    let mut paths = adapter
-        .integration_candidate_paths_with_env(env)
-        .unwrap_or_else(|_| {
-            let config_base = env.xdg_config_home();
-            vec![
-                config_base.join("ghostty/config.ghostty"),
-                config_base.join("ghostty/config"),
-            ]
-        });
-    paths.reverse();
-    paths
+    crate::adapter::GhosttyAdapter::config_candidates_with_env(env)
+        .unwrap_or_else(|_| crate::adapter::GhosttyAdapter::xdg_config_candidates(env))
+        .into_iter()
+        .rev()
+        .map(|candidate| candidate.path)
+        .collect()
 }
 
 #[cfg(test)]
@@ -166,10 +113,9 @@ mod tests {
 
     #[test]
     fn test_detect_current_font_no_config() {
-        // When no configs exist, should return Ok(None)
-        let result = detect_current_font();
-        assert!(result.is_ok());
-        // Result may be None or Some depending on test environment
+        let td = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(td.path().to_owned());
+        assert_eq!(detect_current_font_with_env(&env).unwrap(), None);
     }
 
     #[test]
@@ -198,7 +144,22 @@ mod tests {
     fn test_parse_ghostty_font_config_with_single_quotes() {
         let content = "font-family = 'FiraCode Nerd Font'";
         let font = parse_ghostty_font_config(content);
-        assert_eq!(font.as_deref(), Some("FiraCode Nerd Font"));
+        assert_eq!(font.as_deref(), Some("'FiraCode Nerd Font'"));
+    }
+
+    #[test]
+    // SWATCH-RENDERER: hostile font-name styling bytes are rejection-test data.
+    fn test_parse_ghostty_font_config_preserves_literal_quotes_and_spaces() {
+        for family in [
+            "\"Outer Quotes\"",
+            "'Outer apostrophes'",
+            r"Back\slash 字体",
+            "  Literal spaces  ",
+        ] {
+            let config = crate::adapter::font_config::ghostty(family).unwrap();
+            assert_eq!(parse_ghostty_font_config(&config).as_deref(), Some(family));
+        }
+        assert_eq!(parse_ghostty_font_config("font-family = Bad\x1b[31m"), None);
     }
 
     #[test]
@@ -243,9 +204,7 @@ mod tests {
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
 
         // With empty tempdir, should return None for both Ghostty and Alacritty
-        let result = detect_current_font_with_env(&env);
-        assert!(result.is_ok());
-        // Result should be None since no configs exist in tempdir
+        assert_eq!(detect_current_font_with_env(&env).unwrap(), None);
     }
 
     #[test]
@@ -267,7 +226,7 @@ mod tests {
 
         let font = detect_current_font_with_env(&env).unwrap();
 
-        assert_eq!(font.as_deref(), Some("Legacy Font"));
+        assert_eq!(font.as_deref(), Some("Active Font"));
     }
 
     #[cfg(target_os = "macos")]
@@ -295,5 +254,15 @@ mod tests {
         let font = detect_current_font_with_env(&env).unwrap();
 
         assert_eq!(font.as_deref(), Some("App Support Font"));
+
+        std::fs::write(
+            app_support_dir.join("config.ghostty"),
+            "font-family = \"App Support Current Font\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            detect_current_font_with_env(&env).unwrap().as_deref(),
+            Some("App Support Current Font")
+        );
     }
 }

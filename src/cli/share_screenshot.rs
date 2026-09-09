@@ -1,10 +1,10 @@
-use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::Result;
-use crate::platform::share::{capture_interactive, ShareCaptureResult};
+use crate::platform::share::{capture_draft, CaptureDraft, ShareCaptureResult};
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
+
+mod watermark;
 
 /// Handle `slate share` — screenshot current terminal + export code.
 /// 1. Print the export URI
@@ -13,91 +13,60 @@ use std::process::Command;
 /// 4. Save the image path for sharing
 pub fn handle_share() -> Result<()> {
     let env = SlateEnv::from_process()?;
-    let config = ConfigManager::with_env(&env)?;
-
     // Generate export URI
-    let uri = build_export_uri(&config)?;
-
-    // Determine output path
-    let output_path = output_path(&env);
+    let uri = crate::cli::share::build_export_uri(&env)?;
 
     // Print URI first so it's visible in the screenshot
     println!("{}", share_intro_text(&uri));
 
-    let capture_result = capture_interactive(&output_path)?;
-    if !capture_result.captured {
-        if let Some(message) = capture_fallback_text(&capture_result) {
-            println!("{}", message);
+    let mut image = match capture_draft()? {
+        CaptureDraft::Captured(image) => image,
+        CaptureDraft::Unavailable(result) => {
+            if let Some(message) = capture_fallback_text(&result) {
+                println!("{}", message);
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
+    };
 
-    // Try to add watermark with ImageMagick
-    if has_imagemagick() {
-        let _ = add_watermark(&output_path, &uri);
+    match watermark::try_watermark(&image, &uri) {
+        Ok(Some(watermarked)) => image = watermarked,
+        Ok(None) => {}
+        Err(_) => {
+            eprintln!("warning: watermark could not be applied; keeping the original capture")
+        }
     }
-
+    // Resolve the output directory after interaction/processing, not before a
+    // potentially long user dialog where a directory alias may have changed.
+    let output_path = image.save_unique(&output_path(&env))?;
     println!("{}", share_saved_text(&output_path));
 
     Ok(())
 }
 
-fn build_export_uri(config: &ConfigManager) -> Result<String> {
-    let theme = config
-        .get_current_theme()?
-        .unwrap_or_else(|| "none".to_string());
-
-    let font = config
-        .get_current_font()?
-        .unwrap_or_else(|| "none".to_string())
-        .replace(' ', "-");
-
-    let opacity = config
-        .get_current_opacity()?
-        .unwrap_or_else(|| "solid".to_string())
-        .to_lowercase();
-
-    let mut tools = Vec::new();
-    if config.is_starship_enabled()? {
-        tools.push("s");
-    }
-    if config.is_zsh_highlighting_enabled()? {
-        tools.push("h");
-    }
-    if config.has_fastfetch_autorun()? {
-        tools.push("f");
-    }
-    let tools_str = if tools.is_empty() {
-        "none".to_string()
-    } else {
-        tools.join(",")
-    };
-
-    Ok(format!(
-        "slate://{}/{}/{}/{}",
-        theme, font, opacity, tools_str
-    ))
+fn output_path(env: &SlateEnv) -> PathBuf {
+    output_path_with_pictures(env, std::env::var_os("XDG_PICTURES_DIR").map(PathBuf::from))
 }
 
-fn output_path(env: &SlateEnv) -> PathBuf {
-    // Prefer $XDG_PICTURES_DIR (Linux user-dirs) when it falls inside the injected home
-    // this keeps tests and SLATE_HOME-sandboxed runs hermetic. If XDG_PICTURES_DIR is set
-    // but escapes the injected home, ignore it and fall back to ~/Desktop or $HOME root.
-    if let Ok(pictures) = std::env::var("XDG_PICTURES_DIR") {
-        if !pictures.is_empty() {
-            let pictures_path = PathBuf::from(pictures);
-            if pictures_path.starts_with(env.home()) {
-                return pictures_path.join("slate-share.png");
+fn output_path_with_pictures(env: &SlateEnv, pictures: Option<PathBuf>) -> PathBuf {
+    // Resolve directory aliases before the confinement check. Lexical starts_with
+    // alone accepts home/../outside and links escaping the injected home.
+    let home = std::fs::canonicalize(env.home()).unwrap_or_else(|_| env.home().to_owned());
+    for candidate in pictures.into_iter().chain([env.home().join("Desktop")]) {
+        if !candidate.is_absolute()
+            || candidate
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+        {
+            continue;
+        }
+        if let Ok(directory) = std::fs::canonicalize(candidate) {
+            if directory.is_dir() && directory.starts_with(&home) {
+                return directory.join("slate-share.png");
             }
         }
     }
-
-    let desktop = env.home().join("Desktop");
-    if desktop.is_dir() {
-        return desktop.join("slate-share.png");
-    }
-
-    env.home().join("slate-share.png")
+    home.join("slate-share.png")
 }
 
 fn share_intro_text(uri: &str) -> String {
@@ -115,51 +84,54 @@ fn share_saved_text(output_path: &Path) -> String {
     format!("\n  ✓ Saved to {}\n", output_path.display())
 }
 
-fn has_imagemagick() -> bool {
-    Command::new("magick")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-}
-
-fn add_watermark(image_path: &Path, uri: &str) -> std::result::Result<(), ()> {
-    // Add "✦ slate" watermark + URI at bottom-right.
-    // Skip silently if the path isn't valid UTF-8 — the watermark is optional polish, not
-    // correctness-critical, and magick won't accept non-UTF-8 args anyway.
-    let path_str = image_path.to_str().ok_or(())?;
-    let watermark_text = format!("✦ slate  ·  {}", uri);
-
-    let status = Command::new("magick")
-        .args([
-            path_str,
-            "-gravity",
-            "SouthEast",
-            "-pointsize",
-            "14",
-            "-fill",
-            "rgba(255,255,255,0.5)",
-            "-annotate",
-            "+20+12",
-            &watermark_text,
-            path_str,
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map_err(|_| ())?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(())
-    }
+fn watermark_text(uri: &str) -> String {
+    // ImageMagick interprets percent properties in -annotate text; share-code
+    // escapes must remain literal rather than expanding into image metadata.
+    format!("✦ slate  ·  {}", uri.replace('%', "%%"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn share_image_output_directory_rejects_parent_traversal_and_escaping_aliases() {
+        use std::{fs, os::unix::fs::symlink};
+        let td = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(td.path()).unwrap();
+        let home = root.join("home");
+        let outside = root.join("outside");
+        fs::create_dir_all(home.join("Pictures")).unwrap();
+        fs::create_dir(&outside).unwrap();
+        symlink(&outside, home.join("Desktop")).unwrap();
+        symlink(&outside, home.join("escape")).unwrap();
+        symlink(home.join("Pictures"), home.join("inside")).unwrap();
+        let env = SlateEnv::with_home(home.clone());
+        for path in [
+            home.join("../outside"),
+            home.join("escape"),
+            outside,
+            home.join("missing"),
+            PathBuf::from("relative"),
+        ] {
+            assert_eq!(
+                output_path_with_pictures(&env, Some(path)),
+                home.join("slate-share.png")
+            );
+        }
+        assert_eq!(
+            output_path_with_pictures(&env, Some(home.join("inside"))),
+            home.join("Pictures/slate-share.png")
+        );
+    }
+
+    #[test]
+    fn share_watermark_preserves_uri_percent_escapes_as_literal_text() {
+        assert_eq!(
+            watermark_text("slate://v1/nord/Mono%20%E5%AD%97/solid/s"),
+            "✦ slate  ·  slate://v1/nord/Mono%%20%%E5%%AD%%97/solid/s"
+        );
+    }
 
     #[test]
     fn test_share_intro_text_keeps_uri_visible_before_capture() {

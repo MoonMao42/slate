@@ -1,3 +1,4 @@
+use crate::cli::ui_language::tr;
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::Result;
@@ -13,11 +14,19 @@ pub(super) fn quick_save_auto(state: &PickerState, env: &SlateEnv) -> Result<Str
     let message = match theme.appearance {
         ThemeAppearance::Dark => {
             config.write_auto_config(Some(theme_id), None)?;
-            format!("✓ Auto Dark saved: {}", theme.name)
+            format!(
+                "✓ {}{}",
+                tr("深色配对已保存：", "Auto Dark saved: "),
+                theme.name
+            )
         }
         ThemeAppearance::Light => {
             config.write_auto_config(None, Some(theme_id))?;
-            format!("✓ Auto Light saved: {}", theme.name)
+            format!(
+                "✓ {}{}",
+                tr("浅色配对已保存：", "Auto Light saved: "),
+                theme.name
+            )
         }
     };
 

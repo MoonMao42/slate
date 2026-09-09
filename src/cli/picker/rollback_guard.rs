@@ -1,31 +1,13 @@
-//! RollbackGuard: triple-guarded rollback of managed/* state on picker exit.
-//! locks "双保险" (two layers) but `Cargo.toml:67 panic = "abort"`
-//! makes Drop unreliable in release, so this module provides THREE layers:
-//! 1. **Normal Esc path**: `event_loop.rs` explicitly calls
-//! `silent_preview_apply(original)` on the `ExitAction::Cancel` branch
-//! (already present at L102-107 pre-Phase-19).
-//! 2. **Stack-unwind path (non-abort panic, explicit return)**:
-//! `impl Drop for RollbackGuard` calls `silent_preview_apply(original)`
-//! when `committed == false`.
-//! 3. **`panic = "abort"` release path**: `install_rollback_panic_hook`
-//! wraps `std::panic::take_hook()` with a closure that restores the
-//! terminal + calls `silent_preview_apply(original)` before the
-//! default/backtrace handler runs (after which `abort()` skips Drop).
-//! All rollback failures are silent — `let _ = silent_preview_apply(...)`.
-//! Panicking inside Drop would double-panic → abort (RESEARCH Pitfall 1).
-//! Filled in . Event-loop wiring lands in.
+//! The normal exit, Drop, and abort-profile panic paths share one immutable
+//! snapshot of preview files. Cleanup never regenerates a guessed original theme.
 
-use crate::env::SlateEnv;
-use crate::opacity::OpacityPreset;
+use super::preview_snapshot::PreviewSnapshot;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// RAII guard that restores `managed/*` to the original theme + opacity
-/// when the picker exits without `committed` being set to `true`.
+/// Restores preview files on early return or unwind.
 pub(crate) struct RollbackGuard {
-    env: SlateEnv,
-    original_theme_id: String,
-    original_opacity: OpacityPreset,
+    snapshot: Arc<PreviewSnapshot>,
     committed: Arc<AtomicBool>,
 }
 
@@ -42,19 +24,10 @@ pub(crate) struct PanicHookGuard {
 }
 
 impl RollbackGuard {
-    /// Arm the guard at picker launch. Snapshots the original theme + opacity
-    /// and takes a shared handle to the committed flag (same
-    /// `Arc<AtomicBool>` held by `PickerState::committed`).
-    pub(crate) fn arm(
-        env: &SlateEnv,
-        original_theme_id: &str,
-        original_opacity: OpacityPreset,
-        committed: Arc<AtomicBool>,
-    ) -> Self {
+    /// The same snapshot is shared with the normal exit and panic hook.
+    pub(crate) fn arm(snapshot: Arc<PreviewSnapshot>, committed: Arc<AtomicBool>) -> Self {
         Self {
-            env: env.clone(),
-            original_theme_id: original_theme_id.to_string(),
-            original_opacity,
+            snapshot,
             committed,
         }
     }
@@ -73,29 +46,32 @@ impl Drop for RollbackGuard {
         if self.committed.load(Ordering::SeqCst) {
             return;
         }
-        let _ = crate::cli::set::silent_preview_apply(
-            &self.env,
-            &self.original_theme_id,
-            self.original_opacity,
-        );
+        if let Err(err) = self.snapshot.restore() {
+            report_cleanup_error(&err);
+        }
     }
 }
 
-/// Install a process-wide panic hook that restores the terminal + rolls
-/// back managed/* to the original theme before the previous hook runs.
-/// Required because `Cargo.toml:67 panic = "abort"` skips Drop on panic
-/// in release builds (RESEARCH §Pitfall 1). The hook captures the env +
-/// original theme by move, so it carries its own state independent of
-/// any guard Drop order.
+/// The weak handle prevents inactive hooks from retaining file contents forever.
+/// The hook runs before abort, which would otherwise skip the guard's Drop.
 pub(crate) fn install_rollback_panic_hook(
-    env: SlateEnv,
-    original_theme_id: String,
-    original_opacity: OpacityPreset,
+    snapshot: &Arc<PreviewSnapshot>,
     committed: Arc<AtomicBool>,
 ) -> PanicHookGuard {
+    let snapshot = Arc::downgrade(snapshot);
     install_panic_hook(committed, move || {
-        let _ = crate::cli::set::silent_preview_apply(&env, &original_theme_id, original_opacity);
+        if let Some(snapshot) = snapshot.upgrade() {
+            if let Err(err) = snapshot.restore() {
+                report_cleanup_error(&err);
+            }
+        }
     })
+}
+
+fn report_cleanup_error(error: &crate::error::SlateError) {
+    use std::io::Write;
+    // Best-effort diagnostics must not cause a second panic in Drop/the hook.
+    let _ = writeln!(std::io::stderr().lock(), "warning: {error}");
 }
 
 fn install_panic_hook<F>(committed: Arc<AtomicBool>, rollback: F) -> PanicHookGuard
@@ -169,6 +145,7 @@ pub(crate) fn install_rollback_panic_hook_with_sentinel_and_commit_flag(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::env::SlateEnv;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::sync::{Mutex, OnceLock};
@@ -178,27 +155,22 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
     }
 
-    fn test_env() -> SlateEnv {
+    fn test_env() -> (tempfile::TempDir, SlateEnv) {
         // Use a unique tempdir so tests can run in parallel without
         // clobbering each other's managed/* directories.
         let tmp = tempfile::tempdir().expect("tempdir");
         let home = tmp.path().to_path_buf();
-        // Intentionally leak the TempDir so files survive guard.drop.
-        // This is test-only; process exit cleans up.
-        std::mem::forget(tmp);
-        SlateEnv::with_home(home)
+        (tmp, SlateEnv::with_home(home))
     }
 
     #[test]
     fn rollback_guard_noop_when_committed() {
-        let env = test_env();
+        let (_tmp, env) = test_env();
         let committed = Arc::new(AtomicBool::new(false));
         // Simulate "user pressed Enter" by pre-setting committed=true.
         committed.store(true, Ordering::SeqCst);
         let guard = RollbackGuard::arm(
-            &env,
-            "catppuccin-mocha",
-            OpacityPreset::Solid,
+            Arc::new(PreviewSnapshot::capture(&env).unwrap()),
             committed.clone(),
         );
         drop(guard);
@@ -211,12 +183,10 @@ mod tests {
 
     #[test]
     fn rollback_guard_on_drop_when_not_committed() {
-        let env = test_env();
+        let (_tmp, env) = test_env();
         let committed = Arc::new(AtomicBool::new(false));
         let guard = RollbackGuard::arm(
-            &env,
-            "catppuccin-frappe",
-            OpacityPreset::Frosted,
+            Arc::new(PreviewSnapshot::capture(&env).unwrap()),
             committed.clone(),
         );
         drop(guard);
@@ -225,6 +195,73 @@ mod tests {
         assert!(
             !committed.load(Ordering::SeqCst),
             "committed flag stays false; guard took the rollback branch"
+        );
+    }
+
+    #[test]
+    fn preview_write_state_panic_hook_preserves_inflight_changes_and_recovery() {
+        let _lock = hook_test_lock();
+        let home = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(home.path().to_owned());
+        let path = env.managed_file("managed/ghostty/theme.conf");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"PRIVATE_ORIGINAL").unwrap();
+        let snapshot = Arc::new(PreviewSnapshot::capture(&env).unwrap());
+        let original_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let guard = install_rollback_panic_hook(&snapshot, Arc::new(AtomicBool::new(false)));
+        let result = std::panic::catch_unwind(|| {
+            snapshot.apply_with(|| {
+                std::fs::write(&path, b"PRIVATE_UNRECORDED_CHANGE").unwrap();
+                panic!("injected panic during preview write");
+            })
+        });
+        drop(guard);
+        let _ = std::panic::take_hook();
+        std::panic::set_hook(original_hook);
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"PRIVATE_UNRECORDED_CHANGE");
+        let record = env.slate_cache_dir().join("preview-session.json");
+        let saved = std::fs::read(&record).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&saved).unwrap()["writing"],
+            true
+        );
+        // Unwind releases the unit-valued operation gate. Cleanup can now run,
+        // but it must still reject bytes absent from the last verified state.
+        assert!(snapshot.restore().is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"PRIVATE_UNRECORDED_CHANGE");
+        assert_eq!(std::fs::read(&record).unwrap(), saved);
+        drop(snapshot);
+        let plan = crate::cli::picker::inspect_recovery(&env).unwrap();
+        assert!(!plan.active && plan.interrupted_write && plan.blocked_count() == 1);
+    }
+
+    #[test]
+    fn preview_snapshot_panic_hook_restores_files_and_releases_capture() {
+        let _lock = hook_test_lock();
+        let td = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_owned());
+        let path = env.xdg_config_home().join("ghostty/config.ghostty");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"# custom before panic\xff\n").unwrap();
+        let snapshot = Arc::new(PreviewSnapshot::capture(&env).unwrap());
+        snapshot
+            .apply("nord", crate::opacity::OpacityPreset::Frosted)
+            .unwrap();
+        let original_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let guard = install_rollback_panic_hook(&snapshot, Arc::new(AtomicBool::new(false)));
+        let result = std::panic::catch_unwind(|| panic!("simulated picker panic"));
+        drop(guard);
+        let _ = std::panic::take_hook();
+        std::panic::set_hook(original_hook);
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(path).unwrap(), b"# custom before panic\xff\n");
+        assert_eq!(
+            Arc::strong_count(&snapshot),
+            1,
+            "inactive hook retained file bytes"
         );
     }
 

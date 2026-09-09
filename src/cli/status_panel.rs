@@ -3,8 +3,8 @@ use crate::adapter::registry::ToolRegistry;
 use crate::brand::render_context::RenderContext;
 use crate::brand::roles::Roles;
 use crate::brand::Language;
-use crate::config::ConfigManager;
 use crate::detection::{TerminalFeatureSummary, TerminalProfile};
+use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::platform::capabilities::{detect_capabilities, CapabilityReport, CapabilitySnapshot};
 use crate::theme::{Palette, ThemeRegistry, ThemeVariant};
@@ -12,16 +12,21 @@ use crate::theme::{Palette, ThemeRegistry, ThemeVariant};
 /// Tool installation status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolStatus {
-    Themed,       // ✓ Themed
-    NotInstalled, // ✗ Not installed
+    Available,
+    Unavailable,
+    Unknown,
 }
 
-const TOOL_STATUS_ITEMS: [(&str, &str); 12] = [
+const TOOL_STATUS_ITEMS: [(&str, &str); 16] = [
     ("ghostty", "ghostty"),
     ("alacritty", "alacritty"),
     ("kitty", "kitty"),
+    ("nvim", "nvim"),
     ("starship", "starship"),
     ("bat", "bat"),
+    ("btop", "btop"),
+    ("yazi", "yazi"),
+    ("zellij", "zellij"),
     ("delta", "delta"),
     ("eza", "eza"),
     ("lazygit", "lazygit"),
@@ -31,9 +36,24 @@ const TOOL_STATUS_ITEMS: [(&str, &str); 12] = [
     ("nerd-font", "nerd-font"),
 ];
 
-fn get_auto_theme_status(config: &ConfigManager, terminal: &TerminalProfile) -> String {
-    let enabled = config.is_auto_theme_enabled().unwrap_or(false);
-    let running = crate::platform::dark_mode_notify::is_running().unwrap_or(false);
+fn get_auto_theme_status(
+    enabled: Option<bool>,
+    terminal: &TerminalProfile,
+    env: &SlateEnv,
+) -> String {
+    let Some(enabled) = enabled else {
+        return "Configuration unreadable; watcher state is not inferred.".into();
+    };
+    if env.session().is_isolated() {
+        return format!(
+            "{}; host process check skipped (isolated SLATE_HOME)",
+            if enabled { "enabled" } else { "disabled" }
+        );
+    }
+    let running = match crate::platform::dark_mode_notify::is_running_with_env(env) {
+        Ok(running) => running,
+        Err(_) => return "Watcher process check unavailable; running state is unknown.".into(),
+    };
     let backend = crate::platform::desktop::detect_backend();
     let capability = crate::platform::desktop::capability_report();
 
@@ -96,40 +116,67 @@ fn capability_row_text(name: &str, report: &CapabilityReport) -> String {
 
 /// Render the status dashboard
 pub fn render() -> Result<()> {
-    let config = ConfigManager::new()?;
+    super::status::handle(false)
+}
+
+pub(crate) fn render_report(env: &SlateEnv, report: &super::status::StatusReport) -> Result<()> {
     let registry = ThemeRegistry::new()?;
 
-    // Get current state
-    let current_theme = config
-        .get_current_theme()?
-        .and_then(|id| registry.get(&id).cloned())
-        .unwrap_or_else(|| registry.get("catppuccin-mocha").unwrap().clone());
-    let current_font = config
-        .get_current_font()?
-        .unwrap_or_else(|| "Not configured".to_string());
-    let current_opacity = config
-        .get_current_opacity_preset()
-        .map(|p| p.to_string())
-        .unwrap_or_else(|_| "Solid".to_string());
+    let current_theme = report
+        .theme
+        .as_ref()
+        .and_then(|theme| registry.get(&theme.id));
+    let missing_label = |field| {
+        if report.warnings.iter().any(|warning| warning.field == field) {
+            "Unreadable / invalid"
+        } else {
+            "Not configured"
+        }
+    };
+    let current_font = report
+        .font
+        .as_deref()
+        .unwrap_or_else(|| missing_label("font"));
+    let current_opacity = report
+        .opacity
+        .as_deref()
+        .unwrap_or_else(|| missing_label("opacity"));
     let terminal = TerminalProfile::detect();
     let terminal_features = terminal.feature_summary();
     let capabilities = detect_capabilities();
     let adapter_status = get_adapter_statuses()?;
-    let auto_theme_status = get_auto_theme_status(&config, &terminal);
+    let auto_theme_status = get_auto_theme_status(report.auto_theme_enabled, &terminal, env);
 
-    // graceful degrade: fall back to plain chrome when the registry
-    // cannot resolve an active theme. Roles methods accept `Option<&Roles>`
-    // via the `format_status_panel` seam below.
-    let ctx = RenderContext::from_active_theme().ok();
+    // A fallback palette may style the chrome, but must not be presented as
+    // the user's configured theme. No config initialization is needed.
+    let ctx = current_theme
+        .or_else(|| registry.get("catppuccin-mocha"))
+        .map(RenderContext::new);
     let roles = ctx.as_ref().map(Roles::new);
+
+    for line in report.recovery.lines() {
+        println!("{line}");
+    }
+    for warning in &report.warnings {
+        println!("Warning [{}]: {}", warning.field, warning.message);
+    }
+    if let Some(theme) = report.theme.as_ref().filter(|theme| theme.name.is_none()) {
+        println!("Saved theme ID: {:?}", theme.id);
+    }
+    if let Some(style) = report.prompt_style {
+        println!(
+            "Saved prompt style: {} (not a live-render check)",
+            style.label()
+        );
+    }
 
     print!(
         "{}",
         format_status_panel(
             roles.as_ref(),
-            &current_theme,
-            &current_font,
-            &current_opacity,
+            current_theme,
+            current_font,
+            current_opacity,
             &terminal,
             &terminal_features,
             &capabilities,
@@ -155,7 +202,7 @@ pub fn render() -> Result<()> {
 #[allow(clippy::too_many_arguments)]
 fn format_status_panel(
     r: Option<&Roles<'_>>,
-    theme: &ThemeVariant,
+    theme: Option<&ThemeVariant>,
     font: &str,
     opacity: &str,
     terminal: &TerminalProfile,
@@ -180,10 +227,14 @@ fn format_status_panel(
     // Section 1 — Core Vibe
     out.push_str(" │\n");
     out.push_str(&format!(" │  {}\n", section_heading(r, "Core Vibe")));
-    out.push_str(" │    ");
-    out.push_str(&render_color_blocks(&theme.palette));
-    out.push_str(&format!(" {}\n", theme_name(r, &theme.name)));
-    out.push_str(&format!(" │    {}\n", dim_text(r, &theme.family)));
+    if let Some(theme) = theme {
+        out.push_str(" │    ");
+        out.push_str(&render_color_blocks(&theme.palette));
+        out.push_str(&format!(" {}\n", theme_name(r, &theme.name)));
+        out.push_str(&format!(" │    {}\n", dim_text(r, &theme.family)));
+    } else {
+        out.push_str(" │    No recognized saved theme. Use `slate setup` to configure one.\n");
+    }
 
     // Section 2 — Typography
     out.push_str(" │\n");
@@ -233,7 +284,11 @@ fn format_status_panel(
 
     // Section 5 — Toolkit (3-column grid)
     out.push_str(" │\n");
-    out.push_str(&format!(" │  {}\n", section_heading(r, "Toolkit")));
+    out.push_str(&format!(
+        " │  {}\n",
+        section_heading(r, "Toolkit (availability only)")
+    ));
+    out.push_str(" │    Installed tools are not proof of configured integrations.\n");
     for chunk in adapters.chunks(3) {
         out.push_str(" │    ");
         for (tool, status) in chunk {
@@ -312,10 +367,12 @@ fn code_text(r: Option<&Roles<'_>>, text: &str) -> String {
 fn tool_status_cell(r: Option<&Roles<'_>>, tool: &str, status: ToolStatus) -> String {
     let cell = format!("{tool:<16}");
     match (r, status) {
-        (Some(r), ToolStatus::Themed) => r.status_success(&cell),
-        (Some(r), ToolStatus::NotInstalled) => r.status_error(&cell),
-        (None, ToolStatus::Themed) => format!("✓ {cell}"),
-        (None, ToolStatus::NotInstalled) => format!("✗ {cell}"),
+        (Some(r), ToolStatus::Available) => r.status_success(&cell),
+        (Some(r), ToolStatus::Unavailable) => r.status_error(&cell),
+        (Some(r), ToolStatus::Unknown) => r.status_warn(&format!("{cell} (unknown)")),
+        (None, ToolStatus::Available) => format!("✓ {cell}"),
+        (None, ToolStatus::Unavailable) => format!("✗ {cell}"),
+        (None, ToolStatus::Unknown) => format!("? {cell} (unknown)"),
     }
 }
 
@@ -363,13 +420,13 @@ fn get_adapter_statuses() -> Result<Vec<(String, ToolStatus)>> {
 
     for (tool_key, display_name) in TOOL_STATUS_ITEMS {
         let status = if let Some(adapter) = registry.get_adapter(tool_key) {
-            if adapter.is_installed().unwrap_or(false) {
-                ToolStatus::Themed
-            } else {
-                ToolStatus::NotInstalled
+            match adapter.is_installed() {
+                Ok(true) => ToolStatus::Available,
+                Ok(false) => ToolStatus::Unavailable,
+                Err(_) => ToolStatus::Unknown,
             }
         } else {
-            ToolStatus::NotInstalled
+            ToolStatus::Unknown
         };
         statuses.push((display_name.to_string(), status));
     }
@@ -413,9 +470,9 @@ mod tests {
 
     fn fixed_adapters() -> Vec<(String, ToolStatus)> {
         vec![
-            ("ghostty".to_string(), ToolStatus::Themed),
-            ("alacritty".to_string(), ToolStatus::NotInstalled),
-            ("starship".to_string(), ToolStatus::Themed),
+            ("ghostty".to_string(), ToolStatus::Available),
+            ("alacritty".to_string(), ToolStatus::Unavailable),
+            ("starship".to_string(), ToolStatus::Available),
         ]
     }
 
@@ -510,7 +567,7 @@ mod tests {
 
         let out = format_status_panel(
             Some(&r),
-            &theme,
+            Some(&theme),
             "JetBrains Mono",
             "Solid",
             &terminal,
@@ -544,7 +601,7 @@ mod tests {
 
         let out = format_status_panel(
             Some(&r),
-            &theme,
+            Some(&theme),
             "JetBrains Mono",
             "Solid",
             &terminal,
@@ -584,7 +641,7 @@ mod tests {
 
         let out = format_status_panel(
             Some(&r),
-            &theme,
+            Some(&theme),
             "JetBrains Mono",
             "Solid",
             &terminal,
@@ -615,7 +672,7 @@ mod tests {
 
         let out = format_status_panel(
             None,
-            &theme,
+            Some(&theme),
             "JetBrains Mono",
             "Solid",
             &terminal,

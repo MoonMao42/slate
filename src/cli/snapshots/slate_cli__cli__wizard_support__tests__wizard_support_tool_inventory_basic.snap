@@ -10,6 +10,9 @@ expression: out
 ┃ ├─ ○ eza — Colorful file listing
 ┃ ├─ ○ lazygit — Git client that shines
 ┃ ├─ ○ fastfetch — System info with style
+┃ ├─ ○ btop — System monitor in your theme · reopen btop after changes
+┃ ├─ ○ Yazi — File manager and code previews in your theme · reopen after changes
+┃ ├─ ○ Zellij — Split panes, tabs and sessions in your theme
 ┃ ├─ ○ zsh-syntax-highlighting — Code highlighting in your shell
 ┃ ├─ ◆ Alacritty — GPU-accelerated terminal beauty (synced if installed)
 ┃ ├─ ◆ Kitty — Feature-rich GPU terminal (synced if installed)
