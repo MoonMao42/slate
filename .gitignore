@@ -12,13 +12,6 @@ Cargo.lock
 # Build caches
 .clang-module-cache/
 
-# Editor/agent workspaces
-.claude/
-.serena/
-
-# Planning & review artifacts (local-only, not shipped)
-.planning/
-
 *.gif
 *.mp4
 REVIEW.md
