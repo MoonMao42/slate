@@ -52,13 +52,13 @@ jobs:
         # Bound test concurrency without slowing compilation or extending UI waits.
         env:
           RUST_TEST_THREADS: '2'
-        run: cargo test --locked --quiet --features has-nvim
+        run: cargo test --locked --quiet --no-fail-fast --features has-nvim
 
       - name: Test (Linux, including native Fish completion and shell loading)
         if: runner.os == 'Linux'
         env:
           RUST_TEST_THREADS: '2'
-        run: cargo test --locked --quiet --features has-nvim,has-fish
+        run: cargo test --locked --quiet --no-fail-fast --features has-nvim,has-fish
 
       - name: Install script smoke test
         run: bash tests/install-script-smoke.sh
