@@ -1,20 +1,11 @@
-//! freeze: the count of `dispatch(BrandEvent::...)` call sites
-//! in `src/` (excluding `events.rs` which defines `dispatch` itself) is
-//! locked at 40 (verified 2026-04-24).
-//! MUST NOT add, remove, or modify any dispatch site — the SFX
-//! sink intercepts existing dispatches from Waves 0-6. If this
-//! test fails the plan is changing source-of-truth; open a new phase.
-//! Freeze constant verified by:
-//! grep -rn "^\s*dispatch(BrandEvent" src/ | grep -v events.rs | wc -l
-//! → 40 on 2026-04-24 (main branch).
-//! Implementation note: this test walks `src/` using `std::fs::read_dir`
-//! recursively — stdlib only, no additional dev-dep (revision 2026-04-24
-//! moved to stdlib-only to honor slate's "no unnecessary deps" posture).
+//! Inventory of direct production event dispatches. Review changes alongside
+//! event behavior tests: shared font handling removes duplicate sites, and
+//! setup completion/failure uses injected callbacks tested in setup outcomes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const EXPECTED_DISPATCH_COUNT: usize = 40;
+const EXPECTED_DISPATCH_COUNT: usize = 35;
 
 /// Recursively walk `dir`, returning every `.rs` file under it. Skips
 /// directories whose name starts with `.` (e.g. `.git`, `.cargo`).
@@ -38,7 +29,7 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
 }
 
 #[test]
-fn phase_20_does_not_mutate_phase_18_dispatch_sites() {
+fn direct_brand_dispatch_inventory_matches_reviewed_routes() {
     let mut files: Vec<PathBuf> = Vec::new();
     collect_rs_files(Path::new("src"), &mut files).expect("walk src/ for .rs files");
 

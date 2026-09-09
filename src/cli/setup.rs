@@ -1,10 +1,10 @@
-use crate::adapter::ToolAdapter;
 use crate::brand::events::{dispatch, BrandEvent, FailureKind};
 use crate::brand::language::Language;
 use crate::cli::preflight;
 use crate::cli::setup_executor;
 use crate::cli::tool_selection::ToolCatalog;
 use crate::cli::wizard_core::Wizard;
+use crate::cli::wizard_support::wording as tr;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use std::io::IsTerminal;
@@ -18,6 +18,24 @@ fn should_emit_new_shell_reminder_after_setup(theme_applied: bool) -> bool {
     theme_applied
 }
 
+/// Validate setup before the executable initializes write locks or sounds.
+pub fn validate_entry(quick: bool, only: Option<&str>) -> Result<()> {
+    if let Some(tool_id) = only {
+        validate_retry_tool(tool_id)?;
+    }
+    // Reject invisible guided setup before acquiring a lock or probing files.
+    // Explicit quick/retry workflows keep their existing consent rules.
+    if only.is_none()
+        && !quick
+        && (!std::io::stdin().is_terminal() || !std::io::stdout().is_terminal())
+    {
+        return Err(crate::error::SlateError::Internal(
+            "Non-interactive setup requires --quick for explicit consent.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Handle `slate setup` command with injected SlateEnv (preferred for testability)
 pub fn handle_with_env(
     quick: bool,
@@ -25,16 +43,11 @@ pub fn handle_with_env(
     only: Option<String>,
     env: &SlateEnv,
 ) -> Result<()> {
+    validate_entry(quick, only.as_deref())?;
+    let _write_guard = crate::config::ConfigWriteGuard::acquire(env)?;
     // If --only flag is set, handle retry flow
     if let Some(tool_id) = only {
-        return handle_retry_only(&tool_id);
-    }
-
-    if !std::io::stdin().is_terminal() && !quick {
-        dispatch(BrandEvent::Failure(FailureKind::SetupFailed));
-        return Err(crate::error::SlateError::Internal(
-            "Non-interactive setup requires --quick for explicit consent.".to_string(),
-        ));
+        return handle_retry_only(&tool_id, env);
     }
 
     // Run pre-flight checks
@@ -61,7 +74,7 @@ pub fn handle_with_env(
     eprintln!("\n");
 
     // Run the wizard
-    let mut wizard = Wizard::new()?;
+    let mut wizard = Wizard::with_env(env)?;
     wizard.run(quick, force)?;
 
     // Build selections from wizard context
@@ -77,59 +90,49 @@ pub fn handle_with_env(
     let selected_opacity = context.selected_opacity;
     let fastfetch_enabled = context.fastfetch_enabled;
 
-    // Snapshot current state BEFORE any mutations
-    {
-        use crate::config::{
-            begin_restore_point_baseline_with_env, list_restore_points_with_env,
-            snapshot_current_state_with_env,
-        };
-        let backups = list_restore_points_with_env(env).ok();
-        let has_baseline = if let Some(ref backups) = backups {
-            backups.iter().any(|rp| rp.is_baseline)
-        } else {
-            false
-        };
-
-        if !has_baseline {
-            // First time: create baseline (pre-slate state)
-            match begin_restore_point_baseline_with_env(env) {
-                Ok(baseline_point) => {
-                    eprintln!("✓ Baseline snapshot created ({})", baseline_point.id);
-                }
-                Err(_) => {
-                    eprintln!("⚠ Could not create baseline snapshot — slate restore will not be available for pre-slate state");
-                }
-            }
-        } else {
-            // Subsequent runs: snapshot current config so user can restore back
-            let config = crate::config::ConfigManager::with_env(env).ok();
-            let label = config
-                .and_then(|c| c.get_current_theme().ok().flatten())
-                .unwrap_or_else(|| "pre-setup".to_string());
-            match snapshot_current_state_with_env(env, &label) {
-                Ok(snap) => {
-                    eprintln!("✓ Snapshot created ({})", snap.id);
-                }
-                Err(_) => {
-                    eprintln!("⚠ Could not create restore snapshot — continuing without it");
-                }
-            }
-        }
-    }
-
-    prepare_setup_state(env, fastfetch_enabled, selected_opacity)?;
-
-    // Execute the setup (install tools, apply configurations)
-    let summary = setup_executor::execute_setup_with_env(
+    // Resolve the complete request before preferences, snapshots or installers.
+    // Execution consumes this plan instead of resolving the saved theme again.
+    let reviewed_installs = wizard.confirmed_install_plan()?;
+    let plan = match setup_executor::prepare_setup_with_env(
         &selected_tools,
         &tools_to_configure,
         selected_font,
         selected_theme,
         env,
-    )?;
+    )
+    .and_then(|plan| {
+        plan.with_reviewed_installs(
+            reviewed_installs,
+            crate::platform::packages::InstallContext::detect(),
+        )
+    }) {
+        Ok(plan) => plan,
+        Err(error) => {
+            dispatch(BrandEvent::Failure(FailureKind::SetupFailed));
+            return Err(error);
+        }
+    };
+
+    // A failed safety snapshot must stop setup before installing or editing tools.
+    let snapshot = snapshot_before_setup(env)?;
+    eprintln!(
+        "✓ {} ({})",
+        tr("已创建恢复点", "Snapshot created"),
+        snapshot.id
+    );
+
+    if let Err(error) = prepare_setup_state(env, fastfetch_enabled, selected_opacity) {
+        return fail_setup_after_snapshot(&snapshot.id, error.to_string(), dispatch);
+    }
+
+    // Execute the setup (install tools, apply configurations)
+    let mut summary = match setup_executor::execute_prepared_setup(plan) {
+        Ok(summary) => summary,
+        Err(error) => return fail_setup_after_snapshot(&snapshot.id, error.to_string(), dispatch),
+    };
 
     // nvim install consent prompt.
-    // Runs after `execute_setup_with_env` so the current theme is
+    // Runs after `execute_prepared_setup` so the current theme is
     // resolved (and stored on disk). `NvimAdapter::setup` is
     // idempotent — writes 18 shims + loader + initial state file.
     // The 3-way consent prompt then asks the user about the ONE
@@ -139,26 +142,25 @@ pub fn handle_with_env(
     // `!stdin.is_terminal()` (quick mode on CI / non-tty) → default
     // to option A — silently adding the line is consistent with the
     // "quick = least friction" posture; the later completion-receipt
-    // surface advertises `slate config editor disable` for opt-out.
+    // surface advertises `slate config set editor disable` for opt-out.
     let non_interactive = !std::io::stdin().is_terminal();
-    let nvim_consent = run_nvim_activation_flow(env, non_interactive);
+    let nvim_consent = nvim_after_theme(&mut summary, || {
+        run_nvim_activation_flow(env, non_interactive)
+    });
+    summary.refresh_outcome();
 
     // Display completion message with visibility guidance
-    eprintln!("\n{}", summary.format_completion_message());
+    eprintln!(
+        "\n{}",
+        summary.format_completion_message_for_terminal(wizard.terminal_profile())
+    );
 
     // surface the nvim flow's outcome inline, below the
     // completion card. Separate from `format_completion_message` so
     // the existing receipt contract is not mutated.
-    if let Some(receipt_line) = format_nvim_consent_receipt(&nvim_consent) {
+    if let Some(receipt_line) = nvim_consent.as_ref().and_then(format_nvim_consent_receipt) {
         let _ = cliclack::log::info(receipt_line);
     }
-    // Task 5 — capability hint (missing / too-old nvim) surfaces when
-    // `NvimAdapter.is_installed()` returned false. Exactly once per
-    // run.
-    if let Some(hint) = format_nvim_skip_hint_if_relevant() {
-        let _ = cliclack::log::remark(hint);
-    }
-
     if let Some(timing_line) = format_completion_timing(start_time) {
         eprintln!("{}", timing_line);
     }
@@ -174,15 +176,57 @@ pub fn handle_with_env(
         crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
     }
 
-    // 18-: whole-flow milestone — setup finished
-    // successfully. SoundSink consumes this for the
-    // completion SFX; in it routes to NoopSink (no-op).
-    // Failure exits earlier in this function each fire
-    // BrandEvent::Failure(FailureKind::SetupFailed); the success
-    // signal is this single dispatch.
-    dispatch(BrandEvent::SetupComplete);
-
+    finish_setup_with(&summary, &snapshot.id, dispatch)?;
+    preflight_result.acknowledge_after_setup(env);
     Ok(())
+}
+
+fn nvim_after_theme(
+    summary: &mut crate::cli::failure_handler::ExecutionSummary,
+    activate: impl FnOnce() -> Result<NvimConsent>,
+) -> Option<NvimConsent> {
+    if !summary.theme_applied {
+        summary.add_notice(tr(
+            "主题或 Shell 设置未完成，已跳过 Neovim 启用。",
+            "Neovim activation was skipped because theme/shell setup did not finish.",
+        ));
+        return None;
+    }
+    match activate() {
+        Ok(consent) => Some(consent),
+        Err(error) => {
+            summary.add_issue(format!(
+                "{}: {error}",
+                tr("Neovim 启用未完成", "Neovim activation did not finish")
+            ));
+            None
+        }
+    }
+}
+
+fn finish_setup_with(
+    summary: &crate::cli::failure_handler::ExecutionSummary,
+    restore_point_id: &str,
+    emit: impl FnOnce(BrandEvent),
+) -> Result<()> {
+    if summary.is_successful() {
+        emit(BrandEvent::SetupComplete);
+        Ok(())
+    } else {
+        fail_setup_after_snapshot(restore_point_id, summary.failure_summary(), emit)
+    }
+}
+
+fn fail_setup_after_snapshot(
+    restore_point_id: &str,
+    reason: String,
+    emit: impl FnOnce(BrandEvent),
+) -> Result<()> {
+    emit(BrandEvent::Failure(FailureKind::SetupFailed));
+    Err(crate::error::SlateError::SetupIncomplete {
+        reason,
+        restore_point_id: restore_point_id.to_owned(),
+    })
 }
 
 /// Handle `slate setup` command with optional flags (backward compatibility)
@@ -190,6 +234,19 @@ pub fn handle_with_env(
 pub fn handle(quick: bool, force: bool, only: Option<String>) -> Result<()> {
     let env = SlateEnv::from_process()?;
     handle_with_env(quick, force, only, &env)
+}
+
+fn snapshot_before_setup(env: &SlateEnv) -> Result<crate::config::RestorePoint> {
+    let has_baseline = crate::config::list_restore_points_with_env(env)?
+        .iter()
+        .any(|point| point.is_baseline);
+    if !has_baseline {
+        return crate::config::begin_restore_point_baseline_with_env(env);
+    }
+    let label = crate::config::ConfigManager::with_env(env)?
+        .get_current_theme()?
+        .unwrap_or_else(|| "pre-setup".into());
+    crate::config::snapshot_current_state_with_env(env, &label)
 }
 
 fn prepare_setup_state(
@@ -203,22 +260,16 @@ fn prepare_setup_state(
     // None = user wasn't asked (quick mode) — preserve existing setting.
     match fastfetch_enabled {
         Some(true) => {
-            if let Err(e) = config_mgr.enable_fastfetch_autorun() {
-                eprintln!("⚠ Could not save fastfetch preference: {}", e);
-            }
+            config_mgr.enable_fastfetch_autorun()?;
         }
         Some(false) => {
-            if let Err(e) = config_mgr.disable_fastfetch_autorun() {
-                eprintln!("⚠ Could not save fastfetch preference: {}", e);
-            }
+            config_mgr.disable_fastfetch_autorun()?;
         }
         None => {} // Don't touch existing setting
     }
 
     if let Some(opacity) = selected_opacity {
-        if let Err(e) = config_mgr.set_current_opacity_preset(opacity) {
-            eprintln!("⚠ Could not save opacity preference: {}", e);
-        }
+        config_mgr.set_current_opacity_preset(opacity)?;
     }
 
     Ok(())
@@ -226,39 +277,58 @@ fn prepare_setup_state(
 
 /// Handle --only flag: retry a single tool installation.
 /// Only installs the tool — does NOT rewrite shell integration or apply themes.
-fn handle_retry_only(tool_id: &str) -> Result<()> {
+fn handle_retry_only(tool_id: &str, env: &SlateEnv) -> Result<()> {
+    retry_only_with(
+        tool_id,
+        env,
+        |_env| {
+            let report = preflight::run_checks_for_retry(tool_id);
+            if report.is_ready() {
+                Ok(())
+            } else {
+                Err(crate::error::SlateError::Internal(
+                    report.format_blocking_guidance(),
+                ))
+            }
+        },
+        |tool, env| {
+            setup_executor::install_tool(tool.id, tool.brew_package, tool.brew_kind, env)
+                .map(|method| method.success_message(tool.label))
+        },
+    )
+}
+
+/// Shared retry sequence; callbacks let tests exercise failures without package
+/// managers, network probes or installers. Production always uses the real pair.
+fn retry_only_with(
+    tool_id: &str,
+    env: &SlateEnv,
+    preflight: impl FnOnce(&SlateEnv) -> Result<()>,
+    install: impl FnOnce(&crate::cli::tool_selection::ToolMetadata, &SlateEnv) -> Result<String>,
+) -> Result<()> {
     let tool = validate_retry_tool(tool_id)?;
-    let env = crate::env::SlateEnv::from_process()?;
-
-    eprintln!("\n✦ Retrying tool installation: {}\n", tool.label);
-
-    // Run pre-flight checks
-    let preflight_result =
-        preflight::run_checks_for_setup_with_env(&env, preflight::PreflightScenario::RetryInstall)?;
-    if !preflight_result.is_ready() {
-        return Err(crate::error::SlateError::Internal(
-            preflight_result.format_blocking_guidance(),
-        ));
+    eprintln!(
+        "\n✦ {}: {}\n",
+        tr("重试安装", "Retrying tool installation"),
+        tool.label
+    );
+    preflight(env)?;
+    // Preserve the install error as a failure result (CLI exit 1), not a printed
+    // failure followed by success. Only successful installs get a success line.
+    let message = install(&tool, env)?;
+    eprintln!("\n{}", crate::cli::file_output::terminal_text(&message));
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        eprintln!("{}", tr("本次仅安装工具，未应用配色或启用 Shell 集成。", "This retry only installed the tool; it did not apply colors or enable shell integration."));
     }
-
-    // Only install the single tool — no shell integration, no theme apply
-    match setup_executor::install_tool(tool.id, tool.brew_package, tool.brew_kind, &env) {
-        Ok(method) => {
-            eprintln!("\n{}", method.success_message(tool.label));
-        }
-        Err(e) => {
-            eprintln!("\n✗ Tool '{}' installation failed: {}\n", tool.label, e);
-        }
-    }
-
     Ok(())
 }
 
-fn validate_retry_tool(tool_id: &str) -> Result<crate::cli::tool_selection::ToolMetadata> {
+/// Side-effect-free input validation, also used before CLI profile/lock/sound IO.
+pub fn validate_retry_tool(tool_id: &str) -> Result<crate::cli::tool_selection::ToolMetadata> {
     let Some(tool) = ToolCatalog::get_tool(tool_id) else {
         return Err(crate::error::SlateError::Internal(format!(
             "Unknown tool: '{}'. Run 'slate setup' to see available tools.",
-            tool_id
+            tool_id.escape_default()
         )));
     };
 
@@ -300,43 +370,43 @@ fn format_elapsed(elapsed: std::time::Duration) -> String {
 /// completion receipt so users see what happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NvimConsent {
-    /// NvimAdapter::is_installed() returned false — nvim missing or
-    /// older than 0.8.0. Task 5's capability hint surfaces instead.
+    /// No executable was found; retained for the completion hint.
     NoNvim,
+    /// The checked executable is older than the supported minimum.
+    TooOld,
+    /// This profile has explicitly opted out of automatic setup activation.
+    Disabled,
     /// Marker already present in init.lua/init.vim — prompt skipped.
     AlreadyConsented,
     /// User chose A — slate wrote the managed-block line.
     AutoAdded,
-    /// User chose B — slate printed the line, no file edit.
+    /// User chose B — line shown, manual-only preference saved; init unchanged.
     ShownLine,
-    /// User chose C — nothing happened.
+    /// User chose C — manual-only preference was saved.
     Skipped,
 }
 
 /// Pre-prompt state for `prompt_nvim_activation`. Split from
 /// `NvimConsent` because the prompt function itself has three
-/// short-circuit paths (no nvim, marker exists, needs prompt) and
+/// states (disabled, marker exists, needs prompt) and
 /// unit tests for the idempotency path should NOT need to mock
 /// cliclack. This enum is the pure-function input; the prompt is
 /// the thin orchestrator on top.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NvimActivationState {
-    /// NvimAdapter::is_installed() returned false.
-    NoNvim,
+    Disabled,
     /// A slate marker block is already present in init.lua / init.vim.
     AlreadyConsented,
     /// Neither of the above — the prompt should fire.
     NeedsPrompt,
 }
 
-/// Decide the current activation state WITHOUT firing the cliclack
-/// prompt. Pure I/O (reads init.lua / init.vim, queries nvim
-/// installed-ness) — deterministic for a given env + filesystem
-/// snapshot, so unit-testable with `SlateEnv::with_home(tempdir)`
-/// (no `std::env::set_var` needed).
+/// Read consent/markers WITHOUT launching an editor or firing the prompt.
+/// The activation flow checks availability once before setup; this later stage
+/// must not repeat that native probe just to decide whether a hook is present.
 pub(crate) fn nvim_activation_state(env: &SlateEnv) -> Result<NvimActivationState> {
-    if !crate::adapter::NvimAdapter.is_installed()? {
-        return Ok(NvimActivationState::NoNvim);
+    if !crate::config::ConfigManager::from_env_paths(env).is_editor_auto_activation_enabled()? {
+        return Ok(NvimActivationState::Disabled);
     }
     if init_file_has_slate_marker(env)? {
         return Ok(NvimActivationState::AlreadyConsented);
@@ -349,12 +419,20 @@ pub(crate) fn nvim_activation_state(env: &SlateEnv) -> Result<NvimActivationStat
 /// or vimscript `"` prefix in front of the marker still matches
 /// that's the Pitfall 4 trick. Non-existent files are not an error.
 fn init_file_has_slate_marker(env: &SlateEnv) -> Result<bool> {
-    let nvim_home = env.home().join(".config/nvim");
+    use crate::config::file_read::{self, Links, MAX_TOOL_CONFIG_BYTES};
+    let nvim_home = env.nvim_config_dir();
     for name in ["init.lua", "init.vim"] {
         let path = nvim_home.join(name);
-        if path.exists() {
-            let content = std::fs::read(&path)?;
-            if content
+        if let Some(source) =
+            file_read::read(&path, MAX_TOOL_CONFIG_BYTES, Links::Follow).map_err(|error| {
+                crate::error::SlateError::ConfigReadError(
+                    path.display().to_string(),
+                    error.to_string(),
+                )
+            })?
+        {
+            if source
+                .bytes
                 .windows(crate::adapter::marker_block::START.len())
                 .any(|w| w == crate::adapter::marker_block::START.as_bytes())
             {
@@ -370,14 +448,9 @@ fn init_file_has_slate_marker(env: &SlateEnv) -> Result<bool> {
 /// when NEITHER file exists (default-create-Lua). init.vim wins only
 /// when it exists and init.lua does not.
 pub(crate) fn choose_nvim_init_target(env: &SlateEnv) -> (PathBuf, bool) {
-    let nvim_home = env.home().join(".config/nvim");
-    let init_lua = nvim_home.join("init.lua");
-    let init_vim = nvim_home.join("init.vim");
-    if init_lua.exists() || !init_vim.exists() {
-        (init_lua, true)
-    } else {
-        (init_vim, false)
-    }
+    let target = env.nvim_init_path();
+    let is_lua = target.extension().is_some_and(|ext| ext == "lua");
+    (target, is_lua)
 }
 
 /// Build the managed-block body that gets written to init.lua / init.vim.
@@ -385,9 +458,8 @@ pub(crate) fn choose_nvim_init_target(env: &SlateEnv) -> (PathBuf, bool) {
 /// shell/TOML-style (`# slate:…`). For init.lua we MUST prepend `-- `
 /// so the resulting file parses as valid Lua. For init.vim the prefix
 /// is `"` (vimscript line comment), and the body uses `lua pcall(...)`.
-/// The spliced markers are still raw-substring-matchable by
-/// `marker_block::strip_managed_blocks` — verified in
-/// `build_marker_block_for_init_contains_raw_markers` below.
+/// The marker editor recognizes these full comment lines, removing their
+/// wrappers together with the block instead of leaving a comment prefix behind.
 pub(crate) fn build_marker_block_for_init(is_lua: bool) -> String {
     if is_lua {
         format!(
@@ -413,6 +485,9 @@ pub(crate) fn build_marker_block_for_init(is_lua: bool) -> String {
 /// (or init.vim). Pulled out of `prompt_nvim_activation` so tests can
 /// exercise it without spawning cliclack.
 pub(crate) fn apply_activation_choice_a(env: &SlateEnv) -> Result<NvimConsent> {
+    if !crate::config::ConfigManager::from_env_paths(env).is_editor_auto_activation_enabled()? {
+        return Ok(NvimConsent::Disabled);
+    }
     let (target, is_lua) = choose_nvim_init_target(env);
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
@@ -432,162 +507,176 @@ pub(crate) fn apply_activation_choice_b(env: &SlateEnv) -> NvimConsent {
     } else {
         "lua pcall(require, 'slate')"
     };
-    let _ = cliclack::log::info(format!(
-        "Add this line to {}:\n\n    {}",
-        target.display(),
-        call
-    ));
+    let _ = cliclack::log::info(format_nvim_manual_instruction(&target, call));
     NvimConsent::ShownLine
 }
 
+fn format_nvim_manual_instruction(target: &std::path::Path, call: &str) -> String {
+    format!(
+        "{} {}:\n\n    {}",
+        tr("将以下内容添加到", "Add this line to"),
+        crate::cli::file_output::terminal_text(&target.to_string_lossy()),
+        call
+    )
+}
+
 /// The 3-way consent prompt. Fires cliclack `select` with the
-/// A/B/C labels, dispatches the chosen branch. Returns early if
-/// NvimAdapter reports not-installed OR if an existing slate marker
-/// is already present in init.lua / init.vim.
+/// A/B/C labels, dispatches the chosen branch. The caller must have checked
+/// availability; this stage only checks the preference and existing markers.
 /// `non_interactive=true` short-circuits to option A — used when
 /// stdin is not a TTY (quick setup on CI, piped input, etc.). The
 /// one-line outcome still surfaces in the completion receipt.
 pub(crate) fn prompt_nvim_activation(env: &SlateEnv, non_interactive: bool) -> Result<NvimConsent> {
     match nvim_activation_state(env)? {
-        NvimActivationState::NoNvim => Ok(NvimConsent::NoNvim),
+        NvimActivationState::Disabled => Ok(NvimConsent::Disabled),
         NvimActivationState::AlreadyConsented => Ok(NvimConsent::AlreadyConsented),
         NvimActivationState::NeedsPrompt => {
             if non_interactive {
                 // Quick / non-TTY: default to A. User still sees the
                 // outcome in the completion receipt and can opt out
-                // via `slate config editor disable`.
+                // via `slate config set editor disable`.
                 return apply_activation_choice_a(env);
             }
 
-            let choice = cliclack::select(Language::NVIM_CONSENT_HEADER)
-                .item("A", Language::NVIM_CONSENT_OPTION_A, "")
-                .item("B", Language::NVIM_CONSENT_OPTION_B, "")
-                .item("C", Language::NVIM_CONSENT_OPTION_C, "")
-                .interact()
-                .map_err(|e| {
-                    if e.kind() == std::io::ErrorKind::Interrupted {
-                        crate::error::SlateError::UserCancelled
-                    } else {
-                        crate::error::SlateError::IOError(e)
-                    }
-                })?;
+            let choice =
+                super::menu::select(tr("启用 Neovim 自动配色？", Language::NVIM_CONSENT_HEADER))
+                    .item("A", tr("自动添加配置", Language::NVIM_CONSENT_OPTION_A), "")
+                    .item(
+                        "B",
+                        tr("显示配置内容，手动添加", Language::NVIM_CONSENT_OPTION_B),
+                        tr(
+                            "以后保持手动启用",
+                            "Remember manual activation for future setup",
+                        ),
+                    )
+                    .item(
+                        "C",
+                        tr("跳过，手动切换配色", Language::NVIM_CONSENT_OPTION_C),
+                        tr(
+                            "以后保持手动启用",
+                            "Remember manual activation for future setup",
+                        ),
+                    )
+                    .interact()
+                    .map_err(|e| {
+                        if e.kind() == std::io::ErrorKind::Interrupted {
+                            crate::error::SlateError::UserCancelled
+                        } else {
+                            crate::error::SlateError::IOError(e)
+                        }
+                    })?;
 
             match choice {
                 "A" => apply_activation_choice_a(env),
-                "B" => Ok(apply_activation_choice_b(env)),
-                "C" => Ok(NvimConsent::Skipped),
+                "B" => remember_manual_nvim_activation(env, true),
+                "C" => remember_manual_nvim_activation(env, false),
                 _ => unreachable!("cliclack returns only declared items"),
             }
         }
     }
 }
 
+fn remember_manual_nvim_activation(env: &SlateEnv, show_line: bool) -> Result<NvimConsent> {
+    crate::config::ConfigManager::from_env_paths(env).set_editor_auto_activation_enabled(false)?;
+    Ok(if show_line {
+        apply_activation_choice_b(env)
+    } else {
+        NvimConsent::Skipped
+    })
+}
+
 /// Run the nvim install + consent flow inside the setup handler.
 /// Split from `handle_with_env` so tests can exercise the install +
 /// prompt orchestration without the wizard / preflight / TTY guards.
-/// Install failures are non-fatal — the consent prompt is skipped (we
-/// don't want to prompt for a line that `require('slate')` would fail
-/// to resolve), and the error is logged via cliclack warning so users
-/// see it. Returns `NvimConsent::NoNvim` in both the not-installed and
-/// install-failed paths; the completion receipt surface treats them
-/// identically (no "added" line).
-fn run_nvim_activation_flow(env: &SlateEnv, non_interactive: bool) -> NvimConsent {
-    match crate::adapter::NvimAdapter.is_installed() {
-        Ok(true) => {}
-        Ok(false) | Err(_) => return NvimConsent::NoNvim,
-    }
-
-    // Write 18 shims + loader + initial state. Idempotent — re-runs
-    // produce byte-identical files via AtomicWriteFile.
-    let current_theme =
-        match crate::config::ConfigManager::with_env(env).and_then(|cm| cm.get_current_theme()) {
-            Ok(Some(id)) => id,
-            _ => "catppuccin-mocha".to_string(),
-        };
-    let registry = match crate::theme::ThemeRegistry::new() {
-        Ok(r) => r,
-        Err(_) => return NvimConsent::NoNvim,
-    };
-    let theme = match registry.get(&current_theme).cloned() {
-        Some(t) => t,
-        None => return NvimConsent::NoNvim,
-    };
-    if let Err(err) = crate::adapter::NvimAdapter::setup(env, &theme) {
-        let _ = cliclack::log::warning(format!("⚠ Could not write slate's nvim files: {}", err));
-        return NvimConsent::NoNvim;
-    }
-
-    // Consent prompt for the ONE line in init.lua.
-    match prompt_nvim_activation(env, non_interactive) {
-        Ok(consent) => consent,
-        Err(err) => {
-            let _ = cliclack::log::warning(format!("⚠ Nvim consent prompt failed: {}", err));
-            NvimConsent::NoNvim
-        }
-    }
+/// Missing/unsupported Neovim is an ordinary skip. Actual state-read, setup or
+/// consent failures remain errors so the handler cannot declare full success.
+fn run_nvim_activation_flow(env: &SlateEnv, non_interactive: bool) -> Result<NvimConsent> {
+    run_nvim_activation_with_probe(env, non_interactive, || {
+        crate::adapter::nvim::availability::detect(env)
+    })
 }
 
-/// One-line receipt surface for the `NvimConsent` outcome. Returns
-/// `None` when there's nothing to say (NoNvim — the capability hint
-/// from Task 5 covers that surface, not this one).
+fn run_nvim_activation_with_probe(
+    env: &SlateEnv,
+    non_interactive: bool,
+    probe: impl FnOnce() -> Result<crate::adapter::nvim::availability::NvimAvailability>,
+) -> Result<NvimConsent> {
+    use crate::adapter::nvim::availability::NvimAvailability;
+    with_nvim_auto_activation(env, || match probe()? {
+        NvimAvailability::Missing => Ok(NvimConsent::NoNvim),
+        NvimAvailability::Unsupported => Ok(NvimConsent::TooOld),
+        NvimAvailability::Ready => run_allowed_nvim_activation_flow(env, non_interactive),
+    })
+}
+
+fn with_nvim_auto_activation(
+    env: &SlateEnv,
+    activate: impl FnOnce() -> Result<NvimConsent>,
+) -> Result<NvimConsent> {
+    if !crate::config::ConfigManager::from_env_paths(env).is_editor_auto_activation_enabled()? {
+        return Ok(NvimConsent::Disabled);
+    }
+    activate()
+}
+
+fn run_allowed_nvim_activation_flow(env: &SlateEnv, non_interactive: bool) -> Result<NvimConsent> {
+    // Write the shims + loader + initial state. Idempotent — re-runs
+    // produce byte-identical files via AtomicWriteFile.
+    let current_theme = crate::config::ConfigManager::from_env_paths(env)
+        .get_current_theme()?
+        .unwrap_or_else(|| crate::theme::DEFAULT_THEME_ID.into());
+    let registry = crate::theme::ThemeRegistry::new()?;
+    let theme = registry.get(&current_theme).ok_or_else(|| {
+        crate::error::SlateError::InvalidThemeData(format!(
+            "Cannot activate Neovim with unknown saved theme '{}'",
+            current_theme.escape_default()
+        ))
+    })?;
+    crate::adapter::NvimAdapter::setup(env, theme)?;
+
+    // Consent prompt for the ONE line in init.lua.
+    prompt_nvim_activation(env, non_interactive)
+}
+
+/// Render the retained result without probing the editor again.
 fn format_nvim_consent_receipt(consent: &NvimConsent) -> Option<String> {
+    format_nvim_consent_receipt_in(consent, crate::cli::ui_language::output_language())
+}
+
+fn format_nvim_consent_receipt_in(
+    consent: &NvimConsent,
+    language: crate::config::ui_language::UiLanguage,
+) -> Option<String> {
+    if language == crate::config::ui_language::UiLanguage::Chinese {
+        return match consent {
+            NvimConsent::NoNvim => Some("未检测到 Neovim，已跳过编辑器配色。需要 Neovim 0.8 或更新版本。".into()),
+            NvimConsent::TooOld => Some("Neovim 低于 0.8，已跳过编辑器配色；升级后可重新设置。".into()),
+            NvimConsent::Disabled => Some("Neovim 自动启用保持关闭；未更改手动加载配置或运行中的编辑器。重新允许：`slate config set editor enable`，然后运行 `slate setup`。".into()),
+            NvimConsent::AlreadyConsented => Some("已检测到 Neovim 自动加载配置；未验证运行中的配色。".into()),
+            NvimConsent::AutoAdded => None,
+            NvimConsent::ShownLine => Some("请将上面的配置添加到指定文件。以后保持手动启用；重新允许自动配置：`slate config set editor enable`。".into()),
+            NvimConsent::Skipped => Some("已记住跳过自动启用。可手动运行 `:colorscheme slate-<variant>`；重新允许自动配置：`slate config set editor enable`。".into()),
+        };
+    }
     match consent {
-        NvimConsent::NoNvim => None,
+        NvimConsent::NoNvim => Some(Language::NVIM_MISSING_HINT.into()),
+        NvimConsent::TooOld => Some(Language::NVIM_TOO_OLD_HINT.into()),
+        NvimConsent::Disabled => Some(
+            "Neovim automatic activation remains off for this profile. To allow it again: `slate config set editor enable`, then `slate setup`. Existing manual hooks and running editors are unchanged.".into(),
+        ),
         NvimConsent::AlreadyConsented => Some(
-            "✦ Neovim auto-activation already wired (marker detected in init.lua).".to_string(),
+            "✦ Neovim auto-activation already wired (marker detected in init.lua/init.vim).".to_string(),
         ),
         NvimConsent::AutoAdded => None,
         NvimConsent::ShownLine => Some(
-            "✦ Nvim activation line shown above — paste it into init.lua when you're ready."
+            "✦ Nvim activation line shown above — paste it into the indicated file when ready. Future setup keeps activation manual until `slate config set editor enable`."
                 .to_string(),
         ),
         NvimConsent::Skipped => Some(
-            "✦ Nvim activation skipped — run `:colorscheme slate-<variant>` in nvim manually."
+            "✦ Nvim activation skipped and remembered — use `:colorscheme slate-<variant>` manually. To allow setup activation again: `slate config set editor enable`."
                 .to_string(),
         ),
     }
-}
-
-// Task 5 — nvim capability hint (missing / too-old) surfaced in
-// the completion receipt.
-
-/// Decide which capability hint (if any) to surface on the setup
-/// completion receipt. Pure function of `installed` + the optional
-/// parsed version string — unit-testable without mutating process
-/// env vars or spawning subprocesses.
-/// Rules (matches RESEARCH §Pattern 8):
-/// - `installed = false` → Some(NVIM_MISSING_HINT)
-/// - `installed = true, version parse failure (None)` → Some(NVIM_MISSING_HINT)
-/// - `installed = true, version < 0.8` → Some(NVIM_TOO_OLD_HINT)
-/// - `installed = true, version ≥ 0.8` → None (nothing to say)
-pub(crate) fn skip_hint_for(installed: bool, version: Option<&str>) -> Option<&'static str> {
-    if !installed {
-        return Some(Language::NVIM_MISSING_HINT);
-    }
-    match version {
-        None => Some(Language::NVIM_MISSING_HINT),
-        Some(ver) => {
-            if crate::platform::version_check::VersionPolicy::check_version("nvim", ver).is_ok() {
-                None
-            } else {
-                Some(Language::NVIM_TOO_OLD_HINT)
-            }
-        }
-    }
-}
-
-/// Production wrapper: probes the current process environment via
-/// `detect_tool_presence` + `detect_version` and delegates to
-/// `skip_hint_for` for the decision. The split keeps the decision
-/// logic unit-testable (pure) while the wrapper owns the I/O.
-pub(crate) fn format_nvim_skip_hint_if_relevant() -> Option<&'static str> {
-    let presence = crate::detection::detect_tool_presence("nvim");
-    let version = if presence.installed {
-        crate::platform::version_check::detect_version("nvim").ok()
-    } else {
-        None
-    };
-    skip_hint_for(presence.installed, version.as_deref())
 }
 
 #[cfg(test)]
@@ -599,6 +688,389 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    #[ignore = "invoked by nvim_availability_flow_probes_once in a private subprocess"]
+    fn nvim_availability_flow_child() {
+        let case = std::env::var("SLATE_NVIM_PROBE_CASE").unwrap();
+        let log = PathBuf::from(std::env::var_os("SLATE_NVIM_PROBE_LOG").unwrap());
+        let env = SlateEnv::from_process().unwrap();
+        if case == "disabled" {
+            crate::config::ConfigManager::from_env_paths(&env)
+                .set_editor_auto_activation_enabled(false)
+                .unwrap();
+        }
+        let result = run_nvim_activation_flow(&env, true);
+        match case.as_str() {
+            "ready" | "ready-dev" => {
+                let consent = result.unwrap();
+                assert_eq!(consent, NvimConsent::AutoAdded);
+                assert!(init_file_has_slate_marker(&env).unwrap());
+                assert!(crate::adapter::nvim::state_file_path(&env).is_file());
+                assert_eq!(std::fs::read_to_string(&log).unwrap(), "probe\n");
+                for _ in 0..2 {
+                    assert!(format_nvim_consent_receipt(&consent).is_none());
+                }
+                assert_eq!(std::fs::read_to_string(&log).unwrap(), "probe\n");
+                let before = std::fs::read(env.nvim_init_path()).unwrap();
+                assert_eq!(
+                    run_nvim_activation_flow(&env, true).unwrap(),
+                    NvimConsent::AlreadyConsented
+                );
+                assert_eq!(std::fs::read(env.nvim_init_path()).unwrap(), before);
+                assert_eq!(std::fs::read_to_string(&log).unwrap(), "probe\nprobe\n");
+            }
+            "disabled" => {
+                assert_eq!(result.unwrap(), NvimConsent::Disabled);
+                assert!(!log.exists(), "disabled preference launched an editor");
+                assert!(!env.nvim_init_path().exists());
+                assert!(!crate::adapter::nvim::state_file_path(&env).exists());
+            }
+            "old" | "floor-dev" => {
+                let consent = result.unwrap();
+                assert_eq!(consent, NvimConsent::TooOld);
+                assert_eq!(
+                    format_nvim_consent_receipt(&consent).as_deref(),
+                    Some(Language::NVIM_TOO_OLD_HINT)
+                );
+                assert_eq!(std::fs::read_to_string(&log).unwrap(), "probe\n");
+                assert!(!env.nvim_config_dir().exists());
+            }
+            "invalid" | "short" | "wrong-tool" | "nonzero" | "timeout" => {
+                let error = result.unwrap_err().to_string();
+                let reason = match case.as_str() {
+                    "invalid" | "short" | "wrong-tool" => {
+                        "Could not read a complete semantic version"
+                    }
+                    "nonzero" => "non-zero exit status",
+                    _ => "timed out after 2000 ms",
+                };
+                assert!(error.contains(reason), "{error}");
+                assert!(!error.contains("private-output"));
+                assert!(!error.contains(Language::NVIM_MISSING_HINT));
+                assert_eq!(std::fs::read_to_string(&log).unwrap(), "probe\n");
+                assert!(!env.nvim_config_dir().exists());
+            }
+            _ => panic!("unexpected fixture case"),
+        }
+    }
+
+    #[test]
+    fn nvim_availability_flow_probes_once() {
+        use std::os::unix::fs::PermissionsExt;
+        for (case, body) in [
+            ("ready", "printf 'NVIM v0.8.0\\n'"),
+            (
+                "ready-dev",
+                "printf 'NVIM v0.12.0-dev-123+gabc\\nLuaJIT 2.1.0\\n'",
+            ),
+            ("old", "printf 'NVIM v0.7.2\\n'"),
+            ("floor-dev", "printf 'NVIM v0.8.0-dev\\nLuaJIT 2.1.0\\n'"),
+            ("invalid", "printf 'private-output\\n'"),
+            ("short", "printf 'NVIM v0.8\\nLuaJIT 2.1.0\\n'"),
+            ("wrong-tool", "printf 'LuaJIT 2.1.0\\n'"),
+            ("nonzero", "printf 'NVIM v0.12.0\\n'; exit 9"),
+            ("timeout", "printf 'NVIM v0.12.0\\n'; exec /bin/sleep 20"),
+            ("disabled", "exit 92"),
+        ] {
+            let td = TempDir::new().unwrap();
+            let bin = td.path().join("bin");
+            std::fs::create_dir(&bin).unwrap();
+            let executable = bin.join("nvim");
+            std::fs::write(&executable, format!(
+                "#!/bin/sh\n[ \"$1\" = --version ] || exit 91\nprintf 'probe\\n' >> \"$SLATE_NVIM_PROBE_LOG\"\n{body}\n"
+            )).unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert_cmd::Command::new(std::env::current_exe().unwrap())
+                .env_clear()
+                .env("HOME", td.path())
+                .env("SLATE_HOME", td.path())
+                .env("PATH", &bin)
+                .env("NO_COLOR", "1")
+                .env("SLATE_NVIM_PROBE_CASE", case)
+                .env("SLATE_NVIM_PROBE_LOG", td.path().join("probe-calls"))
+                .args([
+                    "--exact",
+                    "cli::setup::tests::nvim_availability_flow_child",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .timeout(Duration::from_secs(7))
+                .assert()
+                .success();
+        }
+    }
+
+    #[test]
+    fn editor_preference_blocks_setup_before_native_probes_or_writes() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().into());
+        let config = crate::config::ConfigManager::from_env_paths(&env);
+        config.set_editor_auto_activation_enabled(false).unwrap();
+        assert_eq!(
+            with_nvim_auto_activation(&env, || panic!("native activation ran")).unwrap(),
+            NvimConsent::Disabled
+        );
+        assert_eq!(
+            nvim_activation_state(&env).unwrap(),
+            NvimActivationState::Disabled
+        );
+        for quick in [true, false] {
+            assert_eq!(
+                prompt_nvim_activation(&env, quick).unwrap(),
+                NvimConsent::Disabled
+            );
+        }
+        assert_eq!(
+            apply_activation_choice_a(&env).unwrap(),
+            NvimConsent::Disabled
+        );
+        assert!(!env.nvim_init_path().exists());
+        assert!(!env.nvim_config_dir().join("colors").exists());
+        let receipt = format_nvim_consent_receipt(&NvimConsent::Disabled).unwrap();
+        assert!(receipt.contains("slate config set editor enable"));
+        config.set_editor_auto_activation_enabled(true).unwrap();
+        assert_eq!(
+            with_nvim_auto_activation(&env, || Ok(NvimConsent::AutoAdded)).unwrap(),
+            NvimConsent::AutoAdded
+        );
+    }
+
+    #[test]
+    fn editor_preference_remembers_both_manual_choices_and_refuses_bad_records() {
+        for show_line in [false, true] {
+            let td = TempDir::new().unwrap();
+            let env = SlateEnv::with_home(td.path().into());
+            let config = crate::config::ConfigManager::from_env_paths(&env);
+            let result = remember_manual_nvim_activation(&env, show_line).unwrap();
+            assert_eq!(
+                result,
+                if show_line {
+                    NvimConsent::ShownLine
+                } else {
+                    NvimConsent::Skipped
+                }
+            );
+            assert!(!config.is_editor_auto_activation_enabled().unwrap());
+            assert!(!env.nvim_init_path().exists());
+            std::fs::write(env.nvim_auto_activation_path(), "bad record").unwrap();
+            assert!(with_nvim_auto_activation(&env, || panic!(
+                "bad consent was treated as permission"
+            ))
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn setup_outcome_finalization_returns_failure_and_only_one_matching_event() {
+        use crate::cli::failure_handler::ExecutionSummary;
+        for success in [true, false] {
+            let mut summary = ExecutionSummary::new();
+            summary.theme_applied = true;
+            summary.overall_success = true;
+            if !success {
+                summary.add_issue("private failure");
+            }
+            let mut events = Vec::new();
+            let result =
+                finish_setup_with(&summary, "private-checkpoint", |event| events.push(event));
+            assert_eq!(events.len(), 1);
+            assert_eq!(result.is_ok(), success);
+            if success {
+                assert!(matches!(events[0], BrandEvent::SetupComplete));
+            } else {
+                assert!(matches!(
+                    events[0],
+                    BrandEvent::Failure(FailureKind::SetupFailed)
+                ));
+                let error = result.unwrap_err().to_string();
+                assert!(error.contains("slate restore private-checkpoint --dry-run"));
+                assert!(error.contains("does not uninstall packages or fonts"));
+                assert!(error.contains("no automatic rollback"));
+            }
+        }
+    }
+
+    #[test]
+    fn setup_outcome_neovim_errors_are_not_missing_installations() {
+        use crate::cli::failure_handler::ExecutionSummary;
+        let mut summary = ExecutionSummary::new();
+        assert!(nvim_after_theme(&mut summary, || panic!(
+            "activation ran after failed theme setup"
+        ))
+        .is_none());
+        assert!(summary.issues.is_empty());
+        for consent in [
+            NvimConsent::NoNvim,
+            NvimConsent::TooOld,
+            NvimConsent::Disabled,
+            NvimConsent::Skipped,
+            NvimConsent::ShownLine,
+            NvimConsent::AlreadyConsented,
+            NvimConsent::AutoAdded,
+        ] {
+            let mut summary = ExecutionSummary::new();
+            summary.theme_applied = true;
+            assert_eq!(
+                nvim_after_theme(&mut summary, || Ok(consent)),
+                Some(consent)
+            );
+            assert!(summary.is_successful());
+        }
+        summary.theme_applied = true;
+        assert!(nvim_after_theme(&mut summary, || Err(
+            crate::error::SlateError::UserCancelled
+        ))
+        .is_none());
+        assert!(!summary.is_successful());
+        assert!(summary.issues[0].contains("Neovim activation did not finish"));
+    }
+
+    #[test]
+    fn setup_outcome_preference_failures_stop_before_later_choices() {
+        for preference in ["autorun-fastfetch", "current-opacity"] {
+            let td = TempDir::new().unwrap();
+            let env = SlateEnv::with_home(td.path().to_owned());
+            let config = crate::config::ConfigManager::with_env(&env).unwrap();
+            let blocked = env.managed_file(preference);
+            std::fs::create_dir(&blocked).unwrap();
+            let result = prepare_setup_state(&env, Some(true), Some(OpacityPreset::Frosted));
+            assert!(result.is_err());
+            assert!(blocked.is_dir());
+            if preference == "autorun-fastfetch" {
+                assert!(config.get_current_opacity().unwrap().is_none());
+            } else {
+                assert!(config.has_fastfetch_autorun().unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn setup_outcome_marker_scan_rejects_oversized_and_nonregular_sources() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_owned());
+        std::fs::create_dir_all(env.nvim_config_dir()).unwrap();
+        let path = env.nvim_config_dir().join("init.lua");
+        std::fs::create_dir(&path).unwrap();
+        assert!(init_file_has_slate_marker(&env).is_err());
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(8 * 1024 * 1024 + 1)
+            .unwrap();
+        assert!(init_file_has_slate_marker(&env).is_err());
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 8 * 1024 * 1024 + 1);
+    }
+
+    #[test]
+    fn setup_retry_keeps_captured_profile_and_propagates_install_failures() {
+        let td = TempDir::new().unwrap();
+        let home = td.path().join("profile");
+        let custom = td.path().join("custom-xdg");
+        let env = SlateEnv::from_vars(|key| match key {
+            "HOME" => Some(home.as_os_str().to_owned()),
+            "XDG_CONFIG_HOME" => Some(custom.as_os_str().to_owned()),
+            _ => None,
+        })
+        .unwrap();
+        for success in [true, false] {
+            let calls = std::cell::RefCell::new(Vec::new());
+            let result = retry_only_with(
+                "starship",
+                &env,
+                |actual| {
+                    assert!(std::ptr::eq(actual, &env));
+                    assert_eq!(actual.xdg_config_home(), custom);
+                    calls.borrow_mut().push("preflight");
+                    Ok(())
+                },
+                |tool, actual| {
+                    assert!(std::ptr::eq(actual, &env));
+                    assert_eq!(actual.user_local_bin(), home.join(".local/bin"));
+                    assert_eq!(tool.id, "starship");
+                    assert_eq!(tool.brew_package, "starship");
+                    calls.borrow_mut().push("install");
+                    if success {
+                        Ok("private simulated success".into())
+                    } else {
+                        Err(crate::error::SlateError::Internal(
+                            "private install failure".into(),
+                        ))
+                    }
+                },
+            );
+            assert_eq!(*calls.borrow(), ["preflight", "install"]);
+            if success {
+                assert!(result.is_ok());
+            } else {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("private install failure"));
+            }
+        }
+        assert_eq!(std::fs::read_dir(td.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    // SWATCH-RENDERER: hostile target-name styling bytes are rejection-test data.
+    fn setup_retry_rejects_invalid_targets_and_stops_at_failed_preflight() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().join("profile"));
+        for invalid in ["unknown", "tmux", "ghostty", "\x1b[31munknown\n"] {
+            let result = retry_only_with(
+                invalid,
+                &env,
+                |_| panic!("unexpected preflight"),
+                |_, _| panic!("unexpected install"),
+            );
+            let error = result.unwrap_err().to_string();
+            assert!(!error.contains('\x1b') && !error.contains('\n'));
+            assert!(handle_with_env(false, false, Some(invalid.into()), &env).is_err());
+        }
+        let result = retry_only_with(
+            "bat",
+            &env,
+            |_| {
+                Err(crate::error::SlateError::Internal(
+                    "preflight stopped".into(),
+                ))
+            },
+            |_, _| panic!("install ran after failed preflight"),
+        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("preflight stopped"));
+        assert_eq!(std::fs::read_dir(td.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn theme_safety_setup_stops_when_baseline_or_later_snapshot_fails() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_owned());
+        std::fs::write(env.zshrc_path(), "# user shell\n").unwrap();
+        std::fs::create_dir(env.bashrc_path()).unwrap();
+        assert!(snapshot_before_setup(&env).is_err());
+        assert!(crate::config::list_restore_points_with_env(&env)
+            .unwrap()
+            .is_empty());
+        std::fs::remove_dir(env.bashrc_path()).unwrap();
+        let baseline = snapshot_before_setup(&env).unwrap();
+        assert!(baseline.is_baseline);
+        std::fs::create_dir(env.bashrc_path()).unwrap();
+        assert!(snapshot_before_setup(&env).is_err());
+        assert_eq!(
+            crate::config::list_restore_points_with_env(&env)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            std::fs::read_to_string(env.zshrc_path()).unwrap(),
+            "# user shell\n"
+        );
+    }
+
+    #[test]
     fn test_setup_force_flag_recognized() {
         // Verify force flag is handled
         let force = true;
@@ -608,7 +1080,7 @@ mod tests {
     #[test]
     fn test_setup_only_invalid_tool() {
         // Verify invalid tool names are rejected
-        let result = handle_retry_only("invalid_tool_xyz");
+        let result = validate_retry_tool("invalid_tool_xyz");
         assert!(result.is_err());
     }
 
@@ -622,10 +1094,10 @@ mod tests {
     #[test]
     fn test_setup_only_detectable_tool() {
         // Verify detect-only tools are rejected for retry
-        let result = handle_retry_only("tmux");
+        let result = validate_retry_tool("tmux");
         assert!(result.is_err());
         // ghostty is now detect-only too
-        let result = handle_retry_only("ghostty");
+        let result = validate_retry_tool("ghostty");
         assert!(result.is_err());
     }
 
@@ -823,21 +1295,10 @@ mod tests {
         );
         std::fs::write(&init_lua, &seed).unwrap();
 
-        // We can't exercise is_installed() in tests without mutating
-        // PATH; but when nvim IS installed the state is
-        // AlreadyConsented. When nvim is NOT installed the state is
-        // NoNvim. Either way the file is not mutated.
         let state = nvim_activation_state(&env).expect("pure I/O");
-        assert!(
-            matches!(
-                state,
-                NvimActivationState::AlreadyConsented | NvimActivationState::NoNvim
-            ),
-            "with an existing marker, state must be AlreadyConsented OR NoNvim, got {:?}",
-            state
-        );
+        assert_eq!(state, NvimActivationState::AlreadyConsented);
 
-        // Contract: no file mutation regardless of is_installed path.
+        // Marker inspection never launches the editor or changes the file.
         let after = std::fs::read_to_string(&init_lua).unwrap();
         assert_eq!(after, seed, "init.lua must be byte-identical");
     }
@@ -869,10 +1330,8 @@ mod tests {
     /// path. It produces a Lua-comment-wrapped block on init.lua AND
     /// is detected by `init_file_has_slate_marker` on subsequent
     /// calls — that detection is what makes the *flow* (prompt →
-    /// activation-state) idempotent, even though the raw marker_block
-    /// strip+append at the byte level is not a true fixed-point when
-    /// a `-- ` Lua-comment prefix sits outside the substring range of
-    /// the START marker (byte-positional strip, not line-aware).
+    /// activation-state) idempotent. The line-aware block editor also makes
+    /// the direct write itself idempotent, including Lua comment wrappers.
     /// Contract exercised:
     /// 1. First write produces a Lua-comment-wrapped START marker
     /// and the `pcall(require, 'slate')` runtime call.
@@ -909,6 +1368,8 @@ mod tests {
             init_file_has_slate_marker(&env).expect("reads init.lua"),
             "after choice A, init_file_has_slate_marker must detect the marker"
         );
+        apply_activation_choice_a(&env).unwrap();
+        assert_eq!(std::fs::read_to_string(&init_lua).unwrap(), first);
     }
 
     /// `apply_activation_choice_a` creates parent dirs when
@@ -947,45 +1408,44 @@ mod tests {
         );
     }
 
-    /// `skip_hint_for` — pure decision logic (Task 5).
+    /// All skipped availability results must remain distinct and read-only.
     #[test]
-    fn skip_hint_for_returns_missing_hint_when_nvim_absent() {
-        assert_eq!(
-            skip_hint_for(false, None),
-            Some(Language::NVIM_MISSING_HINT)
-        );
-        assert_eq!(
-            skip_hint_for(false, Some("0.12.0")),
-            Some(Language::NVIM_MISSING_HINT),
-            "installed=false always short-circuits to missing"
-        );
-    }
-
-    #[test]
-    fn skip_hint_for_returns_too_old_for_below_0_8() {
-        assert_eq!(
-            skip_hint_for(true, Some("0.7.2")),
-            Some(Language::NVIM_TOO_OLD_HINT)
-        );
-    }
-
-    #[test]
-    fn skip_hint_for_returns_none_for_supported_version() {
-        assert_eq!(skip_hint_for(true, Some("0.8.0")), None);
-        assert_eq!(skip_hint_for(true, Some("0.12.0")), None);
-    }
-
-    #[test]
-    fn skip_hint_for_treats_unparseable_version_as_missing() {
-        // installed=true but we couldn't parse the version → conservative:
-        // surface the missing hint so the user reinstalls.
-        assert_eq!(skip_hint_for(true, None), Some(Language::NVIM_MISSING_HINT));
+    fn nvim_availability_skips_and_errors_do_not_write_configuration() {
+        use crate::adapter::nvim::availability::NvimAvailability;
+        for (availability, consent, hint) in [
+            (
+                NvimAvailability::Missing,
+                NvimConsent::NoNvim,
+                Language::NVIM_MISSING_HINT,
+            ),
+            (
+                NvimAvailability::Unsupported,
+                NvimConsent::TooOld,
+                Language::NVIM_TOO_OLD_HINT,
+            ),
+        ] {
+            let td = TempDir::new().unwrap();
+            let env = SlateEnv::with_home(td.path().into());
+            let result = run_nvim_activation_with_probe(&env, false, || Ok(availability)).unwrap();
+            assert_eq!(result, consent);
+            assert_eq!(format_nvim_consent_receipt(&result).as_deref(), Some(hint));
+            assert_eq!(std::fs::read_dir(td.path()).unwrap().count(), 0);
+        }
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().into());
+        let error = run_nvim_activation_with_probe(&env, true, || {
+            Err(crate::error::SlateError::PlatformError(
+                "probe failed".into(),
+            ))
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("probe failed"));
+        assert_eq!(std::fs::read_dir(td.path()).unwrap().count(), 0);
     }
 
     /// Receipt surface distinctness — every meaningful consent state
     /// produces a distinct one-liner so the reader can tell outcomes
-    /// apart. AutoAdded and NoNvim are intentionally silent (the marker
-    /// in init.lua and the capability hint cover those surfaces).
+    /// apart. Only AutoAdded is silent (the marker covers that surface).
     #[test]
     fn format_nvim_consent_receipt_surfaces_distinct_messages() {
         let auto = format_nvim_consent_receipt(&NvimConsent::AutoAdded);
@@ -993,9 +1453,12 @@ mod tests {
         let skipped = format_nvim_consent_receipt(&NvimConsent::Skipped);
         let already = format_nvim_consent_receipt(&NvimConsent::AlreadyConsented);
         let none = format_nvim_consent_receipt(&NvimConsent::NoNvim);
+        let old = format_nvim_consent_receipt(&NvimConsent::TooOld);
 
         assert_eq!(auto, None, "AutoAdded is silent — marker speaks for itself");
-        assert_eq!(none, None, "NoNvim is silent — hint surface covers it");
+        assert_eq!(none.as_deref(), Some(Language::NVIM_MISSING_HINT));
+        assert_eq!(old.as_deref(), Some(Language::NVIM_TOO_OLD_HINT));
+        assert_ne!(none, old);
         assert!(shown.is_some());
         assert!(skipped.is_some());
         assert!(already.is_some());
@@ -1003,5 +1466,55 @@ mod tests {
         assert_ne!(shown, skipped);
         assert_ne!(already, shown);
         assert_ne!(already, skipped);
+    }
+
+    #[test]
+    fn nvim_receipt_languages_preserve_consent_and_recovery_commands() {
+        use crate::config::ui_language::UiLanguage;
+        for language in [UiLanguage::Chinese, UiLanguage::English] {
+            assert_eq!(
+                format_nvim_consent_receipt_in(&NvimConsent::AutoAdded, language),
+                None
+            );
+            let mut messages = std::collections::HashSet::new();
+            for consent in [
+                NvimConsent::NoNvim,
+                NvimConsent::TooOld,
+                NvimConsent::Disabled,
+                NvimConsent::AlreadyConsented,
+                NvimConsent::ShownLine,
+                NvimConsent::Skipped,
+            ] {
+                let message = format_nvim_consent_receipt_in(&consent, language).unwrap();
+                if matches!(
+                    consent,
+                    NvimConsent::Disabled | NvimConsent::ShownLine | NvimConsent::Skipped
+                ) {
+                    assert!(
+                        message.contains("slate config set editor enable"),
+                        "{message}"
+                    );
+                }
+                if consent == NvimConsent::Skipped {
+                    assert!(message.contains(":colorscheme slate-<variant>"));
+                }
+                if matches!(consent, NvimConsent::NoNvim | NvimConsent::TooOld) {
+                    assert!(message.contains("0.8"));
+                }
+                assert!(messages.insert(message));
+            }
+        }
+    }
+
+    #[test]
+    fn nvim_manual_instruction_escapes_path_controls_without_altering_lua() {
+        let call = "pcall(require, 'slate')";
+        let text = format_nvim_manual_instruction(
+            std::path::Path::new("/fixture/\x1b[2J\n/init.lua"),
+            call,
+        );
+        assert!(!text.contains('\x1b'));
+        assert!(!text.contains("[2J\n/init.lua"));
+        assert!(text.ends_with(call));
     }
 }

@@ -8,6 +8,15 @@ use crate::theme::{ThemeRegistry, ThemeVariant, FAMILY_SORT_ORDER};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+/// Selection snapshot for view-only regression checks.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PreviewSelection {
+    theme_index: usize,
+    opacity: OpacityPreset,
+    opacity_overridden: bool,
+}
+
 /// State machine for 2D picker navigation.
 /// Manages:
 /// Vertical axis: Theme selection (wraps around registry)
@@ -36,16 +45,15 @@ pub struct PickerState {
     opacity_override_in_session: bool,
     /// Tab-toggled view mode . `false` = list-dominant (default per
     /// session; not persisted across picker launches); `true` = full-screen
-    /// preview with ◆ Heading responsive fold.
+    /// preview with independently paged content.
     pub preview_mode_full: bool,
-    /// Theme-id → forked starship prompt cache. Populated by
-    /// event_loop glue when Tab mode triggers a fork for a new theme;
-    /// cleared on resize (because `--terminal-width` is part of the fork
-    /// args, so cached prompts no longer match the current layout).
-    /// No LRU eviction — max 18 themes × ~100 bytes ≈ 2KB total
-    /// (RESEARCH Open Q3). Chose simple HashMap over an LRU crate since the
-    /// bounded cardinality makes eviction pointless for this use case.
-    prompt_cache: std::collections::HashMap<String, String>,
+    /// Requested preview top line. usize::MAX anchors End to the document's
+    /// bottom even when a deferred prompt refresh changes its height.
+    pub(super) preview_scroll: usize,
+    /// One entry per attempted catalog theme: Some(prompt) for success, None
+    /// for a cached fallback. Child output is bounded at capture. Resize clears
+    /// both because terminal width affects prompts and permits a fresh attempt.
+    prompt_cache: std::collections::HashMap<String, Option<String>>,
 }
 
 impl PickerState {
@@ -92,6 +100,7 @@ impl PickerState {
             committed: Arc::new(AtomicBool::new(false)),
             opacity_override_in_session: false,
             preview_mode_full: false, //  default; Tab toggles
+            preview_scroll: 0,
             prompt_cache: std::collections::HashMap::new(),
         })
     }
@@ -111,7 +120,7 @@ impl PickerState {
         &self.theme_ids
     }
 
-    /// Current theme cursor index (for rendering scroll window).
+    /// Current index in the catalog.
     pub fn selected_theme_index(&self) -> usize {
         self.selected_theme_index
     }
@@ -140,25 +149,37 @@ impl PickerState {
         self.committed.clone()
     }
 
-    /// Jump to a specific theme by index (for resume-auto and mouse clicks)
+    pub(crate) fn has_selection(&self) -> bool {
+        self.selected_theme_index < self.theme_ids.len()
+    }
+
+    /// Jump to a specific theme by index.
     pub fn jump_to_theme(&mut self, index: usize) {
         if index < self.theme_ids.len() {
+            self.select_theme_index(index);
+        }
+    }
+
+    fn select_theme_index(&mut self, index: usize) {
+        if self.selected_theme_index != index {
+            self.preview_scroll = 0;
             self.selected_theme_index = index;
         }
     }
 
     /// Move up in theme list (wraps around)
     pub fn move_up(&mut self) {
-        if self.selected_theme_index == 0 {
-            self.selected_theme_index = self.theme_ids.len() - 1;
-        } else {
-            self.selected_theme_index -= 1;
+        if self.has_selection() {
+            let total = self.theme_ids.len();
+            self.select_theme_index((self.selected_theme_index + total - 1) % total);
         }
     }
 
     /// Move down in theme list (wraps around)
     pub fn move_down(&mut self) {
-        self.selected_theme_index = (self.selected_theme_index + 1) % self.theme_ids.len();
+        if self.has_selection() {
+            self.select_theme_index((self.selected_theme_index + 1) % self.theme_ids.len());
+        }
     }
 
     /// Move left in opacity (hard stop at Solid, no wrap)
@@ -223,10 +244,21 @@ impl PickerState {
             .iter()
             .position(|id| id == &self.original_theme_id)
         {
-            self.selected_theme_index = pos;
+            self.select_theme_index(pos);
         }
+        self.preview_scroll = 0;
         self.selected_opacity = self.original_opacity;
+        self.opacity_override_in_session = false;
         self.committed.store(false, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(super) fn preview_selection(&self) -> PreviewSelection {
+        PreviewSelection {
+            theme_index: self.selected_theme_index,
+            opacity: self.selected_opacity,
+            opacity_overridden: self.opacity_override_in_session,
+        }
     }
 
     /// Get current theme variant from registry
@@ -245,14 +277,24 @@ impl PickerState {
 
     // starship-fork prompt cache (Hybrid)
 
-    /// Read cached forked prompt for a theme; `None` = cache miss or
-    /// first Tab visit since the last resize.
+    /// Read a cached forked prompt. None means either unattempted or a cached
+    /// fallback; callers deciding whether to retry use `prompt_attempted`.
     /// Populated by event_loop glue after a successful
     /// `fork_starship_prompt` call; consumers feed the returned string
     /// into `compose::compose_full` as `prompt_line_override`.
     #[allow(dead_code)] // event_loop wiring removes the attribute.
     pub(crate) fn cached_prompt(&self, theme_id: &str) -> Option<&str> {
-        self.prompt_cache.get(theme_id).map(String::as_str)
+        self.prompt_cache
+            .get(theme_id)
+            .and_then(|prompt| prompt.as_deref())
+    }
+
+    pub(crate) fn prompt_attempted(&self, theme_id: &str) -> bool {
+        self.prompt_cache.contains_key(theme_id)
+    }
+
+    pub(crate) fn cache_prompt_failure(&mut self, theme_id: &str) {
+        self.prompt_cache.insert(theme_id.to_owned(), None);
     }
 
     /// Store a forked prompt for reuse on subsequent Tab visits to the
@@ -260,12 +302,12 @@ impl PickerState {
     /// during the event-loop hot path.
     #[allow(dead_code)] // event_loop wiring removes the attribute.
     pub(crate) fn cache_prompt(&mut self, theme_id: &str, prompt: String) {
-        self.prompt_cache.insert(theme_id.to_string(), prompt);
+        self.prompt_cache.insert(theme_id.to_string(), Some(prompt));
     }
 
     /// Clear the whole prompt cache — called on terminal resize because
     /// `--terminal-width` is part of the fork args, so every cached
-    /// prompt is stale relative to the new layout.
+    /// prompt is stale relative to the new layout. Failed attempts are cleared too.
     #[allow(dead_code)] // event_loop wiring removes the attribute.
     pub(crate) fn invalidate_prompt_cache(&mut self) {
         self.prompt_cache.clear();

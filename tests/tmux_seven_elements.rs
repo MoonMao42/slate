@@ -198,9 +198,24 @@ fn test_palette_fields_mapped_correctly_per_d17() {
             output.contains(&"window-status-current-style \"bg=".to_string()),
             "window-status-current-style missing"
         );
+        let active = output
+            .lines()
+            .find(|line| line.contains("window-status-current-style"))
+            .unwrap();
+        let foreground = active
+            .split("fg=")
+            .nth(1)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap();
+        let luminance = |hex: &str| {
+            let (r, g, b) = slate_cli::wcag::hex_to_rgb(hex).unwrap();
+            slate_cli::wcag::relative_luminance(r, g, b)
+        };
         assert!(
-            output.contains(&format!("fg={} bold", palette.foreground)),
-            "window-status-current-style foreground incorrect"
+            slate_cli::wcag::contrast_ratio(luminance(foreground), luminance(&palette.blue)) >= 4.5,
+            "active window text must be readable on its accent background"
         );
 
         // pane-active-border-style should use blue accent

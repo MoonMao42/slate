@@ -1,6 +1,9 @@
 use super::{auto_theme, flags, AutoConfig, ConfigManager};
 use crate::error::Result;
 
+const DEFAULT_AUTO_THEME_ENABLED: bool = false;
+const DEFAULT_SOUND_ENABLED: bool = true;
+
 impl ConfigManager {
     /// Read auto.toml from ~/.config/slate/auto.toml if it exists.
     pub fn read_auto_config(&self) -> Result<Option<AutoConfig>> {
@@ -18,7 +21,19 @@ impl ConfigManager {
 
     /// Check if auto-theme is enabled via config.toml [auto_theme].enabled field.
     pub fn is_auto_theme_enabled(&self) -> Result<bool> {
-        Ok(flags::config_flag(&self.base_path, "auto_theme", "enabled")?.unwrap_or(false))
+        Ok(
+            flags::config_flag(&self.base_path, "auto_theme", "enabled")?
+                .unwrap_or(DEFAULT_AUTO_THEME_ENABLED),
+        )
+    }
+
+    /// Same preference/default as runtime, with the no-final-link, isolated-path
+    /// contract for read-only diagnostics. Does not create a manager or writer.
+    pub(crate) fn inspect_auto_theme_enabled(&self) -> Result<bool> {
+        Ok(
+            flags::inspect_config_flag(&self.env, "auto_theme", "enabled")?
+                .unwrap_or(DEFAULT_AUTO_THEME_ENABLED),
+        )
     }
 
     /// Write auto-theme enabled flag to config.toml.
@@ -48,7 +63,17 @@ impl ConfigManager {
 
     /// Check if sound feedback is enabled.
     pub fn is_sound_enabled(&self) -> Result<bool> {
-        Ok(flags::config_flag(&self.base_path, "preferences", "sound")?.unwrap_or(true))
+        Ok(flags::config_flag(&self.base_path, "preferences", "sound")?
+            .unwrap_or(DEFAULT_SOUND_ENABLED))
+    }
+
+    /// Inspect the saved preference, without initializing sound or following a
+    /// final file link. Ordinary runtime reads retain linked-dotfile support.
+    pub(crate) fn inspect_sound_enabled(&self) -> Result<bool> {
+        Ok(
+            flags::inspect_config_flag(&self.env, "preferences", "sound")?
+                .unwrap_or(DEFAULT_SOUND_ENABLED),
+        )
     }
 
     /// Enable or disable sound feedback.

@@ -1,7 +1,29 @@
 use crate::env::SlateEnv;
 use crate::platform::capabilities::CapabilityReport;
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+
+mod cache;
+mod paths;
+pub use cache::{activation_hint, activation_hint_in, refresh_font_cache, FontCacheRefresh};
+pub(crate) use paths::install_directory;
+
+/// OpenType filename extensions are case-insensitive, including collections.
+pub(crate) fn supported_font_extension(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| {
+        ["ttf", "otf", "ttc", "otc"]
+            .iter()
+            .any(|suffix| extension.eq_ignore_ascii_case(suffix))
+    })
+}
+
+/// Signature only, not SFNT tables, names, glyphs or native activation.
+pub(crate) fn has_sfnt_signature(prefix: &[u8]) -> bool {
+    prefix.len() >= 12
+        && matches!(
+            prefix.get(..4),
+            Some(b"\0\x01\0\0" | b"OTTO" | b"ttcf" | b"true" | b"typ1")
+        )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontPlatformBackend {
@@ -16,14 +38,6 @@ impl FontPlatformBackend {
             Self::Fontconfig => "fontconfig",
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FontCacheRefresh {
-    NotNeeded,
-    Refreshed,
-    MissingDependency,
-    Failed,
 }
 
 pub fn backend() -> FontPlatformBackend {
@@ -57,7 +71,7 @@ pub fn user_font_dir(env: &SlateEnv) -> PathBuf {
 fn user_font_dir_for_backend(env: &SlateEnv, backend: FontPlatformBackend) -> PathBuf {
     match backend {
         FontPlatformBackend::Macos => env.home().join("Library/Fonts"),
-        FontPlatformBackend::Fontconfig => env.home().join(".local/share/fonts"),
+        FontPlatformBackend::Fontconfig => env.xdg_data_home().join("fonts"),
     }
 }
 
@@ -84,36 +98,6 @@ fn font_search_paths_for_backend(env: &SlateEnv, backend: FontPlatformBackend) -
     }
 
     paths
-}
-
-pub fn refresh_font_cache() -> FontCacheRefresh {
-    if backend() != FontPlatformBackend::Fontconfig {
-        return FontCacheRefresh::NotNeeded;
-    }
-
-    let Some(fc_cache) = crate::detection::command_path("fc-cache") else {
-        return FontCacheRefresh::MissingDependency;
-    };
-
-    match Command::new(fc_cache).args(["-f"]).output() {
-        Ok(output) if output.status.success() => FontCacheRefresh::Refreshed,
-        Ok(_) | Err(_) => FontCacheRefresh::Failed,
-    }
-}
-
-pub fn activation_hint() -> &'static str {
-    match backend() {
-        FontPlatformBackend::Macos => {
-            "Open a new terminal window if the new font does not appear immediately."
-        }
-        FontPlatformBackend::Fontconfig => {
-            if crate::detection::command_path("fc-cache").is_some() {
-                "Slate refreshed the fontconfig cache. Open a new terminal window if glyphs still look wrong."
-            } else {
-                "Install `fontconfig` / `fc-cache`, then open a new terminal window if glyphs still look wrong."
-            }
-        }
-    }
 }
 
 #[cfg(test)]

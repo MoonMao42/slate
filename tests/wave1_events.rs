@@ -7,16 +7,10 @@
 //! the counter before any dispatch fires — no collision with the lib
 //! unit tests that also touch the sink.
 //! Contract locked here:
-//! - `execute_setup_with_env` (with theme=Some(…), no tools) reaches the
-//! shell-integration success arm → `BrandEvent::ApplyComplete` fires
-//! exactly once for the per-tool path (zero tools installed, so no
-//! per-tool ApplyComplete events) and the final shell-integration
-//! success path currently does not dispatch (that’s the setup
-//! handler’s `SetupComplete` surface, tested separately). Test
-//! asserts that the failure count is 0 and the SINK counters reflect
-//! what was actually dispatched.
-//! - Failure branch: shell-integration Err → `BrandEvent::Failure(
-//! FailureKind::SetupFailed)` fires exactly once.
+//! - With no requested installs, no per-tool ApplyComplete is emitted.
+//! - The executor returns partial results; the setup handler owns the final
+//! SetupComplete/SetupFailed milestone after all follow-up steps. Executor
+//! success/failure is exercised without installations in setup_outcomes.rs.
 
 use std::sync::{
     atomic::{AtomicUsize, Ordering},

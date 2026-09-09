@@ -1,3 +1,4 @@
+use super::file_read::{read_text, MAX_STATE_BYTES};
 use crate::error::{Result, SlateError};
 use atomic_write_file::AtomicWriteFile;
 use std::fs;
@@ -5,11 +6,9 @@ use std::io::Write;
 use std::path::Path;
 
 pub(super) fn read_optional_state_file(path: &Path) -> Result<Option<String>> {
-    if !path.exists() {
+    let Some(content) = read_text(path, MAX_STATE_BYTES)? else {
         return Ok(None);
-    }
-
-    let content = fs::read_to_string(path)?;
+    };
     let trimmed = content.trim();
     if trimmed.is_empty() {
         return Ok(None);
@@ -39,16 +38,58 @@ pub(super) fn read_optional_state_file(path: &Path) -> Result<Option<String>> {
 // cache for immediate readers on macOS APFS. Propagating the error would
 // turn a portability nuisance into a fatal write failure.
 pub(crate) fn atomic_write_synced(path: &Path, contents: &[u8]) -> Result<()> {
-    if path.exists() && fs::symlink_metadata(path)?.file_type().is_symlink() {
+    atomic_write_synced_mode(path, contents, None)
+}
+
+/// Apply saved permissions to the temporary file before publication, not after
+/// rename. Explicit-mode writes start private even when replacing a public file.
+pub(crate) fn atomic_write_synced_mode(
+    path: &Path,
+    contents: &[u8],
+    mode: Option<u32>,
+) -> Result<()> {
+    let ticket = super::preview_write::prepare(path, contents.len())?;
+    let is_link = match fs::symlink_metadata(path) {
+        Ok(meta) => meta.file_type().is_symlink(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+        Err(err) => return Err(err.into()),
+    };
+    if is_link {
         return Err(SlateError::InvalidConfig(format!(
             "Refusing to write through symlink: {}",
             path.display()
         )));
     }
 
-    let mut file = AtomicWriteFile::open(path)?;
+    let mut options = AtomicWriteFile::options();
+    #[cfg(unix)]
+    if mode.is_some() {
+        use atomic_write_file::unix::OpenOptionsExt as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600).preserve_mode(false);
+    }
+    let mut file = options.open(path)?;
     file.write_all(contents)?;
+    #[cfg(unix)]
+    if let Some(mode) = mode {
+        use std::os::unix::fs::PermissionsExt;
+        file.as_file()
+            .set_permissions(fs::Permissions::from_mode(mode))?;
+    }
+    let written_mode = if let Some(ticket) = &ticket {
+        use std::os::unix::fs::PermissionsExt;
+        ticket.verify()?;
+        Some(file.as_file().metadata()?.permissions().mode())
+    } else {
+        None
+    };
     file.commit()?;
+    if let Some(ticket) = ticket {
+        ticket.committed(
+            contents,
+            written_mode.expect("tracked publication captured its mode"),
+        )?;
+    }
 
     if let Some(parent) = path.parent() {
         if let Err(err) = fs::File::open(parent).and_then(|f| f.sync_all()) {
@@ -67,6 +108,12 @@ pub(crate) fn atomic_write_synced(path: &Path, contents: &[u8]) -> Result<()> {
 }
 
 pub(super) fn write_state_file(path: &Path, content: &str) -> Result<()> {
+    if content.len() as u64 > MAX_STATE_BYTES {
+        return Err(SlateError::ConfigWriteError(
+            path.display().to_string(),
+            "state exceeds 4 KiB limit".into(),
+        ));
+    }
     atomic_write_synced(path, content.as_bytes())
 }
 
@@ -113,5 +160,24 @@ mod tests {
         // Ensure the symlink target was NOT modified.
         let unchanged = fs::read_to_string(&real_target).unwrap();
         assert_eq!(unchanged, "original");
+
+        fs::remove_file(&real_target).unwrap();
+        assert!(atomic_write_synced(&symlink_path, b"must not create target").is_err());
+        assert!(!real_target.exists());
+    }
+
+    #[test]
+    fn atomic_write_synced_mode_publishes_explicit_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let td = TempDir::new().unwrap();
+        let path = td.path().join("private-config");
+        for mode in [0o600, 0o755, 0o000, 0o640] {
+            atomic_write_synced_mode(&path, b"fixture", Some(mode)).unwrap();
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                mode
+            );
+        }
+        assert_eq!(fs::read(path).unwrap(), b"fixture");
     }
 }

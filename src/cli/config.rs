@@ -8,40 +8,44 @@ use crate::error::Result;
 use crate::opacity::OpacityPreset;
 use crate::platform;
 
+mod catalog;
+mod inspect;
+pub mod pairing;
+mod shell_settings;
+
+pub(super) fn set_shell_preference(
+    config: &ConfigManager,
+    preference: crate::config::shell_change::ShellPreference,
+) -> Result<()> {
+    shell_settings::apply_menu(config, preference)
+}
+
+pub(super) fn set_fastfetch_autorun(config: &ConfigManager, enabled: bool) -> Result<()> {
+    shell_settings::apply(
+        config,
+        crate::config::shell_change::ShellPreference::Fastfetch(enabled),
+    )
+}
+pub use catalog::{validate_key, validate_set, SETTINGS};
+pub use inspect::handle_inspect;
+
 pub(crate) fn enable_auto_theme(config: &ConfigManager) -> Result<()> {
-    platform::dark_mode_notify::ensure_binary(config)?;
-    config.set_auto_theme_enabled(true)?;
+    shell_settings::apply(
+        config,
+        crate::config::shell_change::ShellPreference::AutoTheme(true),
+    )?;
 
-    if let Err(err) = config.refresh_shell_integration() {
-        let _ = config.set_auto_theme_enabled(false);
-        return Err(err);
-    }
-
-    // Start watcher immediately so the user doesn't have to open a new terminal
-    let _ = platform::dark_mode_notify::start(config);
-
-    // UX-02 (D-D2): inline trigger — this path bypassed apply_all but touched
-    // shell integration (refresh_shell_integration above). `slate config` has
-    // no --auto / --quiet flags, so both guards are false.
+    // This path bypasses apply_all but may regenerate the watcher startup hook.
     crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
 
     Ok(())
 }
 
 pub(crate) fn disable_auto_theme(config: &ConfigManager) -> Result<()> {
-    let was_enabled = config.is_auto_theme_enabled()?;
-
-    config.set_auto_theme_enabled(false)?;
-    if let Err(err) = config.refresh_shell_integration() {
-        if was_enabled {
-            let _ = config.set_auto_theme_enabled(true);
-            let _ = config.refresh_shell_integration();
-        }
-        return Err(err);
-    }
-
-    platform::dark_mode_notify::stop()?;
-    platform::dark_mode_notify::remove_binary(config)?;
+    shell_settings::apply(
+        config,
+        crate::config::shell_change::ShellPreference::AutoTheme(false),
+    )?;
 
     // UX-02 (D-D2): inline trigger — disable also mutates shell integration
     // (we re-render env files without the watcher hook).
@@ -58,11 +62,20 @@ pub(crate) fn disable_auto_theme(config: &ConfigManager) -> Result<()> {
 /// Where the value is a user-facing literal (opacity preset, sub-action),
 /// it routes through `Roles::code` (inline-code pill per Sketch 001).
 pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
+    validate_set(key, value)?;
+    if key == "auto-theme" && value == "configure" {
+        crate::cli::auto_theme::require_interactive_configuration()?;
+    }
     let env = SlateEnv::from_process()?;
     handle_config_set_with_env(key, value, &env)
 }
 
 fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<()> {
+    validate_set(key, value)?;
+    if key == "auto-theme" && value == "configure" {
+        return crate::cli::auto_theme::configure_auto_theme();
+    }
+    let _write_guard = crate::config::ConfigWriteGuard::acquire(env)?;
     let config = ConfigManager::with_env(env)?;
     let terminal = TerminalProfile::detect();
     let appearance_backend = platform::desktop::detect_backend();
@@ -91,6 +104,7 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
                 crate::cli::apply::OpacityApplyOptions {
                     persist_state: true,
                     reload_terminals: true,
+                    snapshot_policy: crate::cli::apply::SnapshotPolicy::Create,
                 },
             )?;
 
@@ -135,19 +149,7 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
                     dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
                     Ok(())
                 }
-                "configure" => {
-                    crate::cli::auto_theme::configure_auto_theme()?;
-
-                    if config.is_auto_theme_enabled()? {
-                        platform::dark_mode_notify::ensure_binary(&config)?;
-                        config.refresh_shell_integration()?;
-                        // Restart watcher so new pairing takes effect immediately
-                        let _ = platform::dark_mode_notify::stop();
-                        let _ = platform::dark_mode_notify::start(&config);
-                    }
-
-                    Ok(())
-                }
+                "configure" => crate::cli::auto_theme::configure_auto_theme(),
                 _ => Err(crate::error::SlateError::InvalidConfig(format!(
                     "Invalid auto-theme action: '{}'. Must be one of: enable, disable, configure",
                     value
@@ -156,28 +158,23 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
         }
         "fastfetch" => match value {
             "enable" => {
-                config.enable_fastfetch_autorun()?;
-                config.refresh_shell_integration()?;
+                set_fastfetch_autorun(&config, true)?;
                 println!(
                     "{}",
                     status_success_line(r.as_ref(), "Fastfetch auto-run enabled")
                 );
-                // UX-02 (D-D2): inline trigger — refresh_shell_integration
-                // above rewrote env files, so a new shell is needed to pick
-                // up the fastfetch wrapper.
+                // New interactive shells pick up the enabled autorun hook.
                 crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
                 dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
                 Ok(())
             }
             "disable" => {
-                config.disable_fastfetch_autorun()?;
-                config.refresh_shell_integration()?;
+                set_fastfetch_autorun(&config, false)?;
                 println!(
                     "{}",
                     status_success_line(r.as_ref(), "Fastfetch auto-run disabled")
                 );
-                // UX-02 (D-D2): inline trigger — symmetrical with enable;
-                // the env file no longer sources the fastfetch wrapper.
+                // Only autorun is disabled; the manual wrapper remains available.
                 crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
                 dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
                 Ok(())
@@ -211,7 +208,7 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
                 value
             ))),
         },
-        // `slate config editor disable` strips the
+        // `slate config set editor disable` remembers the opt-out and strips the
         // marker block from init.lua / init.vim without touching
         // the 18 `slate-*.lua` shims or the loader. For users who want
         // to keep the colorscheme files available (so
@@ -219,24 +216,38 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
         // `pcall(require, 'slate')` auto-activation.
         "editor" => match value {
             "disable" => {
-                let init_lua = env.home().join(".config/nvim/init.lua");
-                let init_vim = env.home().join(".config/nvim/init.vim");
-                // Best-effort — primitive is a no-op on missing files.
-                crate::adapter::marker_block::remove_managed_blocks_from_file(&init_lua)?;
-                crate::adapter::marker_block::remove_managed_blocks_from_file(&init_vim)?;
+                // Save consent first. A later hook-removal failure must not let
+                // the next quick setup silently opt the user back in.
+                config.set_editor_auto_activation_enabled(false)?;
+                let init_lua = env.nvim_config_dir().join("init.lua");
+                let init_vim = env.nvim_config_dir().join("init.vim");
+                for path in [&init_lua, &init_vim] {
+                    crate::adapter::marker_block::remove_managed_blocks_from_file(path)
+                        .map_err(|error| crate::error::SlateError::InvalidConfig(format!(
+                            "Neovim auto-activation preference was saved, but hook removal did not finish: {error}. Earlier removals remain; no automatic rollback was attempted. Fix the file and rerun `slate config set editor disable`."
+                        )))?;
+                }
                 println!(
                     "{}",
                     status_success_line(
                         r.as_ref(),
-                        "Slate's nvim auto-activation disabled. Colors/ files remain; \
-                         run `:colorscheme slate-<variant>` manually.",
+                        "Neovim auto-activation stays disabled for this profile, including future setup. \
+                         Colors/ files remain for manual use. Restart Neovim to stop any already-loaded watcher; \
+                         unmarked user hooks are not removed.",
                     )
                 );
                 dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
                 Ok(())
             }
+            "enable" => {
+                config.set_editor_auto_activation_enabled(true)?;
+                println!("{}", status_success_line(r.as_ref(),
+                    "Neovim automatic setup is allowed again for this profile. Run `slate setup` to configure activation; existing hooks were not changed."));
+                dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
+                Ok(())
+            }
             _ => Err(crate::error::SlateError::InvalidConfig(format!(
-                "Invalid editor action: '{}'. Must be one of: disable",
+                "Invalid editor action: '{}'. Must be one of: enable, disable",
                 value
             ))),
         },
@@ -301,10 +312,9 @@ mod tests {
 
     /// UX-02 wiring tests. Each config sub-command tail emits via
     /// `emit_new_shell_reminder_once(false, false)` on the success path. We
-    /// can't invoke `handle_config_set_with_env("auto-theme", "enable", …)`
-    /// directly — `enable_auto_theme` spawns the `dark-mode-notify` watcher
-    /// via `platform::dark_mode_notify::start`, which would persist beyond
-    /// the test. Instead, we mirror the emit call and assert flag state.
+    /// keep these legacy checks narrowly focused on reminder dispatch. Actual
+    /// isolated watcher-start behavior is covered by the runtime's own tests;
+    /// SLATE_HOME/injected isolated environments never start a desktop watcher.
     /// The opacity sub-command has NO corresponding emit call in the
     /// handler body (RESEARCH Q4: terminal-hot-reloadable); we verify this
     /// by running the full handler end-to-end and asserting the flag
@@ -425,6 +435,9 @@ mod tests {
 
         // Exercise the editor disable sub-command.
         handle_config_set_with_env("editor", "disable", &env).unwrap();
+        assert!(!ConfigManager::from_env_paths(&env)
+            .is_editor_auto_activation_enabled()
+            .unwrap());
 
         // Colors/ shims must survive — the whole point of the verb.
         let colors_dir = td.path().join(".config/nvim/colors");
@@ -478,9 +491,26 @@ mod tests {
         );
     }
 
-    /// `editor disable` on a home with no init files is a no-op:
-    /// no error, nothing created. Mirrors the "best-effort" posture
-    /// of the other missing-files paths.
+    #[test]
+    fn config_editor_enable_only_clears_consent_and_disable_reports_partial_removal() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_owned());
+        let config = ConfigManager::from_env_paths(&env);
+        config.set_editor_auto_activation_enabled(false).unwrap();
+        std::fs::create_dir(env.nvim_config_dir().join("init.vim")).unwrap();
+        let error = handle_config_set_with_env("editor", "disable", &env)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("preference was saved"));
+        assert!(error.contains("hook removal did not finish"));
+        assert!(!config.is_editor_auto_activation_enabled().unwrap());
+        handle_config_set_with_env("editor", "enable", &env).unwrap();
+        assert!(config.is_editor_auto_activation_enabled().unwrap());
+        assert!(!env.nvim_config_dir().join("init.lua").exists());
+        assert!(env.nvim_config_dir().join("init.vim").is_dir());
+    }
+
+    /// Disabling on a fresh profile saves consent but creates no init file.
     #[test]
     fn config_editor_disable_is_noop_when_no_init_files() {
         let td = TempDir::new().unwrap();
@@ -493,6 +523,7 @@ mod tests {
         );
         assert!(!td.path().join(".config/nvim/init.lua").exists());
         assert!(!td.path().join(".config/nvim/init.vim").exists());
+        assert!(env.nvim_auto_activation_path().is_file());
     }
 
     /// Regression guard: the unknown-top-level-key error message

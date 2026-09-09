@@ -4,6 +4,8 @@ use crate::theme::ThemeAppearance;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 
+mod probe;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopAppearanceBackend {
     MacosDefaults,
@@ -75,14 +77,47 @@ pub fn capability_report() -> CapabilityReport {
 }
 
 pub fn detect_system_appearance() -> ThemeAppearance {
-    match detect_backend() {
-        DesktopAppearanceBackend::MacosDefaults => detect_macos_appearance(),
-        DesktopAppearanceBackend::XdgDesktopPortal => detect_portal_appearance()
-            .or_else(detect_gnome_appearance_if_available)
-            .unwrap_or(ThemeAppearance::Light),
-        DesktopAppearanceBackend::GnomeGsettings => detect_gnome_appearance(),
-        DesktopAppearanceBackend::Unsupported => ThemeAppearance::Light,
+    // Compatibility best-effort API. Mutating command paths use the checked API
+    // so a broken backend cannot masquerade as a successful Light reading.
+    detect_system_appearance_checked().unwrap_or(ThemeAppearance::Light)
+}
+
+pub fn detect_system_appearance_checked() -> Result<ThemeAppearance> {
+    if cfg!(target_os = "macos") {
+        return probe::query(probe::Kind::MacosDefaults);
     }
+    if cfg!(target_os = "linux") {
+        // Read once: do not open a second connection to discover a version
+        // before fetching the one value we actually need.
+        return resolve_linux_appearance(crate::platform::portal::read_color_scheme(), || {
+            if is_gnome_session() && crate::detection::command_path("gsettings").is_some() {
+                Some(probe::query(probe::Kind::GnomeGsettings))
+            } else {
+                None
+            }
+        });
+    }
+    Ok(ThemeAppearance::Light)
+}
+
+fn resolve_linux_appearance(
+    portal: Result<Option<u32>>,
+    gnome: impl FnOnce() -> Option<Result<ThemeAppearance>>,
+) -> Result<ThemeAppearance> {
+    if let Ok(Some(value)) = portal {
+        return Ok(portal_color_scheme_to_appearance(value));
+    }
+    if let Some(result) = gnome() {
+        return match (portal, result) {
+            (Err(portal_error), Err(gnome_error)) => Err(SlateError::PlatformError(format!(
+                "Portal appearance query failed: {portal_error}; GNOME fallback failed: {gnome_error}"
+            ))),
+            (_, result) => result,
+        };
+    }
+    // An absent backend is still a supported headless fallback. A backend
+    // timeout, protocol error or denied connection is not a Light preference.
+    portal.map(|_| ThemeAppearance::Light)
 }
 
 pub fn watch_appearance_changes<F>(mut on_change: F) -> Result<()>
@@ -113,23 +148,6 @@ pub fn is_gnome_session() -> bool {
     desktop.contains("gnome")
 }
 
-fn detect_macos_appearance() -> ThemeAppearance {
-    match std::process::Command::new("defaults")
-        .args(["read", "-g", "AppleInterfaceStyle"])
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if stdout.contains("Dark") {
-                ThemeAppearance::Dark
-            } else {
-                ThemeAppearance::Light
-            }
-        }
-        _ => ThemeAppearance::Light,
-    }
-}
-
 fn portal_color_scheme_to_appearance(value: u32) -> ThemeAppearance {
     match value {
         1 => ThemeAppearance::Dark,
@@ -138,46 +156,8 @@ fn portal_color_scheme_to_appearance(value: u32) -> ThemeAppearance {
     }
 }
 
-fn detect_portal_appearance() -> Option<ThemeAppearance> {
-    crate::platform::portal::read_color_scheme()
-        .ok()
-        .flatten()
-        .map(portal_color_scheme_to_appearance)
-}
-
-fn detect_gnome_appearance_if_available() -> Option<ThemeAppearance> {
-    if crate::detection::command_path("gsettings").is_some() {
-        Some(detect_gnome_appearance())
-    } else {
-        None
-    }
-}
-
-fn detect_gnome_appearance() -> ThemeAppearance {
-    let Some(gsettings) = crate::detection::command_path("gsettings") else {
-        return ThemeAppearance::Light;
-    };
-
-    match Command::new(gsettings)
-        .args(["get", "org.gnome.desktop.interface", "color-scheme"])
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            parse_gnome_color_scheme_output(&String::from_utf8_lossy(&output.stdout))
-        }
-        _ => ThemeAppearance::Light,
-    }
-}
-
-fn parse_gnome_color_scheme_output(output: &str) -> ThemeAppearance {
-    let stdout = output.to_ascii_lowercase();
-    // GNOME emits 'prefer-dark', 'prefer-light', or 'default'; contains("dark") covers
-    // prefer-dark, and anything else (including prefer-light) falls through to Light.
-    if stdout.contains("dark") {
-        ThemeAppearance::Dark
-    } else {
-        ThemeAppearance::Light
-    }
+pub(crate) fn parse_gnome_color_scheme_output(output: &str) -> Option<ThemeAppearance> {
+    probe::parse_gnome_value(output.trim().strip_prefix("color-scheme:")?.trim())
 }
 
 fn watch_gnome_appearance_changes<F>(mut on_change: F) -> Result<()>
@@ -208,10 +188,9 @@ where
 
     for line in BufReader::new(stdout).lines() {
         let line = line.map_err(SlateError::IOError)?;
-        if !line.to_ascii_lowercase().contains("color-scheme") {
-            continue;
+        if let Some(appearance) = parse_gnome_color_scheme_output(&line) {
+            on_change(appearance)?;
         }
-        on_change(parse_gnome_color_scheme_output(&line))?;
     }
 
     Ok(())
@@ -220,6 +199,46 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appearance_resolution_distinguishes_missing_backends_from_failed_queries() {
+        assert_eq!(
+            resolve_linux_appearance(Ok(None), || None).unwrap(),
+            ThemeAppearance::Light
+        );
+        let failed = || SlateError::PlatformError("fixture timeout".into());
+        assert!(resolve_linux_appearance(Err(failed()), || None).is_err());
+        assert_eq!(
+            resolve_linux_appearance(Err(failed()), || Some(Ok(ThemeAppearance::Dark))).unwrap(),
+            ThemeAppearance::Dark
+        );
+        assert!(resolve_linux_appearance(Ok(None), || Some(Err(failed()))).is_err());
+        let error = resolve_linux_appearance(Err(failed()), || {
+            Some(Err(SlateError::PlatformError(
+                "GNOME fixture failure".into(),
+            )))
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("fixture timeout"));
+        assert!(error.contains("GNOME fixture failure"));
+    }
+
+    #[test]
+    fn appearance_resolution_portal_preference_does_not_probe_gnome() {
+        for (value, expected) in [
+            (1, ThemeAppearance::Dark),
+            (2, ThemeAppearance::Light),
+            (0, ThemeAppearance::Light),
+            (99, ThemeAppearance::Light),
+        ] {
+            assert_eq!(
+                resolve_linux_appearance(Ok(Some(value)), || panic!("portal already answered"))
+                    .unwrap(),
+                expected
+            );
+        }
+    }
 
     #[test]
     fn test_backend_label() {
@@ -277,11 +296,19 @@ mod tests {
     fn test_parse_gnome_color_scheme_output() {
         assert_eq!(
             parse_gnome_color_scheme_output("color-scheme: 'prefer-dark'"),
-            ThemeAppearance::Dark
+            Some(ThemeAppearance::Dark)
         );
         assert_eq!(
             parse_gnome_color_scheme_output("color-scheme: 'default'"),
-            ThemeAppearance::Light
+            Some(ThemeAppearance::Light)
+        );
+        assert_eq!(
+            parse_gnome_color_scheme_output("error: color-scheme dark failed"),
+            None
+        );
+        assert_eq!(
+            parse_gnome_color_scheme_output("color-scheme: 'invalid-dark'"),
+            None
         );
     }
 }

@@ -2,6 +2,6 @@
 source: src/cli/hub.rs
 expression: "lines.join(\"\\n\")"
 ---
-◆ Theme    [1mCatppuccin Mocha[0m
-◆ Opacity  [1m`Frosted`[0m
-◆ Font    [2;3mJetBrains Mono[0m
+主题    [1mCatppuccin Mocha[0m
+透明度  磨砂
+字体    JetBrains Mono

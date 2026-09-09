@@ -1,28 +1,46 @@
-//! Setup execution: actually runs the brew installations and applies configurations.
+//! Setup execution: runs the planned installations and applies configurations.
 //! Handles partial failures and tracks results.
 
 mod font_install;
+mod font_stage;
+#[cfg(test)]
+mod homebrew_tests;
 mod integration;
+mod plan;
+mod shell_loader;
+mod starship;
 mod tool_install;
 
-use crate::brand::events::{dispatch, BrandEvent, FailureKind};
+use crate::brand::events::{dispatch, BrandEvent};
 use crate::brand::render_context::RenderContext;
 use crate::brand::roles::Roles;
 use crate::cli::failure_handler::{ExecutionSummary, InstallStatus, ToolInstallResult};
+use crate::cli::file_output::terminal_text;
+use crate::cli::wizard_support::wording as tr;
 use crate::config::ConfigManager;
 use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::Result;
+use crate::platform::packages::homebrew;
 
-pub(crate) use font_install::{
-    copy_font_from_caskroom, download_font_release, font_display_name, install_font,
-    is_font_installed_with_env, planned_font_installs, resolve_font_family_with_env,
-    strip_error_prefix,
-};
-pub(crate) use integration::{
-    ensure_tool_configs, setup_shell_integration_with_env, theme_apply_issues,
-};
+pub(crate) use font_install::chain::install_catalog as install_catalog_font;
+pub(crate) use font_install::resolve_font_family_with_env;
+#[cfg(test)]
+use integration::setup_shell_integration_with_env;
+pub(crate) use integration::{ensure_tool_configs, theme_apply_issues};
+pub(crate) use plan::prepare_setup_with_env;
 pub(crate) use tool_install::install_tool;
+pub(crate) use tool_install::{install_planned as install_planned_tool, ToolInstallMethod};
+
+/// Typed uncertainty must be checked before any message-based fallback.
+pub(crate) fn installation_fallback_allowed(error: &crate::error::SlateError) -> bool {
+    !matches!(
+        error,
+        crate::error::SlateError::HomebrewInstallUncertain(_)
+            | crate::error::SlateError::AptInstallUncertain(_)
+            | crate::error::SlateError::StarshipInstallUncertain(_)
+    )
+}
 
 /// Execute the setup based on wizard selections with injected SlateEnv (preferred)
 pub fn execute_setup_with_env(
@@ -32,167 +50,183 @@ pub fn execute_setup_with_env(
     theme: Option<&str>,
     env: &SlateEnv,
 ) -> Result<ExecutionSummary> {
-    let mut summary = ExecutionSummary::new();
+    execute_prepared_setup(prepare_setup_with_env(
+        tools_to_install,
+        tools_to_configure,
+        font,
+        theme,
+        env,
+    )?)
+}
 
-    // Build a RenderContext up-front so the tree-narrative anchor + the
-    // per-tool status lines share the same byte contract (sketch 003
-    // winner daily chrome). Registry init failure is graceful
-    // the executor still prints plain-text status, per.
-    let ctx = RenderContext::from_active_theme().ok();
-    let roles = ctx.as_ref().map(Roles::new);
+pub(crate) fn execute_prepared_setup(plan: plan::PreparedSetup) -> Result<ExecutionSummary> {
+    execute_bound_plan(
+        plan,
+        crate::platform::packages::InstallContext::detect,
+        tool_install::install_planned,
+    )
+}
+
+fn execute_bound_plan(
+    mut plan: plan::PreparedSetup,
+    mut current_context: impl FnMut() -> crate::platform::packages::InstallContext,
+    mut install: impl FnMut(
+        &crate::cli::tool_selection::PlannedToolInstall,
+        &SlateEnv,
+    ) -> Result<tool_install::ToolInstallMethod>,
+) -> Result<ExecutionSummary> {
+    use crate::cli::tool_selection::InstallPlan;
+    // CLI plans carry the receipt that was actually confirmed. Library callers
+    // without a wizard capture one execution plan before any installer runs.
+    let installs = match plan.reviewed_installs.take() {
+        Some(reviewed) => reviewed,
+        None => InstallPlan::capture(
+            &plan
+                .tools_to_install
+                .iter()
+                .map(|tool| tool.id.to_owned())
+                .collect::<Vec<_>>(),
+            &plan.env,
+            current_context(),
+        )?,
+    };
+    installs.verify_selection(&plan.tools_to_install, &plan.env)?;
+    installs.verify_context(current_context())?;
+    execute_checked(
+        plan,
+        |id, _, _, env| install(installs.tool(id)?, env),
+        |id| installs.verify_tool(id, current_context()),
+    )
+}
+
+#[cfg(test)]
+fn execute_with_installer(
+    plan: plan::PreparedSetup,
+    install: impl FnMut(
+        &str,
+        &str,
+        crate::cli::tool_selection::BrewKind,
+        &SlateEnv,
+    ) -> Result<tool_install::ToolInstallMethod>,
+) -> Result<ExecutionSummary> {
+    execute_checked(plan, install, |_| Ok(()))
+}
+
+fn execute_checked(
+    plan: plan::PreparedSetup,
+    mut install: impl FnMut(
+        &str,
+        &str,
+        crate::cli::tool_selection::BrewKind,
+        &SlateEnv,
+    ) -> Result<tool_install::ToolInstallMethod>,
+    mut verify: impl FnMut(&str) -> Result<()>,
+) -> Result<ExecutionSummary> {
+    plan.loader.verify(&plan.env)?;
+    let env = &plan.env;
+    let font = plan.font.as_deref();
+    let tools_to_configure = &plan.tools_to_configure;
+    let mut summary = ExecutionSummary::new();
+    summary.font_requested = font.is_some();
+    let terminal = detection::TerminalProfile::from_env_vars(
+        std::env::var("TERM_PROGRAM").ok().as_deref(),
+        std::env::var("TERM").ok().as_deref(),
+    )
+    .with_session(env.session().clone());
+
+    // The prepared theme also colors progress; do not reread an ambient profile
+    // after the caller's choice has been resolved.
+    let ctx = RenderContext::new(&plan.theme);
+    let roles = Some(Roles::new(&ctx));
 
     // the setup-applying header is a static tree-narrative anchor.
     // Emit via println! (stderr-adjacent `eprintln!` for diagnostics
     // parity with the existing flow) bypassing cliclack.
-    eprintln!("\n{}\n", heading(roles.as_ref(), "Applying your setup"));
+    eprintln!(
+        "\n{}\n",
+        heading(roles.as_ref(), tr("正在应用设置", "Applying your setup"))
+    );
 
     let spinner = cliclack::spinner();
 
-    for tool_id in tools_to_install {
-        if let Some(tool) = crate::cli::tool_selection::ToolCatalog::get_tool(tool_id) {
-            if !tool.installable {
+    for tool in &plan.tools_to_install {
+        let tool_id = tool.id;
+        if let Err(error) = verify(tool_id) {
+            spinner.error(format!(
+                "{} {}",
+                tool.label,
+                tr(
+                    "安装计划已变化，请重新确认；设置已停止",
+                    "installation plan needs review; setup stopped"
+                )
+            ));
+            return Err(error);
+        }
+        spinner.start(format!(
+            "{} {}...",
+            tr("正在安装", "Installing"),
+            tool.label
+        ));
+
+        // Report the actual result immediately; spinner visibility must not
+        // impose a minimum duration on an already-completed installation.
+        match install(tool_id, tool.brew_package, tool.brew_kind, env) {
+            Ok(method) => {
                 summary.add_tool_result(ToolInstallResult {
-                    tool_id: tool_id.clone(),
+                    tool_id: tool_id.to_owned(),
                     tool_label: tool.label.to_string(),
-                    status: InstallStatus::Skipped,
-                    error_message: Some("Not installable via setup".to_string()),
+                    status: InstallStatus::Success,
+                    error_message: None,
                 });
-                continue;
+                spinner.stop(method.success_message(tool.label));
+                // per-tool-apply success → BrandEvent::ApplyComplete.
+                // SoundSink consumes this for per-tool SFX.
+                dispatch(BrandEvent::ApplyComplete);
             }
-
-            spinner.start(format!("Installing {}...", tool.label));
-
-            let install_start = std::time::Instant::now();
-            match install_tool(tool_id, tool.brew_package, tool.brew_kind, env) {
-                Ok(method) => {
-                    let elapsed = install_start.elapsed();
-                    if elapsed < std::time::Duration::from_millis(400) {
-                        std::thread::sleep(std::time::Duration::from_millis(400) - elapsed);
-                    }
-                    summary.add_tool_result(ToolInstallResult {
-                        tool_id: tool_id.clone(),
-                        tool_label: tool.label.to_string(),
-                        status: InstallStatus::Success,
-                        error_message: None,
-                    });
-                    spinner.stop(method.success_message(tool.label));
-                    // per-tool-apply success → BrandEvent::ApplyComplete.
-                    // SoundSink consumes this for per-tool SFX.
-                    dispatch(BrandEvent::ApplyComplete);
-                }
-                Err(err) => {
-                    let elapsed = install_start.elapsed();
-                    if elapsed < std::time::Duration::from_millis(400) {
-                        std::thread::sleep(std::time::Duration::from_millis(400) - elapsed);
-                    }
-                    summary.add_tool_result(ToolInstallResult {
-                        tool_id: tool_id.clone(),
-                        tool_label: tool.label.to_string(),
-                        status: InstallStatus::Failed,
-                        error_message: Some(err.to_string()),
-                    });
-                    spinner.error(status_error(
-                        roles.as_ref(),
-                        &format!("{} failed: {}", tool.label, err),
-                    ));
-                }
-            }
-        }
-    }
-
-    let font_plan = planned_font_installs(font);
-    let mut brew_font_broken = false;
-    let homebrew_font_path = matches!(
-        crate::platform::packages::detect_backend(),
-        crate::platform::packages::PackageManagerBackend::Homebrew
-    );
-    for font_name in &font_plan {
-        let required = font == Some(font_name.as_str());
-        let display = font_display_name(font_name);
-
-        spinner.start(format!("Checking font {}...", display));
-        if is_font_installed_with_env(env, font_name) {
-            spinner.stop(format!("✓ {} already installed", display));
-            if required {
-                summary.font_applied = true;
-            }
-            continue;
-        }
-
-        if homebrew_font_path && !brew_font_broken {
-            spinner.start(format!("Installing {} via Homebrew...", display));
-            match install_font(font_name) {
-                Ok(_) => {
-                    spinner.stop(format!("✓ {} installed", display));
-                    if required {
-                        summary.font_applied = true;
-                    }
-                    continue;
-                }
-                Err(err) => {
-                    let message = err.to_string().to_lowercase();
-                    if message.contains("permission denied") || message.contains("not writable") {
-                        brew_font_broken = true;
-                        spinner.stop("⚠ Homebrew: no write access — switching to direct download");
-                    } else {
-                        // Non-permission brew failures (network, renamed cask, deleted cask, etc.)
-                        // still fall through to direct download, but surface what went wrong so
-                        // users aren't left guessing when the final path reports "download failed".
-                        let err_full = err.to_string();
-                        let err_line = strip_error_prefix(&err_full);
-                        spinner.stop(format!(
-                            "⚠ Homebrew install failed — trying fallback ({})",
-                            err_line
-                        ));
-                        summary.add_notice(format!("brew {}: {}", display, err_line));
-                    }
-                }
-            }
-        }
-
-        if homebrew_font_path && copy_font_from_caskroom(font_name, env).is_ok() {
-            spinner.stop(format!("✓ {} installed (shared cache)", display));
-            if required {
-                summary.font_applied = true;
-            }
-            continue;
-        }
-
-        spinner.start(format!("Downloading {}...", display));
-        match download_font_release(font_name, env) {
-            Ok(_) => {
-                spinner.stop(format!("✓ {} downloaded", display));
-                if required {
-                    summary.font_applied = true;
-                }
+            Err(err) if !installation_fallback_allowed(&err) => {
+                // The handler wraps this failure with its existing checkpoint.
+                // Do not launch another installer or follow-up configuration
+                // while installer completion is unconfirmed.
+                spinner.error(format!(
+                    "{} {}",
+                    tool.label,
+                    tr(
+                        "安装结果尚未确认；设置已停止",
+                        "installation result is uncertain; setup stopped"
+                    )
+                ));
+                return Err(err);
             }
             Err(err) => {
-                let full = err.to_string();
-                let err_msg = strip_error_prefix(&full);
-                if required {
-                    spinner.error(format!("✗ {}: {}", display, err_msg));
-                    summary.add_issue(format!("{}: {}", display, err_msg));
-                } else {
-                    spinner.stop(format!("⚠ {} unavailable", display));
-                    summary.add_notice(format!("{}: {}", display, err_msg));
-                }
-            }
-        }
-    }
-
-    if let Some(font_name) = font.filter(|_| summary.font_applied) {
-        let family = resolve_font_family_with_env(env, font_name);
-        match ConfigManager::with_env(env).and_then(|manager| manager.set_current_font(&family)) {
-            Ok(_) => {}
-            Err(err) => {
-                summary.add_issue(format!(
-                    "Font '{}' was installed but could not be saved to config: {}",
-                    family, err
+                summary.add_tool_result(ToolInstallResult {
+                    tool_id: tool_id.to_owned(),
+                    tool_label: tool.label.to_string(),
+                    status: InstallStatus::Failed,
+                    error_message: Some(err.to_string()),
+                });
+                spinner.error(status_error(
+                    roles.as_ref(),
+                    &format!(
+                        "{} {}: {}",
+                        tool.label,
+                        tr("失败", "failed"),
+                        terminal_text(&err.to_string())
+                    ),
                 ));
             }
         }
+    }
 
-        summary.add_notice(crate::platform::fonts::activation_hint());
+    let font_cache_refresh = font_stage::execute(font, env, &mut summary);
+
+    if let Some(font_name) = font.filter(|_| summary.font_available) {
+        let family = resolve_font_family_with_env(env, font_name);
+        save_font_choice(env, &family, &mut summary);
+
+        summary.add_notice(crate::platform::fonts::activation_hint_in(
+            font_cache_refresh,
+            crate::cli::ui_language::output_language(),
+        ));
     }
 
     let just_installed: Vec<String> = summary
@@ -205,9 +239,12 @@ pub fn execute_setup_with_env(
         summary.add_issue(issue);
     }
 
-    spinner.start("Setting up shell integration...");
-    match setup_shell_integration_with_env(theme, env, tools_to_configure) {
-        Ok((selected_theme, report)) => {
+    spinner.start(tr(
+        "正在配置 Shell 集成…",
+        "Setting up shell integration...",
+    ));
+    match integration::setup_with_loader(&plan.theme, env, tools_to_configure, &plan.loader) {
+        Ok(report) => {
             summary.theme_applied = true;
             for issue in theme_apply_issues(&report.results) {
                 summary.add_issue(issue);
@@ -215,40 +252,51 @@ pub fn execute_setup_with_env(
             summary.set_theme_results(report.results);
             spinner.stop(status_success(
                 roles.as_ref(),
-                &format!("Shell integration configured for {}", selected_theme.name),
+                &format!(
+                    "{} {}",
+                    tr(
+                        "Shell 集成已配置，主题：",
+                        "Shell integration configured for"
+                    ),
+                    terminal_text(&plan.theme.name)
+                ),
             ));
         }
         Err(err) => {
             spinner.error(status_error(
                 roles.as_ref(),
-                &format!("Shell integration had issues: {}", err),
+                &format!(
+                    "{}: {}",
+                    tr("Shell 集成出现问题", "Shell integration had issues"),
+                    terminal_text(&err.to_string())
+                ),
             ));
-            summary.add_issue(format!("Shell integration setup failed: {}", err));
-            // 18-: setup-level failure → single Failure
-            // dispatch so SoundSink maps it to the failure SFX.
-            dispatch(BrandEvent::Failure(FailureKind::SetupFailed));
+            summary.add_issue(format!(
+                "{}: {}",
+                tr("Shell 集成设置失败", "Shell integration setup failed"),
+                err
+            ));
+            // The handler owns the whole-setup success/failure milestone after
+            // all follow-up work. The executor returns detailed partial results.
         }
     }
 
-    if summary.theme_applied {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-
-        let theme_name = theme.unwrap_or("catppuccin-mocha");
-        let font_name = font.unwrap_or("(system default)");
-        let tool_count = summary.configured_count();
-        let shell = match crate::platform::shell::detect_backend() {
-            crate::platform::shell::ShellBackend::Zsh => "zsh (.zshrc)".to_string(),
-            crate::platform::shell::ShellBackend::Bash => "bash (.bashrc)".to_string(),
-            crate::platform::shell::ShellBackend::Fish => {
-                "fish (~/.config/fish/conf.d/slate.fish)".to_string()
-            }
-            crate::platform::shell::ShellBackend::Unsupported => std::env::var("SHELL")
-                .ok()
-                .and_then(|shell_path| shell_path.rsplit('/').next().map(String::from))
-                .unwrap_or_else(|| "unsupported".to_string()),
+    use std::io::IsTerminal;
+    // The interactive handler owns the final receipt and activation guidance.
+    // Retain the legacy detailed card for redirected command output only.
+    if show_configuration_card(
+        summary.theme_applied,
+        std::io::stdin().is_terminal(),
+        std::io::stdout().is_terminal(),
+    ) {
+        let theme_name = &plan.theme.id;
+        let font_name = match font {
+            Some(font) if summary.font_applied => font,
+            Some(_) => "(selected font choice not saved)",
+            None => "(existing font kept)",
         };
-        let terminal = detection::TerminalProfile::detect();
-
+        let tool_count = summary.configured_count();
+        let shell = plan.shell.label();
         let receipt_body = format!(
             "Terminal    {} ({})\n\
              Theme       {theme_name}\n\
@@ -258,22 +306,32 @@ pub fn execute_setup_with_env(
             terminal.display_name(),
             terminal.compatibility_label()
         );
-        let _ = cliclack::note("Your terminal is beautiful", receipt_body);
+        let _ = cliclack::note("Configuration files updated", receipt_body);
 
-        if let Some(tip) = terminal.setup_tip() {
-            let _ = cliclack::log::remark(tip);
+        if terminal.session().can_reload_terminal() {
+            if let Some(tip) = terminal.setup_tip() {
+                let _ = cliclack::log::remark(tip);
+            }
         }
     }
 
-    let font_ok = font.is_none() || summary.font_applied;
-    summary.overall_success = summary.failure_count() == 0
-        && font_ok
-        && summary.theme_applied
-        && summary.theme_failure_count() == 0
-        && summary.missing_integration_skip_count() == 0
-        && summary.issues.is_empty();
+    summary.refresh_outcome();
 
     Ok(summary)
+}
+
+fn show_configuration_card(applied: bool, input_tty: bool, output_tty: bool) -> bool {
+    applied && !(input_tty && output_tty)
+}
+
+fn save_font_choice(env: &SlateEnv, family: &str, summary: &mut ExecutionSummary) {
+    summary.font_applied = false;
+    match ConfigManager::with_env(env).and_then(|manager| manager.set_current_font(family)) {
+        Ok(()) => summary.font_applied = true,
+        Err(error) => summary.add_issue(format!(
+            "Selected font is available but its choice could not be saved: {error}"
+        )),
+    }
 }
 
 /// Render `◆ title` via Roles::heading, falling back to a plain `◆ …`
@@ -316,6 +374,126 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn shell_loader_drift_stops_real_executor_before_installers_and_theme_writes() {
+        use crate::platform::shell::ShellBackend;
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_owned());
+        let prepared = plan::prepare_with_shell(
+            &["starship".into()],
+            &[],
+            None,
+            Some("nord"),
+            &env,
+            ShellBackend::Bash,
+        )
+        .unwrap();
+        std::fs::write(env.bash_integration_path(), "# later user edit\n").unwrap();
+        let error = integration::setup_with_loader(&prepared.theme, &env, &[], &prepared.loader)
+            .unwrap_err();
+        assert!(error.to_string().contains("changed after preparation"));
+        let error = execute_with_installer(prepared, |_, _, _, _| {
+            panic!("changed loader must stop before an installer")
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("changed after preparation"));
+        assert_eq!(
+            std::fs::read(env.bash_integration_path()).unwrap(),
+            b"# later user edit\n"
+        );
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn bash_startup_selection_drift_stops_real_executor_before_installers() {
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().into());
+        std::fs::write(env.shell_profile_path(), "# existing user profile\n").unwrap();
+        let prepared = plan::prepare_with_shell(
+            &["starship".into()],
+            &[],
+            None,
+            Some("nord"),
+            &env,
+            crate::platform::shell::ShellBackend::Bash,
+        )
+        .unwrap();
+        std::fs::write(env.bash_login_path(), "# later higher-priority entry\n").unwrap();
+        let error = execute_with_installer(prepared, |_, _, _, _| {
+            panic!("selection drift must stop before installation")
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("selected startup or environment path changed"));
+        assert_eq!(
+            std::fs::read(env.shell_profile_path()).unwrap(),
+            b"# existing user profile\n"
+        );
+        assert_eq!(
+            std::fs::read(env.bash_login_path()).unwrap(),
+            b"# later higher-priority entry\n"
+        );
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn setup_outcome_font_availability_is_not_persistence() {
+        for blocked in [false, true] {
+            let td = TempDir::new().unwrap();
+            let env = SlateEnv::with_home(td.path().to_owned());
+            let config = ConfigManager::with_env(&env).unwrap();
+            let path = env.managed_file("current-font");
+            if blocked {
+                std::fs::create_dir(&path).unwrap();
+            }
+            let mut summary = ExecutionSummary::new();
+            summary.font_requested = true;
+            summary.font_available = true;
+            summary.theme_applied = true;
+            save_font_choice(&env, "Private Fixture Mono", &mut summary);
+            assert!(summary.font_available);
+            assert_eq!(summary.font_applied, !blocked);
+            assert_eq!(summary.is_successful(), !blocked);
+            if blocked {
+                assert!(path.is_dir());
+                assert_eq!(summary.issues.len(), 1);
+            } else {
+                assert_eq!(
+                    config.get_current_font().unwrap().as_deref(),
+                    Some("Private Fixture Mono")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn theme_safety_failed_setup_keeps_existing_shell_loader_and_environment() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_owned());
+        let config = ConfigManager::with_env(&env).unwrap();
+        config.set_current_theme("nord").unwrap();
+        let shell_env = env.config_dir().join("managed/shell/env.zsh");
+        std::fs::create_dir_all(shell_env.parent().unwrap()).unwrap();
+        std::fs::write(&shell_env, "# original shell env\n").unwrap();
+        std::fs::write(env.zshrc_path(), "# original shell loader\n").unwrap();
+        let broken = env.xdg_config_home().join("alacritty/alacritty.toml");
+        std::fs::create_dir_all(broken.parent().unwrap()).unwrap();
+        std::fs::write(broken, "[broken TOML\n").unwrap();
+        let result =
+            setup_shell_integration_with_env(Some("catppuccin-mocha"), &env, &["alacritty".into()]);
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read_to_string(shell_env).unwrap(),
+            "# original shell env\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(env.zshrc_path()).unwrap(),
+            "# original shell loader\n"
+        );
+        assert_eq!(config.get_current_theme().unwrap().as_deref(), Some("nord"));
+    }
+
+    #[test]
     fn test_execute_setup_empty() {
         let tempdir = TempDir::new().unwrap();
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
@@ -329,15 +507,217 @@ mod tests {
     }
 
     #[test]
-    fn test_planned_font_installs_only_selected() {
-        let plan = planned_font_installs(Some("jetbrains-mono"));
-        assert_eq!(plan, vec!["jetbrains-mono"]);
+    fn configuration_card_is_not_duplicated_in_interactive_setup() {
+        for input in [false, true] {
+            for output in [false, true] {
+                assert!(!show_configuration_card(false, input, output));
+                assert_eq!(
+                    show_configuration_card(true, input, output),
+                    !(input && output)
+                );
+            }
+        }
     }
 
     #[test]
-    fn test_planned_font_installs_none_selected() {
-        let plan = planned_font_installs(None);
-        assert!(plan.is_empty());
+    #[ignore = "private PTY executor fixture with simulated installers only"]
+    fn executor_terminal_fixture() {
+        let env = SlateEnv::from_process().unwrap();
+        assert!(env.session().is_isolated());
+        assert_eq!(std::fs::read_dir(env.home()).unwrap().count(), 0);
+        crate::cli::ui_language::load_saved_ui_language(&env).unwrap();
+        let failed = match std::env::var("SLATE_RECEIPT_CASE").unwrap().as_str() {
+            "success" => false,
+            "failure" => true,
+            _ => panic!("unknown fixture"),
+        };
+        let plan = prepare_setup_with_env(&["bat".into()], &[], None, Some("nord"), &env).unwrap();
+        let mut calls = 0;
+        let summary = execute_with_installer(plan, |id, _, _, actual| {
+            assert_eq!(id, "bat");
+            assert_eq!(actual.home(), env.home());
+            calls += 1;
+            if failed {
+                Err(crate::error::SlateError::Internal(
+                    "fixture download failed".into(),
+                ))
+            } else {
+                Ok(ToolInstallMethod::Homebrew)
+            }
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(summary.is_successful(), !failed);
+        assert!(summary.theme_applied);
+        assert_eq!(
+            ConfigManager::from_env_paths(&env)
+                .get_current_theme()
+                .unwrap()
+                .as_deref(),
+            Some("nord")
+        );
+        assert!(!env.user_local_bin().join("bat").exists());
+        let terminal = detection::TerminalProfile::from_env_vars(Some("ghostty"), None)
+            .with_session(env.session().clone());
+        eprintln!(
+            "RECEIPT-BEGIN\n{}RECEIPT-END",
+            summary.format_completion_message_for_terminal(&terminal)
+        );
+    }
+
+    #[test]
+    fn completed_installations_report_success_and_known_failure_in_order() {
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_owned());
+        let ids = ["bat".into(), "delta".into()];
+        let plan = prepare_setup_with_env(&ids, &[], None, Some("nord"), &env).unwrap();
+        let mut calls = Vec::new();
+        let summary = execute_with_installer(plan, |id, _, _, selected_env| {
+            assert!(selected_env.session().is_isolated());
+            calls.push(id.to_owned());
+            if id == "bat" {
+                Ok(ToolInstallMethod::Homebrew)
+            } else {
+                Err(crate::error::SlateError::Internal(
+                    "fixture completed failure".into(),
+                ))
+            }
+        })
+        .unwrap();
+        assert_eq!(calls, ids);
+        assert_eq!(summary.tool_results.len(), 2);
+        assert_eq!(summary.tool_results[0].status, InstallStatus::Success);
+        assert_eq!(summary.tool_results[1].status, InstallStatus::Failed);
+        assert!(summary.tool_results[1]
+            .error_message
+            .as_deref()
+            .unwrap()
+            .contains("fixture completed failure"));
+        assert_eq!(summary.success_count(), 1);
+        assert_eq!(summary.failure_count(), 1);
+        assert!(!summary.is_successful());
+    }
+
+    #[test]
+    fn homebrew_tool_uncertain_setup_stops_remaining_installers_and_configuration() {
+        uncertain_setup_stops_remaining_installers_and_configuration("homebrew");
+    }
+
+    #[test]
+    fn install_review_executor_checks_before_first_and_each_later_installer() {
+        use crate::{
+            cli::tool_selection::InstallPlan,
+            platform::packages::{InstallContext, PackageManagerBackend, ToolInstallRoute},
+        };
+        let brew = InstallContext {
+            package_manager: PackageManagerBackend::Homebrew,
+            supported_os: true,
+        };
+        let changed = InstallContext {
+            package_manager: PackageManagerBackend::Unsupported,
+            ..brew
+        };
+        for change_before_first in [true, false] {
+            let temp = TempDir::new().unwrap();
+            let env = SlateEnv::with_home(temp.path().to_owned());
+            let ids = ["bat".into(), "delta".into()];
+            let reviewed = InstallPlan::capture(&ids, &env, brew).unwrap();
+            let plan =
+                prepare_setup_with_env(&ids, &["alacritty".into()], None, Some("nord"), &env)
+                    .unwrap()
+                    .with_reviewed_installs(reviewed, brew)
+                    .unwrap();
+            let current = std::cell::Cell::new(if change_before_first { changed } else { brew });
+            let calls = std::cell::Cell::new(0);
+            let error = execute_bound_plan(
+                plan,
+                || current.get(),
+                |tool, selected_env| {
+                    assert!(
+                        !change_before_first,
+                        "no installer may start after review drift"
+                    );
+                    assert_eq!(tool.metadata.id, "bat", "delta must never start");
+                    assert_eq!(tool.route, ToolInstallRoute::Homebrew);
+                    assert_eq!(selected_env.home(), env.home());
+                    calls.set(calls.get() + 1);
+                    std::fs::write(env.home().join("private-partial-package"), "retained").unwrap();
+                    current.set(changed);
+                    // Known failed exits normally continue; route drift must stop
+                    // before the next installer even on that path. No success SFX.
+                    Err(crate::error::SlateError::Internal(
+                        "private completed failure".into(),
+                    ))
+                },
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("plan changed"));
+            assert_eq!(calls.get(), usize::from(!change_before_first));
+            assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), calls.get());
+            assert!(!env.managed_file("current").exists());
+            assert!(!env.zshrc_path().exists());
+        }
+    }
+
+    #[test]
+    fn starship_local_uncertain_setup_stops_remaining_installers_and_configuration() {
+        uncertain_setup_stops_remaining_installers_and_configuration("starship");
+    }
+
+    #[test]
+    fn apt_install_uncertain_setup_stops_remaining_installers_and_configuration() {
+        uncertain_setup_stops_remaining_installers_and_configuration("apt");
+    }
+
+    fn uncertain_setup_stops_remaining_installers_and_configuration(source: &str) {
+        let temp = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_owned());
+        let tools = if source == "apt" {
+            ["bat", "delta"]
+        } else {
+            ["starship", "bat"]
+        };
+        let plan = prepare_setup_with_env(
+            &tools.map(str::to_owned),
+            &["alacritty".into()],
+            Some("NeverInstallFixture Nerd Font"),
+            Some("nord"),
+            &env,
+        )
+        .unwrap();
+        assert_eq!(plan.tools_to_install.len(), 2);
+        let calls = std::cell::Cell::new(0);
+        let error = execute_with_installer(plan, |id, _, _, selected_env| {
+            assert_eq!(
+                id, tools[0],
+                "no later installer may start after uncertainty"
+            );
+            assert_eq!(selected_env.home(), env.home());
+            calls.set(calls.get() + 1);
+            std::fs::write(env.home().join("partial-package-record"), "left in place").unwrap();
+            Err(match source {
+                "starship" => crate::error::SlateError::StarshipInstallUncertain(
+                    "fixture interruption".into(),
+                ),
+                "homebrew" => crate::error::SlateError::HomebrewInstallUncertain(
+                    "fixture interruption".into(),
+                ),
+                "apt" => {
+                    crate::error::SlateError::AptInstallUncertain("fixture interruption".into())
+                }
+                _ => unreachable!(),
+            })
+        })
+        .unwrap_err();
+        assert!(!installation_fallback_allowed(&error));
+        assert_eq!(calls.get(), 1);
+        assert_eq!(
+            std::fs::read(env.home().join("partial-package-record")).unwrap(),
+            b"left in place"
+        );
+        assert_eq!(std::fs::read_dir(env.home()).unwrap().count(), 1);
+        assert!(!env.managed_file("current-font").exists());
+        assert!(!env.managed_file("current").exists());
     }
 
     #[test]
@@ -436,6 +816,45 @@ error_symbol = "[>](bold red)"
         let content = std::fs::read_to_string(env.home().join(".gitconfig")).unwrap();
         assert!(content.contains("git configuration"));
         assert!(content.contains("managed imports"));
+    }
+
+    #[test]
+    fn setup_reuses_alacritty_alternates_without_creating_a_shadow_config() {
+        for relative in [".config/alacritty.toml", ".alacritty.toml"] {
+            let td = TempDir::new().unwrap();
+            let env = SlateEnv::with_home(td.path().to_owned());
+            let path = env.home().join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "# PRIVATE_CONTENT user\n").unwrap();
+            let issues = ensure_tool_configs(&env, &["alacritty".into()], &["alacritty".into()]);
+            assert!(issues.is_empty(), "{issues:?}");
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                "# PRIVATE_CONTENT user\n"
+            );
+            assert!(!env
+                .xdg_config_home()
+                .join("alacritty/alacritty.toml")
+                .exists());
+        }
+    }
+
+    #[test]
+    fn setup_does_not_initialize_through_a_dangling_alacritty_link() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_owned());
+        let high = env.xdg_config_home().join("alacritty/alacritty.toml");
+        let missing_target = env.home().join("must-not-be-created");
+        std::fs::create_dir_all(high.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&missing_target, &high).unwrap();
+        std::fs::write(env.home().join(".alacritty.toml"), "# lower\n").unwrap();
+        ensure_tool_configs(&env, &["alacritty".into()], &["alacritty".into()]);
+        assert!(!missing_target.exists());
+        assert!(std::fs::symlink_metadata(&high).unwrap().is_symlink());
+        assert_eq!(
+            std::fs::read_to_string(env.home().join(".alacritty.toml")).unwrap(),
+            "# lower\n"
+        );
     }
 
     #[test]

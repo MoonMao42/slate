@@ -26,6 +26,9 @@ pub enum SlateError {
     #[error("Theme '{0}' not found. Run 'slate list' to see available themes.")]
     ThemeNotFound(String),
 
+    #[error("Theme {input} not found.\n{guidance}")]
+    ThemeLookupFailed { input: String, guidance: String },
+
     #[error("Invalid theme data: {0}")]
     InvalidThemeData(String),
 
@@ -37,6 +40,9 @@ pub enum SlateError {
 
     #[error("Failed to reload {0}: {1}")]
     ReloadFailed(String, String),
+
+    #[error("Colors saved; no default tmux server is running. No session was reloaded.")]
+    NoDefaultTmuxServer,
 
     #[error("Backup operation failed: {0}")]
     BackupFailed(String),
@@ -59,8 +65,29 @@ pub enum SlateError {
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 
+    #[error("A Slate configuration operation or preview is still running. Let it finish or close its picker, then retry; no config files were changed.")]
+    ConfigurationBusy,
+
+    #[error("An unfinished preview remains. Run `slate recover --dry-run` before changing configuration.")]
+    PreviewRecoveryPending,
+
     #[error("User cancelled operation")]
     UserCancelled,
+
+    #[error("Homebrew installation could not be confirmed: {0}. Installed files, package records or caches may have changed; inspect Homebrew before retrying. Command output omitted.")]
+    HomebrewInstallUncertain(String),
+
+    #[error("apt installation could not be confirmed: {0}. An elevated installer may still be running; packages and dpkg state may have changed. Inspect apt/dpkg before retrying; do not delete lock files. Command output omitted.")]
+    AptInstallUncertain(String),
+
+    #[error("Starship local installation could not be confirmed: {0}. Inspect the local binary and installer changes before retrying; file recovery does not uninstall binaries. Command output omitted.")]
+    StarshipInstallUncertain(String),
+
+    #[error("Setup incomplete: {reason}\nCompleted changes were left in place; no automatic rollback was attempted.\nPreview captured file recovery: slate restore {restore_point_id} --dry-run\nFile recovery does not uninstall packages or fonts.")]
+    SetupIncomplete {
+        reason: String,
+        restore_point_id: String,
+    },
 
     #[error("Internal error: {0}")]
     Internal(String),

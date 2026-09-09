@@ -5,14 +5,19 @@ use std::path::PathBuf;
 
 pub mod alacritty;
 pub mod bat;
+pub mod btop;
 pub mod delta;
 pub mod eza;
 pub mod fastfetch;
 pub mod font;
+pub(crate) mod font_config;
 pub mod ghostty;
+mod integration_publish;
 pub mod kitty;
+pub(crate) mod kitty_config;
 pub mod lazygit;
 pub mod ls_colors;
+mod managed_fragment;
 pub mod marker_block;
 pub mod nvim;
 pub mod opencode;
@@ -20,11 +25,15 @@ pub mod palette_renderer;
 pub mod registry;
 pub mod starship;
 pub mod tmux;
+pub(crate) mod write_paths;
+pub mod yazi;
+pub mod zellij;
 pub mod zsh_highlight;
 
 // Re-export adapter structs for use in commands and tests
 pub use alacritty::AlacrittyAdapter;
 pub use bat::BatAdapter;
+pub use btop::BtopAdapter;
 pub use delta::DeltaAdapter;
 pub use eza::EzaAdapter;
 pub use fastfetch::FastfetchAdapter;
@@ -38,6 +47,8 @@ pub use opencode::OpencodeAdapter;
 pub use registry::{ToolApplyResult, ToolApplyStatus, ToolRegistry};
 pub use starship::StarshipAdapter;
 pub use tmux::TmuxAdapter;
+pub use yazi::YaziAdapter;
+pub use zellij::ZellijAdapter;
 pub use zsh_highlight::ZshHighlightAdapter;
 
 /// How a tool includes external configuration files.
@@ -100,6 +111,7 @@ impl ApplyOutcome {
 pub enum SkipReason {
     MissingIntegrationConfig,
     NotInstalled,
+    ThemeNotCommitted,
 }
 
 impl std::fmt::Display for SkipReason {
@@ -109,6 +121,9 @@ impl std::fmt::Display for SkipReason {
                 write!(f, "missing integration config")
             }
             SkipReason::NotInstalled => write!(f, "tool not installed"),
+            SkipReason::ThemeNotCommitted => {
+                write!(f, "theme was not committed; notification was not sent")
+            }
         }
     }
 }
@@ -151,6 +166,14 @@ pub trait ToolAdapter: Send + Sync {
     /// one of four variants
     fn apply_strategy(&self) -> ApplyStrategy;
 
+    /// The shared theme coordinator defers this adapter until required config
+    /// writes and the current-theme record have succeeded. Availability is still
+    /// checked before the checkpoint. Direct adapter/registry calls remain
+    /// immediate primitives and do not establish a global theme commit.
+    fn is_post_commit_notification(&self) -> bool {
+        false
+    }
+
     /// Apply theme to tool's configuration.
     /// Must:
     /// 1. Write theme data to managed_config_path()
@@ -182,6 +205,11 @@ pub trait ToolAdapter: Send + Sync {
     fn reload(&self) -> Result<()> {
         // Default: no-op. Adapters override if they support reload.
         Ok(())
+    }
+
+    /// Reload using the same environment that received the generated files.
+    fn reload_with_env(&self, _env: &SlateEnv) -> Result<()> {
+        self.reload()
     }
 
     /// Get current theme applied to this tool (optional, for status).

@@ -3,8 +3,11 @@
 //! configurations.
 
 use crate::error::{Result, SlateError};
-use crate::theme::ThemeVariant;
+use crate::theme::{ThemeAppearance, ThemeVariant};
 use std::str::FromStr;
+
+mod managed;
+pub(crate) use managed::{managed_paths, ManagedFile, PreparedOpacity, MANAGED_FILES};
 
 /// Discrete opacity presets for terminal windows.
 /// Three levels with specific opacity values.
@@ -73,10 +76,7 @@ impl std::fmt::Display for OpacityPreset {
 /// Recommended opacity preset based on theme lightness.
 /// Light themes prefer Solid; dark themes prefer Frosted.
 pub fn recommended_opacity_for_theme(theme: &ThemeVariant) -> OpacityPreset {
-    // Heuristic: if theme name contains "light", "latte", or "day", recommend Solid.
-    // Otherwise (dark themes), recommend Frosted.
-    let name_lower = theme.name.to_lowercase();
-    if name_lower.contains("light") || name_lower.contains("latte") || name_lower.contains("day") {
+    if theme.appearance == ThemeAppearance::Light {
         OpacityPreset::Solid
     } else {
         OpacityPreset::Frosted
@@ -89,19 +89,62 @@ pub fn should_warn_for_translucent_light_theme(
     theme: &ThemeVariant,
     preset: OpacityPreset,
 ) -> bool {
-    let is_light_theme = {
-        let name_lower = theme.name.to_lowercase();
-        name_lower.contains("light") || name_lower.contains("latte") || name_lower.contains("day")
-    };
-
     let is_translucent = preset == OpacityPreset::Frosted || preset == OpacityPreset::Clear;
 
-    is_light_theme && is_translucent
+    theme.appearance == ThemeAppearance::Light && is_translucent
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opacity_advice_uses_declared_appearance_across_catalog_and_renamed_themes() {
+        let themes = crate::theme::ThemeRegistry::new().unwrap();
+        for theme in themes.all() {
+            let light = theme.appearance == ThemeAppearance::Light;
+            assert_eq!(
+                recommended_opacity_for_theme(theme),
+                if light {
+                    OpacityPreset::Solid
+                } else {
+                    OpacityPreset::Frosted
+                },
+                "{}",
+                theme.id
+            );
+            for preset in [
+                OpacityPreset::Solid,
+                OpacityPreset::Frosted,
+                OpacityPreset::Clear,
+            ] {
+                assert_eq!(
+                    should_warn_for_translucent_light_theme(theme, preset),
+                    light && preset != OpacityPreset::Solid,
+                    "{} {preset}",
+                    theme.id
+                );
+            }
+        }
+        let dawn = themes.get("rose-pine-dawn").unwrap();
+        assert_eq!(recommended_opacity_for_theme(dawn), OpacityPreset::Solid);
+        let mut renamed = dawn.clone();
+        renamed.name = "Unrelated display name".into();
+        assert_eq!(
+            recommended_opacity_for_theme(&renamed),
+            OpacityPreset::Solid
+        );
+        renamed.appearance = ThemeAppearance::Dark;
+        renamed.name = "Daylight Latte".into();
+        assert_eq!(
+            recommended_opacity_for_theme(&renamed),
+            OpacityPreset::Frosted
+        );
+        assert!(!should_warn_for_translucent_light_theme(
+            &renamed,
+            OpacityPreset::Clear
+        ));
+    }
 
     #[test]
     fn test_opacity_preset_solid_values() {

@@ -1,10 +1,7 @@
-//! lazygit adapter with macOS path fix and pager sync logic.
-//! Uses EnvironmentVariable strategy (LG_CONFIG_FILE via slate init).
-//! Fixes macOS path resolution to check LG_CONFIG_FILE first.
-//! Preserves pager sync logic (bat/delta themes) as competitive advantage.
+//! A GUI-only palette fragment. Lazygit requires lists of color attributes,
+//! not scalar YAML strings. Personal layout, bindings and pagers stay untouched.
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
-use crate::config::ConfigManager;
 use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
@@ -15,60 +12,8 @@ use std::path::PathBuf;
 pub struct LazygitAdapter;
 
 impl LazygitAdapter {
-    fn parse_config_paths(path_str: &str) -> Option<PathBuf> {
-        for separator in [',', ':'] {
-            if !path_str.contains(separator) {
-                continue;
-            }
-
-            if let Some(first_path) = path_str
-                .split(separator)
-                .map(str::trim)
-                .find(|path| !path.is_empty())
-            {
-                return Some(PathBuf::from(first_path));
-            }
-        }
-
-        let trimmed = path_str.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(PathBuf::from(trimmed))
-        }
-    }
-
-    /// Resolve lazygit config path
-    /// 1. LG_CONFIG_FILE env var (if set)
-    /// 2. XDG_CONFIG_HOME/lazygit/config.yml
-    /// 3. ~/Library/Application Support/lazygit/ (macOS)
-    fn resolve_config_path() -> Result<PathBuf> {
-        let env = SlateEnv::from_process()?;
-        Self::resolve_config_path_with_env(&env)
-    }
-
-    fn resolve_config_path_with_env(env: &SlateEnv) -> Result<PathBuf> {
-        // Step 1: Check LG_CONFIG_FILE env var first
-        if let Ok(path_str) = std::env::var("LG_CONFIG_FILE") {
-            if let Some(first_path) = Self::parse_config_paths(&path_str) {
-                return Ok(first_path);
-            }
-        }
-
-        // Step 2: Check XDG config root from SlateEnv
-        let xdg = env.xdg_config_home();
-        if !xdg.as_os_str().is_empty() {
-            return Ok(xdg.join("lazygit/config.yml"));
-        }
-
-        // Step 3: Default to macOS location
-        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
-
-        if cfg!(target_os = "macos") {
-            Ok(PathBuf::from(home).join("Library/Application Support/lazygit/config.yml"))
-        } else {
-            Ok(PathBuf::from(home).join(".config/lazygit/config.yml"))
-        }
+    pub fn theme_path(env: &SlateEnv) -> PathBuf {
+        env.managed_file("managed/lazygit/config.yml")
     }
 }
 
@@ -78,11 +23,17 @@ impl ToolAdapter for LazygitAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        Ok(detection::detect_tool_presence(self.tool_name()).installed)
+        self.is_installed_with_env(&SlateEnv::from_process()?)
+    }
+
+    fn is_installed_with_env(&self, env: &SlateEnv) -> Result<bool> {
+        Ok(detection::detect_tool_presence_with_env(self.tool_name(), env).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
-        Self::resolve_config_path()
+        Ok(SlateEnv::from_process()?
+            .lazygit_primary_config()
+            .to_owned())
     }
 
     fn managed_config_path(&self) -> PathBuf {
@@ -104,22 +55,15 @@ impl ToolAdapter for LazygitAdapter {
     }
 
     fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
-        // Step 1: Extract theme name from tool_refs
-        theme.tool_refs.get("lazygit").ok_or_else(|| {
-            SlateError::InvalidThemeData(format!(
-                "Theme '{}' missing lazygit tool reference",
-                theme.id
-            ))
-        })?;
-
-        // Step 2: Generate managed YAML using PaletteRenderer
         let managed_content = self.generate_yaml_config(theme)?;
-
-        // Step 3: Write to managed config directory
-        let config_manager = ConfigManager::with_env(env)?;
-        config_manager.write_managed_file("lazygit", "config.yml", &managed_content)?;
-
-        // Step 4: Pager sync is handled at generation time via generate_yaml_config
+        let path = Self::theme_path(env);
+        if path.to_str().is_none_or(|s| s.contains(',')) {
+            return Err(SlateError::InvalidConfig(
+                "Lazygit's comma-separated LG_CONFIG_FILE cannot represent this managed path"
+                    .into(),
+            ));
+        }
+        super::managed_fragment::write(env, &path, managed_content.as_bytes(), "lazygit")?;
 
         // lazygit reads LG_CONFIG_FILE at launch; the managed config only
         // reaches a new lazygit process spawned from a fresh shell.
@@ -133,28 +77,49 @@ impl ToolAdapter for LazygitAdapter {
 }
 
 impl LazygitAdapter {
-    fn generate_yaml_config(&self, theme: &ThemeVariant) -> Result<String> {
-        let lazygit_ref = theme.tool_refs.get("lazygit").ok_or_else(|| {
-            SlateError::InvalidThemeData(format!(
-                "Theme '{}' missing lazygit tool reference",
-                theme.id
-            ))
-        })?;
-
-        // Generate lazygit YAML config with themed GUI colors
-        let mut semantic_map = std::collections::HashMap::new();
-        semantic_map.insert("text", "gui.theme.inactiveBorderColor");
-        semantic_map.insert("foreground", "gui.theme.activeBorderColor");
-        semantic_map.insert("red", "gui.theme.selectedLineBgColor");
-
-        let yaml_content = crate::adapter::palette_renderer::PaletteRenderer::to_yaml(
-            &theme.palette,
-            &semantic_map,
-        )?;
-
-        // PaletteRenderer emits the full gui.theme tree; append pager sync below it.
-        let config = format!("{yaml_content}pager:\n  commands:\n    theme: \"{lazygit_ref}\"\n");
-
+    pub(crate) fn generate_yaml_config(&self, theme: &ThemeVariant) -> Result<String> {
+        let p = &theme.palette;
+        p.validate()?;
+        // A neutral selected row replaces the former solid error-red block.
+        // Keep ordinary foreground legible instead of assuming ANSI accents
+        // work as backgrounds in both light and dark palettes.
+        let selected = [
+            p.selection_bg.as_deref(),
+            p.surface0.as_deref(),
+            p.bg_dim.as_deref(),
+            Some(p.background.as_str()),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|bg| crate::wcag::contrast_hex(&p.foreground, bg) >= 4.5)
+        .unwrap_or(&p.background);
+        let cherry_fg = crate::wcag::pick_accessible_fg_for_bg(&[&p.blue, &p.foreground], selected);
+        let marked_fg =
+            crate::wcag::pick_accessible_fg_for_bg(&[&p.yellow, &p.foreground], selected);
+        let mut config = String::from("# Managed by Slate: GUI colors only.\ngui:\n  theme:\n");
+        for (key, color, bold) in [
+            ("activeBorderColor", p.brand_accent.as_str(), true),
+            (
+                "inactiveBorderColor",
+                p.overlay0.as_deref().unwrap_or(&p.bright_black),
+                false,
+            ),
+            ("searchingActiveBorderColor", &p.yellow, true),
+            ("optionsTextColor", &p.blue, false),
+            ("selectedLineBgColor", selected, false),
+            ("inactiveViewSelectedLineBgColor", selected, false),
+            ("cherryPickedCommitFgColor", cherry_fg.as_str(), false),
+            ("cherryPickedCommitBgColor", selected, false),
+            ("markedBaseCommitFgColor", marked_fg.as_str(), false),
+            ("markedBaseCommitBgColor", selected, false),
+            ("unstagedChangesColor", &p.red, false),
+            ("defaultFgColor", &p.foreground, false),
+        ] {
+            config.push_str(&format!(
+                "    {key}: ['{color}'{}]\n",
+                if bold { ", 'bold'" } else { "" }
+            ));
+        }
         Ok(config)
     }
 }
@@ -162,6 +127,102 @@ impl LazygitAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs,
+        os::unix::fs::{symlink, MetadataExt, PermissionsExt},
+    };
+
+    #[test]
+    fn lazygit_palettes_use_native_color_lists_and_legible_selected_rows() {
+        for theme in crate::theme::ThemeRegistry::new().unwrap().all() {
+            let config = LazygitAdapter.generate_yaml_config(theme).unwrap();
+            let lines = config
+                .lines()
+                .filter(|line| line.starts_with("    "))
+                .collect::<Vec<_>>();
+            assert_eq!(lines.len(), 12);
+            for line in &lines {
+                let (_, values) = line.split_once(": ").unwrap();
+                assert!(
+                    values.starts_with("['#") && values.ends_with("']"),
+                    "{line}"
+                );
+                assert!(values.len() == 11 || values.len() == 19, "{line}");
+            }
+            let row = lines
+                .iter()
+                .find(|line| line.contains("selectedLineBgColor:"))
+                .unwrap();
+            let bg = &row[row.find('#').unwrap()..][..7];
+            assert!(
+                crate::wcag::contrast_hex(&theme.palette.foreground, bg) >= 4.5,
+                "{}: {row}",
+                theme.id
+            );
+            assert_ne!(bg, theme.palette.red);
+            assert!(!config.contains("pager:") && !config.contains("git:"));
+        }
+    }
+
+    #[test]
+    fn lazygit_apply_only_writes_its_fragment_and_preserves_mode_and_noop_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_owned());
+        let path = LazygitAdapter::theme_path(&env);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "gui:\n  theme:\n    activeBorderColor: '#89b4fa'\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        let personal = env.lazygit_default_config();
+        fs::create_dir_all(personal.parent().unwrap()).unwrap();
+        fs::write(personal, "# PRIVATE\ngui:\n  scrollHeight: 7\n").unwrap();
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                LazygitAdapter.apply_theme_with_env(&theme, &env).unwrap(),
+                ApplyOutcome::applied_needs_new_shell()
+            );
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o640
+            );
+            assert_eq!(
+                fs::read_to_string(personal).unwrap(),
+                "# PRIVATE\ngui:\n  scrollHeight: 7\n"
+            );
+            assert!(!env.managed_file("config.toml").exists());
+            assert!(!env.managed_file("current").exists());
+            assert!(!env.slate_cache_dir().exists());
+        }
+        let before = fs::metadata(&path).unwrap();
+        LazygitAdapter.apply_theme_with_env(&theme, &env).unwrap();
+        let after = fs::metadata(&path).unwrap();
+        assert_eq!(before.ino(), after.ino());
+        assert_eq!(before.modified().unwrap(), after.modified().unwrap());
+        let mut invalid = theme;
+        invalid.palette.red = "#123456'\ngit: bad".into();
+        assert!(LazygitAdapter.apply_theme_with_env(&invalid, &env).is_err());
+        assert_eq!(fs::metadata(&path).unwrap().ino(), before.ino());
+    }
+
+    #[test]
+    fn lazygit_apply_rejects_unrepresentable_and_unsafe_targets_before_writing() {
+        let temp = tempfile::tempdir().unwrap();
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        let comma = SlateEnv::with_home(temp.path().join("comma,home"));
+        assert!(LazygitAdapter.apply_theme_with_env(&theme, &comma).is_err());
+        assert!(!comma.home().exists());
+        let env = SlateEnv::with_home(temp.path().join("home"));
+        let path = LazygitAdapter::theme_path(&env);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let outside = temp.path().join("outside");
+        fs::write(&outside, "PRIVATE").unwrap();
+        symlink(&outside, &path).unwrap();
+        assert!(LazygitAdapter.apply_theme_with_env(&theme, &env).is_err());
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "PRIVATE");
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(LazygitAdapter.apply_theme_with_env(&theme, &env).is_err());
+    }
 
     #[test]
     fn test_tool_name() {
@@ -193,23 +254,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_config_paths_prefers_first_comma_separated_path() {
-        let path = LazygitAdapter::parse_config_paths("/tmp/managed.yml,/tmp/user.yml");
-        assert_eq!(path, Some(PathBuf::from("/tmp/managed.yml")));
-    }
-
-    #[test]
-    fn test_parse_config_paths_accepts_legacy_colon_separator() {
-        let path = LazygitAdapter::parse_config_paths("/tmp/managed.yml:/tmp/user.yml");
-        assert_eq!(path, Some(PathBuf::from("/tmp/managed.yml")));
-    }
-
-    #[test]
-    fn test_parse_config_paths_rejects_empty_input() {
-        assert_eq!(LazygitAdapter::parse_config_paths("   "), None);
-    }
-
-    #[test]
     fn test_generate_yaml_config_includes_gui_theme_colors() {
         let adapter = LazygitAdapter;
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
@@ -220,5 +264,14 @@ mod tests {
         assert!(config.contains("inactiveBorderColor:"));
         assert!(config.contains("selectedLineBgColor:"));
         assert!(!config.contains("  theme:\n  gui:"));
+        assert!(!config.contains("pager:"));
+        assert!(config.contains("activeBorderColor: ['"));
+        assert_eq!(
+            config
+                .lines()
+                .filter(|line| line.starts_with("    "))
+                .count(),
+            12
+        );
     }
 }

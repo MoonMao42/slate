@@ -2,14 +2,19 @@ use crate::adapter::{SkipReason, ToolApplyStatus};
 use crate::brand::events::{dispatch, BrandEvent, FailureKind, SuccessKind};
 use crate::brand::render_context::RenderContext;
 use crate::brand::roles::Roles;
-use crate::cli::apply::{SnapshotPolicy, ThemeApplyCoordinator, ThemeApplyReport};
+use crate::cli::apply::{
+    log_apply_report, SnapshotPolicy, ThemeApplyCoordinator, ThemeApplyReport,
+};
 use crate::cli::auto_theme;
-use crate::cli::theme_apply::{apply_theme_selection, apply_theme_selection_with_env};
+use crate::cli::theme_apply::apply_theme_selection_with_env;
 use crate::config::ConfigManager;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::{ThemeRegistry, ThemeVariant};
 use std::os::fd::{AsRawFd, RawFd};
+
+mod input;
+pub use input::{theme_name_argument, validate_selection};
 
 struct StderrRedirectGuard {
     saved_stderr: RawFd,
@@ -60,12 +65,17 @@ impl Drop for StderrRedirectGuard {
     }
 }
 
-fn apply_explicit_theme(theme: &ThemeVariant, quiet: bool) -> Result<ThemeApplyReport> {
-    let env = SlateEnv::from_process()?;
+fn apply_explicit_theme(
+    env: &SlateEnv,
+    theme: &ThemeVariant,
+    quiet: bool,
+) -> Result<ThemeApplyReport> {
     if quiet {
-        ThemeApplyCoordinator::new(&env).apply(theme)
+        let report = ThemeApplyCoordinator::new(env).apply(theme)?;
+        super::apply::log_apply_errors(&report);
+        Ok(report)
     } else {
-        apply_theme_selection_with_env(theme, &env)
+        apply_theme_selection_with_env(theme, env)
     }
 }
 
@@ -158,9 +168,16 @@ fn missing_integration_config_labels(report: &ThemeApplyReport) -> Vec<&'static 
 /// 2. `slate theme --auto` — Apply auto-resolved theme based on system appearance
 /// 3. `slate theme` (no args) — Launch interactive picker
 pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Result<()> {
+    // Library callers share CLI preflight; invalid input must not create a lock.
+    validate_selection(theme_name.as_deref(), auto)?;
+    let env = SlateEnv::from_process()?;
+    let _write_guard = if auto || theme_name.is_some() {
+        Some(crate::config::ConfigWriteGuard::acquire(&env)?)
+    } else {
+        None
+    };
     if auto {
         // Auto path: resolve theme based on system appearance
-        let env = SlateEnv::from_process()?;
         let config = ConfigManager::with_env(&env)?;
 
         let theme_id = match auto_theme::resolve_auto_theme(&env, &config) {
@@ -185,13 +202,19 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
             }
         };
 
-        // In quiet mode, suppress all stderr output from apply_theme_selection.
-        // NOTE: the binding name must not be bare `_` — bare `_` drops immediately and
-        // restores stderr before `apply` runs, defeating quiet mode. `.ok()` gracefully
-        // degrades to non-quiet if the redirect couldn't be established.
-        let report = if quiet {
-            let _stderr_guard = StderrRedirectGuard::silence().ok();
-            match ThemeApplyCoordinator::with_snapshot_policy(&env, SnapshotPolicy::Skip)
+        // Resolve once, then consume the saved pairing without relearning it.
+        // Drop stderr suppression before rendering retained warnings/errors.
+        let report = {
+            let _stderr_guard = quiet
+                .then(StderrRedirectGuard::silence)
+                .and_then(|r| r.ok());
+            let snapshot_policy = if quiet {
+                SnapshotPolicy::Skip
+            } else {
+                SnapshotPolicy::Create
+            };
+            match ThemeApplyCoordinator::with_snapshot_policy(&env, snapshot_policy)
+                .preserving_auto_pair()
                 .apply(theme)
             {
                 Ok(report) => report,
@@ -200,14 +223,14 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
                     return Err(err);
                 }
             }
+        };
+        if quiet {
+            super::apply::log_apply_errors(&report);
         } else {
-            let report = match apply_theme_selection(theme) {
-                Ok(report) => report,
-                Err(err) => {
-                    dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
-                    return Err(err);
-                }
-            };
+            log_apply_report(&report);
+        }
+        validate_theme_report(&report)?;
+        if !quiet {
             let ctx = RenderContext::from_active_theme().ok();
             let roles = ctx.as_ref().map(Roles::new);
             if report.applied_count() == 0 {
@@ -221,8 +244,7 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
                     println!("{warning}");
                 }
             }
-            report
-        };
+        }
         if report.applied_count() == 0 {
             return Ok(());
         }
@@ -236,24 +258,16 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         // Direct apply path: accept canonical kebab-case IDs and display-name aliases.
         let registry = ThemeRegistry::new()?;
 
-        let theme = match registry.get_by_id_or_name(&name) {
-            Some(theme) => theme,
-            None => {
-                dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
-                return Err(crate::error::SlateError::InvalidThemeData(format!(
-                    "Theme '{}' not found",
-                    name
-                )));
-            }
-        };
+        let theme = registry.require_by_id_or_name(&name)?;
 
-        let report = match apply_explicit_theme(theme, quiet) {
+        let report = match apply_explicit_theme(&env, theme, quiet) {
             Ok(report) => report,
             Err(err) => {
                 dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
                 return Err(err);
             }
         };
+        validate_theme_report(&report)?;
 
         if !quiet {
             let ctx = RenderContext::from_active_theme().ok();
@@ -289,6 +303,14 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         let env = SlateEnv::from_process()?;
         crate::cli::picker::launch_picker(&env)
     }
+}
+
+fn validate_theme_report(report: &ThemeApplyReport) -> Result<()> {
+    if let Err(err) = report.ensure_no_failures() {
+        dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
+        return Err(err);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -460,6 +482,9 @@ mod tests {
     #[test]
     fn missing_integration_warning_names_skipped_terminal_configs() {
         let report = ThemeApplyReport {
+            commit_failure: None,
+            reload_warnings: Vec::new(),
+            restore_point_id: None,
             results: vec![
                 applied("bat", false),
                 ToolApplyResult {

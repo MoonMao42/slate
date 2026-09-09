@@ -31,7 +31,8 @@ expression: out
  │    [2;3mFont Platform  supported · fontconfig[0m
  │    [2;3mTerminal  supported · ghostty[0m
  │
- │  ◆ Toolkit
+ │  ◆ Toolkit (availability only)
+ │    Installed tools are not proof of configured integrations.
  │    [1m✓ ghostty         [0m  [1m✗ alacritty       [0m  [1m✓ starship        [0m  
  │
  │  ◆ Auto Theme Watcher

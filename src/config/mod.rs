@@ -3,29 +3,51 @@ use crate::error::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub(crate) mod auto_resolution;
 mod auto_theme;
 mod backup;
+mod editor;
+pub(crate) mod file_read;
 mod flags;
 mod integration;
+pub(crate) mod pairing;
 mod preferences;
+pub(crate) mod preview_write;
+pub mod prompt;
+pub(crate) mod recovery_paths;
+pub(crate) mod shell_change;
 pub(crate) mod shell_integration;
 pub(crate) mod state_files;
 mod tracked_state;
+pub mod ui_language;
+pub(crate) mod write_guard;
+pub use write_guard::ConfigWriteGuard;
 
 // Re-export the shared atomic-write helper so the rest of the crate
 // (adapters, brand sound cache) can route through the single source of
 // truth for AtomicWriteFile + parent-dir fsync.
+pub(crate) use backup::{
+    format_iso8601_timestamp, read_snapshot_source, restore_path_is_safe, MAX_RESTORE_ENTRIES,
+    MAX_SNAPSHOT_BYTES,
+};
+pub(crate) use backup::{
+    snapshot_clean_targets_with_env, snapshot_config_targets_with_env,
+    snapshot_font_targets_with_env, snapshot_import_targets_with_env,
+    snapshot_opacity_targets_with_env, snapshot_theme_targets_with_env,
+};
 pub(crate) use state_files::atomic_write_synced;
 
 pub use backup::{
     backup_directory, backup_directory_with_env, begin_restore_point_baseline,
     begin_restore_point_baseline_with_env, clear_all_restore_points, create_backup_with_session,
     create_pre_restore_snapshot, create_pre_restore_snapshot_with_env, delete_restore_point,
-    display_tools, execute_restore, execute_restore_with_env, get_restore_point,
-    get_restore_point_with_env, is_baseline_restore_point, list_restore_points,
-    list_restore_points_with_env, snapshot_current_state, snapshot_current_state_with_env,
-    BackupSession, OriginalFileState, RestoreEntry, RestoreFileResult, RestorePoint,
-    RestoreReceipt,
+    display_tools, execute_prepared_restore, execute_restore, execute_restore_with_env,
+    get_restore_point, get_restore_point_with_env, inspect_restore_points_with_env,
+    is_baseline_restore_point, list_restore_points, list_restore_points_with_env,
+    prepare_restore_with_env, preview_restore_with_env, snapshot_current_state,
+    snapshot_current_state_with_env, BackupSession, OriginalFileState, PreparedRestore,
+    RestoreAction, RestoreChange, RestoreEntry, RestoreFileResult, RestoreInventory,
+    RestoreInventoryIssue, RestoreInventoryIssueKind, RestorePlan, RestorePoint, RestoreReceipt,
 };
 
 /// Three-tier configuration manager.
@@ -41,6 +63,7 @@ pub struct AutoConfig {
 }
 
 pub struct ConfigManager {
+    env: SlateEnv,
     base_path: PathBuf,   // ~/.config/slate
     backup_root: PathBuf, // ~/.cache/slate/backups
     home_path: PathBuf,
@@ -55,18 +78,25 @@ impl ConfigManager {
     /// All path resolution goes through SlateEnv for testability.
     /// Prefer this method over new() for new code.
     pub fn with_env(env: &SlateEnv) -> Result<Self> {
-        let base_path = env.config_dir().to_path_buf();
-        let backup_root = env.slate_cache_dir().join("backups");
-        let home_path = env.home().to_path_buf();
+        let config = Self::from_env_paths(env);
+        fs::create_dir_all(&config.base_path)?;
+        fs::create_dir_all(&config.backup_root)?;
+        Ok(config)
+    }
 
-        fs::create_dir_all(&base_path)?;
-        fs::create_dir_all(&backup_root)?;
+    /// Construct paths without creating directories. Inspection callers must
+    /// use getters only; this does not disable the manager's write methods.
+    pub(crate) fn from_env_paths(env: &SlateEnv) -> Self {
+        Self {
+            env: env.clone(),
+            base_path: env.config_dir().to_owned(),
+            backup_root: env.slate_cache_dir().join("backups"),
+            home_path: env.home().to_owned(),
+        }
+    }
 
-        Ok(Self {
-            base_path,
-            backup_root,
-            home_path,
-        })
+    pub(crate) fn environment(&self) -> &SlateEnv {
+        &self.env
     }
 
     /// Create ConfigManager from process environment (backward compatibility).
@@ -120,17 +150,17 @@ impl ConfigManager {
         backup::backup_file(&self.backup_root, config_path)
     }
 
+    /// Back up a bounded source already captured by a prepared edit, without
+    /// rereading a path that may now contain a different file. The caller must
+    /// still verify the live source before publishing the edit.
+    pub(crate) fn backup_captured_file(&self, config_path: &Path, bytes: &[u8]) -> Result<PathBuf> {
+        backup::backup_captured_file(&self.backup_root, config_path, bytes)
+    }
+
     pub fn edit_config_field(&self, config_path: &Path, keys: &[&str], value: &str) -> Result<()> {
-        if !config_path.exists() {
-            return Err(crate::error::SlateError::ConfigNotFound(
-                config_path.to_string_lossy().to_string(),
-            ));
-        }
-
-        self.backup_file(config_path)?;
-
-        let content = fs::read_to_string(config_path)?;
-        let mut doc = flags::parse_toml_document(&content)?;
+        let mut doc = flags::read_document(config_path)?.ok_or_else(|| {
+            crate::error::SlateError::ConfigNotFound(config_path.display().to_string())
+        })?;
 
         if keys.len() == 1 {
             doc[keys[0]] = toml_edit::value(value);
@@ -141,6 +171,7 @@ impl ConfigManager {
             ));
         }
 
+        self.backup_file(config_path)?;
         flags::write_document(config_path, &doc)
     }
 
@@ -158,6 +189,7 @@ mod tests {
 
     fn test_config_manager(base_path: &Path) -> ConfigManager {
         ConfigManager {
+            env: SlateEnv::with_home(base_path.to_owned()),
             base_path: base_path.to_path_buf(),
             backup_root: base_path.join(".cache/slate/backups"),
             home_path: base_path.to_path_buf(),
@@ -243,7 +275,15 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let base_path = temp.path().join("custom-xdg/slate");
         fs::create_dir_all(&base_path).unwrap();
-        let config_manager = test_config_manager(&base_path);
+        // Use the production constructor: the legacy test helper's independent
+        // base_path and SlateEnv disagree about the config root.
+        let env = SlateEnv::from_vars(|name| match name {
+            "HOME" => Some(temp.path().as_os_str().to_owned()),
+            "XDG_CONFIG_HOME" => Some(base_path.parent().unwrap().as_os_str().to_owned()),
+            _ => None,
+        })
+        .unwrap();
+        let config_manager = ConfigManager::from_env_paths(&env);
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
 
         // Pin a nerd font so should_prefer_plain_starship() returns false regardless of
@@ -262,7 +302,7 @@ mod tests {
         let xdg_root = base_path.parent().unwrap().to_string_lossy().to_string();
         let eza_config = crate::detection::shell_quote(&format!("{}/eza", managed_root));
         let lazygit_config = crate::detection::shell_quote(&format!(
-            "{}/lazygit/config.yml:{}/lazygit/config.yml",
+            "{}/lazygit/config.yml,{}/lazygit/config.yml",
             managed_root, xdg_root
         ));
         let active_starship = crate::detection::shell_quote(
@@ -298,8 +338,8 @@ mod tests {
 
         let shell_file = config_manager.managed_dir("shell").join("env.zsh");
         let content = fs::read_to_string(shell_file).unwrap();
-        assert!(content.contains("if ! pgrep -f \"slate-dark-mode-notify\" >/dev/null 2>&1; then"));
-        assert!(content.contains("theme --auto --quiet >/dev/null 2>&1 &"));
+        assert!(!content.contains("pgrep"));
+        assert!(content.contains("slate-dark-mode-notify' >/dev/null 2>&1 &"));
         assert!(!content.contains("_SLATE_AUTO_WATCHER"));
     }
 

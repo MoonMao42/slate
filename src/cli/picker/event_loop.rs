@@ -2,16 +2,18 @@
 //! Built on crossterm for live preview support.
 
 use crate::brand::events::{dispatch, BrandEvent, NavKind, SelectKind};
+use crate::cli::ui_language::tr;
 use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::opacity::OpacityPreset;
-use std::io::{self, Write as _};
+use std::io;
 use std::time::{Duration, Instant};
 
 use crossterm::{
     cursor::{Hide, Show},
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyCode, KeyEvent, KeyModifiers,
     },
     execute,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
@@ -19,12 +21,21 @@ use crossterm::{
 
 use super::actions::quick_save_auto;
 use super::preview::starship_fork::fork_starship_prompt;
+use super::preview_snapshot::PreviewSnapshot;
 use super::render::{
     get_effective_opacity_for_rendering, is_ghostty, render, render_afterglow_receipt,
     should_guard_light_theme_opacity,
 };
 use super::rollback_guard::{install_rollback_panic_hook, RollbackGuard};
 use super::state::PickerState;
+
+mod input;
+#[cfg(test)]
+mod input_tests;
+#[cfg(test)]
+mod paste_tests;
+#[cfg(test)]
+mod starship_tests;
 
 /// Flash message shown at the bottom of the picker for ~900ms.
 struct Flash {
@@ -39,32 +50,56 @@ impl TerminalGuard {
     fn enter() -> Result<Self> {
         terminal::enable_raw_mode()
             .map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))?;
+        let guard = Self;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture, Hide)
-            .map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))?;
-        Ok(Self)
+        execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableBracketedPaste,
+            EnableMouseCapture,
+            Hide
+        )
+        .map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))?;
+        Ok(guard)
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let mut stdout = io::stdout();
-        let _ = execute!(stdout, Show, DisableMouseCapture, LeaveAlternateScreen);
+        let _ = execute!(
+            stdout,
+            Show,
+            DisableMouseCapture,
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        );
         let _ = terminal::disable_raw_mode();
     }
 }
 
 /// Launch the interactive 2D picker for theme + opacity selection.
 pub fn launch_picker(env: &SlateEnv) -> Result<()> {
-    let config = crate::config::ConfigManager::with_env(env)?;
-    let starting_theme_id = config
-        .get_current_theme()?
-        .unwrap_or_else(|| "catppuccin-mocha".to_string());
-    let starting_opacity = config
-        .get_current_opacity_preset()
-        .unwrap_or(OpacityPreset::Solid);
-
-    let mut state = PickerState::new(&starting_theme_id, starting_opacity)?;
+    let preview = std::sync::Arc::new(PreviewSnapshot::capture(env)?);
+    let initial_state = (|| -> Result<PickerState> {
+        let config = crate::config::ConfigManager::with_env(env)?;
+        let theme = config
+            .get_current_theme()?
+            .unwrap_or_else(|| "catppuccin-mocha".to_string());
+        let opacity = config
+            .get_current_opacity_preset()
+            .unwrap_or(OpacityPreset::Solid);
+        PickerState::new(&theme, opacity)
+    })();
+    let mut state = match initial_state {
+        Ok(state) => state,
+        Err(err) => {
+            if let Err(cleanup) = preview.restore() {
+                eprintln!("warning: {cleanup}");
+            }
+            return Err(err);
+        }
+    };
     let committed = state.committed_flag();
 
     // layer 3: install the panic hook BEFORE entering the
@@ -72,48 +107,32 @@ pub fn launch_picker(env: &SlateEnv) -> Result<()> {
     // triggers a managed/* rollback. The hook is process-global and
     // shares the same committed flag as `RollbackGuard`, so a panic after a
     // successful commit will not spuriously restore the original theme.
-    let _panic_hook = install_rollback_panic_hook(
-        env.clone(),
-        starting_theme_id.clone(),
-        starting_opacity,
-        committed.clone(),
-    );
-
-    let _guard = TerminalGuard::enter()?;
-
     // layer 2: arm the RAII rollback guard. It shares the
     // same atomic commit flag as the panic hook, so `state.commit()` flips
     // one bit that suppresses every rollback path after a successful apply.
     // Rust drops locals in reverse declaration order, so `_rollback` drops
     // AFTER the match arm below runs `state.commit()`.
-    let _rollback = RollbackGuard::arm(env, &starting_theme_id, starting_opacity, committed);
+    let _rollback = RollbackGuard::arm(preview.clone(), committed.clone());
+    let _panic_hook = install_rollback_panic_hook(&preview, committed);
+    let _guard = TerminalGuard::enter()?;
 
     let effective = get_effective_opacity_for_rendering(&state);
-    let _ = crate::cli::set::silent_preview_apply(env, state.get_current_theme_id(), effective);
+    preview.apply(state.get_current_theme_id(), effective)?;
 
-    let exit_action = event_loop(env, &mut state)?;
+    let exit_action = event_loop(env, &mut state, &preview)?;
 
-    // Picker Enter tactile feedback — brief reverse-video flash before leaving alt screen
+    // Keep the selected palette stable while saving: no reverse-video flash.
     if matches!(exit_action, ExitAction::Commit) {
-        let mut stdout = io::stdout();
-        let _ = execute!(
-            stdout,
-            crossterm::style::SetAttribute(crossterm::style::Attribute::Reverse)
-        );
-        // Re-render current view with inverted colors for a brief tactile flash
-        let _ = render(&state, Some("Applied!"));
-        let _ = execute!(
-            stdout,
-            crossterm::style::SetAttribute(crossterm::style::Attribute::Reset)
-        );
-        let _ = stdout.flush();
-        std::thread::sleep(Duration::from_millis(80));
+        let _ = render(&state, Some(tr("正在应用…", "Applying…")));
     }
 
     drop(_guard);
 
+    // Remove preview mutations before committing too: the coordinator's safety
+    // snapshot must contain the user's original files, not the highlighted theme.
     match exit_action {
         ExitAction::Commit => {
+            let _write_guard = preview.restore_for_commit()?;
             let theme_id = state.get_current_theme_id().to_string();
             let opacity = get_effective_opacity_for_rendering(&state);
             crate::cli::set::silent_commit_apply(
@@ -126,13 +145,7 @@ pub fn launch_picker(env: &SlateEnv) -> Result<()> {
             state.commit();
             render_afterglow_receipt(&state, opacity)?;
         }
-        ExitAction::Cancel => {
-            let _ = crate::cli::set::silent_preview_apply(
-                env,
-                state.original_theme_id(),
-                state.original_opacity(),
-            );
-        }
+        ExitAction::Cancel => preview.restore()?,
     }
 
     Ok(())
@@ -143,7 +156,11 @@ enum ExitAction {
     Cancel,
 }
 
-fn event_loop(env: &SlateEnv, state: &mut PickerState) -> Result<ExitAction> {
+fn event_loop(
+    env: &SlateEnv,
+    state: &mut PickerState,
+    preview: &PreviewSnapshot,
+) -> Result<ExitAction> {
     let mut flash: Option<Flash> = None;
     let mut dirty = true;
 
@@ -168,72 +185,80 @@ fn event_loop(env: &SlateEnv, state: &mut PickerState) -> Result<ExitAction> {
 
         let first =
             event::read().map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))?;
-        let mut last_key_event = match &first {
-            Event::Key(key) => Some(*key),
-            _ => None,
-        };
-        let mut had_resize = matches!(&first, Event::Resize(_, _));
-
-        while event::poll(Duration::ZERO)
-            .map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))?
-        {
-            match event::read()
-                .map_err(|e| crate::error::SlateError::IOError(io::Error::other(e)))?
-            {
-                Event::Key(key) => match key.code {
-                    KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
-                        last_key_event = Some(key);
-                        break;
-                    }
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        last_key_event = Some(key);
-                        break;
-                    }
-                    _ => {
-                        last_key_event = Some(key);
-                    }
-                },
-                Event::Resize(_, _) => {
-                    had_resize = true;
+        let batch = process_input_batch(
+            first,
+            || {
+                if event::poll(Duration::ZERO)? {
+                    Ok(Some(event::read()?))
+                } else {
+                    Ok(None)
                 }
-                _ => {}
-            }
+            },
+            state,
+            env,
+            &mut flash,
+            |state| {
+                preview.apply(
+                    state.get_current_theme_id(),
+                    get_effective_opacity_for_rendering(state),
+                )
+            },
+        )?;
+        if let Some(exit) = batch.exit {
+            return Ok(exit);
         }
-
-        if let Some(key) = last_key_event {
-            match handle_key(key, state, env, &mut flash)? {
-                KeyOutcome::Continue => {
-                    dirty = true;
-                    sync_preview_after_state_change(state, env);
-                }
-                KeyOutcome::Inert => {}
-                KeyOutcome::Commit => return Ok(ExitAction::Commit),
-                KeyOutcome::Cancel => return Ok(ExitAction::Cancel),
-            }
-        }
-
-        if had_resize {
-            dirty = true;
-            // forked starship prompts were generated with a specific
-            // `--terminal-width` arg, so a
-            // resize invalidates every cached entry. `invalidate_prompt_cache`
-            // is a `clear()` — simpler than per-entry width tracking,
-            // and correctness > cache hit-rate here.
-            state.invalidate_prompt_cache();
-            if state.preview_mode_full {
-                fork_and_cache_prompt(state, env);
-            }
-        }
+        dirty |= batch.redraw || batch.resized;
     }
 }
 
-fn sync_preview_after_state_change(state: &mut PickerState, env: &SlateEnv) {
-    if state.preview_mode_full {
+/// Preserve semantic input order, but publish only the final selection in a
+/// bounded batch. UI-only actions and navigation back to the same selection do
+/// not rewrite terminal files. Exit proceeds directly to cancel/commit cleanup.
+fn process_input_batch(
+    first: Event,
+    next: impl FnMut() -> Result<Option<Event>>,
+    state: &mut PickerState,
+    env: &SlateEnv,
+    flash: &mut Option<Flash>,
+    apply: impl FnOnce(&PickerState) -> Result<()>,
+) -> Result<input::Batch> {
+    let before = (
+        state.get_current_theme_id().to_owned(),
+        get_effective_opacity_for_rendering(state),
+    );
+    let batch = input::drain(first, next, |event| {
+        match event {
+            input::Input::Key(key) => handle_key(key, state, env, flash),
+            input::Input::Paste => {
+                // Clipboard contents never become shortcuts or a confirmation.
+                // Do not inspect or echo the payload, even in feedback.
+                *flash = Some(Flash {
+                    text: tr("已忽略粘贴 · 用 ↑↓ 选择", "Paste ignored · use ↑↓").into(),
+                    until: Instant::now() + Duration::from_millis(1200),
+                });
+                Ok(KeyOutcome::Continue)
+            }
+        }
+    })?;
+    if batch.exit.is_some() {
+        return Ok(batch);
+    }
+    if batch.resized {
+        // Forked prompts depend on terminal width. Invalidate before refreshing.
+        state.invalidate_prompt_cache();
+    }
+    if !state.has_selection() {
+        return Ok(batch);
+    }
+    if (batch.redraw || batch.resized) && state.preview_mode_full {
         fork_and_cache_prompt(state, env);
     }
-
-    let effective = get_effective_opacity_for_rendering(state);
-    let _ = crate::cli::set::silent_preview_apply(env, state.get_current_theme_id(), effective);
+    if before.0 != state.get_current_theme_id()
+        || before.1 != get_effective_opacity_for_rendering(state)
+    {
+        apply(state)?;
+    }
+    Ok(batch)
 }
 
 enum KeyOutcome {
@@ -249,7 +274,31 @@ fn handle_key(
     env: &SlateEnv,
     flash: &mut Option<Flash>,
 ) -> Result<KeyOutcome> {
+    if key.code == KeyCode::Esc
+        || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+    {
+        return Ok(KeyOutcome::Cancel);
+    }
+    if !state.has_selection() {
+        return Ok(KeyOutcome::Inert);
+    }
     match key.code {
+        KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+            let (cols, rows) = terminal::size().unwrap_or((80, 24));
+            Ok(
+                if super::render::scroll_preview(
+                    state,
+                    flash.as_ref().map(|flash| flash.text.as_str()),
+                    cols,
+                    rows,
+                    key.code,
+                )? {
+                    KeyOutcome::Continue
+                } else {
+                    KeyOutcome::Inert
+                },
+            )
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             state.move_up();
             // picker navigation — NoopSink in , SoundSink in.
@@ -270,12 +319,16 @@ fn handle_key(
             let at_edge = state.move_left();
             if at_edge {
                 *flash = Some(Flash {
-                    text: "← Solid (hard stop)".to_string(),
+                    text: tr("← 已到不透明", "← Solid (hard stop)").to_string(),
                     until: Instant::now() + Duration::from_millis(500),
                 });
             } else if was_guarded {
                 *flash = Some(Flash {
-                    text: "(!) Translucent light themes may reduce text contrast".to_string(),
+                    text: tr(
+                        "浅色主题半透明时可能降低文字对比度",
+                        "(!) Translucent light themes may reduce text contrast",
+                    )
+                    .to_string(),
                     until: Instant::now() + Duration::from_millis(1200),
                 });
             }
@@ -290,17 +343,25 @@ fn handle_key(
             let at_edge = state.move_right();
             if at_edge {
                 *flash = Some(Flash {
-                    text: "→ Clear (hard stop)".to_string(),
+                    text: tr("→ 已到透明", "→ Clear (hard stop)").to_string(),
                     until: Instant::now() + Duration::from_millis(500),
                 });
             } else if was_guarded {
                 *flash = Some(Flash {
-                    text: "(!) Translucent light themes may reduce text contrast".to_string(),
+                    text: tr(
+                        "浅色主题半透明时可能降低文字对比度",
+                        "(!) Translucent light themes may reduce text contrast",
+                    )
+                    .to_string(),
                     until: Instant::now() + Duration::from_millis(1200),
                 });
             } else if state.get_current_opacity() == OpacityPreset::Frosted && !is_ghostty() {
                 *flash = Some(Flash {
-                    text: "(i) Frosted is approximated here · Ghostty shows full blur".to_string(),
+                    text: tr(
+                        "此终端近似显示磨砂 · Ghostty 支持完整模糊",
+                        "(i) Frosted is approximated here · Ghostty shows full blur",
+                    )
+                    .to_string(),
                     until: Instant::now() + Duration::from_millis(1200),
                 });
             }
@@ -312,20 +373,15 @@ fn handle_key(
                 text,
                 until: Instant::now() + Duration::from_millis(1200),
             });
-            Ok(KeyOutcome::Inert)
+            Ok(KeyOutcome::Continue)
         }
         KeyCode::Tab => {
             // Tab toggle: flip list-dominant ↔ full-preview mode.
             // Navigation/opacity keys stay live in both modes; Tab is only
             // the layout switch, not a mode lock.
-            // When flipping INTO preview mode, eagerly resolve the prompt so
-            // the preview shows the real theme-aware prompt instead of the
-            // self-draw fallback. Failure is silent (compose_full falls back
-            // to self-draw) per.
+            // The batch coordinator refreshes the prompt once before rendering.
             state.preview_mode_full = !state.preview_mode_full;
-            if state.preview_mode_full {
-                fork_and_cache_prompt(state, env);
-            }
+            state.preview_scroll = 0;
             Ok(KeyOutcome::Continue)
         }
         KeyCode::Enter => {
@@ -351,14 +407,21 @@ fn handle_key(
 /// fallback when `cached_prompt` returns `None`.
 fn fork_and_cache_prompt(state: &mut PickerState, env: &SlateEnv) {
     let theme_id = state.get_current_theme_id().to_string();
-    if state.cached_prompt(&theme_id).is_some() {
+    if state.prompt_attempted(&theme_id) {
         return;
     }
+    // Cache a fallback before any fallible IO. A failed fork/config read should
+    // not stall the same theme again on every Tab or opacity change. Resize
+    // invalidates successes and failures together, permitting another attempt.
+    state.cache_prompt_failure(&theme_id);
 
     let Ok(config) = crate::config::ConfigManager::with_env(env) else {
         return;
     };
-    if !config.is_starship_enabled().unwrap_or(true) {
+    let Ok(enabled) = config.is_starship_enabled() else {
+        return;
+    };
+    if !enabled {
         state.cache_prompt(&theme_id, disabled_prompt_preview());
         return;
     }
@@ -391,6 +454,11 @@ fn prepare_preview_starship_config(
     let theme = state.get_current_theme()?;
     let config = crate::config::ConfigManager::with_env(env)?;
     let content = preview_starship_content(&config, env, &theme)?;
+    if content.len() as u64 > crate::config::file_read::MAX_TOOL_CONFIG_BYTES {
+        return Err(crate::error::SlateError::InvalidConfig(
+            "Starship preview output exceeds 8 MiB".into(),
+        ));
+    }
     config.write_managed_file("starship", "picker-preview.toml", &content)?;
     Ok(env
         .config_dir()
@@ -405,31 +473,23 @@ fn preview_starship_content(
     theme: &crate::theme::ThemeVariant,
 ) -> Result<String> {
     if should_use_plain_starship_preview(config)? {
-        return Ok(crate::config::shell_integration::themed_plain_starship_content(theme));
+        return crate::config::prompt::plain_content(env, theme);
     }
 
     let integration_path = crate::adapter::StarshipAdapter::integration_config_path_with_env(env);
-    if !integration_path.exists() {
-        return Ok(crate::config::shell_integration::themed_plain_starship_content(theme));
-    }
+    let Some(content) = crate::config::file_read::read_text(
+        &integration_path,
+        crate::config::file_read::MAX_TOOL_CONFIG_BYTES,
+    )?
+    else {
+        return crate::config::prompt::plain_content(env, theme);
+    };
 
-    let bytes = std::fs::read(&integration_path).map_err(|err| {
-        crate::error::SlateError::ConfigReadError(
-            integration_path.display().to_string(),
-            err.to_string(),
+    crate::adapter::starship::themed_config_from_content(&content, theme).map_err(|_| {
+        crate::error::SlateError::InvalidConfig(
+            "Cannot prepare prompt preview: invalid Starship configuration".into(),
         )
-    })?;
-    let content = String::from_utf8(bytes).map_err(|err| {
-        crate::error::SlateError::ConfigReadError(
-            integration_path.display().to_string(),
-            format!(
-                "contains non-UTF-8 bytes at byte offset {}",
-                err.utf8_error().valid_up_to()
-            ),
-        )
-    })?;
-
-    crate::adapter::starship::themed_config_from_content(&content, theme)
+    })
 }
 
 fn should_use_plain_starship_preview(config: &crate::config::ConfigManager) -> Result<bool> {
@@ -514,6 +574,7 @@ mod tests {
 
     #[test]
     fn picker_nav_keys_fire_picker_move_event() {
+        let _sink_guard = crate::brand::events::reset_sink_for_tests();
         let sink = try_seat_picker_sink();
         let env = dummy_env();
         let mut state = fresh_state();
@@ -562,6 +623,7 @@ mod tests {
 
     #[test]
     fn picker_enter_fires_picker_enter_event_and_commits() {
+        let _sink_guard = crate::brand::events::reset_sink_for_tests();
         let sink = try_seat_picker_sink();
         let env = dummy_env();
         let mut state = fresh_state();
@@ -933,7 +995,8 @@ mod tests {
     }
 
     #[test]
-    fn continue_sync_caches_prompt_for_current_theme_in_full_preview() {
+    fn picker_input_batch_caches_prompt_for_current_theme_in_full_preview() {
+        let _sink_guard = crate::brand::events::reset_sink_for_tests();
         let tmp = tempfile::tempdir().expect("tempdir");
         let env = SlateEnv::with_home(tmp.path().to_path_buf());
         let config = crate::config::ConfigManager::with_env(&env).expect("config manager");
@@ -943,16 +1006,33 @@ mod tests {
 
         let mut state = fresh_state();
         state.preview_mode_full = true;
-        state.move_down();
-
-        let theme_id = state.get_current_theme_id().to_string();
+        let mut next = fresh_state();
+        next.move_down();
+        let theme_id = next.get_current_theme_id().to_string();
         assert_eq!(
             state.cached_prompt(&theme_id),
             None,
             "newly-selected theme should start as a cache miss"
         );
 
-        sync_preview_after_state_change(&mut state, &env);
+        let preview = PreviewSnapshot::capture(&env).unwrap();
+        let batch = process_input_batch(
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            || Ok(None),
+            &mut state,
+            &env,
+            &mut None,
+            |state| {
+                preview.apply(
+                    state.get_current_theme_id(),
+                    get_effective_opacity_for_rendering(state),
+                )
+            },
+        )
+        .unwrap();
+        assert!(batch.redraw);
+        assert_eq!(state.get_current_theme_id(), theme_id);
+        preview.restore().unwrap();
 
         assert_eq!(
             state.cached_prompt(&theme_id),

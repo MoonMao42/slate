@@ -1,14 +1,17 @@
 use crate::detection::shell_quote;
 use crate::theme::ThemeVariant;
 
+mod fastfetch;
+mod lazygit;
+
 pub(crate) struct ShellIntegrationOptions<'a> {
     pub managed_root: &'a str,
     pub user_config_root: &'a str,
+    pub lazygit_default_config: &'a str,
     pub user_local_bin: Option<&'a str>,
     pub plain_starship_path: &'a str,
     pub active_starship_path: &'a str,
     pub notify_path: &'a str,
-    pub slate_bin: &'a str,
     pub zsh_highlighting_plugin_path: Option<&'a str>,
     pub homebrew_prefix: Option<&'a str>,
     pub prefer_plain_starship: bool,
@@ -247,7 +250,7 @@ struct SharedShellModel {
     path_entries: Vec<PathEntry>,
     bat_theme: String,
     eza_config_dir: String,
-    lg_config_file: String,
+    lazygit: lazygit::Config,
     // (D-A6): shell-quoted LS_COLORS / EZA_COLORS strings,
     // rendered from the active palette by `ls_colors::render_strings` and
     // emitted from render_shared_exports (POSIX) / render_fish_shell (fish).
@@ -257,7 +260,6 @@ struct SharedShellModel {
     plain_starship_path: String,
     active_starship_path: String,
     notify_path: String,
-    slate_bin: String,
     zsh_highlighting_plugin_path: Option<String>,
     zsh_highlight_styles_path: String,
     prefer_plain_starship: bool,
@@ -283,8 +285,8 @@ impl PosixShell {
 }
 
 impl SharedShellModel {
-    fn path_entry(path: String) -> PathEntry {
-        let quoted = shell_quote(&path);
+    fn path_entry(path: String, quote: fn(&str) -> String) -> PathEntry {
+        let quoted = quote(&path);
         PathEntry {
             posix_case_pattern: format!("*:{quoted}:*"),
             quoted,
@@ -292,51 +294,54 @@ impl SharedShellModel {
     }
 
     fn new(theme: &ThemeVariant, options: &ShellIntegrationOptions<'_>) -> Self {
+        Self::with_quote(theme, options, shell_quote)
+    }
+
+    fn with_quote(
+        theme: &ThemeVariant,
+        options: &ShellIntegrationOptions<'_>,
+        quote: fn(&str) -> String,
+    ) -> Self {
         let mut path_entries = Vec::new();
 
         if let Some(prefix) = options.homebrew_prefix {
             for path in [format!("{}/bin", prefix), format!("{}/sbin", prefix)] {
-                path_entries.push(Self::path_entry(path));
+                path_entries.push(Self::path_entry(path, quote));
             }
         }
 
         if let Some(local_bin) = options.user_local_bin {
-            path_entries.push(Self::path_entry(local_bin.to_string()));
+            path_entries.push(Self::path_entry(local_bin.to_string(), quote));
         }
 
         // D-A6: project the active palette into shell-ready
         // LS_COLORS / EZA_COLORS strings. The renderer lives in
-        // `src/adapter/ls_colors.rs`; we shell-quote the results once so the
-        // two env var exports can be interpolated into POSIX `export X={}` /
-        // fish `set -gx X {}` lines without further escaping.
+        // `src/adapter/ls_colors.rs`; quote once for the target shell before
+        // interpolating into its assignments. Fish must not reuse POSIX words.
         let (raw_ls, raw_eza) = crate::adapter::ls_colors::render_strings(&theme.palette);
 
         Self {
             path_entries,
-            bat_theme: shell_quote(
+            bat_theme: quote(
                 theme
                     .tool_refs
                     .get("bat")
                     .map(|value| value.as_str())
                     .unwrap_or("Catppuccin Mocha"),
             ),
-            eza_config_dir: shell_quote(&format!("{}/eza", options.managed_root)),
-            lg_config_file: shell_quote(&format!(
-                "{}/lazygit/config.yml:{}/lazygit/config.yml",
-                options.managed_root, options.user_config_root
-            )),
-            ls_colors: shell_quote(&raw_ls),
-            eza_colors: shell_quote(&raw_eza),
-            fastfetch_config_path: shell_quote(&format!(
+            eza_config_dir: quote(&format!("{}/eza", options.managed_root)),
+            lazygit: lazygit::Config::new(options, quote),
+            ls_colors: quote(&raw_ls),
+            eza_colors: quote(&raw_eza),
+            fastfetch_config_path: quote(&format!(
                 "{}/fastfetch/config.jsonc",
                 options.managed_root
             )),
-            plain_starship_path: shell_quote(options.plain_starship_path),
-            active_starship_path: shell_quote(options.active_starship_path),
-            notify_path: shell_quote(options.notify_path),
-            slate_bin: shell_quote(options.slate_bin),
-            zsh_highlighting_plugin_path: options.zsh_highlighting_plugin_path.map(shell_quote),
-            zsh_highlight_styles_path: shell_quote(&format!(
+            plain_starship_path: quote(options.plain_starship_path),
+            active_starship_path: quote(options.active_starship_path),
+            notify_path: quote(options.notify_path),
+            zsh_highlighting_plugin_path: options.zsh_highlighting_plugin_path.map(quote),
+            zsh_highlight_styles_path: quote(&format!(
                 "{}/zsh/highlight-styles.sh",
                 options.managed_root
             )),
@@ -354,11 +359,13 @@ pub(crate) fn build_shell_integration_files(
     options: &ShellIntegrationOptions<'_>,
 ) -> ShellIntegrationFiles {
     let model = SharedShellModel::new(theme, options);
+    let fish_model =
+        SharedShellModel::with_quote(theme, options, crate::platform::shell::fish_quote);
 
     ShellIntegrationFiles {
         zsh: render_posix_shell(&model, PosixShell::Zsh),
         bash: render_posix_shell(&model, PosixShell::Bash),
-        fish: render_fish_shell(&model),
+        fish: render_fish_shell(&fish_model),
     }
 }
 
@@ -375,16 +382,13 @@ fn render_posix_path_entries(content: &mut String, model: &SharedShellModel) {
 fn render_shared_exports(content: &mut String, model: &SharedShellModel) {
     content.push_str(&format!("export BAT_THEME={}\n", model.bat_theme));
     content.push_str(&format!("export EZA_CONFIG_DIR={}\n", model.eza_config_dir));
-    content.push_str(&format!("export LG_CONFIG_FILE={}\n", model.lg_config_file));
+    model.lazygit.posix(content);
     content.push_str(&format!("export LS_COLORS={}\n", model.ls_colors));
     content.push_str(&format!("export EZA_COLORS={}\n", model.eza_colors));
 }
 
 fn render_posix_fastfetch_wrapper(content: &mut String, model: &SharedShellModel) {
-    content.push_str(&format!(
-        "fastfetch() {{ command fastfetch -c {} \"$@\"; }}\n",
-        model.fastfetch_config_path
-    ));
+    fastfetch::posix(content, &model.fastfetch_config_path);
 }
 
 fn render_zsh_highlighting(content: &mut String, model: &SharedShellModel) {
@@ -411,15 +415,20 @@ fn render_posix_fastfetch_autorun(content: &mut String) {
     content.push_str("fi\n");
 }
 
-fn render_posix_auto_theme(content: &mut String, model: &SharedShellModel) {
+fn render_posix_auto_theme(content: &mut String, model: &SharedShellModel, shell: PosixShell) {
+    // Zsh's disowned job syntax suppresses shell job notices; redirecting the
+    // helper's own output alone does not. Do not change the user's job options.
+    let background = match shell {
+        PosixShell::Zsh => "&!",
+        PosixShell::Bash => "&",
+    };
     content.push_str(&format!(
-        "if [ \"${{TERM_PROGRAM:-}}\" = \"ghostty\" ] || [ \"${{TERM_PROGRAM:-}}\" = \"Ghostty\" ]; then\n  if [ -x {notify} ]; then\n    if ! pgrep -f \"slate-dark-mode-notify\" >/dev/null 2>&1; then\n      {notify} {slate_bin} theme --auto --quiet >/dev/null 2>&1 &\n    fi\n  fi\nfi\n",
+        "if [ \"${{TERM_PROGRAM:-}}\" = \"ghostty\" ] || [ \"${{TERM_PROGRAM:-}}\" = \"Ghostty\" ]; then\n  if [ -x {notify} ]; then\n    {notify} >/dev/null 2>&1 {background}\n  fi\nfi\n",
         notify = model.notify_path,
-        slate_bin = model.slate_bin
     ));
 }
 
-fn render_posix_starship(content: &mut String, model: &SharedShellModel, shell: PosixShell) {
+fn render_posix_starship_config(content: &mut String, model: &SharedShellModel) {
     if model.prefer_plain_starship {
         content.push_str(&format!(
             "export STARSHIP_CONFIG={}\n",
@@ -432,7 +441,9 @@ fn render_posix_starship(content: &mut String, model: &SharedShellModel, shell: 
             plain = model.plain_starship_path
         ));
     }
+}
 
+fn render_posix_starship_init(content: &mut String, shell: PosixShell) {
     content.push_str("\nif command -v starship >/dev/null 2>&1; then\n");
     content.push_str(&format!(
         "  eval \"$(starship init {})\"\n",
@@ -448,6 +459,13 @@ fn render_posix_shell(model: &SharedShellModel, shell: PosixShell) -> String {
     render_shared_exports(&mut content, model);
     render_posix_fastfetch_wrapper(&mut content, model);
 
+    if model.starship_enabled {
+        render_posix_starship_config(&mut content, model);
+    }
+    // A sourced environment may also be used by scripts and remote commands.
+    // Keep exports/wrappers above; do not exit or return out of the caller.
+    content.push_str("\n# Prompt, startup output and background helpers are interactive-only.\ncase $- in\n*i*)\n");
+
     if shell == PosixShell::Zsh {
         render_zsh_highlighting(&mut content, model);
     }
@@ -457,11 +475,11 @@ fn render_posix_shell(model: &SharedShellModel, shell: PosixShell) -> String {
     }
 
     if model.auto_theme_enabled {
-        render_posix_auto_theme(&mut content, model);
+        render_posix_auto_theme(&mut content, model, shell);
     }
 
     if model.starship_enabled {
-        render_posix_starship(&mut content, model, shell);
+        render_posix_starship_init(&mut content, shell);
     } else {
         content.push_str("\n# Minimal prompt (starship disabled)\n");
         match shell {
@@ -470,6 +488,7 @@ fn render_posix_shell(model: &SharedShellModel, shell: PosixShell) -> String {
         }
     }
 
+    content.push_str(";;\nesac\n");
     content
 }
 
@@ -478,6 +497,21 @@ fn render_fish_path_entries(content: &mut String, model: &SharedShellModel) {
         content.push_str(&format!(
             "if test -d {quoted}\n  if not contains -- {quoted} $PATH\n    set -gx PATH {quoted} $PATH\n  end\nend\n",
             quoted = entry.quoted
+        ));
+    }
+}
+
+fn render_fish_starship_config(content: &mut String, model: &SharedShellModel) {
+    if model.prefer_plain_starship {
+        content.push_str(&format!(
+            "set -gx STARSHIP_CONFIG {}\n",
+            model.plain_starship_path
+        ));
+    } else {
+        content.push_str(&format!(
+            "if test \"$TERM_PROGRAM\" = \"Apple_Terminal\"\n  set -gx STARSHIP_CONFIG {plain}\nelse if test -f {active}\n  set -gx STARSHIP_CONFIG {active}\nelse\n  set -gx STARSHIP_CONFIG {plain}\nend\n",
+            active = model.active_starship_path,
+            plain = model.plain_starship_path
         ));
     }
 }
@@ -491,16 +525,15 @@ fn render_fish_shell(model: &SharedShellModel) -> String {
         "set -gx EZA_CONFIG_DIR {}\n",
         model.eza_config_dir
     ));
-    content.push_str(&format!(
-        "set -gx LG_CONFIG_FILE {}\n",
-        model.lg_config_file
-    ));
+    model.lazygit.fish(&mut content);
     content.push_str(&format!("set -gx LS_COLORS {}\n", model.ls_colors));
     content.push_str(&format!("set -gx EZA_COLORS {}\n", model.eza_colors));
-    content.push_str(&format!(
-        "function fastfetch\n  command fastfetch -c {} $argv\nend\n",
-        model.fastfetch_config_path
-    ));
+    fastfetch::fish(&mut content, &model.fastfetch_config_path);
+
+    if model.starship_enabled {
+        render_fish_starship_config(&mut content, model);
+    }
+    content.push_str("\n# Prompt, startup output and background helpers are interactive-only.\nif status is-interactive\n");
 
     if model.fastfetch_autorun {
         content.push_str("if command -sq fastfetch\n  fastfetch\nend\n");
@@ -508,32 +541,19 @@ fn render_fish_shell(model: &SharedShellModel) -> String {
 
     if model.auto_theme_enabled {
         content.push_str(&format!(
-            "if test \"$TERM_PROGRAM\" = \"ghostty\"\n  if test -x {notify}\n    if not pgrep -f \"slate-dark-mode-notify\" >/dev/null 2>&1\n      {notify} {slate_bin} theme --auto --quiet >/dev/null 2>&1 &\n    end\n  end\nelse if test \"$TERM_PROGRAM\" = \"Ghostty\"\n  if test -x {notify}\n    if not pgrep -f \"slate-dark-mode-notify\" >/dev/null 2>&1\n      {notify} {slate_bin} theme --auto --quiet >/dev/null 2>&1 &\n    end\n  end\nend\n",
+            "if test \"$TERM_PROGRAM\" = \"ghostty\"; or test \"$TERM_PROGRAM\" = \"Ghostty\"\n  if test -x {notify}\n    {notify} >/dev/null 2>&1 &\n  end\nend\n",
             notify = model.notify_path,
-            slate_bin = model.slate_bin
         ));
     }
 
     if model.starship_enabled {
-        if model.prefer_plain_starship {
-            content.push_str(&format!(
-                "set -gx STARSHIP_CONFIG {}\n",
-                model.plain_starship_path
-            ));
-        } else {
-            content.push_str(&format!(
-                "if test \"$TERM_PROGRAM\" = \"Apple_Terminal\"\n  set -gx STARSHIP_CONFIG {plain}\nelse if test -f {active}\n  set -gx STARSHIP_CONFIG {active}\nelse\n  set -gx STARSHIP_CONFIG {plain}\nend\n",
-                active = model.active_starship_path,
-                plain = model.plain_starship_path
-            ));
-        }
-
         content.push_str("\nif command -sq starship\n  starship init fish | source\nend\n");
     } else {
         content.push_str("\n# Minimal prompt (starship disabled)\n");
         content.push_str("function fish_prompt\n  printf '%s\\n❯ ' $USER\nend\n");
     }
 
+    content.push_str("end\n");
     content
 }
 
@@ -686,6 +706,10 @@ pub(crate) fn themed_plain_starship_content(theme: &ThemeVariant) -> String {
     with_slate_palette(BASIC_STARSHIP_CONTENT, theme)
 }
 
+pub(crate) fn plain_starship_template() -> &'static str {
+    BASIC_STARSHIP_CONTENT
+}
+
 pub(crate) fn starter_starship_content() -> &'static str {
     DEFAULT_STARSHIP_CONTENT
 }
@@ -698,6 +722,9 @@ pub(crate) fn should_upgrade_seeded_starship_content(content: &str) -> bool {
 }
 
 #[cfg(test)]
+mod startup_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -705,11 +732,11 @@ mod tests {
         ShellIntegrationOptions {
             managed_root: "/tmp/slate/managed",
             user_config_root: "/tmp/.config",
+            lazygit_default_config: "/tmp/.config/lazygit/config.yml",
             user_local_bin: Some("/tmp/.local/bin"),
             plain_starship_path: "/tmp/slate/managed/starship/plain.toml",
             active_starship_path: "/tmp/.config/starship.toml",
             notify_path: "/tmp/slate/managed/bin/slate-dark-mode-notify",
-            slate_bin: "/tmp/slate/bin/slate",
             zsh_highlighting_plugin_path: Some(
                 "/opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh",
             ),
@@ -725,6 +752,89 @@ mod tests {
     fn sample_files() -> ShellIntegrationFiles {
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
         build_shell_integration_files(&theme, &sample_options())
+    }
+
+    #[test]
+    fn shell_bat_exports_match_delta_and_generated_asset_names_for_every_theme() {
+        for theme in crate::theme::ThemeRegistry::new().unwrap().all() {
+            let files = build_shell_integration_files(theme, &sample_options());
+            let expected = format!("slate-{}", theme.id);
+            assert_eq!(theme.tool_refs["bat"], expected);
+            assert_eq!(theme.tool_refs["delta"], expected);
+            let xml = crate::adapter::bat::tmtheme::render_tmtheme(&theme.palette, &theme.id);
+            assert!(xml.contains(&format!("<string>{expected}</string>")));
+            for source in [&files.bash, &files.zsh] {
+                let exports: Vec<_> = source
+                    .lines()
+                    .filter(|line| line.starts_with("export BAT_THEME="))
+                    .collect();
+                assert_eq!(
+                    exports,
+                    [format!("export BAT_THEME={}", shell_quote(&expected))],
+                    "{}",
+                    theme.id
+                );
+            }
+            let exports: Vec<_> = files
+                .fish
+                .lines()
+                .filter(|line| line.starts_with("set -gx BAT_THEME "))
+                .collect();
+            assert_eq!(
+                exports,
+                [format!(
+                    "set -gx BAT_THEME {}",
+                    crate::platform::shell::fish_quote(&expected)
+                )],
+                "{}",
+                theme.id
+            );
+        }
+    }
+
+    #[test]
+    fn fish_paths_render_every_dynamic_word_for_its_own_shell() {
+        let mut theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        theme
+            .tool_refs
+            .insert("bat".into(), r"Theme\\' $literal".into());
+        let mut options = sample_options();
+        options.managed_root = r"/private/managed\\' $literal";
+        options.user_config_root = r"/private/config\\' $literal";
+        options.lazygit_default_config = r"/private/config\\' $literal/lazygit/config.yml";
+        options.user_local_bin = Some(r"/private/bin\\' $literal");
+        options.homebrew_prefix = Some(r"/private/brew\\' $literal");
+        options.plain_starship_path = r"/private/plain\\' $literal";
+        options.active_starship_path = r"/private/active\\' $literal";
+        options.notify_path = r"/private/notify\\' $literal\";
+        options.auto_theme_enabled = true;
+        let files = build_shell_integration_files(&theme, &options);
+        for value in [
+            theme.tool_refs["bat"].clone(),
+            format!("{}/eza", options.managed_root),
+            format!(
+                "{}/lazygit/config.yml:{}/lazygit/config.yml",
+                options.managed_root, options.user_config_root
+            ),
+            format!("{}/fastfetch/config.jsonc", options.managed_root),
+            options.user_local_bin.unwrap().to_owned(),
+            format!("{}/bin", options.homebrew_prefix.unwrap()),
+            format!("{}/sbin", options.homebrew_prefix.unwrap()),
+            options.plain_starship_path.to_owned(),
+            options.active_starship_path.to_owned(),
+            options.notify_path.to_owned(),
+        ] {
+            let fish = crate::platform::shell::fish_quote(&value);
+            let posix = shell_quote(&value);
+            assert_ne!(fish, posix);
+            assert!(files.fish.contains(&fish), "{value:?}");
+            assert!(
+                !files.fish.contains(&posix),
+                "Fish reused POSIX quoting: {value:?}"
+            );
+            assert!(files.bash.contains(&posix), "Bash changed: {value:?}");
+            assert!(files.zsh.contains(&posix), "Zsh changed: {value:?}");
+        }
     }
 
     #[test]
@@ -1005,13 +1115,15 @@ mod tests {
 
         let files = build_shell_integration_files(&theme, &options);
 
-        assert!(files.zsh.contains("theme --auto --quiet >/dev/null 2>&1 &"));
+        assert!(files
+            .zsh
+            .contains("slate-dark-mode-notify' >/dev/null 2>&1 &!\n"));
         assert!(files
             .bash
-            .contains("theme --auto --quiet >/dev/null 2>&1 &"));
+            .contains("slate-dark-mode-notify' >/dev/null 2>&1 &"));
         assert!(files
             .fish
-            .contains("theme --auto --quiet >/dev/null 2>&1 &"));
+            .contains("slate-dark-mode-notify' >/dev/null 2>&1 &"));
         assert!(!files.bash.contains("${TERM_PROGRAM:l}"));
         assert!(!files.fish.contains("${TERM_PROGRAM:l}"));
         assert!(!files.bash.contains("&!"));

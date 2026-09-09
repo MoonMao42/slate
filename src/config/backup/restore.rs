@@ -1,14 +1,23 @@
 use super::manifest::{read_manifest, validate_restore_point_data};
-use super::snapshot::create_pre_restore_snapshot_with_env;
 use super::{
-    backup_directory, backup_directory_with_env, manifest_path, restore_point_directory,
-    restore_point_directory_with_env, OriginalFileState, RestoreEntry, RestorePoint,
+    backup_directory, manifest_path, restore_point_directory, restore_point_directory_with_env,
+    OriginalFileState, RestoreEntry, RestorePoint,
 };
-use crate::config::atomic_write_synced;
+use crate::config::state_files::atomic_write_synced_mode;
 use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use std::fs;
 use std::path::PathBuf;
+
+mod inventory;
+mod plan;
+mod prepared;
+pub use inventory::{
+    inspect_restore_points_with_env, RestoreInventory, RestoreInventoryIssue,
+    RestoreInventoryIssueKind,
+};
+pub use plan::{preview_restore_with_env, RestoreAction, RestoreChange, RestorePlan};
+pub use prepared::{execute_prepared_restore, prepare_restore_with_env, PreparedRestore};
 
 /// Result of a single file restoration attempt.
 #[derive(Debug, Clone)]
@@ -24,6 +33,7 @@ pub struct RestoreFileResult {
 #[derive(Debug, Clone)]
 pub struct RestoreReceipt {
     pub restore_point_id: String,
+    pub pre_restore_point_id: String,
     pub theme_name: String,
     pub results: Vec<RestoreFileResult>,
 }
@@ -54,41 +64,7 @@ pub fn list_restore_points() -> Result<Vec<RestorePoint>> {
 }
 
 pub fn list_restore_points_with_env(env: &SlateEnv) -> Result<Vec<RestorePoint>> {
-    let backup_dir = backup_directory_with_env(env)?;
-
-    if !backup_dir.exists() {
-        return Ok(Vec::new());
-    }
-
-    let entries = fs::read_dir(&backup_dir)
-        .map_err(|e| SlateError::BackupFailed(format!("Failed to read backup directory: {}", e)))?;
-
-    let mut restore_points = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|e| {
-            SlateError::BackupFailed(format!("Failed to read backup directory entry: {}", e))
-        })?;
-
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        let manifest_path = path.join("manifest.toml");
-        if !manifest_path.exists() {
-            continue;
-        }
-
-        match read_manifest(&manifest_path) {
-            Ok(restore_point) if validate_restore_point_data(&restore_point).is_ok() => {
-                restore_points.push(restore_point);
-            }
-            _ => continue,
-        }
-    }
-
-    restore_points.sort_by_key(|rp| std::cmp::Reverse(rp.created_at));
-    Ok(restore_points)
+    Ok(inspect_restore_points_with_env(env)?.points)
 }
 
 pub fn is_baseline_restore_point(restore_point: &RestorePoint) -> bool {
@@ -106,19 +82,11 @@ pub fn get_restore_point_with_env(env: &SlateEnv, restore_point_id: &str) -> Res
     let restore_point_dir = restore_point_directory_with_env(env, restore_point_id)?;
     let manifest_path = manifest_path(&restore_point_dir);
 
-    if !manifest_path.exists() {
-        return Err(SlateError::BackupFailed(format!(
-            "Restore point not found: {}",
-            restore_point_id
-        )));
-    }
-
     let restore_point = read_manifest(&manifest_path)?;
     if restore_point.id != restore_point_id {
-        return Err(SlateError::BackupFailed(format!(
-            "Restore point metadata mismatch: expected {}, found {}",
-            restore_point_id, restore_point.id
-        )));
+        return Err(SlateError::BackupFailed(
+            "Restore point metadata ID mismatch".into(),
+        ));
     }
 
     Ok(restore_point)
@@ -152,7 +120,7 @@ fn restore_entry(entry: &RestoreEntry, content: Option<&[u8]>) -> Result<()> {
         })?;
     }
 
-    atomic_write_synced(original_path, content).map_err(|e| {
+    atomic_write_synced_mode(original_path, content, entry.unix_mode).map_err(|e| {
         SlateError::BackupFailed(format!(
             "Failed to restore file {}: {}",
             original_path.display(),
@@ -237,67 +205,8 @@ pub fn execute_restore(restore_point_id: &str) -> Result<RestoreReceipt> {
 }
 
 pub fn execute_restore_with_env(env: &SlateEnv, restore_point_id: &str) -> Result<RestoreReceipt> {
-    let restore_point = get_restore_point_with_env(env, restore_point_id)?;
-    validate_restore_point_data(&restore_point)?;
-    let _pre_restore = create_pre_restore_snapshot_with_env(env, restore_point_id)?;
-
-    let mut results = Vec::new();
-    for entry in &restore_point.entries {
-        results.push(restore_single_entry(entry));
-    }
-
-    Ok(RestoreReceipt {
-        restore_point_id: restore_point.id.clone(),
-        theme_name: restore_point.theme_name.clone(),
-        results,
-    })
-}
-
-fn restore_single_entry(entry: &RestoreEntry) -> RestoreFileResult {
-    let backup_content = if entry.original_state == OriginalFileState::Present {
-        match entry.backup_path.as_ref() {
-            Some(path) => match fs::read(path) {
-                Ok(content) => Some(content),
-                Err(e) => {
-                    return RestoreFileResult {
-                        tool_key: entry.tool_key.clone(),
-                        display_tool: entry.display_tool.clone(),
-                        original_path: entry.original_path.clone(),
-                        success: false,
-                        error: Some(format!("Failed to read backup file: {}", e)),
-                    };
-                }
-            },
-            None => {
-                return RestoreFileResult {
-                    tool_key: entry.tool_key.clone(),
-                    display_tool: entry.display_tool.clone(),
-                    original_path: entry.original_path.clone(),
-                    success: false,
-                    error: Some("Backup path not found in manifest".to_string()),
-                };
-            }
-        }
-    } else {
-        None
-    };
-
-    match restore_entry(entry, backup_content.as_deref()) {
-        Ok(()) => RestoreFileResult {
-            tool_key: entry.tool_key.clone(),
-            display_tool: entry.display_tool.clone(),
-            original_path: entry.original_path.clone(),
-            success: true,
-            error: None,
-        },
-        Err(e) => RestoreFileResult {
-            tool_key: entry.tool_key.clone(),
-            display_tool: entry.display_tool.clone(),
-            original_path: entry.original_path.clone(),
-            success: false,
-            error: Some(e.to_string()),
-        },
-    }
+    let _write_guard = crate::config::ConfigWriteGuard::acquire(env)?;
+    execute_prepared_restore(prepare_restore_with_env(env, restore_point_id)?)
 }
 
 #[cfg(test)]

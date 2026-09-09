@@ -149,7 +149,8 @@ pub(crate) fn render_eza_colors(palette: &Palette) -> String {
 
 /// Convenience tuple `(ls_colors, eza_colors)` — calls this from
 /// `SharedShellModel::new` so the two env vars stay in lock-step.
-pub(crate) fn render_strings(palette: &Palette) -> (String, String) {
+/// Render the LS_COLORS and EZA_COLORS exports, in that order, without IO.
+pub fn render_strings(palette: &Palette) -> (String, String) {
     (render_ls_colors(palette), render_eza_colors(palette))
 }
 

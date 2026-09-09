@@ -3,10 +3,9 @@
 //! Generates managed JSONC config with themed colors while preserving Apple logo.
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
-use crate::config::ConfigManager;
 use crate::detection;
 use crate::env::SlateEnv;
-use crate::error::{Result, SlateError};
+use crate::error::Result;
 use crate::theme::ThemeVariant;
 use std::path::PathBuf;
 
@@ -14,6 +13,9 @@ use std::path::PathBuf;
 pub struct FastfetchAdapter;
 
 impl FastfetchAdapter {
+    pub fn theme_path(env: &SlateEnv) -> PathBuf {
+        env.managed_file("managed/fastfetch/config.jsonc")
+    }
     /// Get config home directory (XDG default)
     fn config_home() -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
@@ -27,7 +29,11 @@ impl ToolAdapter for FastfetchAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        Ok(detection::detect_tool_presence(self.tool_name()).installed)
+        self.is_installed_with_env(&SlateEnv::from_process()?)
+    }
+
+    fn is_installed_with_env(&self, env: &SlateEnv) -> Result<bool> {
+        Ok(detection::detect_tool_presence_with_env(self.tool_name(), env).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
@@ -54,24 +60,16 @@ impl ToolAdapter for FastfetchAdapter {
     }
 
     fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
-        // Step 1: Extract theme name from tool_refs
-        let _fastfetch_theme = theme
-            .tool_refs
-            .get("fastfetch")
-            .ok_or_else(|| {
-                SlateError::InvalidThemeData(format!(
-                    "Theme '{}' missing fastfetch tool reference",
-                    theme.id
-                ))
-            })?
-            .to_string();
-
-        // Step 2: Generate managed JSONC config with themed colors
+        // Fastfetch uses generated palette colors, not a native named theme.
         let managed_content = self.generate_jsonc_config(theme)?;
 
-        // Step 3: Write to managed config directory
-        let config_manager = ConfigManager::with_env(env)?;
-        config_manager.write_managed_file("fastfetch", "config.jsonc", &managed_content)?;
+        // Write only after the palette has been validated.
+        super::managed_fragment::write(
+            env,
+            &Self::theme_path(env),
+            managed_content.as_bytes(),
+            "fastfetch",
+        )?;
 
         // fastfetch is invoked at shell startup via the managed wrapper;
         // updated colors are visible the next time a shell runs it.
@@ -90,6 +88,7 @@ impl FastfetchAdapter {
         use serde_json::json;
 
         let palette = &theme.palette;
+        palette.validate()?;
 
         // Use subtext color for keys (muted), accent for separators (subtle pop)
         let key_hex = palette.subtext1.as_deref().unwrap_or(&palette.foreground);
@@ -138,6 +137,145 @@ impl FastfetchAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires explicit SLATE_FASTFETCH_BINARY; fixed-text native rendering only"]
+    fn fastfetch_native_display_colors_match_all_palettes_without_system_modules() {
+        use std::{fs, time::Duration};
+        let binary = fs::canonicalize(
+            std::env::var_os("SLATE_FASTFETCH_BINARY").expect("set native fastfetch explicitly"),
+        )
+        .unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let config_path = home.path().join("preset.jsonc");
+        let ansi = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+        for theme in crate::theme::ThemeRegistry::new().unwrap().all() {
+            let mut config: serde_json::Value =
+                serde_json::from_str(&FastfetchAdapter.generate_jsonc_config(theme).unwrap())
+                    .unwrap();
+            // Keep the generated display object, but replace system probes with
+            // a fixed custom module. This does not validate the system modules.
+            config["modules"] = serde_json::json!([{"type": "custom", "key": "FixtureKey", "format": "FixtureValue"}]);
+            for payload in [
+                serde_json::to_vec(&config).unwrap(),
+                format!(
+                    "/* fixed fixture comment */\n{}\n// trailing comment\n",
+                    serde_json::to_string_pretty(&config).unwrap()
+                )
+                .into_bytes(),
+            ] {
+                // Slate's wrapper selects a JSONC file. Fastfetch's stdin
+                // parser uses a different (strict JSON) contract.
+                fs::write(&config_path, payload).unwrap();
+                let result = assert_cmd::Command::new(&binary)
+                    .env_clear()
+                    .env("HOME", home.path())
+                    .env("TERM", "xterm-256color")
+                    .current_dir(home.path())
+                    .arg("--config")
+                    .arg(&config_path)
+                    .args(["--logo", "none", "--pipe", "false"])
+                    .timeout(Duration::from_secs(5))
+                    .assert()
+                    .success()
+                    .stderr("");
+                let output = String::from_utf8_lossy(&result.get_output().stdout);
+                assert!(
+                    ansi.replace_all(&output, "")
+                        .contains("FixtureKey FixtureValue"),
+                    "{}: {output:?}",
+                    theme.id
+                );
+                for (label, color) in [
+                    (
+                        "FixtureKey",
+                        theme
+                            .palette
+                            .subtext1
+                            .as_deref()
+                            .unwrap_or(&theme.palette.foreground),
+                    ),
+                    ("FixtureValue", theme.palette.foreground.as_str()),
+                    (" ", theme.palette.blue.as_str()),
+                ] {
+                    let (r, g, b) =
+                        crate::adapter::palette_renderer::PaletteRenderer::hex_to_rgb(color)
+                            .unwrap();
+                    let pattern = format!(
+                        r"\x1b\[[0-9;]*38;2;{r};{g};{b}(?:;[0-9]+)*m{}",
+                        regex::escape(label)
+                    );
+                    assert!(
+                        regex::Regex::new(&pattern).unwrap().is_match(&output),
+                        "{} {label}: {output:?}",
+                        theme.id
+                    );
+                }
+            }
+        }
+        fs::remove_file(config_path).unwrap();
+        assert_eq!(fs::read_dir(home.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn fastfetch_apply_needs_only_palette_not_unused_native_theme_references() {
+        let themes = crate::theme::ThemeRegistry::new().unwrap();
+        for theme in themes.all() {
+            let home = tempfile::tempdir().unwrap();
+            let env = SlateEnv::with_home(home.path().to_owned());
+            let expected = FastfetchAdapter.generate_jsonc_config(theme).unwrap();
+            let mut palette_only = theme.clone();
+            palette_only.tool_refs.clear();
+            FastfetchAdapter
+                .apply_theme_with_env(&palette_only, &env)
+                .unwrap();
+            let path = FastfetchAdapter::theme_path(&env);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
+            palette_only.palette.red = "invalid".into();
+            assert!(FastfetchAdapter
+                .apply_theme_with_env(&palette_only, &env)
+                .is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
+            assert!(!env
+                .xdg_config_home()
+                .join("fastfetch/config.jsonc")
+                .exists());
+            assert!(!env.zshrc_path().exists());
+        }
+    }
+
+    #[test]
+    fn fastfetch_presets_keep_layout_across_palettes_and_reject_invalid_colors_before_writing() {
+        let themes = crate::theme::ThemeRegistry::new().unwrap();
+        let mut layout = None;
+        for theme in themes.all() {
+            let mut config: serde_json::Value =
+                serde_json::from_str(&FastfetchAdapter.generate_jsonc_config(theme).unwrap())
+                    .unwrap();
+            assert!(config["display"]["color"]["keys"]
+                .as_str()
+                .unwrap()
+                .starts_with("38;2;"));
+            config["display"].as_object_mut().unwrap().remove("color");
+            if let Some(expected) = &layout {
+                assert_eq!(
+                    &config, expected,
+                    "{} unexpectedly changes the preset layout",
+                    theme.id
+                );
+            } else {
+                layout = Some(config);
+            }
+        }
+        let home = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(home.path().to_owned());
+        let mut invalid = themes.get("nord").unwrap().clone();
+        invalid.palette.red = "not-a-color".into();
+        assert!(FastfetchAdapter
+            .apply_theme_with_env(&invalid, &env)
+            .is_err());
+        assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+    }
 
     #[test]
     fn test_tool_name() {

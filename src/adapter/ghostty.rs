@@ -15,93 +15,45 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod paths;
+pub(crate) mod references;
+
+#[cfg(test)]
+#[path = "ghostty/reference_tests.rs"]
+mod reference_tests;
+
 /// Ghostty adapter implementing the ToolAdapter trait.
 pub struct GhosttyAdapter;
 
+const RELOAD_LIMITS: crate::platform::process_output::Limits =
+    crate::platform::process_output::Limits {
+        timeout: std::time::Duration::from_secs(3),
+        max_output: 16 * 1024,
+    };
+
+fn run_reload(
+    command: &mut Command,
+    limits: crate::platform::process_output::Limits,
+) -> Result<()> {
+    use crate::platform::process_output::{capture, Completion};
+    let output = capture(command, limits).map_err(|error| {
+        SlateError::ReloadFailed(
+            "ghostty".into(),
+            format!("Could not start or observe Ghostty reload: {error}"),
+        )
+    })?;
+    let reason = match output.completion {
+        Completion::Exited(status) if status.success() => return Ok(()),
+        Completion::Exited(status) => format!("command exited with {status}"),
+        Completion::TimedOut => "command exceeded its deadline".into(),
+        Completion::OutputLimit => "command exceeded its output limit".into(),
+    };
+    Err(SlateError::ReloadFailed("ghostty".into(), format!(
+        "Ghostty reload was not confirmed: {reason}. It may already have applied; check the window and reload its config manually if needed. Native output omitted."
+    )))
+}
+
 impl GhosttyAdapter {
-    fn trim_ascii(bytes: &[u8]) -> &[u8] {
-        let start = bytes
-            .iter()
-            .position(|b| !b.is_ascii_whitespace())
-            .unwrap_or(bytes.len());
-        let end = bytes
-            .iter()
-            .rposition(|b| !b.is_ascii_whitespace())
-            .map(|idx| idx + 1)
-            .unwrap_or(start);
-        &bytes[start..end]
-    }
-
-    fn line_ends_with_newline(line: &[u8]) -> bool {
-        line.ends_with(b"\n")
-    }
-
-    fn line_references_slate_managed_ghostty(line: &[u8], managed_prefix: &[u8]) -> bool {
-        let trimmed = Self::trim_ascii(line);
-        let key = Self::line_key(trimmed);
-
-        (key == b"config-file" || key == b"include")
-            && Self::contains_managed_ghostty_path(trimmed, managed_prefix)
-    }
-
-    fn line_key(line: &[u8]) -> &[u8] {
-        let key_end = line
-            .iter()
-            .position(|b| *b == b'=' || b.is_ascii_whitespace())
-            .unwrap_or(line.len());
-        Self::trim_ascii(&line[..key_end])
-    }
-
-    fn contains_managed_ghostty_path(line: &[u8], managed_prefix: &[u8]) -> bool {
-        Self::contains_ghostty_path_reference(line, managed_prefix, true)
-    }
-
-    fn contains_exact_ghostty_path(line: &[u8], managed_path: &[u8]) -> bool {
-        Self::contains_ghostty_path_reference(line, managed_path, false)
-    }
-
-    fn contains_ghostty_path_reference(line: &[u8], path: &[u8], allow_child_path: bool) -> bool {
-        if path.is_empty() || line.len() < path.len() {
-            return false;
-        }
-
-        line.windows(path.len()).enumerate().any(|(idx, window)| {
-            if window != path {
-                return false;
-            }
-
-            let previous = if idx == 0 {
-                None
-            } else {
-                line.get(idx - 1).copied()
-            };
-
-            Self::path_reference_starts_at_value_boundary(previous)
-                && Self::path_reference_ends_at_value_boundary(
-                    line.get(idx + path.len()).copied(),
-                    allow_child_path,
-                )
-        })
-    }
-
-    fn path_reference_starts_at_value_boundary(previous: Option<u8>) -> bool {
-        match previous {
-            Some(b'=') | Some(b'"') | Some(b'\'') | Some(b'[') | Some(b'(') | Some(b'{')
-            | Some(b',') => true,
-            Some(prev) => prev.is_ascii_whitespace(),
-            None => true,
-        }
-    }
-
-    fn path_reference_ends_at_value_boundary(next: Option<u8>, allow_child_path: bool) -> bool {
-        match next {
-            Some(b'/') | Some(b'\\') if allow_child_path => true,
-            Some(b'"') | Some(b'\'') | Some(b',') | Some(b']') | Some(b')') | Some(b'}')
-            | Some(b'\r') | Some(b'\n') | None => true,
-            Some(next) => next.is_ascii_whitespace(),
-        }
-    }
-
     fn render_config_file_line(managed_path: &Path, with_newline: bool) -> Vec<u8> {
         let mut line = format!("config-file = \"{}\"", managed_path.display()).into_bytes();
         if with_newline {
@@ -110,36 +62,10 @@ impl GhosttyAdapter {
         line
     }
 
-    /// The current Ghostty default config path documented upstream.
-    /// Ghostty uses `config.ghostty` as the standard config filename.
+    /// Slate's zero-config write target, including on macOS. This is not
+    /// Ghostty's own template-creation policy (which prefers App Support there).
     fn default_config_path(xdg_dir: &Path) -> PathBuf {
         xdg_dir.join("config.ghostty")
-    }
-
-    /// Build candidate config paths in Ghostty's observed load order.
-    /// On macOS, Ghostty can load both XDG and App Support configs; Slate writes
-    /// managed references into the last existing file so its reset/include block
-    /// wins without duplicating the same managed files across entry configs.
-    fn candidate_paths(xdg_dir: &Path, home: Option<&str>) -> Vec<PathBuf> {
-        let mut paths = Vec::new();
-
-        // Standard Ghostty config path.
-        paths.push(xdg_dir.join("config.ghostty"));
-
-        // Legacy no-extension path (some older setups).
-        paths.push(xdg_dir.join("config"));
-
-        // Legacy macOS App Support location, loaded after XDG on macOS.
-        if cfg!(target_os = "macos") {
-            if let Some(h) = home {
-                let appsupport =
-                    PathBuf::from(h).join("Library/Application Support/com.mitchellh.ghostty");
-                paths.push(appsupport.join("config.ghostty"));
-                paths.push(appsupport.join("config"));
-            }
-        }
-
-        paths
     }
 
     fn last_existing_path(candidates: &[PathBuf]) -> Option<PathBuf> {
@@ -169,81 +95,76 @@ impl GhosttyAdapter {
         }
 
         let content = fs::read(integration_path)?;
-        let managed_path_bytes = managed_path.display().to_string().into_bytes();
+        let updated = Self::font_include_content(&content, managed_path);
+        if updated != content {
+            crate::config::preview_write::write_legacy(integration_path, &updated)?;
+        }
+        Ok(())
+    }
 
-        // Parse content line-by-line to detect idempotence and handle migration
-        let lines: Vec<Vec<u8>> = content
-            .split_inclusive(|b| *b == b'\n')
-            .map(|line| line.to_vec())
-            .collect();
+    /// Pure byte transform shared by single-adapter and prepared font changes.
+    pub(crate) fn font_include_content(content: &[u8], managed_path: &Path) -> Vec<u8> {
+        use references::Directive;
+        let managed = managed_path.to_string_lossy();
+
+        // Inspect without allocating one buffer per line on the no-op path.
         let mut found_config_file = false;
         let mut legacy_include_idx = None;
 
-        for (idx, line) in lines.iter().enumerate() {
-            let trimmed = Self::trim_ascii(line);
-
-            // Skip comments and empty lines
-            if trimmed.starts_with(b"#") || trimmed.is_empty() {
-                continue;
-            }
-            let key = Self::line_key(trimmed);
-
-            // Check for existing config-file pointing to our managed path
-            if key == b"config-file"
-                && Self::contains_exact_ghostty_path(trimmed, managed_path_bytes.as_slice())
-            {
-                found_config_file = true;
-                break;
-            }
-
-            // Check for legacy include = pointing to our managed path (for migration)
-            if key == b"include"
-                && Self::contains_exact_ghostty_path(trimmed, managed_path_bytes.as_slice())
-            {
-                legacy_include_idx = Some(idx);
-                break;
+        for (idx, (_, directive)) in references::literal_lines(content).enumerate() {
+            match directive {
+                Directive::Reset => {
+                    found_config_file = false;
+                    legacy_include_idx = None;
+                }
+                Directive::Path { value, legacy, .. } if value == managed => {
+                    if legacy {
+                        legacy_include_idx = Some(idx);
+                    } else {
+                        found_config_file = true;
+                    }
+                }
+                _ => {}
             }
         }
 
         // If already using config-file pointing to our managed path, we're done
         if found_config_file {
-            return Ok(());
+            return content.to_vec();
         }
 
         // If legacy include exists, migrate it to config-file
         if let Some(idx) = legacy_include_idx {
-            let mut updated_lines = lines;
-            let had_newline = Self::line_ends_with_newline(&updated_lines[idx]);
+            let mut updated_lines: Vec<Vec<u8>> = content
+                .split_inclusive(|b| *b == b'\n')
+                .map(|line| line.to_vec())
+                .collect();
+            let had_newline = updated_lines[idx].ends_with(b"\n");
+            let had_bom = idx == 0 && updated_lines[idx].starts_with(b"\xef\xbb\xbf");
             updated_lines[idx] = Self::render_config_file_line(managed_path, had_newline);
-            let new_content: Vec<u8> = updated_lines.concat();
-            fs::write(integration_path, new_content)?;
-            return Ok(());
+            if had_bom {
+                updated_lines[idx].splice(..0, [0xef, 0xbb, 0xbf]);
+            }
+            return updated_lines.concat();
         }
 
         // Otherwise, append the config-file line
         let config_file_line = Self::render_config_file_line(managed_path, true);
-        let new_content = if content.ends_with(b"\n") {
-            [content.as_slice(), config_file_line.as_slice()].concat()
+        if content.ends_with(b"\n") {
+            [content, config_file_line.as_slice()].concat()
         } else {
-            [content.as_slice(), b"\n", config_file_line.as_slice()].concat()
-        };
-        fs::write(integration_path, new_content)?;
-
-        Ok(())
+            [content, b"\n", config_file_line.as_slice()].concat()
+        }
     }
 
     /// Apply font-only update to Ghostty without triggering full theme reapply.
     /// Writes only font.conf and ensures it's included.
     /// Reloads Ghostty so the font change is visible immediately.
     pub fn apply_font_only(env: &SlateEnv, font_name: &str) -> Result<()> {
+        let font_conf_content = super::font_config::ghostty(font_name)?;
         let config_manager = ConfigManager::with_env(env)?;
 
         // Write only the font-family to managed font.conf
-        let font_conf_content = format!(
-            "font-family = \"{}\"
-",
-            font_name
-        );
         config_manager.write_managed_file("ghostty", "font.conf", &font_conf_content)?;
 
         // Ensure integration file includes the font.conf file
@@ -256,14 +177,14 @@ impl GhosttyAdapter {
         }
 
         // Reload Ghostty so the font change takes effect immediately
-        let _ = adapter.reload();
+        let _ = adapter.reload_with_env(env);
 
         Ok(())
     }
 
     /// Reload Ghostty config via its own AppleScript API.
-    /// This triggers macOS Automation permission (not Accessibility),
-    /// and works even without the user granting the permission.
+    /// macOS Automation authorization may be required; failure is surfaced
+    /// without retrying through another automation mechanism.
     #[cfg(target_os = "macos")]
     fn reload_via_applescript() -> Result<()> {
         let script = r#"tell application "Ghostty"
@@ -271,43 +192,21 @@ impl GhosttyAdapter {
     perform action "reload_config" on target_terminal
 end tell"#;
 
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(script)
-            .output()
-            .map_err(|e| {
-                SlateError::ReloadFailed(
-                    "ghostty".to_string(),
-                    format!("Failed to invoke Ghostty reload: {}", e),
-                )
-            })?;
-
-        if !output.status.success() {
-            return Err(SlateError::ReloadFailed(
-                "ghostty".to_string(),
-                "Ghostty AppleScript reload failed".to_string(),
-            ));
-        }
-
-        Ok(())
+        run_reload(
+            Command::new("osascript").arg("-e").arg(script),
+            RELOAD_LIMITS,
+        )
     }
 
     #[cfg(not(target_os = "macos"))]
     fn send_reload_signal() -> Result<()> {
-        let output = Command::new("pkill")
-            .arg("-SIGUSR2")
-            .arg("-x")
-            .arg("ghostty")
-            .output()
-            .map_err(|e| SlateError::Internal(format!("Failed to reload ghostty: {}", e)))?;
-
-        if !output.status.success() {
-            return Err(SlateError::Internal(
-                "pkill signal failed (Ghostty may not be running)".to_string(),
-            ));
-        }
-
-        Ok(())
+        run_reload(
+            Command::new("pkill")
+                .arg("-SIGUSR2")
+                .arg("-x")
+                .arg("ghostty"),
+            RELOAD_LIMITS,
+        )
     }
 }
 
@@ -359,11 +258,13 @@ impl ToolAdapter for GhosttyAdapter {
         // starship, bat, etc.), eliminating cross-tool color drift.
         let p = &theme.palette;
         let window_theme = Self::window_theme_for(theme.appearance);
-        let macos_titlebar_style = Self::macos_titlebar_style_line();
+        // Match light/dark colors without choosing a native window layout.
+        // A managed titlebar-style value loads after user preferences (including
+        // nested config-files), silently overriding tabs/hidden/native choices.
+        // Omission also removes earlier Slate overrides when this file regenerates.
         let managed_content = format!(
             "theme =\n\
              window-theme = {window_theme}\n\
-             {macos_titlebar_style}\
              background = {bg}\n\
              foreground = {fg}\n\
              cursor-color = {cursor}\n\
@@ -388,7 +289,6 @@ impl ToolAdapter for GhosttyAdapter {
             bg = p.background,
             fg = p.foreground,
             window_theme = window_theme,
-            macos_titlebar_style = macos_titlebar_style,
             cursor = p.cursor.as_deref().unwrap_or(&p.foreground),
             sel_bg = p.selection_bg.as_deref().unwrap_or(&p.bright_black),
             sel_fg = p.selection_fg.as_deref().unwrap_or(&p.foreground),
@@ -412,16 +312,19 @@ impl ToolAdapter for GhosttyAdapter {
 
         // Step 3: Write managed theme config
         let config_manager = ConfigManager::with_env(env)?;
+        let current_font = config_manager.get_current_font()?;
+        let font_conf_content = current_font
+            .as_deref()
+            .map(super::font_config::ghostty)
+            .transpose()?;
         config_manager.write_managed_file("ghostty", "theme.conf", &managed_content)?;
 
         let current_opacity = config_manager.get_current_opacity_preset()?;
         write_opacity_config(env, current_opacity)?;
         write_blur_radius(env, current_opacity)?;
 
-        let current_font = config_manager.get_current_font()?;
-        if let Some(ref font_family) = current_font {
-            let font_conf_content = format!("font-family = \"{}\"\n", font_family);
-            config_manager.write_managed_file("ghostty", "font.conf", &font_conf_content)?;
+        if let Some(ref font_conf_content) = font_conf_content {
+            config_manager.write_managed_file("ghostty", "font.conf", font_conf_content)?;
         }
 
         // Step 4: Ensure integration file includes all managed paths idempotently
@@ -453,6 +356,20 @@ impl ToolAdapter for GhosttyAdapter {
     }
 
     fn reload(&self) -> Result<()> {
+        self.reload_with_env(&SlateEnv::from_process()?)
+    }
+
+    fn reload_with_env(&self, env: &SlateEnv) -> Result<()> {
+        let session = env.session();
+        if session.is_isolated() {
+            return Ok(());
+        }
+        if session.is_remote() {
+            return Err(crate::error::SlateError::ReloadFailed(
+                "ghostty".into(),
+                "SSH cannot reload the client terminal".into(),
+            ));
+        }
         // macOS: use Ghostty's own AppleScript API (Automation permission, not Accessibility).
         // No System Events access = no Accessibility popup.
         #[cfg(target_os = "macos")]
@@ -478,16 +395,6 @@ impl GhosttyAdapter {
         }
     }
 
-    fn macos_titlebar_style_line() -> &'static str {
-        if cfg!(target_os = "macos") {
-            // Keep macOS chrome visually attached to Slate's terminal palette.
-            // Native follows system materials and can look light against a dark terminal.
-            "macos-titlebar-style = transparent\n"
-        } else {
-            ""
-        }
-    }
-
     pub fn integration_config_path_with_env(&self, env: &SlateEnv) -> Result<PathBuf> {
         let candidates = self.integration_candidate_paths_with_env(env)?;
 
@@ -495,17 +402,31 @@ impl GhosttyAdapter {
             return Ok(path);
         }
 
-        // Zero-config should create the current upstream default file.
+        // Keep Slate's established zero-config destination on both platforms.
         Ok(Self::default_config_path(
             &env.xdg_config_home().join("ghostty"),
         ))
     }
 
     pub fn integration_candidate_paths_with_env(&self, env: &SlateEnv) -> Result<Vec<PathBuf>> {
-        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
-        let xdg_dir = env.xdg_config_home().join("ghostty");
+        Ok(Self::config_candidates_with_env(env)?
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect())
+    }
 
-        Ok(Self::candidate_paths(&xdg_dir, Some(home)))
+    /// Candidates in Ghostty 1.3.1 default-file order, with stable recovery keys.
+    /// Slate writes to the last existing candidate. This is not an effective
+    /// runtime loader: native preferred-file checks and process overrides differ.
+    pub(crate) fn config_candidates_with_env(
+        env: &SlateEnv,
+    ) -> Result<Vec<paths::ConfigCandidate>> {
+        let xdg_dir = env.xdg_config_home().join("ghostty");
+        Ok(paths::candidates(&xdg_dir, Some(env.home())))
+    }
+
+    pub(crate) fn xdg_config_candidates(env: &SlateEnv) -> Vec<paths::ConfigCandidate> {
+        paths::candidates(&env.xdg_config_home().join("ghostty"), None)
     }
 
     pub fn strip_managed_references_from_path(
@@ -527,7 +448,7 @@ impl GhosttyAdapter {
         let cleaned = Self::strip_managed_references_from_bytes(&content, &managed_prefix);
 
         if cleaned != content {
-            fs::write(integration_path, cleaned)?;
+            crate::config::preview_write::write_legacy(integration_path, &cleaned)?;
         }
         Ok(())
     }
@@ -569,16 +490,26 @@ impl GhosttyAdapter {
         // whole Slate ref set in one pass.
         writes.sort_by_key(|(path, _)| if path == selected_path { 1 } else { 0 });
         for (path, content) in writes {
-            fs::write(path, content)?;
+            crate::config::preview_write::write_legacy(&path, &content)?;
         }
 
         Ok(())
     }
 
-    fn strip_managed_references_from_bytes(content: &[u8], managed_prefix: &[u8]) -> Vec<u8> {
+    pub(crate) fn strip_managed_references_from_bytes(
+        content: &[u8],
+        managed_prefix: &[u8],
+    ) -> Vec<u8> {
+        let Ok(root) = std::str::from_utf8(managed_prefix) else {
+            return content.to_vec();
+        };
         let mut cleaned: Vec<u8> = Vec::with_capacity(content.len());
-        for line in content.split_inclusive(|b| *b == b'\n') {
-            if Self::line_references_slate_managed_ghostty(line, managed_prefix) {
+        for (index, (line, directive)) in references::literal_lines(content).enumerate() {
+            if matches!(directive, references::Directive::Path { value, .. } if references::managed(value, Path::new(root)).is_some())
+            {
+                if index == 0 && line.starts_with(b"\xef\xbb\xbf") {
+                    cleaned.extend_from_slice(b"\xef\xbb\xbf");
+                }
                 continue;
             }
             cleaned.extend_from_slice(line);
@@ -622,42 +553,56 @@ impl GhosttyAdapter {
 /// Sets background-opacity value based on OpacityPreset.
 /// Path: ~/.config/slate/managed/ghostty/opacity.conf
 pub fn write_opacity_config(env: &SlateEnv, opacity: crate::opacity::OpacityPreset) -> Result<()> {
-    let config_manager = ConfigManager::with_env(env)?;
-
-    let opacity_value = opacity.to_f32();
-    let config_content = format!(
-        "background-opacity = {}
-",
-        opacity_value
-    );
-
-    // Write to managed file, will be idempotently included by integration file
-    config_manager.write_managed_file("ghostty", "opacity.conf", &config_content)?;
-
-    Ok(())
+    crate::opacity::ManagedFile::GhosttyOpacity.write(env, opacity)
 }
 
 /// Write blur radius configuration to managed Ghostty config file.
 /// Frosted preset → 20px blur, others → 0 (no blur).
 /// Path: ~/.config/slate/managed/ghostty/blur.conf
 pub fn write_blur_radius(env: &SlateEnv, opacity: crate::opacity::OpacityPreset) -> Result<()> {
-    let config_manager = ConfigManager::with_env(env)?;
-
-    let blur_value = opacity.blur_radius();
-    let config_content = format!(
-        "background-blur = {}
-",
-        blur_value
-    );
-
-    // Write to managed file
-    config_manager.write_managed_file("ghostty", "blur.conf", &config_content)?;
-
-    Ok(())
+    crate::opacity::ManagedFile::GhosttyBlur.write(env, opacity)
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ghostty_reload_capture_bounds_helpers_and_retains_uncertainty() {
+        use crate::platform::process_output::Limits;
+        use std::{process::Command, time::Duration};
+        for (script, expected) in [
+            ("printf 'PRIVATE\\033[2J' >&2; exit 7", "exit status: 7"),
+            ("while :; do :; done", "deadline"),
+            ("while :; do printf PRIVATE_OUTPUT; done", "output limit"),
+        ] {
+            let mut command = Command::new("/bin/sh");
+            command.env_clear().args(["-c", script]);
+            let error = super::run_reload(
+                &mut command,
+                Limits {
+                    timeout: Duration::from_millis(200),
+                    max_output: 1024,
+                },
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(error.contains(expected), "{error}");
+            assert!(error.contains("may already have applied"));
+            assert!(!error.contains("PRIVATE"));
+            assert!(!error.contains('\x1b'));
+        }
+        let mut success = Command::new("/bin/sh");
+        success
+            .env_clear()
+            .args(["-c", "read value && exit 9; exit 0"]);
+        super::run_reload(&mut success, super::RELOAD_LIMITS).unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let mut missing = Command::new(home.path().join("missing-helper"));
+        assert!(super::run_reload(&mut missing, super::RELOAD_LIMITS)
+            .unwrap_err()
+            .to_string()
+            .contains("Could not start or observe"));
+    }
+
     use super::*;
 
     #[test]
@@ -675,11 +620,13 @@ mod tests {
 
     #[test]
     fn test_ghostty_candidate_paths_includes_both_names() {
-        let xdg_dir = PathBuf::from("/test/.config/ghostty");
-        let candidates = GhosttyAdapter::candidate_paths(&xdg_dir, Some("/home/user"));
+        let env = SlateEnv::with_home(PathBuf::from("/test"));
+        let candidates = GhosttyAdapter
+            .integration_candidate_paths_with_env(&env)
+            .unwrap();
         // Must include both config.ghostty (primary) and config (legacy)
-        assert!(candidates[0].ends_with("ghostty/config.ghostty"));
-        assert!(candidates[1].ends_with("ghostty/config"));
+        assert!(candidates[0].ends_with("ghostty/config"));
+        assert!(candidates[1].ends_with("ghostty/config.ghostty"));
     }
 
     #[test]
@@ -719,7 +666,7 @@ mod tests {
 
         let path = adapter.integration_config_path_with_env(&env).unwrap();
 
-        assert!(path.ends_with("ghostty/config"));
+        assert!(path.ends_with("ghostty/config.ghostty"));
     }
 
     #[test]
@@ -1052,13 +999,13 @@ mod tests {
         let ghostty_dir = env.xdg_config_home().join("ghostty");
         fs::create_dir_all(&ghostty_dir).unwrap();
 
-        let current_default = ghostty_dir.join("config.ghostty");
-        let selected_existing = ghostty_dir.join("config");
+        let legacy_entry = ghostty_dir.join("config");
+        let selected_existing = ghostty_dir.join("config.ghostty");
         let managed = env.config_dir().join("managed/ghostty");
         fs::write(
-            &current_default,
+            &legacy_entry,
             format!(
-                "config-file = \"{}/theme.conf\"\nuser-current-default = true\n",
+                "config-file = \"{}/theme.conf\"\nuser-legacy = true\n",
                 managed.display()
             ),
         )
@@ -1068,9 +1015,9 @@ mod tests {
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
         adapter.apply_theme_with_env(&theme, &env).unwrap();
 
-        let current_content = fs::read_to_string(&current_default).unwrap();
-        assert!(current_content.contains("user-current-default = true"));
-        assert!(!current_content.contains("managed/ghostty"));
+        let legacy_content = fs::read_to_string(&legacy_entry).unwrap();
+        assert!(legacy_content.contains("user-legacy = true"));
+        assert!(!legacy_content.contains("managed/ghostty"));
 
         let selected_content = fs::read_to_string(&selected_existing).unwrap();
         assert!(selected_content.contains("user-selected-existing = true"));
@@ -1177,15 +1124,9 @@ mod tests {
             managed_content.contains("window-theme = dark\n"),
             "managed theme.conf must pin Ghostty window chrome to the Slate theme appearance"
         );
-        #[cfg(target_os = "macos")]
-        assert!(
-            managed_content.contains("macos-titlebar-style = transparent\n"),
-            "macOS titlebar/tab chrome should visually blend with Slate's terminal background"
-        );
-        #[cfg(not(target_os = "macos"))]
         assert!(
             !managed_content.contains("macos-titlebar-style"),
-            "non-macOS Ghostty configs should not receive macOS-only titlebar options"
+            "theme colors must not override the user's window layout on any platform"
         );
 
         // Integration file inside the tempdir must reference the managed path.
@@ -1198,7 +1139,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_theme_writes_macos_chrome_for_dark_and_light_themes() {
+    fn apply_theme_updates_window_appearance_without_choosing_titlebar_layout() {
         use tempfile::TempDir;
 
         let tempdir = TempDir::new().unwrap();
@@ -1222,15 +1163,7 @@ mod tests {
         let light_content = fs::read_to_string(&managed_theme).unwrap();
         assert!(light_content.contains("window-theme = light\n"));
 
-        #[cfg(target_os = "macos")]
-        {
-            assert!(dark_content.contains("macos-titlebar-style = transparent\n"));
-            assert!(light_content.contains("macos-titlebar-style = transparent\n"));
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            assert!(!dark_content.contains("macos-titlebar-style"));
-            assert!(!light_content.contains("macos-titlebar-style"));
-        }
+        assert!(!dark_content.contains("macos-titlebar-style"));
+        assert!(!light_content.contains("macos-titlebar-style"));
     }
 }

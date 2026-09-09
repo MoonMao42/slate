@@ -4,7 +4,6 @@
 //! and synchronizes bat --theme with delta --syntax-theme so the two agree.
 
 use crate::adapter::{marker_block, ApplyOutcome, ApplyStrategy, ToolAdapter};
-use crate::config::ConfigManager;
 use crate::detection;
 use crate::env::SlateEnv;
 use crate::error::Result;
@@ -26,24 +25,24 @@ impl DeltaAdapter {
     }
 
     /// Format include path for gitconfig
-    fn format_gitconfig_include_path(config_path: &Path) -> String {
-        let escaped = config_path
-            .display()
-            .to_string()
-            .replace('\\', r"\\")
-            .replace('"', "\\\"");
-        format!(r#""{}""#, escaped)
+    fn format_gitconfig_include_path(config_path: &Path) -> Result<String> {
+        let path = config_path.to_str().filter(|value| !value.chars().any(char::is_control))
+            .ok_or_else(|| crate::error::SlateError::InvalidConfig(
+                "Delta include path must be UTF-8 without control characters; no files were changed.".into()
+            ))?;
+        let escaped = path.replace('\\', r"\\").replace('"', "\\\"");
+        Ok(format!(r#""{}""#, escaped))
     }
 
     /// Render delta config in gitconfig INI format with marker blocks
-    fn render_delta_config(_theme: &ThemeVariant, managed_path: &Path) -> String {
-        let managed_str = Self::format_gitconfig_include_path(managed_path);
-        format!(
+    fn render_delta_config(_theme: &ThemeVariant, managed_path: &Path) -> Result<String> {
+        let managed_str = Self::format_gitconfig_include_path(managed_path)?;
+        Ok(format!(
             "{}\n[include]\n\tpath = {}\n{}\n",
             marker_block::START,
             managed_str,
             marker_block::END
-        )
+        ))
     }
 
     /// Render delta color theme settings (for managed config file).
@@ -52,23 +51,27 @@ impl DeltaAdapter {
     /// Hard-coding `dark = true` made every light-theme diff render with
     /// dark-terminal-tuned defaults — context lines washed out against the
     /// cream bg.
-    fn render_delta_colors(theme: &ThemeVariant) -> String {
+    fn render_delta_colors(theme: &ThemeVariant) -> Result<String> {
         let syntax_theme = theme
             .tool_refs
             .get("delta")
             .map(|s| s.as_str())
-            .unwrap_or("catppuccin-mocha");
+            .filter(|name| !name.trim().is_empty() && !name.chars().any(char::is_control))
+            .ok_or_else(|| crate::error::SlateError::InvalidThemeData(
+                "Delta requires a nonempty syntax theme reference without control characters; no fallback was selected.".into()
+            ))?;
+        let syntax_theme = syntax_theme.replace('\\', "\\\\").replace('"', "\\\"");
         let appearance_flag = match theme.appearance {
             crate::theme::ThemeAppearance::Light => "light = true",
             crate::theme::ThemeAppearance::Dark => "dark = true",
         };
-        format!(
+        Ok(format!(
             "[delta]\n\
-             syntax-theme = {}\n\
+             syntax-theme = \"{}\"\n\
              {}\n\
              line-numbers = true\n",
             syntax_theme, appearance_flag
-        )
+        ))
     }
 }
 
@@ -78,7 +81,11 @@ impl ToolAdapter for DeltaAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        Ok(detection::detect_tool_presence(self.tool_name()).installed)
+        self.is_installed_with_env(&SlateEnv::from_process()?)
+    }
+
+    fn is_installed_with_env(&self, env: &SlateEnv) -> Result<bool> {
+        Ok(detection::detect_tool_presence_with_env(self.tool_name(), env).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
@@ -108,22 +115,52 @@ impl ToolAdapter for DeltaAdapter {
         theme.palette.validate()?;
 
         let gitconfig_path = Self::gitconfig_path_with_env(env)?;
-        if !gitconfig_path.exists() {
+        crate::config::recovery_paths::validate_file_path(env, &gitconfig_path, "Delta")?;
+        let destination = super::integration_publish::destination(
+            &gitconfig_path,
+            "Git configuration for Delta",
+        )?;
+        let source = crate::config::file_read::read(
+            &gitconfig_path,
+            crate::config::file_read::MAX_TOOL_CONFIG_BYTES,
+            crate::config::file_read::Links::Reject,
+        )
+        .map_err(|_| {
+            crate::error::SlateError::InvalidConfig(
+                "Cannot safely read Git configuration for Delta; no files were changed.".into(),
+            )
+        })?;
+        let Some(source) = source else {
             return Ok(ApplyOutcome::Skipped(
                 crate::adapter::SkipReason::MissingIntegrationConfig,
             ));
-        }
+        };
 
         // Render delta colors config
-        let delta_colors = Self::render_delta_colors(theme);
+        let delta_colors = Self::render_delta_colors(theme)?;
+        let managed_path = env.managed_file("managed/delta/colors");
+        let new_block = Self::render_delta_config(theme, &managed_path)?;
+        // Detect malformed existing markers before initializing or writing any
+        // managed state. Publication below still re-reads the integration file.
+        let updated =
+            marker_block::upsert_managed_block_bytes(&source.bytes, new_block.as_bytes())?;
+        if updated.len() as u64 > crate::config::file_read::MAX_TOOL_CONFIG_BYTES {
+            return Err(crate::error::SlateError::InvalidConfig(
+                "Adding Delta's include would exceed the 8 MiB Git configuration limit; no files were changed.".into(),
+            ));
+        }
 
-        // Write managed config
-        let config_mgr = ConfigManager::with_env(env)?;
-        config_mgr.write_managed_file("delta", "colors", &delta_colors)?;
+        // Publish just this adapter's palette without initializing the profile.
+        super::managed_fragment::write(env, &managed_path, delta_colors.as_bytes(), "delta")?;
 
-        let managed_path = config_mgr.managed_dir("delta").join("colors");
-        let new_block = Self::render_delta_config(theme, &managed_path);
-        marker_block::upsert_managed_block_file(&gitconfig_path, &new_block)?;
+        super::integration_publish::publish(
+            env,
+            &gitconfig_path,
+            &destination,
+            Some(&source),
+            &updated,
+            "Git configuration",
+        )?;
 
         // delta reads colors from git config on every invocation; no shell
         // restart required.
@@ -137,152 +174,4 @@ impl ToolAdapter for DeltaAdapter {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
-
-    fn create_test_palette() -> crate::theme::Palette {
-        crate::theme::Palette {
-            foreground: "#ffffff".to_string(),
-            background: "#000000".to_string(),
-            cursor: None,
-            selection_bg: None,
-            selection_fg: None,
-            brand_accent: "#7287fd".to_string(),
-            black: "#000000".to_string(),
-            red: "#ff0000".to_string(),
-            green: "#00ff00".to_string(),
-            yellow: "#ffff00".to_string(),
-            blue: "#0000ff".to_string(),
-            magenta: "#ff00ff".to_string(),
-            cyan: "#00ffff".to_string(),
-            white: "#ffffff".to_string(),
-            bright_black: "#808080".to_string(),
-            bright_red: "#ff6b6b".to_string(),
-            bright_green: "#69ff69".to_string(),
-            bright_yellow: "#ffff69".to_string(),
-            bright_blue: "#6b69ff".to_string(),
-            bright_magenta: "#ff69ff".to_string(),
-            bright_cyan: "#69ffff".to_string(),
-            bright_white: "#ffffff".to_string(),
-            bg_dim: None,
-            bg_darker: None,
-            bg_darkest: None,
-            rosewater: None,
-            flamingo: None,
-            pink: None,
-            mauve: None,
-            lavender: None,
-            text: None,
-            subtext1: None,
-            subtext0: None,
-            overlay2: None,
-            overlay1: None,
-            overlay0: None,
-            surface2: None,
-            surface1: None,
-            surface0: None,
-            extras: HashMap::new(),
-        }
-    }
-
-    fn create_test_theme() -> ThemeVariant {
-        ThemeVariant {
-            id: "test".to_string(),
-            name: "Test Theme".to_string(),
-            family: "Test".to_string(),
-            palette: create_test_palette(),
-            tool_refs: HashMap::from([
-                ("ghostty".to_string(), "test".to_string()),
-                ("alacritty".to_string(), "test".to_string()),
-                ("bat".to_string(), "test".to_string()),
-                ("delta".to_string(), "test".to_string()),
-                ("starship".to_string(), "test".to_string()),
-                ("eza".to_string(), "test".to_string()),
-                ("lazygit".to_string(), "test".to_string()),
-                ("fastfetch".to_string(), "test".to_string()),
-                ("tmux".to_string(), "test".to_string()),
-                ("zsh_syntax_highlighting".to_string(), "test".to_string()),
-            ]),
-            appearance: crate::theme::ThemeAppearance::Dark,
-            auto_pair: None,
-        }
-    }
-
-    #[test]
-    fn test_tool_name() {
-        let adapter = DeltaAdapter;
-        assert_eq!(adapter.tool_name(), "delta");
-    }
-
-    #[test]
-    fn test_apply_strategy() {
-        let adapter = DeltaAdapter;
-        assert_eq!(adapter.apply_strategy(), ApplyStrategy::WriteAndInclude);
-    }
-
-    #[test]
-    fn test_render_delta_config() {
-        let theme = create_test_theme();
-        let managed_path = PathBuf::from("/home/user/.config/slate/managed/delta");
-        let output = DeltaAdapter::render_delta_config(&theme, &managed_path);
-
-        assert!(output.contains(marker_block::START));
-        assert!(output.contains(marker_block::END));
-        assert!(output.contains("[include]"));
-        assert!(output.contains(".config/slate/managed/delta"));
-    }
-
-    #[test]
-    fn test_render_delta_colors() {
-        let theme = create_test_theme();
-        let output = DeltaAdapter::render_delta_colors(&theme);
-
-        assert!(output.contains("[delta]"));
-        assert!(output.contains("syntax-theme = test"));
-        assert!(output.contains("dark = true"));
-        assert!(
-            !output.contains("light = true"),
-            "Dark theme must not emit light = true"
-        );
-    }
-
-    #[test]
-    fn test_render_delta_colors_emits_light_for_light_themes() {
-        let mut theme = create_test_theme();
-        theme.appearance = crate::theme::ThemeAppearance::Light;
-        let output = DeltaAdapter::render_delta_colors(&theme);
-
-        assert!(
-            output.contains("light = true"),
-            "Light theme must emit light = true so delta picks light-bg defaults; got:\n{output}"
-        );
-        assert!(
-            !output.contains("dark = true"),
-            "Light theme must not emit dark = true (was the bug — washed out context lines on cream Ghostty bg); got:\n{output}"
-        );
-    }
-
-    #[test]
-    fn apply_theme_skips_without_creating_missing_gitconfig() {
-        let tempdir = tempfile::TempDir::new().unwrap();
-        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
-        let adapter = DeltaAdapter;
-        let theme = create_test_theme();
-
-        let outcome = adapter.apply_theme_with_env(&theme, &env).unwrap();
-
-        assert_eq!(
-            outcome,
-            ApplyOutcome::Skipped(crate::adapter::SkipReason::MissingIntegrationConfig)
-        );
-        assert!(!env.home().join(".gitconfig").exists());
-        assert!(!env.config_dir().join("managed/delta/colors").exists());
-    }
-
-    #[test]
-    fn test_is_installed() {
-        let adapter = DeltaAdapter;
-        let _result = adapter.is_installed();
-    }
-}
+mod tests;

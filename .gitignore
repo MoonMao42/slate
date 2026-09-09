@@ -42,6 +42,9 @@ scripts/*
 !scripts/bake-audio.sh
 !scripts/parse_tape_sfx.py
 !scripts/render-theme-gallery.sh
+!scripts/build-dev.sh
+!scripts/install-dev.sh
+!scripts/dev-space.sh
 
 # Misc
 plot_25min.png

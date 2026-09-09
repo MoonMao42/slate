@@ -153,12 +153,11 @@ impl SoundSink {
             let _ = set_sink(Arc::new(NoopSink) as Arc<dyn EventSink>);
             return;
         }
-        // honor `slate config set sound off`. ConfigManager construction
-        // or read failure → default true (sound on); we only skip install when
-        // the user has explicitly opted out.
-        let enabled = ConfigManager::with_env(env)
-            .and_then(|c| c.is_sound_enabled())
-            .unwrap_or(true);
+        // Missing preferences keep the default; unreadable/invalid preferences
+        // fail quiet, without initializing config directories or a sound cache.
+        let enabled = ConfigManager::from_env_paths(env)
+            .is_sound_enabled()
+            .unwrap_or(false);
         if !enabled {
             let _ = set_sink(Arc::new(NoopSink) as Arc<dyn EventSink>);
             return;

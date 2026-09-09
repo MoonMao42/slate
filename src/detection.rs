@@ -1,6 +1,7 @@
 use crate::env::SlateEnv;
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{CString, OsString};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -15,9 +16,9 @@ pub enum ToolEvidence {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolPresence {
     pub installed: bool,
-    /// Whether the tool was found in the user's actual PATH (Tier 1) rather than
-    /// only in fallback locations like /opt/homebrew/bin (Tier 2).
-    /// AppBundle and Config evidence are always considered in-path (user-local).
+    /// Legacy configuration tier flag. AppBundle, Config and Plugin evidence
+    /// also use Tier 1; this flag alone is not executable-in-PATH evidence.
+    /// Use `has_path_executable` for user-facing command availability.
     pub in_path: bool,
     pub evidence: Option<ToolEvidence>,
 }
@@ -61,9 +62,14 @@ impl ToolPresence {
         }
     }
 
-    /// Is this a Tier 1 (active, in PATH) tool?
+    /// Is this a Tier 1 configuration candidate? Does not prove live activation.
     pub fn is_tier1(&self) -> bool {
         self.installed && self.in_path
+    }
+
+    /// A detected executable in PATH, not a promise that launching it succeeds.
+    pub fn has_path_executable(&self) -> bool {
+        self.installed && self.in_path && matches!(self.evidence, Some(ToolEvidence::Executable(_)))
     }
 }
 
@@ -80,6 +86,7 @@ pub enum TerminalKind {
 pub struct TerminalProfile {
     kind: TerminalKind,
     raw_name: String,
+    session: crate::session::SessionContext,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +101,7 @@ impl TerminalProfile {
         let term_program = env::var("TERM_PROGRAM").ok();
         let term = env::var("TERM").ok();
         Self::from_env_vars(term_program.as_deref(), term.as_deref())
+            .with_session(crate::session::SessionContext::from_process())
     }
 
     pub fn from_env_vars(term_program: Option<&str>, term: Option<&str>) -> Self {
@@ -123,7 +131,26 @@ impl TerminalProfile {
                 .to_string(),
         };
 
-        Self { kind, raw_name }
+        Self {
+            kind,
+            raw_name,
+            session: crate::session::SessionContext::default(),
+        }
+    }
+
+    pub fn with_session(mut self, session: crate::session::SessionContext) -> Self {
+        if session.is_remote() {
+            self.raw_name.push_str(" (SSH)");
+        }
+        if session.is_multiplexed() && !self.raw_name.starts_with("tmux") {
+            self.raw_name.push_str(" (tmux)");
+        }
+        self.session = session;
+        self
+    }
+
+    pub fn session(&self) -> &crate::session::SessionContext {
+        &self.session
     }
 
     pub fn kind(&self) -> TerminalKind {
@@ -135,16 +162,36 @@ impl TerminalProfile {
     }
 
     pub fn compatibility_label(&self) -> &'static str {
+        self.compatibility_label_in(crate::config::ui_language::UiLanguage::English)
+    }
+
+    pub fn compatibility_label_in(
+        &self,
+        language: crate::config::ui_language::UiLanguage,
+    ) -> &'static str {
+        let text = |zh, en| crate::config::ui_language::Text { zh, en }.get(language);
+        if self.session.is_remote() {
+            return text("远程 Shell", "remote shell");
+        }
+        if self.session.is_multiplexed() && self.kind == TerminalKind::Unknown {
+            return text("tmux 会话", "tmux session");
+        }
         match self.kind {
-            TerminalKind::Ghostty => "best experience",
-            TerminalKind::Kitty => "supported",
-            TerminalKind::Alacritty => "supported with limits",
-            TerminalKind::TerminalApp => "supported with limits",
-            TerminalKind::Unknown => "best-effort only",
+            TerminalKind::Ghostty => text("完整体验", "best experience"),
+            TerminalKind::Kitty => text("支持", "supported"),
+            TerminalKind::Alacritty => text("支持，但有部分限制", "supported with limits"),
+            TerminalKind::TerminalApp => text("支持，但有部分限制", "supported with limits"),
+            TerminalKind::Unknown => text("尽力兼容", "best-effort only"),
         }
     }
 
     pub fn compatibility_summary(&self) -> &'static str {
+        if self.session.is_remote() {
+            return "themes apply to tools on this host; configure the client terminal's appearance locally";
+        }
+        if self.session.is_multiplexed() && self.kind == TerminalKind::Unknown {
+            return "tmux styles and shell/tool themes are supported; the outer terminal is not identified";
+        }
         match self.kind {
             TerminalKind::Ghostty => {
                 "live reload, frosted glass, and watcher relaunch are available"
@@ -165,6 +212,12 @@ impl TerminalProfile {
     }
 
     pub fn short_limitations(&self) -> &'static str {
+        if self.session.is_remote() {
+            return "remote tools; client font and opacity stay local";
+        }
+        if self.session.is_multiplexed() && self.kind == TerminalKind::Unknown {
+            return "tmux + shell/tool themes; outer terminal unknown";
+        }
         match self.kind {
             TerminalKind::Ghostty => "live reload, frosted glass, watcher relaunch",
             TerminalKind::Kitty => "live reload, opacity, no blur",
@@ -175,25 +228,41 @@ impl TerminalProfile {
     }
 
     pub fn supports_blur(&self) -> bool {
-        matches!(self.kind, TerminalKind::Ghostty)
+        !self.session.is_remote() && matches!(self.kind, TerminalKind::Ghostty)
     }
 
     pub fn supports_opacity(&self) -> bool {
-        matches!(
-            self.kind,
-            TerminalKind::Ghostty | TerminalKind::Kitty | TerminalKind::Alacritty
-        )
+        !self.session.is_remote()
+            && matches!(
+                self.kind,
+                TerminalKind::Ghostty | TerminalKind::Kitty | TerminalKind::Alacritty
+            )
     }
 
     pub fn watcher_shell_autostart_supported(&self) -> bool {
-        matches!(self.kind, TerminalKind::Ghostty)
+        !self.session.is_remote() && matches!(self.kind, TerminalKind::Ghostty)
     }
 
     pub fn font_selection_is_manual(&self) -> bool {
-        matches!(self.kind, TerminalKind::TerminalApp | TerminalKind::Unknown)
+        self.session.is_remote()
+            || matches!(self.kind, TerminalKind::TerminalApp | TerminalKind::Unknown)
     }
 
     pub fn feature_summary(&self) -> TerminalFeatureSummary {
+        if self.session.is_remote() {
+            return TerminalFeatureSummary {
+                reload: "remote tools only; client terminal is unchanged".into(),
+                live_preview: "inline preview only over SSH".into(),
+                font_apply: "configure fonts on the client machine".into(),
+            };
+        }
+        if self.session.is_multiplexed() && self.kind == TerminalKind::Unknown {
+            return TerminalFeatureSummary {
+                reload: "tmux server colors; outer terminal not identified".into(),
+                live_preview: "inline preview only".into(),
+                font_apply: "configure fonts outside tmux".into(),
+            };
+        }
         let reload = match self.kind {
             TerminalKind::Ghostty => {
                 if cfg!(target_os = "macos") {
@@ -233,14 +302,43 @@ impl TerminalProfile {
     }
 
     pub fn setup_review_summary(&self, opacity: Option<f32>, blur_requested: bool) -> String {
+        self.setup_review_summary_in(
+            opacity,
+            blur_requested,
+            crate::config::ui_language::UiLanguage::English,
+        )
+    }
+
+    pub fn setup_review_summary_in(
+        &self,
+        opacity: Option<f32>,
+        blur_requested: bool,
+        language: crate::config::ui_language::UiLanguage,
+    ) -> String {
+        let text = |zh, en| crate::config::ui_language::Text { zh, en }.get(language);
+        if self.session.is_remote() {
+            return format!(
+                "{} · {}",
+                self.display_name(),
+                text(
+                    "仅设置远程 Shell/工具配色；客户端外观需在本地设置",
+                    "remote shell/tool themes; client appearance stays local"
+                )
+            );
+        }
         let opacity_label = opacity
-            .map(|value| format!("opacity {:.2}", value))
-            .unwrap_or_else(|| "core theme sync".to_string());
+            .map(|value| format!("{} {:.2}", text("不透明度", "opacity"), value))
+            .unwrap_or_else(|| text("同步基础配色", "core theme sync").to_string());
 
         match self.kind {
             TerminalKind::Ghostty => {
                 if blur_requested {
-                    format!("{} · {}, frosted glass", self.display_name(), opacity_label)
+                    format!(
+                        "{} · {}, {}",
+                        self.display_name(),
+                        opacity_label,
+                        text("磨砂效果", "frosted glass")
+                    )
                 } else {
                     format!("{} · {}", self.display_name(), opacity_label)
                 }
@@ -248,25 +346,43 @@ impl TerminalProfile {
             TerminalKind::Kitty | TerminalKind::Alacritty => {
                 if blur_requested {
                     format!(
-                        "{} · {}, blur not supported here",
+                        "{} · {}, {}",
                         self.display_name(),
-                        opacity_label
+                        opacity_label,
+                        text("此处不支持模糊效果", "blur not supported here")
                     )
                 } else {
                     format!("{} · {}", self.display_name(), opacity_label)
                 }
             }
             TerminalKind::TerminalApp => format!(
-                "{} · shell/tool theme only, font stays manual",
-                self.display_name()
+                "{} · {}",
+                self.display_name(),
+                text(
+                    "仅设置 Shell/工具配色，字体需手动设置",
+                    "shell/tool theme only, font stays manual"
+                )
             ),
             TerminalKind::Unknown => {
-                format!("{} · shell/tool theme where supported", self.display_name())
+                format!(
+                    "{} · {}",
+                    self.display_name(),
+                    text(
+                        "仅同步受支持的 Shell/工具配色",
+                        "shell/tool theme where supported"
+                    )
+                )
             }
         }
     }
 
     pub fn setup_tip(&self) -> Option<&'static str> {
+        if self.session.is_remote() {
+            return Some("Run slate locally to configure your client terminal's font and opacity.");
+        }
+        if self.session.is_multiplexed() && self.kind == TerminalKind::Unknown {
+            return Some("Run slate outside tmux for terminal-specific appearance controls.");
+        }
         match self.kind {
             TerminalKind::Ghostty => None,
             TerminalKind::Kitty => Some(
@@ -303,7 +419,7 @@ pub fn homebrew_executable() -> Option<PathBuf> {
         PathBuf::from("/usr/local/bin/brew"),
     ]
     .into_iter()
-    .find(|path| path.is_file())
+    .find(|path| is_executable_file(path))
     .or_else(|| search_paths("brew", &current_path_dirs()))
 }
 
@@ -357,7 +473,70 @@ fn search_paths(command: &str, paths: &[PathBuf]) -> Option<PathBuf> {
     paths
         .iter()
         .map(|dir| dir.join(command))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| is_executable_file(candidate))
+}
+
+/// Advisory lookup only: follow ordinary symlinks, require a regular file and
+/// execute access for effective credentials. Never launch/open the candidate's
+/// contents. This does not validate its format/interpreter or prevent later races.
+fn is_executable_file(path: &Path) -> bool {
+    if !std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        return false;
+    }
+    let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: the CString is NUL-terminated and lives throughout this read-only
+    // call. AT_FDCWD and AT_EACCESS select the cwd and effective credentials.
+    unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), libc::X_OK, libc::AT_EACCESS) == 0 }
+}
+
+pub(crate) struct UnusableCommand {
+    pub path: PathBuf,
+    pub in_path: bool,
+}
+
+/// Call only after ordinary lookup finds no executable. Preserve a rejected
+/// candidate for diagnostics without claiming that the tool is installed.
+pub(crate) fn unusable_command_with_env(command: &str, env: &SlateEnv) -> Option<UnusableCommand> {
+    unusable_command_in_paths(
+        command,
+        &current_path_dirs(),
+        &normalized_path_dirs_for_home(Some(env.home())),
+    )
+}
+
+fn unusable_command_in_paths(
+    command: &str,
+    actual: &[PathBuf],
+    fallback: &[PathBuf],
+) -> Option<UnusableCommand> {
+    let aliases = command_aliases(command);
+    let names = if aliases.is_empty() {
+        std::slice::from_ref(&command)
+    } else {
+        aliases
+    };
+    for (paths, in_path) in [(actual, true), (fallback, false)] {
+        for name in names {
+            for dir in paths {
+                let path = dir.join(name);
+                // A broken link, directory, FIFO, denied entry or another
+                // inspection error is useful evidence; a missing name is not.
+                let present = match std::fs::symlink_metadata(&path) {
+                    Ok(_) => true,
+                    Err(error) => !matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    ),
+                };
+                if present {
+                    return Some(UnusableCommand { path, in_path });
+                }
+            }
+        }
+    }
+    None
 }
 
 pub fn command_path(command: &str) -> Option<PathBuf> {
@@ -391,21 +570,12 @@ fn macos_app_path(name: &str, home: &Path) -> Option<(PathBuf, bool)> {
 }
 
 fn ghostty_candidate_paths(env: &SlateEnv) -> Vec<PathBuf> {
-    let mut paths = vec![
-        env.xdg_config_home().join("ghostty").join("config.ghostty"),
-        env.xdg_config_home().join("ghostty").join("config"),
-    ];
-
-    paths.push(
-        env.home()
-            .join("Library/Application Support/com.mitchellh.ghostty/config.ghostty"),
-    );
-    paths.push(
-        env.home()
-            .join("Library/Application Support/com.mitchellh.ghostty/config"),
-    );
-
-    paths
+    crate::adapter::GhosttyAdapter::config_candidates_with_env(env)
+        .unwrap_or_else(|_| crate::adapter::GhosttyAdapter::xdg_config_candidates(env))
+        .into_iter()
+        .rev()
+        .map(|candidate| candidate.path)
+        .collect()
 }
 
 fn first_existing(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
@@ -446,7 +616,7 @@ pub fn detect_tool_presence(tool_id: &str) -> ToolPresence {
 }
 
 /// Check if a command exists in the user's actual PATH (without fallback dirs).
-fn command_in_actual_path(command: &str) -> Option<PathBuf> {
+pub(crate) fn command_in_actual_path(command: &str) -> Option<PathBuf> {
     search_paths(command, &current_path_dirs())
 }
 
@@ -521,11 +691,9 @@ pub fn detect_tool_presence_with_env(tool_id: &str, env: &SlateEnv) -> ToolPrese
             } else if let Some(path) = command_path_with_env("alacritty", env) {
                 ToolPresence::fallback_with(ToolEvidence::Executable(path))
             } else {
-                let config = env
-                    .xdg_config_home()
-                    .join("alacritty")
-                    .join("alacritty.toml");
-                if config.exists() {
+                let config =
+                    crate::adapter::AlacrittyAdapter::integration_config_path_with_env(env);
+                if std::fs::symlink_metadata(&config).is_ok() {
                     ToolPresence::installed_with(ToolEvidence::Config(config))
                 } else {
                     ToolPresence::missing()
@@ -561,28 +729,30 @@ pub fn detect_tool_presence_with_env(tool_id: &str, env: &SlateEnv) -> ToolPrese
                 ToolPresence::in_path_with(ToolEvidence::Executable(path))
             } else if let Some(path) = command_path_with_env("opencode", env) {
                 ToolPresence::fallback_with(ToolEvidence::Executable(path))
+            } else if let Some(path) = opencode_config_evidence(env) {
+                ToolPresence::installed_with(ToolEvidence::Config(path))
             } else {
-                // Check for opencode config files/directories
-                if let Some(path) = std::env::var("OPENCODE_TUI_CONFIG")
-                    .ok()
-                    .filter(|value| !value.trim().is_empty())
-                    .map(PathBuf::from)
-                    .filter(|path| path.exists())
-                {
-                    ToolPresence::installed_with(ToolEvidence::Config(path))
-                } else {
-                    let config_dir = env.xdg_config_home().join("opencode");
-                    if config_dir.exists() {
-                        ToolPresence::installed_with(ToolEvidence::Config(config_dir))
-                    } else {
-                        ToolPresence::missing()
-                    }
-                }
+                ToolPresence::missing()
             }
         }
         // All other CLI tools: tiered detection
         other => detect_cli_tool_tiered(other, env),
     }
+}
+
+// Configuration evidence is not executable detection or config validation.
+// Keep it injected and independent of the ambient OPENCODE_TUI_CONFIG value.
+fn opencode_config_evidence(env: &SlateEnv) -> Option<PathBuf> {
+    if env.opencode_tui_config_error().is_some() {
+        return None;
+    }
+    env.opencode_tui_config()
+        .filter(|path| path.exists())
+        .map(Path::to_owned)
+        .or_else(|| {
+            let directory = env.xdg_config_home().join("opencode");
+            directory.exists().then_some(directory)
+        })
 }
 
 pub fn shell_quote(value: &str) -> String {
@@ -600,6 +770,158 @@ pub fn shell_quote_path(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn executable_lookup_skips_nonexecutable_files_before_valid_candidates() {
+        let td = tempfile::tempdir().unwrap();
+        let first = td.path().join("first");
+        let second = td.path().join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        let blocked = first.join("fixture-tool");
+        let valid = second.join("fixture-tool");
+        std::fs::write(&blocked, "PRIVATE_NONEXECUTABLE").unwrap();
+        std::fs::write(&valid, "#!/bin/sh\nexit 99\n").unwrap();
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::set_permissions(&valid, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(search_paths("fixture-tool", &[first, second]), Some(valid));
+        assert_eq!(
+            std::fs::read_to_string(blocked).unwrap(),
+            "PRIVATE_NONEXECUTABLE"
+        );
+    }
+
+    #[test]
+    fn executable_lookup_skips_special_and_broken_entries_but_keeps_valid_links() {
+        use std::os::unix::fs::symlink;
+        let td = tempfile::tempdir().unwrap();
+        let mut dirs = Vec::new();
+        for name in ["directory", "fifo", "dangling", "loop", "link", "later"] {
+            let dir = td.path().join(name);
+            std::fs::create_dir(&dir).unwrap();
+            dirs.push(dir);
+        }
+        std::fs::create_dir(dirs[0].join("fixture-tool")).unwrap();
+        let fifo = CString::new(dirs[1].join("fixture-tool").as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o755) }, 0);
+        symlink(td.path().join("absent"), dirs[2].join("fixture-tool")).unwrap();
+        symlink("fixture-tool", dirs[3].join("fixture-tool")).unwrap();
+        let target = td.path().join("target");
+        std::fs::write(&target, "#!/bin/sh\nexit 99\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link = dirs[4].join("fixture-tool");
+        symlink(&target, &link).unwrap();
+        symlink(&target, dirs[5].join("fixture-tool")).unwrap();
+        assert_eq!(search_paths("fixture-tool", &dirs), Some(link));
+        assert!(search_paths("fixture-tool", &dirs[..4]).is_none());
+        let evidence = unusable_command_in_paths("fixture-tool", &dirs[..1], &dirs[1..4]).unwrap();
+        assert_eq!(evidence.path, dirs[0].join("fixture-tool"));
+        assert!(evidence.in_path);
+        let evidence = unusable_command_in_paths("fixture-tool", &[], &dirs[1..4]).unwrap();
+        assert_eq!(evidence.path, dirs[1].join("fixture-tool"));
+        assert!(!evidence.in_path);
+        assert!(unusable_command_in_paths("absent", &dirs, &[]).is_none());
+    }
+
+    #[test]
+    fn executable_lookup_checks_effective_access_and_preserves_path_bytes() {
+        let td = tempfile::tempdir().unwrap();
+        let first = td.path().join("first 编辑器");
+        let second = td.path().join("second");
+        std::fs::create_dir(&first).unwrap();
+        std::fs::create_dir(&second).unwrap();
+        for dir in [&first, &second] {
+            std::fs::write(dir.join("fixture-tool"), "#!/bin/sh\nexit 99\n").unwrap();
+        }
+        let candidate = first.join("fixture-tool");
+        let valid = second.join("fixture-tool");
+        std::fs::set_permissions(&candidate, std::fs::Permissions::from_mode(0o001)).unwrap();
+        std::fs::set_permissions(&valid, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if unsafe { libc::geteuid() } != 0 {
+            assert_eq!(
+                search_paths("fixture-tool", &[first.clone(), second]),
+                Some(valid)
+            );
+        }
+        std::fs::set_permissions(&candidate, std::fs::Permissions::from_mode(0o100)).unwrap();
+        assert_eq!(search_paths("fixture-tool", &[first]), Some(candidate));
+        let invalid = Path::new(std::ffi::OsStr::from_bytes(b"not-a-path\0suffix"));
+        assert!(!is_executable_file(invalid));
+    }
+
+    #[test]
+    fn ghostty_config_evidence_follows_write_target_in_custom_and_isolated_profiles() {
+        let td = tempfile::tempdir().unwrap();
+        let home = td.path().join("home");
+        let custom = td.path().join("custom-xdg");
+        let custom_env = crate::env::SlateEnv::from_vars(|key| match key {
+            "HOME" => Some(home.as_os_str().to_owned()),
+            "XDG_CONFIG_HOME" => Some(custom.as_os_str().to_owned()),
+            _ => None,
+        })
+        .unwrap();
+        let isolated = crate::env::SlateEnv::with_home(home.clone());
+        assert_eq!(custom_env.xdg_config_home(), custom);
+        assert_eq!(isolated.xdg_config_home(), home.join(".config"));
+        for env in [&custom_env, &isolated] {
+            let entries = crate::adapter::GhosttyAdapter
+                .integration_candidate_paths_with_env(env)
+                .unwrap();
+            assert_eq!(entries.len(), if cfg!(target_os = "macos") { 4 } else { 2 });
+            for path in &entries {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, "# private fixture\n").unwrap();
+            }
+            // Remove candidates one by one; detection must follow the same
+            // last-existing policy, then report no config evidence at all.
+            for expected in entries.iter().rev() {
+                assert_eq!(
+                    super::first_existing(super::ghostty_candidate_paths(env)),
+                    Some(expected.clone())
+                );
+                assert_eq!(
+                    crate::adapter::GhosttyAdapter
+                        .integration_config_path_with_env(env)
+                        .unwrap(),
+                    *expected
+                );
+                std::fs::remove_file(expected).unwrap();
+            }
+            assert_eq!(
+                super::first_existing(super::ghostty_candidate_paths(env)),
+                None
+            );
+            assert_eq!(
+                crate::adapter::GhosttyAdapter
+                    .integration_config_path_with_env(env)
+                    .unwrap(),
+                env.xdg_config_home().join("ghostty/config.ghostty")
+            );
+        }
+    }
+
+    #[test]
+    fn opencode_config_evidence_uses_only_the_injected_profile() {
+        let td = tempfile::tempdir().unwrap();
+        let home = td.path().join("profile");
+        std::fs::create_dir(&home).unwrap();
+        for name in ["first.json", "second.json"] {
+            let config = td.path().join(name);
+            std::fs::write(&config, "{}").unwrap();
+            let env = crate::env::SlateEnv::from_vars(|key| match key {
+                "HOME" => Some(home.as_os_str().to_owned()),
+                "OPENCODE_TUI_CONFIG" => Some(config.as_os_str().to_owned()),
+                _ => None,
+            })
+            .unwrap();
+            assert_eq!(super::opencode_config_evidence(&env), Some(config));
+        }
+        let isolated = crate::env::SlateEnv::with_home(home.clone());
+        assert_eq!(super::opencode_config_evidence(&isolated), None);
+        let directory = home.join(".config/opencode");
+        std::fs::create_dir_all(&directory).unwrap();
+        assert_eq!(super::opencode_config_evidence(&isolated), Some(directory));
+    }
+
     use super::*;
     use std::fs;
     #[cfg(unix)]
@@ -641,6 +963,38 @@ mod tests {
 
         let detected = command_path_with_env("starship", &env);
         assert_eq!(detected.as_deref(), Some(executable.as_path()));
+    }
+
+    #[test]
+    fn terminal_review_languages_preserve_capability_limits() {
+        use crate::config::ui_language::UiLanguage::{Chinese, English};
+        for (program, expected) in [
+            ("ghostty", "磨砂效果"),
+            ("kitty", "不支持模糊效果"),
+            ("Alacritty", "不支持模糊效果"),
+            ("Apple_Terminal", "字体需手动设置"),
+            ("Other", "受支持的 Shell/工具配色"),
+        ] {
+            let profile = TerminalProfile::from_env_vars(Some(program), None);
+            let zh = profile.setup_review_summary_in(Some(0.85), true, Chinese);
+            assert!(zh.contains(expected), "{program}: {zh}");
+            assert_eq!(
+                profile.setup_review_summary_in(Some(0.85), true, English),
+                profile.setup_review_summary(Some(0.85), true)
+            );
+            assert_eq!(
+                profile.compatibility_label_in(English),
+                profile.compatibility_label()
+            );
+        }
+        let session = crate::session::SessionContext::from_vars(|key| {
+            (key == "SSH_TTY").then(|| "/fixture/tty".into())
+        });
+        let remote = TerminalProfile::from_env_vars(Some("ghostty"), None).with_session(session);
+        let zh = remote.setup_review_summary_in(Some(0.85), true, Chinese);
+        assert!(zh.contains("客户端外观需在本地设置"));
+        assert!(!zh.contains("磨砂效果"));
+        assert_eq!(remote.compatibility_label_in(Chinese), "远程 Shell");
     }
 
     #[test]

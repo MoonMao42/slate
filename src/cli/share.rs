@@ -8,7 +8,16 @@ use crate::error::{Result, SlateError};
 use crate::opacity::OpacityPreset;
 use crate::theme::ThemeRegistry;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+mod preview;
+pub use preview::handle_import_preview;
+mod codec;
+mod export;
+mod recovery;
+pub(crate) use export::build_export_uri;
+pub use export::handle_export_with_options;
+pub use recovery::validate_storage_paths as validate_import_storage_paths;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 struct ToolImportFlags {
     starship: bool,
     highlighting: bool,
@@ -23,57 +32,17 @@ struct ImportRequest {
     tools: ToolImportFlags,
 }
 
-/// Export current slate config as a shareable URI.
-/// Format: slate://theme/font/opacity/tools
-/// Example: slate://catppuccin-mocha/JetBrainsMono/frosted/s,h,f
-/// Tool flags: s=starship, h=highlighting, f=fastfetch
+/// A validated URI with its font request resolved for this host. Constructed
+/// before sound or writer-lock initialization; this is not a writeability check.
+pub struct PreparedImport(ImportRequest);
+
+pub fn prepare_import(uri: &str) -> Result<PreparedImport> {
+    parse_import_request(uri).map(PreparedImport)
+}
+
+/// Export saved settings. Keep the no-argument entrypoint for library callers.
 pub fn handle_export() -> Result<()> {
-    let env = SlateEnv::from_process()?;
-    let config = ConfigManager::with_env(&env)?;
-
-    let theme = config
-        .get_current_theme()?
-        .unwrap_or_else(|| "none".to_string());
-
-    let font = config
-        .get_current_font()?
-        .unwrap_or_else(|| "none".to_string())
-        .replace(' ', "-");
-
-    let opacity = config
-        .get_current_opacity()?
-        .unwrap_or_else(|| "solid".to_string())
-        .to_lowercase();
-
-    let mut tools = Vec::new();
-    if config.is_starship_enabled()? {
-        tools.push("s");
-    }
-    if config.is_zsh_highlighting_enabled()? {
-        tools.push("h");
-    }
-    if config.has_fastfetch_autorun()? {
-        tools.push("f");
-    }
-    let tools_str = if tools.is_empty() {
-        "none".to_string()
-    } else {
-        tools.join(",")
-    };
-
-    let uri = format!("slate://{}/{}/{}/{}", theme, font, opacity, tools_str);
-
-    let ctx = RenderContext::from_active_theme().ok();
-    let r = ctx.as_ref().map(Roles::new);
-
-    println!();
-    println!("  {}", path_text(r.as_ref(), &uri));
-    println!();
-    println!("  Share this with anyone — they can run:");
-    println!("  slate import \"{}\"", path_text(r.as_ref(), &uri));
-    println!();
-
-    Ok(())
+    handle_export_with_options(false)
 }
 
 /// Import a slate config from a shareable URI.
@@ -84,24 +53,81 @@ pub fn handle_export() -> Result<()> {
 /// SoundSink can ring the share-import completion moment alongside the
 /// other config-mutation surfaces.
 pub fn handle_import(uri: &str) -> Result<()> {
-    let env = SlateEnv::from_process()?;
-    handle_import_with_env(uri, &env)
+    handle_prepared_import(prepare_import(uri)?)
 }
 
-fn handle_import_with_env(uri: &str, env: &SlateEnv) -> Result<()> {
-    let request = parse_import_request(uri)?;
+/// Apply to the process profile, also used by the nested font/theme handlers.
+pub fn handle_prepared_import(prepared: PreparedImport) -> Result<()> {
+    handle_prepared_import_with_options(prepared, false, false)
+}
 
+/// Defer sound/profile reads until the mandatory recovery checkpoint exists.
+pub fn handle_prepared_import_with_options(
+    prepared: PreparedImport,
+    auto: bool,
+    quiet: bool,
+) -> Result<()> {
+    let env = SlateEnv::from_process()?;
+    apply_prepared_import_with_env(prepared, &env, auto, quiet)
+}
+
+#[cfg(test)]
+fn handle_import_with_env(uri: &str, env: &SlateEnv) -> Result<()> {
+    apply_prepared_import_with_env(prepare_import(uri)?, env, false, true)
+}
+
+fn apply_prepared_import_with_env(
+    prepared: PreparedImport,
+    env: &SlateEnv,
+    auto: bool,
+    quiet: bool,
+) -> Result<()> {
+    let request = prepared.0;
+    recovery::validate_storage_paths(env)?;
+    let _write_guard = crate::config::ConfigWriteGuard::acquire(env)?;
+    let checkpoint = recovery::create(env, &request)?;
+    let id = &checkpoint.point.id;
+    eprintln!("Pre-import recovery point: {id}");
+    eprintln!("Inspect file recovery: slate restore {id} --dry-run");
+    eprintln!("Recovery excludes installed fonts, external caches, empty directories and running application state.");
+    crate::brand::SoundSink::install(env, auto, quiet);
+    apply_request(env, &request, &checkpoint.theme_tools).map_err(|err| SlateError::InvalidConfig(format!(
+        "Import was incomplete: {err}. Earlier changes were not automatically rolled back. Inspect the pre-import recovery point with: slate restore {id} --dry-run. Remove --dry-run to restore captured files. Font installations and external caches are not undone."
+    )))
+}
+
+fn apply_request(env: &SlateEnv, request: &ImportRequest, theme_tools: &[String]) -> Result<()> {
     if let Some(font) = request.font.as_deref() {
-        crate::cli::font::handle_font(Some(font))?;
+        crate::cli::font::handle_import_font(env, font)?;
     }
 
-    if let Some(theme) = request.theme.clone() {
-        crate::cli::theme::handle_theme(Some(theme), false, false)?;
+    if let Some(theme_id) = request.theme.as_deref() {
+        // The pre-import checkpoint covers font + theme + flags together. Do
+        // not take the narrower theme snapshot after the font has changed.
+        let registry = ThemeRegistry::new()?;
+        let theme = registry
+            .get(theme_id)
+            .ok_or_else(|| SlateError::ThemeNotFound(theme_id.into()))?;
+        let report = crate::cli::apply::ThemeApplyCoordinator::with_snapshot_policy(
+            env,
+            crate::cli::apply::SnapshotPolicy::Skip,
+        )
+        .apply_to_tools(theme, theme_tools)?;
+        crate::cli::apply::log_apply_report(&report);
+        report.ensure_no_failures()?;
     }
 
     let config = ConfigManager::with_env(env)?;
 
-    let ctx = RenderContext::from_active_theme().ok();
+    let themes = ThemeRegistry::new()?;
+    let current_theme = config.get_current_theme()?;
+    let ctx = themes
+        .get(
+            current_theme
+                .as_deref()
+                .unwrap_or(crate::theme::DEFAULT_THEME_ID),
+        )
+        .map(RenderContext::new);
     let r = ctx.as_ref().map(Roles::new);
 
     if let Some(opacity) = request.opacity {
@@ -111,6 +137,7 @@ fn handle_import_with_env(uri: &str, env: &SlateEnv) -> Result<()> {
             crate::cli::apply::OpacityApplyOptions {
                 persist_state: true,
                 reload_terminals: true,
+                snapshot_policy: crate::cli::apply::SnapshotPolicy::Skip,
             },
         )?;
         let value = opacity.to_string().to_lowercase();
@@ -159,32 +186,49 @@ fn code_text(r: Option<&Roles<'_>>, text: &str) -> String {
     }
 }
 
-/// Render a path / URI through `Roles::path` (dim + italic per Sketch
-/// 002), falling back to bare text when Roles is unavailable.
-fn path_text(r: Option<&Roles<'_>>, text: &str) -> String {
-    match r {
-        Some(r) => r.path(text),
-        None => text.to_string(),
+fn parse_import_request(uri: &str) -> Result<ImportRequest> {
+    // Validate every URI segment before local font discovery. A bad opacity or
+    // flag list must not trigger platform probes just because it names a font.
+    let mut request = parse_import_intent(uri)?;
+    if let Some(font) = request.font.as_deref() {
+        request.font = Some(resolve_font_choice(font)?.font_name().to_owned());
     }
+    Ok(request)
 }
 
-fn parse_import_request(uri: &str) -> Result<ImportRequest> {
+/// Parse the requested settings without reading profiles, discovering fonts,
+/// creating paths, or launching commands. Preview intentionally stops here.
+fn parse_import_intent(uri: &str) -> Result<ImportRequest> {
+    if uri.len() > 1024 || uri.chars().any(char::is_control) {
+        return Err(SlateError::InvalidConfig(
+            "Share code must be at most 1024 bytes and contain no control characters.".into(),
+        ));
+    }
     let stripped = uri
         .strip_prefix("slate://")
         .ok_or_else(|| SlateError::InvalidConfig("URI must start with slate://".to_string()))?;
 
     let parts: Vec<&str> = stripped.split('/').collect();
-    if parts.len() != 4 {
-        return Err(SlateError::InvalidConfig(
-            "Expected format: slate://theme/font/opacity/tools".to_string(),
-        ));
-    }
+    let (theme, font, opacity, tools, encoded) = match parts.as_slice() {
+        [theme, font, opacity, tools] => (*theme, *font, *opacity, *tools, false),
+        ["v1", theme, font, opacity, tools] => (*theme, *font, *opacity, *tools, true),
+        [_, _, _, _, _] => return Err(SlateError::InvalidConfig("Unsupported share-code version. Use v1 or a legacy four-part code.".into())),
+        _ => return Err(SlateError::InvalidConfig(
+            "Expected slate://v1/theme/font/opacity/tools or legacy slate://theme/font/opacity/tools".into(),
+        )),
+    };
 
     Ok(ImportRequest {
-        theme: parse_theme_segment(parts[0])?,
-        font: parse_font_segment(parts[1])?,
-        opacity: parse_opacity_segment(parts[2])?,
-        tools: parse_tool_flags(parts[3])?,
+        theme: parse_theme_segment(theme)?,
+        font: if encoded && font != "none" {
+            let decoded = codec::decode_font(font)?;
+            validate_font_name(&decoded)?;
+            Some(decoded)
+        } else {
+            parse_font_segment(font)?
+        },
+        opacity: parse_opacity_segment(opacity)?,
+        tools: parse_tool_flags(tools)?,
     })
 }
 
@@ -195,7 +239,10 @@ fn parse_theme_segment(theme: &str) -> Result<Option<String>> {
 
     let registry = ThemeRegistry::new()?;
     if registry.get(theme).is_none() {
-        return Err(SlateError::ThemeNotFound(theme.to_string()));
+        let preview: String = theme.chars().take(80).collect();
+        return Err(SlateError::InvalidConfig(format!(
+            "Unknown shared theme ID {preview:?}. Run `slate list` to find a canonical ID."
+        )));
     }
 
     Ok(Some(theme.to_string()))
@@ -206,8 +253,12 @@ fn parse_font_segment(font: &str) -> Result<Option<String>> {
         return Ok(None);
     }
 
-    let resolved = resolve_font_choice(font)?;
-    Ok(Some(resolved.font_name().to_string()))
+    validate_font_name(font)?;
+    Ok(Some(font.to_owned()))
+}
+
+fn validate_font_name(font: &str) -> Result<()> {
+    crate::adapter::font_config::validate_family(font)
 }
 
 fn parse_opacity_segment(opacity: &str) -> Result<Option<OpacityPreset>> {
@@ -216,10 +267,9 @@ fn parse_opacity_segment(opacity: &str) -> Result<Option<OpacityPreset>> {
     }
 
     opacity.parse::<OpacityPreset>().map(Some).map_err(|_| {
-        SlateError::InvalidConfig(format!(
-            "Invalid opacity preset: '{}'. Must be one of: solid, frosted, clear",
-            opacity
-        ))
+        SlateError::InvalidConfig(
+            "Invalid shared opacity preset. Use solid, frosted, clear, or none.".into(),
+        )
     })
 }
 
@@ -233,10 +283,7 @@ fn parse_tool_flags(tools: &str) -> Result<ToolImportFlags> {
 
     for flag in tools.split(',') {
         if flag.is_empty() || !seen.insert(flag) {
-            return Err(SlateError::InvalidConfig(format!(
-                "Invalid tool flag list: '{}'. Use comma-separated values from: s, h, f",
-                tools
-            )));
+            return Err(invalid_tool_flags());
         }
 
         match flag {
@@ -244,15 +291,18 @@ fn parse_tool_flags(tools: &str) -> Result<ToolImportFlags> {
             "h" => flags.highlighting = true,
             "f" => flags.fastfetch = true,
             _ => {
-                return Err(SlateError::InvalidConfig(format!(
-                    "Invalid tool flag list: '{}'. Use comma-separated values from: s, h, f",
-                    tools
-                )))
+                return Err(invalid_tool_flags());
             }
         }
     }
 
     Ok(flags)
+}
+
+fn invalid_tool_flags() -> SlateError {
+    SlateError::InvalidConfig(
+        "Invalid tool flag list. Use unique comma-separated values from s, h, f, or none to disable all three.".into(),
+    )
 }
 
 fn apply_imported_tool_flags(config: &ConfigManager, flags: ToolImportFlags) -> Result<()> {

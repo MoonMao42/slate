@@ -7,12 +7,14 @@ use crate::detection::{self, TerminalProfile, ToolPresence};
 use crate::env::SlateEnv;
 use std::collections::HashMap;
 
-/// Brew installation kind
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BrewKind {
-    Formula,
-    Cask,
-}
+mod install_plan;
+mod quick;
+pub(crate) use install_plan::{InstallPlan, PlannedToolInstall};
+pub(crate) use quick::{core_tools as quick_core_tools, plan as quick_tool_plan};
+
+// Keep the existing catalog API while the installation type belongs to the
+// shared platform executor, not the interactive wizard.
+pub use crate::platform::packages::BrewKind;
 
 /// Tool metadata: single source of truth for wizard-managed tools.
 #[derive(Debug, Clone, Copy)]
@@ -33,7 +35,7 @@ pub struct ToolMetadata {
     pub detect_only: bool,
 }
 
-const ALL_TOOLS: [ToolMetadata; 11] = [
+const ALL_TOOLS: [ToolMetadata; 14] = [
     ToolMetadata {
         id: "ghostty",
         label: "Ghostty",
@@ -94,6 +96,33 @@ const ALL_TOOLS: [ToolMetadata; 11] = [
         pitch: Language::PITCH_FASTFETCH,
         installable: true,
         brew_package: "fastfetch",
+        brew_kind: BrewKind::Formula,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "btop",
+        label: "btop",
+        pitch: "System monitor in your theme · reopen btop after changes",
+        installable: true,
+        brew_package: "btop",
+        brew_kind: BrewKind::Formula,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "yazi",
+        label: "Yazi",
+        pitch: "File manager and code previews in your theme · reopen after changes",
+        installable: true,
+        brew_package: "yazi",
+        brew_kind: BrewKind::Formula,
+        detect_only: false,
+    },
+    ToolMetadata {
+        id: "zellij",
+        label: "Zellij",
+        pitch: "Split panes, tabs and sessions in your theme",
+        installable: true,
+        brew_package: "zellij",
         brew_kind: BrewKind::Formula,
         detect_only: false,
     },
@@ -215,12 +244,18 @@ impl InstallAction {
 pub struct ReviewReceipt {
     /// Tools to install with their actions
     pub install_actions: Vec<InstallAction>,
+    /// Requested configuration targets, distinct from package installations.
+    pub tools_to_configure: Vec<String>,
     /// Selected font name (if any)
     pub selected_font: Option<String>,
     /// Selected theme (if any)
     pub selected_theme: Option<String>,
     /// Terminal visual settings (if any)
     pub terminal_settings: Option<TerminalSettings>,
+    /// Actual saved appearance request, including manual setup's inferred value.
+    pub selected_opacity: Option<crate::opacity::OpacityPreset>,
+    /// None means setup leaves this preference untouched (quick mode).
+    pub fastfetch_enabled: Option<bool>,
 }
 
 /// Terminal visual settings applied via theme presets
@@ -242,9 +277,12 @@ impl ReviewReceipt {
     pub fn new() -> Self {
         Self {
             install_actions: Vec::new(),
+            tools_to_configure: Vec::new(),
             selected_font: None,
             selected_theme: None,
             terminal_settings: None,
+            selected_opacity: None,
+            fastfetch_enabled: None,
         }
     }
 
@@ -276,72 +314,143 @@ impl ReviewReceipt {
         r: Option<&Roles<'_>>,
         terminal: &TerminalProfile,
     ) -> String {
+        self.format_with_install_plan(r, terminal, None)
+    }
+
+    /// Runtime wizard rendering uses the captured installation plan. The legacy
+    /// catalog-only renderer remains available for callers without a bound plan.
+    pub(crate) fn format_with_install_plan(
+        &self,
+        r: Option<&Roles<'_>>,
+        terminal: &TerminalProfile,
+        installs: Option<&InstallPlan>,
+    ) -> String {
+        use super::wizard_support::wording;
+        let language = super::ui_language::output_language();
         let mut output = String::new();
 
         // Heading: "◆ Review and confirm" via Roles::heading. Mirrors
         // sketch 003 tree narrative anchor.
-        output.push_str(&render_heading(r, "Review and confirm"));
+        output.push_str(&render_heading(
+            r,
+            wording("检查设置", "Review and confirm"),
+        ));
         output.push_str("\n\n");
 
         if !self.install_actions.is_empty() {
-            output.push_str(&render_heading(r, "Install"));
+            output.push_str(&render_heading(r, wording("安装", "Install")));
             output.push('\n');
             for action in &self.install_actions {
                 let kind_str = match action.brew_kind {
                     BrewKind::Formula => "formula",
                     BrewKind::Cask => "cask",
                 };
-                let line = format!("• {} — {}", action.tool_label, kind_str);
+                let description = installs.map_or_else(
+                    || kind_str.to_owned(),
+                    |plan| {
+                        plan.description_in(&action.tool_id, language)
+                            .unwrap_or_else(|| "not included in captured installation plan".into())
+                    },
+                );
+                let line = format!("• {} — {}", action.tool_label, description);
                 output.push_str(&match r {
                     Some(r) => r.tree_branch(&line),
                     None => format!("  {}", line),
                 });
                 output.push('\n');
             }
+            if let Some(fallback) = installs.and_then(|plan| plan.fallback_description_in(language))
+            {
+                output.push_str(&format!("  {fallback}\n"));
+            }
+            if installs.is_some() {
+                output.push_str(wording(
+                    "  备份仅包含配置文件，不包含软件包或已安装的可执行文件。\n",
+                    "  Backups cover configuration files, not packages or installed executables.\n",
+                ));
+            }
+            output.push('\n');
+        }
+
+        if !self.tools_to_configure.is_empty() {
+            let mut ids = self
+                .tools_to_configure
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            ids.sort_unstable();
+            ids.dedup();
+            let labels = ids
+                .into_iter()
+                .map(|id| {
+                    let label = ToolCatalog::get_tool(id).map_or(id, |tool| tool.label);
+                    super::file_output::terminal_text(label)
+                })
+                .collect::<Vec<_>>();
+            output.push_str(&Language::receipt_line(
+                wording("计划配色", "Configure colors"),
+                &labels.join(" · "),
+            ));
             output.push('\n');
         }
 
         if let Some(font) = &self.selected_font {
             output.push_str(&Language::receipt_line(
-                Language::RECEIPT_FONT_SECTION,
-                font,
+                wording("字体", Language::RECEIPT_FONT_SECTION),
+                &super::file_output::terminal_text(font),
             ));
             output.push('\n');
         }
 
         if let Some(theme) = &self.selected_theme {
             output.push_str(&Language::receipt_line(
-                Language::RECEIPT_THEME_SECTION,
-                theme,
+                wording("主题", Language::RECEIPT_THEME_SECTION),
+                &super::file_output::terminal_text(theme),
             ));
             output.push('\n');
         }
 
-        let terminal_summary = self
-            .terminal_settings
-            .as_ref()
-            .map(|settings| {
-                terminal
-                    .setup_review_summary(Some(settings.background_opacity), settings.blur_enabled)
-            })
+        let appearance = self
+            .selected_opacity
+            .map(|opacity| (opacity.to_f32(), opacity.blur_radius() > 0))
+            .or_else(|| {
+                self.terminal_settings
+                    .as_ref()
+                    .map(|settings| (settings.background_opacity, settings.blur_enabled))
+            });
+        let terminal_summary = appearance
+            .map(|(opacity, blur)| terminal.setup_review_summary_in(Some(opacity), blur, language))
             .unwrap_or_else(|| {
                 format!(
                     "{} · {}",
                     terminal.display_name(),
-                    terminal.compatibility_label()
+                    terminal.compatibility_label_in(language)
                 )
             });
         output.push_str(&Language::receipt_line(
-            Language::RECEIPT_TERMINAL_SECTION,
-            &terminal_summary,
+            wording("终端", Language::RECEIPT_TERMINAL_SECTION),
+            &super::file_output::terminal_text(&terminal_summary),
         ));
         output.push('\n');
 
+        if let Some(enabled) = self.fastfetch_enabled {
+            output.push_str(&Language::receipt_line(
+                wording("启动系统信息", "Startup system info"),
+                if enabled {
+                    wording("显示", "On")
+                } else {
+                    wording("不显示", "Off")
+                },
+            ));
+            output.push('\n');
+        }
+
         // Footer hint — path-role (dim italic, no container) per sketch 003.
         output.push('\n');
+        let footer = wording("确认后先备份配置，再执行设置。", Language::RECEIPT_FOOTER);
         output.push_str(&match r {
-            Some(r) => format!("  {}", r.path(Language::RECEIPT_FOOTER)),
-            None => format!("  {}", Language::RECEIPT_FOOTER),
+            Some(r) => format!("  {}", r.path(footer)),
+            None => format!("  {}", footer),
         });
         output.push('\n');
 
@@ -369,6 +478,34 @@ pub fn compute_install_candidates(installed: &HashMap<String, ToolPresence>) -> 
         .collect()
 }
 
+/// Missing catalog tools that this platform has a concrete installation route
+/// for. Existing installed/configuration-only tools are handled independently.
+pub(crate) fn compute_install_candidates_for_platform(
+    installed: &HashMap<String, ToolPresence>,
+    context: crate::platform::packages::InstallContext,
+) -> Vec<ToolMetadata> {
+    compute_install_candidates(installed)
+        .into_iter()
+        .filter(|tool| context.route(tool.id).is_ok())
+        .collect()
+}
+
+/// Recheck final installation intent before snapshot/preferences/installers.
+/// Catalog validity is checked separately by setup preparation. Never silently
+/// remove a requested tool just because its installation route is unavailable.
+pub(crate) fn validate_install_routes(
+    selected_ids: &[String],
+    context: crate::platform::packages::InstallContext,
+) -> crate::error::Result<()> {
+    for id in selected_ids {
+        context.route(id).map_err(|unavailable| crate::error::SlateError::InvalidConfig(format!(
+            "Cannot automatically install '{}': {}. Use Manual setup to configure existing tools, or provide the missing installation route before retrying.",
+            id.escape_default(), unavailable.reason(),
+        )))?;
+    }
+    Ok(())
+}
+
 /// Filter selected tools to ensure only installable tools are included
 pub fn filter_valid_selections(selected_ids: Vec<String>) -> Vec<InstallAction> {
     selected_ids
@@ -388,6 +525,77 @@ pub fn filter_valid_selections(selected_ids: Vec<String>) -> Vec<InstallAction> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bootstrap_candidates_only_offer_real_routes_without_changing_presence() {
+        use crate::platform::packages::{InstallContext, PackageManagerBackend};
+        let mut installed = HashMap::new();
+        let context = InstallContext {
+            package_manager: PackageManagerBackend::Unsupported,
+            supported_os: true,
+        };
+        let candidates = compute_install_candidates_for_platform(&installed, context);
+        assert_eq!(
+            candidates.iter().map(|tool| tool.id).collect::<Vec<_>>(),
+            ["starship"]
+        );
+        installed.insert(
+            "bat".into(),
+            ToolPresence {
+                installed: true,
+                in_path: false,
+                evidence: None,
+            },
+        );
+        assert_eq!(
+            compute_install_candidates_for_platform(&installed, context).len(),
+            1
+        );
+        assert!(installed["bat"].installed && !installed["bat"].in_path);
+        installed.insert(
+            "starship".into(),
+            ToolPresence {
+                installed: true,
+                in_path: true,
+                evidence: None,
+            },
+        );
+        assert!(compute_install_candidates_for_platform(&installed, context).is_empty());
+        assert!(compute_install_candidates_for_platform(
+            &HashMap::new(),
+            InstallContext {
+                supported_os: false,
+                ..context
+            }
+        )
+        .is_empty());
+        for backend in [PackageManagerBackend::Homebrew, PackageManagerBackend::Apt] {
+            let candidates = compute_install_candidates_for_platform(
+                &HashMap::new(),
+                InstallContext {
+                    package_manager: backend,
+                    ..context
+                },
+            );
+            let expected = ToolCatalog::installable_tools()
+                .into_iter()
+                .filter(|tool| {
+                    InstallContext {
+                        package_manager: backend,
+                        ..context
+                    }
+                    .route(tool.id)
+                    .is_ok()
+                })
+                .map(|tool| tool.id)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                candidates.iter().map(|tool| tool.id).collect::<Vec<_>>(),
+                expected
+            );
+            assert!(candidates.iter().all(|tool| !tool.detect_only));
+        }
+    }
 
     #[test]
     fn test_tool_catalog_has_tools() {
@@ -480,6 +688,19 @@ mod tests {
     fn test_ghostty_uses_cask_install() {
         let ghostty = ToolCatalog::get_tool("ghostty").expect("ghostty should exist");
         assert_eq!(ghostty.brew_kind, BrewKind::Cask);
+    }
+
+    #[test]
+    fn review_receipt_escapes_font_and_theme_control_characters() {
+        let mut receipt = ReviewReceipt::new();
+        receipt.selected_font = Some("Personal\n\x1b[2JFont".into());
+        // ANSI-FIXTURE: raw input for escaping or width checks.
+        receipt.selected_theme = Some("Theme\r\x1b[31mName".into());
+        let formatted = receipt.format_for_display();
+        assert!(!formatted.contains('\x1b'));
+        assert!(!formatted.contains("Personal\n"));
+        assert!(!formatted.contains("Theme\r"));
+        assert!(formatted.contains("Personal") && formatted.contains("Font"));
     }
 
     #[test]

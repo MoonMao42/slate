@@ -1,5 +1,6 @@
 use crate::adapter::{SkipReason, ToolApplyResult, ToolApplyStatus};
 use crate::detection::{TerminalKind, TerminalProfile};
+mod completion;
 
 /// Failure handling and result tracking for setup execution
 /// Tracks which tools installed successfully, which failed, and provides retry guidance
@@ -25,17 +26,22 @@ pub struct ToolInstallResult {
 pub struct ExecutionSummary {
     /// Per-tool results
     pub tool_results: Vec<ToolInstallResult>,
-    /// Whether font was successfully applied
+    /// Whether this run requested a font change.
+    pub font_requested: bool,
+    /// Whether the selected font was found or installed (not proof of activation).
+    pub font_available: bool,
+    /// Whether the selected font choice was successfully persisted.
     pub font_applied: bool,
     /// Whether theme was successfully applied
     pub theme_applied: bool,
     /// Per-adapter theme apply results
     pub theme_results: Vec<ToolApplyResult>,
-    /// Non-fatal setup issues that still need user visibility
+    /// Issues that let independent steps continue but prevent overall success.
     pub issues: Vec<String>,
     /// Best-effort notes that should be visible but should not fail setup
     pub notices: Vec<String>,
-    /// Overall success flag
+    /// Compatibility mirror, refreshed by the executor/handler. Use
+    /// `is_successful()` to derive the outcome after changing public fields.
     pub overall_success: bool,
 }
 
@@ -51,6 +57,8 @@ impl ExecutionSummary {
     pub fn new() -> Self {
         Self {
             tool_results: Vec::new(),
+            font_requested: false,
+            font_available: false,
             font_applied: false,
             theme_applied: false,
             theme_results: Vec::new(),
@@ -75,6 +83,53 @@ impl ExecutionSummary {
 
     pub fn add_notice(&mut self, notice: impl Into<String>) {
         self.notices.push(notice.into());
+    }
+
+    pub fn is_successful(&self) -> bool {
+        self.failure_count() == 0
+            && (!self.font_requested || (self.font_available && self.font_applied))
+            && self.theme_applied
+            && self.theme_failure_count() == 0
+            && self.missing_integration_skip_count() == 0
+            && self.issues.is_empty()
+    }
+
+    pub fn refresh_outcome(&mut self) {
+        self.overall_success = self.is_successful();
+    }
+
+    pub(crate) fn failure_summary(&self) -> String {
+        let mut parts = Vec::new();
+        if self.failure_count() > 0 {
+            parts.push(format!(
+                "{} tool installation(s) failed",
+                self.failure_count()
+            ));
+        }
+        if self.font_requested && !self.font_available {
+            parts.push("selected font was not found or installed".into());
+        } else if self.font_requested && !self.font_applied {
+            parts.push("selected font choice was not saved".into());
+        }
+        if !self.theme_applied {
+            parts.push("theme/shell setup did not finish".into());
+        }
+        if self.theme_failure_count() > 0 {
+            parts.push(format!("{} adapter(s) failed", self.theme_failure_count()));
+        }
+        if self.missing_integration_skip_count() > 0 {
+            parts.push(format!(
+                "{} integration file(s) are still missing",
+                self.missing_integration_skip_count()
+            ));
+        }
+        if !self.issues.is_empty() {
+            parts.push(format!(
+                "{} setup issue(s) need attention",
+                self.issues.len()
+            ));
+        }
+        parts.join("; ")
     }
 
     /// Get count of successful installations
@@ -135,6 +190,10 @@ impl ExecutionSummary {
     }
 
     pub fn format_completion_message_for_terminal(&self, terminal: &TerminalProfile) -> String {
+        use std::io::IsTerminal;
+        if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+            return self.compact_completion(terminal, super::ui_language::output_language());
+        }
         let mut output = String::new();
 
         // Summary counts
@@ -142,7 +201,7 @@ impl ExecutionSummary {
         let success = self.success_count();
         let failed = self.failure_count();
 
-        if !self.overall_success {
+        if !self.is_successful() {
             output.push_str("✦ Setup finished with issues.\n\n");
         } else {
             output.push_str("✦ Setup Complete!\n\n");
@@ -209,101 +268,124 @@ impl ExecutionSummary {
         // Visibility guidance
         output.push_str("Visibility & Activation:\n\n");
 
-        output.push_str("→ Already Live:\n");
-        output.push_str(
-            "  • Theme files and managed config were written for the tools Slate could reach\n",
-        );
+        output.push_str("→ Confirmed On Disk:\n");
+        if self.theme_applied {
+            output.push_str(
+                "  • Theme and shell integration completed; window appearance is not verified\n",
+            );
+        } else {
+            output.push_str(
+                "  • Theme/shell setup did not finish; some earlier file changes may remain\n",
+            );
+        }
         if success > 0 {
-            output.push_str("  • Successful Homebrew installs are already on disk\n");
+            output.push_str("  • Successful tool installation steps completed\n");
+        }
+        if self.font_applied {
+            output.push_str("  • The selected font choice was saved; rendering is not verified\n");
+        } else if self.font_available {
+            output.push_str("  • The selected font is available, but its choice was not saved\n");
         }
         output.push('\n');
 
-        output.push_str("→ Fresh Shell or Tab:\n");
-        output.push_str("  • Starship prompt initialization\n");
-        output.push_str("  • zsh-syntax-highlighting and shell init changes\n");
-        output.push_str("  • PATH or environment updates that land on shell startup\n\n");
+        if !terminal.session().can_reload_terminal() {
+            output.push_str("→ File-Only Session:\n");
+            if terminal.session().is_remote() {
+                output.push_str("  • These changes concern tools on this host; configure the client terminal's font and opacity locally\n");
+            } else {
+                output.push_str("  • This isolated profile does not establish changes to host terminal windows\n");
+            }
+            output.push_str(
+                "  • Live font, opacity and window appearance are not verified by this receipt\n\n",
+            );
+        } else {
+            output.push_str("→ Fresh Shell or Tab:\n");
+            output.push_str("  • Starship prompt initialization\n");
+            output.push_str("  • zsh-syntax-highlighting and shell init changes\n");
+            output.push_str("  • PATH or environment updates that land on shell startup\n\n");
 
-        output.push_str("→ New Terminal Window or Surface:\n");
-        match terminal.kind() {
-            TerminalKind::Ghostty => {
-                output.push_str("  • Ghostty chrome, opacity, and frosted glass usually show up after a new tab or window\n");
+            output.push_str("→ New Terminal Window or Surface:\n");
+            match terminal.kind() {
+                TerminalKind::Ghostty => {
+                    output.push_str("  • Ghostty chrome, opacity, and frosted glass usually show up after a new tab or window\n");
+                }
+                TerminalKind::Kitty => {
+                    output.push_str(
+                        "  • Open a new Kitty window if colors did not reload immediately\n",
+                    );
+                }
+                TerminalKind::Alacritty => {
+                    output.push_str("  • Open a new Alacritty window if colors or opacity did not reload immediately\n");
+                }
+                TerminalKind::TerminalApp => {
+                    output.push_str("  • Open a new Terminal.app tab after setup so shell startup changes are loaded cleanly\n");
+                }
+                TerminalKind::Unknown => {
+                    output.push_str("  • Open a fresh terminal tab or window if your app does not hot-reload config changes\n");
+                }
             }
-            TerminalKind::Kitty => {
-                output
-                    .push_str("  • Open a new Kitty window if colors did not reload immediately\n");
-            }
-            TerminalKind::Alacritty => {
-                output.push_str("  • Open a new Alacritty window if colors or opacity did not reload immediately\n");
-            }
-            TerminalKind::TerminalApp => {
-                output.push_str("  • Open a new Terminal.app tab after setup so shell startup changes are loaded cleanly\n");
-            }
-            TerminalKind::Unknown => {
-                output.push_str("  • Open a fresh terminal tab or window if your app does not hot-reload config changes\n");
-            }
-        }
-        output.push('\n');
+            output.push('\n');
 
-        output.push_str("→ Manual Follow-Up:\n");
-        match terminal.kind() {
-            TerminalKind::Ghostty => {
-                output.push_str(
-                    "  • If the font still looks unchanged, fully restart Ghostty once\n",
-                );
+            output.push_str("→ Manual Follow-Up:\n");
+            match terminal.kind() {
+                TerminalKind::Ghostty => {
+                    output.push_str(
+                        "  • If the font still looks unchanged, fully restart Ghostty once\n",
+                    );
+                }
+                TerminalKind::Kitty => {
+                    output.push_str("  • If glyphs still look wrong, verify your chosen Nerd Font is available to Kitty\n");
+                }
+                TerminalKind::Alacritty => {
+                    output.push_str("  • If glyphs still look wrong, verify your chosen Nerd Font is available to Alacritty\n");
+                }
+                TerminalKind::TerminalApp => {
+                    output.push_str(
+                        "  • Choose your Nerd Font in Terminal.app Settings > Profiles > Text\n",
+                    );
+                    output.push_str(
+                        "  • If icons still look wrong, reopen the profile after switching fonts\n",
+                    );
+                }
+                TerminalKind::Unknown => {
+                    output.push_str("  • If icons still look wrong, pick a Nerd Font in your terminal's font settings\n");
+                }
             }
-            TerminalKind::Kitty => {
-                output.push_str("  • If glyphs still look wrong, verify your chosen Nerd Font is available to Kitty\n");
-            }
-            TerminalKind::Alacritty => {
-                output.push_str("  • If glyphs still look wrong, verify your chosen Nerd Font is available to Alacritty\n");
-            }
-            TerminalKind::TerminalApp => {
-                output.push_str(
-                    "  • Choose your Nerd Font in Terminal.app Settings > Profiles > Text\n",
-                );
-                output.push_str(
-                    "  • If icons still look wrong, reopen the profile after switching fonts\n",
-                );
-            }
-            TerminalKind::Unknown => {
-                output.push_str("  • If icons still look wrong, pick a Nerd Font in your terminal's font settings\n");
-            }
-        }
-        output.push('\n');
+            output.push('\n');
 
-        output.push_str("→ Not Supported In This Terminal:\n");
-        match terminal.kind() {
-            TerminalKind::Ghostty => {
-                output.push_str(
-                    "  • Nothing major is gated here — Ghostty gets the full Slate path\n",
-                );
-            }
-            TerminalKind::Kitty => {
-                output.push_str(
+            output.push_str("→ Not Supported In This Terminal:\n");
+            match terminal.kind() {
+                TerminalKind::Ghostty => {
+                    output.push_str(
+                        "  • Nothing major is gated here — Ghostty gets the full Slate path\n",
+                    );
+                }
+                TerminalKind::Kitty => {
+                    output.push_str(
                     "  • Frosted/blurred backgrounds and watcher auto-relaunch remain Ghostty-only\n",
                 );
-            }
-            TerminalKind::Alacritty => {
-                output.push_str(
+                }
+                TerminalKind::Alacritty => {
+                    output.push_str(
                     "  • Frosted/blurred backgrounds and watcher auto-relaunch remain Ghostty-only\n",
                 );
-            }
-            TerminalKind::TerminalApp => {
-                output.push_str(
+                }
+                TerminalKind::TerminalApp => {
+                    output.push_str(
                     "  • Slate cannot auto-pick Terminal.app profile fonts or enable frosted backgrounds\n",
                 );
-                output.push_str(
+                    output.push_str(
                     "  • Auto-theme recovery after a restart is not guaranteed outside Ghostty shell sessions\n",
                 );
-            }
-            TerminalKind::Unknown => {
-                output.push_str(
+                }
+                TerminalKind::Unknown => {
+                    output.push_str(
                     "  • Terminal-specific visuals are best-effort only and depend on the app you are using\n",
                 );
+                }
             }
+            output.push('\n');
         }
-        output.push('\n');
-
         let recovery_sections = self.recovery_sections();
         if !recovery_sections.is_empty() {
             output.push_str("Recovery Paths:\n\n");
@@ -320,8 +402,10 @@ impl ExecutionSummary {
             output.push('\n');
         }
 
-        output.push_str("Open a fresh shell first, then restart the terminal app only if\n");
-        output.push_str("   fonts or window visuals still look unchanged.\n");
+        if terminal.session().can_reload_terminal() {
+            output.push_str("Open a fresh shell first, then restart the terminal app only if\n");
+            output.push_str("   fonts or window visuals still look unchanged.\n");
+        }
 
         output
     }
@@ -342,11 +426,11 @@ impl ExecutionSummary {
             parts.push("theme files were written".to_string());
         }
         if self.font_applied {
-            parts.push("the selected font was saved".to_string());
+            parts.push("the selected font choice was saved".to_string());
         }
 
         if parts.is_empty() {
-            "Slate finished preflight-safe work without changing your terminal yet.".to_string()
+            "No successful installation or configuration step was confirmed; inspect the issues for possible partial writes.".to_string()
         } else {
             parts.join("; ")
         }
@@ -373,11 +457,15 @@ impl ExecutionSummary {
                 self.missing_integration_skip_count()
             ));
         }
-        if self.failure_count() == 0
-            && self.theme_failure_count() == 0
-            && self.missing_integration_skip_count() == 0
-            && self.issues.is_empty()
-        {
+        if self.font_requested && !self.font_available {
+            parts.push("the selected font still needs to be available".into());
+        } else if self.font_requested && !self.font_applied {
+            parts.push("the selected font choice still needs to be saved".into());
+        }
+        if !self.theme_applied {
+            parts.push("theme/shell setup did not finish".into());
+        }
+        if self.is_successful() {
             "Nothing else is blocked right now.".to_string()
         } else if parts.is_empty() {
             "Some setup steps still need attention.".to_string()
@@ -449,7 +537,9 @@ impl ExecutionSummary {
         }
 
         output.push('\n');
-        output.push_str(&format!("Font applied: {}\n", self.font_applied));
+        output.push_str(&format!("Font requested: {}\n", self.font_requested));
+        output.push_str(&format!("Font available: {}\n", self.font_available));
+        output.push_str(&format!("Font choice saved: {}\n", self.font_applied));
         output.push_str(&format!("Theme applied: {}\n", self.theme_applied));
         output.push_str(&format!(
             "Theme apply failures: {}\n",
@@ -461,7 +551,7 @@ impl ExecutionSummary {
         ));
         output.push_str(&format!("Issues: {}\n", self.issues.len()));
         output.push_str(&format!("Notices: {}\n", self.notices.len()));
-        output.push_str(&format!("Overall success: {}\n", self.overall_success));
+        output.push_str(&format!("Overall success: {}\n", self.is_successful()));
 
         output
     }
@@ -561,6 +651,101 @@ mod tests {
     use super::*;
 
     #[test]
+    fn setup_outcome_is_derived_from_required_stages_not_cached_success() {
+        for case in [
+            "complete",
+            "notice",
+            "install",
+            "font_absent",
+            "font_unsaved",
+            "theme",
+            "adapter",
+            "missing",
+            "late_issue",
+        ] {
+            let mut summary = ExecutionSummary::new();
+            summary.theme_applied = true;
+            summary.overall_success = true; // Deliberately stale for failure cases.
+            match case {
+                "complete" => {}
+                "notice" => summary.add_notice("Optional helper unavailable"),
+                "install" => summary.add_tool_result(ToolInstallResult {
+                    tool_id: "bat".into(),
+                    tool_label: "bat".into(),
+                    status: InstallStatus::Failed,
+                    error_message: Some("download failed".into()),
+                }),
+                "font_absent" => {
+                    summary.font_requested = true;
+                    summary.font_applied = true;
+                }
+                "font_unsaved" => {
+                    summary.font_requested = true;
+                    summary.font_available = true;
+                }
+                "theme" => summary.theme_applied = false,
+                "adapter" | "missing" => summary.set_theme_results(vec![ToolApplyResult {
+                    tool_name: "ghostty".into(),
+                    requires_new_shell: false,
+                    status: if case == "adapter" {
+                        ToolApplyStatus::Failed(crate::error::SlateError::Internal(
+                            "write failed".into(),
+                        ))
+                    } else {
+                        ToolApplyStatus::Skipped(SkipReason::MissingIntegrationConfig)
+                    },
+                }]),
+                "late_issue" => summary.add_issue("Neovim activation failed"),
+                _ => unreachable!(),
+            }
+            let expected = matches!(case, "complete" | "notice");
+            assert_eq!(summary.is_successful(), expected, "{case}");
+            let report = summary.format_completion_message_for_terminal(
+                &TerminalProfile::from_env_vars(Some("ghostty"), None),
+            );
+            assert_eq!(
+                report.contains("Setup Complete!"),
+                expected,
+                "{case}: {report}"
+            );
+            assert!(!report.contains("Already Live"));
+            if !expected {
+                assert!(!summary.failure_summary().is_empty(), "{case}");
+            }
+            summary.refresh_outcome();
+            assert_eq!(summary.overall_success, expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn setup_outcome_file_only_receipts_do_not_promise_host_window_activation() {
+        for session in [
+            crate::session::SessionContext::isolated(),
+            crate::session::SessionContext::from_vars(|key| {
+                (key == "SSH_CONNECTION").then(|| "private".into())
+            }),
+        ] {
+            let terminal =
+                TerminalProfile::from_env_vars(Some("ghostty"), None).with_session(session);
+            let mut summary = ExecutionSummary::new();
+            summary.theme_applied = true;
+            summary.font_requested = true;
+            summary.font_available = true;
+            summary.font_applied = true;
+            let report = summary.format_completion_message_for_terminal(&terminal);
+            assert!(report.contains("Setup Complete!"));
+            assert!(report.contains("File-Only Session"));
+            assert!(report.contains("rendering is not verified"));
+            assert!(!report.contains("Nothing major is gated"));
+            assert!(!report.contains("fully restart Ghostty"));
+        }
+        let report = ExecutionSummary::new()
+            .format_completion_message_for_terminal(&TerminalProfile::from_env_vars(None, None));
+        assert!(report.contains("Theme/shell setup did not finish"));
+        assert!(!report.contains("Theme files and managed config were written"));
+    }
+
+    #[test]
     fn test_execution_summary_counts() {
         let mut summary = ExecutionSummary::new();
         summary.add_tool_result(ToolInstallResult {
@@ -654,6 +839,7 @@ mod tests {
             error_message: None,
         });
         summary.font_applied = true;
+        summary.theme_applied = true;
         summary.overall_success = true;
         let message = summary.format_completion_message_for_terminal(
             &TerminalProfile::from_env_vars(Some("ghostty"), None),

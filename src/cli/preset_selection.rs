@@ -24,6 +24,9 @@ pub struct StylePreset {
     pub name: &'static str,
     /// One-line description
     pub description: &'static str,
+    /// Chinese menu text; stable IDs and preset settings stay language-neutral.
+    pub name_zh: &'static str,
+    pub description_zh: &'static str,
     /// Theme variant ID (e.g., "catppuccin-mocha")
     pub theme_id: &'static str,
     /// Font option ID (e.g., "jetbrains-mono")
@@ -43,6 +46,8 @@ impl PresetCatalog {
                 id: "modern-dark",
                 name: "Modern Dark",
                 description: "Sleek dark palette with JetBrains Mono",
+                name_zh: "现代深色",
+                description_zh: "柔和深色 · JetBrains Mono 字体",
                 theme_id: "catppuccin-mocha",
                 font_id: "jetbrains-mono",
                 visuals: TerminalVisuals {
@@ -57,6 +62,8 @@ impl PresetCatalog {
                 id: "minimal-frost",
                 name: "Minimal Frost",
                 description: "Clean Nordic aesthetic with Hack font",
+                name_zh: "北欧简约",
+                description_zh: "清爽冷色 · Hack 字体",
                 theme_id: "nord",
                 font_id: "hack",
                 visuals: TerminalVisuals {
@@ -71,6 +78,8 @@ impl PresetCatalog {
                 id: "retro-warm",
                 name: "Retro Warm",
                 description: "Warm vintage palette with Iosevka Term",
+                name_zh: "复古暖色",
+                description_zh: "温暖复古 · Iosevka Term 字体",
                 theme_id: "gruvbox-dark",
                 font_id: "iosevka-term",
                 visuals: TerminalVisuals {
@@ -85,6 +94,8 @@ impl PresetCatalog {
                 id: "clean-light",
                 name: "Clean Light",
                 description: "Bright palette with Fira Code",
+                name_zh: "明亮浅色",
+                description_zh: "明亮浅色 · Fira Code 字体",
                 theme_id: "catppuccin-latte",
                 font_id: "fira-code",
                 visuals: TerminalVisuals {

@@ -15,12 +15,17 @@ impl ConfigManager {
 
     /// Persist user's chosen font family name.
     pub fn set_current_font(&self, font_family: &str) -> Result<()> {
+        crate::adapter::font_config::validate_family(font_family)?;
         state_files::write_state_file(&self.current_font_path(), font_family)
     }
 
     /// Get the user's chosen font family name.
     pub fn get_current_font(&self) -> Result<Option<String>> {
-        state_files::read_optional_state_file(&self.current_font_path())
+        let family = state_files::read_optional_state_file(&self.current_font_path())?;
+        if let Some(name) = &family {
+            crate::adapter::font_config::validate_family(name)?;
+        }
+        Ok(family)
     }
 
     /// Get the current opacity preset.
@@ -46,7 +51,16 @@ impl ConfigManager {
 
     /// Check if fastfetch auto-run is enabled via marker file.
     pub fn has_fastfetch_autorun(&self) -> Result<bool> {
-        Ok(self.base_path.join("autorun-fastfetch").exists())
+        let path = self.base_path.join("autorun-fastfetch");
+        super::file_read::read(
+            &path,
+            super::file_read::MAX_STATE_BYTES,
+            super::file_read::Links::Reject,
+        )
+        .map(|source| source.is_some())
+        .map_err(|error| {
+            crate::error::SlateError::ConfigReadError(path.display().to_string(), error.to_string())
+        })
     }
 
     /// Enable fastfetch auto-run by creating marker file atomically.
@@ -89,6 +103,7 @@ mod tests {
 
     fn test_config_manager(base_path: &Path) -> ConfigManager {
         ConfigManager {
+            env: crate::env::SlateEnv::with_home(base_path.to_owned()),
             base_path: base_path.to_path_buf(),
             backup_root: base_path.join(".cache/slate/backups"),
             home_path: base_path.to_path_buf(),

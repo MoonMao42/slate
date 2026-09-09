@@ -32,14 +32,32 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
+      - name: Install Fish for native completion and shell checks
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fish
+          fish --version
+
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Build
         run: cargo build --locked --release
 
-      - name: Test
+      - name: Test (macOS)
+        if: runner.os == 'macOS'
+        # PTY tests spawn processes with deliberately short preview deadlines.
+        # Bound test concurrency without slowing compilation or extending UI waits.
+        env:
+          RUST_TEST_THREADS: '2'
         run: cargo test --locked --quiet --features has-nvim
+
+      - name: Test (Linux, including native Fish completion and shell loading)
+        if: runner.os == 'Linux'
+        env:
+          RUST_TEST_THREADS: '2'
+        run: cargo test --locked --quiet --features has-nvim,has-fish
 
       - name: Install script smoke test
         run: bash tests/install-script-smoke.sh

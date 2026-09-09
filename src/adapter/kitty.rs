@@ -1,7 +1,7 @@
 //! Kitty adapter with WriteAndInclude strategy.
 //! Kitty uses plain-text `.conf` files with `include` directives.
 //! Color format: `foreground #RRGGBB`, `color0 #RRGGBB`, etc.
-//! Config auto-reloads on file change (no signal needed).
+//! Live updates use Kitty remote-control commands when sockets are available.
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::config::ConfigManager;
@@ -29,19 +29,6 @@ fn kitty_socket_listen_on() -> String {
 pub struct KittyAdapter;
 
 impl KittyAdapter {
-    fn trim_ascii(bytes: &[u8]) -> &[u8] {
-        let start = bytes
-            .iter()
-            .position(|b| !b.is_ascii_whitespace())
-            .unwrap_or(bytes.len());
-        let end = bytes
-            .iter()
-            .rposition(|b| !b.is_ascii_whitespace())
-            .map(|idx| idx + 1)
-            .unwrap_or(start);
-        &bytes[start..end]
-    }
-
     pub fn resolve_config_path_with_env(env: &SlateEnv) -> PathBuf {
         env.xdg_config_home().join("kitty").join("kitty.conf")
     }
@@ -55,22 +42,17 @@ impl KittyAdapter {
         let content = fs::read(integration_path)?;
 
         let mut additions = String::new();
-        if !content.split(|b| *b == b'\n').any(|line| {
-            let t = Self::trim_ascii(line);
-            !t.starts_with(b"#") && t.starts_with(b"allow_remote_control")
-        }) {
+        if !super::kitty_config::lines(&content)
+            .any(|line| line.value(b"allow_remote_control").is_some())
+        {
             additions.push_str("allow_remote_control socket-only\n");
         }
-        if !content.split(|b| *b == b'\n').any(|line| {
-            let t = Self::trim_ascii(line);
-            !t.starts_with(b"#") && t.starts_with(b"listen_on")
-        }) {
+        if !super::kitty_config::lines(&content).any(|line| line.value(b"listen_on").is_some()) {
             additions.push_str(&format!("listen_on {}\n", kitty_socket_listen_on()));
         }
-        if !content.split(|b| *b == b'\n').any(|line| {
-            let t = Self::trim_ascii(line);
-            !t.starts_with(b"#") && t.starts_with(b"dynamic_background_opacity")
-        }) {
+        if !super::kitty_config::lines(&content)
+            .any(|line| line.value(b"dynamic_background_opacity").is_some())
+        {
             additions.push_str("dynamic_background_opacity yes\n");
         }
 
@@ -80,7 +62,7 @@ impl KittyAdapter {
 
         // Prepend so these settings take effect before includes
         let new_content = [additions.as_bytes(), content.as_slice()].concat();
-        fs::write(integration_path, new_content)?;
+        crate::config::preview_write::write_legacy(integration_path, &new_content)?;
         Ok(())
     }
 
@@ -154,42 +136,40 @@ impl KittyAdapter {
         }
 
         let content = fs::read(integration_path)?;
+        let updated = Self::font_include_content(&content, managed_path);
+        if updated != content {
+            crate::config::preview_write::write_legacy(integration_path, &updated)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn font_include_content(content: &[u8], managed_path: &Path) -> Vec<u8> {
         let managed_str = managed_path.display().to_string();
         let managed_bytes = managed_str.as_bytes();
 
-        // Check if already included (line-by-line, skip comments)
-        for line in content.split(|b| *b == b'\n') {
-            let trimmed = Self::trim_ascii(line);
-            if trimmed.starts_with(b"#") || trimmed.is_empty() {
-                continue;
-            }
-            if trimmed.starts_with(b"include")
-                && trimmed
-                    .windows(managed_bytes.len())
-                    .any(|w| w == managed_bytes)
-            {
-                return Ok(());
-            }
+        // Match the full directive and literal path, including continuations.
+        // A path suffix or a differently named key is not an installed include.
+        if super::kitty_config::lines(content)
+            .any(|line| line.value(b"include") == Some(managed_bytes))
+        {
+            return content.to_vec();
         }
 
         // Append include directive
         let include_line = format!("include {}\n", managed_str);
-        let new_content = if content.ends_with(b"\n") {
-            [content.as_slice(), include_line.as_bytes()].concat()
+        if content.ends_with(b"\n") {
+            [content, include_line.as_bytes()].concat()
         } else {
-            [content.as_slice(), b"\n", include_line.as_bytes()].concat()
-        };
-        fs::write(integration_path, new_content)?;
-
-        Ok(())
+            [content, b"\n", include_line.as_bytes()].concat()
+        }
     }
 
     /// Apply font-only update to Kitty without triggering full theme reapply.
     pub fn apply_font_only(env: &SlateEnv, font_name: &str) -> Result<()> {
+        let font_content = super::font_config::kitty(font_name)?;
         let config_manager = ConfigManager::with_env(env)?;
         let integration_path = Self::resolve_config_path_with_env(env);
 
-        let font_content = format!("font_family {}\n", font_name);
         config_manager.write_managed_file("kitty", "font.conf", &font_content)?;
 
         let managed_font_path = config_manager.managed_dir("kitty").join("font.conf");
@@ -242,13 +222,29 @@ impl ToolAdapter for KittyAdapter {
     fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
         let integration_path = Self::resolve_config_path_with_env(env);
 
+        // Resolve/serialize the font before creating or editing kitty.conf.
+        let config_mgr = ConfigManager::with_env(env)?;
+        let chosen_font = config_mgr.get_current_font()?;
+        let font_family = chosen_font.or_else(|| {
+            crate::adapter::font::FontAdapter::preferred_installed_font_with_env(env)
+                .ok()
+                .flatten()
+        });
+        let font_content = font_family
+            .as_deref()
+            .map(super::font_config::kitty)
+            .transpose()?;
+
         // Kitty doesn't auto-create its config file. If Kitty is installed
         // but kitty.conf is missing, create it so we can add include directives.
         if !integration_path.exists() {
             if let Some(parent) = integration_path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            let _ = fs::write(&integration_path, "# Created by slate\n");
+            let _ = crate::config::preview_write::write_legacy(
+                &integration_path,
+                b"# Created by slate\n",
+            );
         }
         if !integration_path.exists() {
             return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
@@ -261,18 +257,10 @@ impl ToolAdapter for KittyAdapter {
 
         let colors_content = Self::render_kitty_colors(theme);
 
-        let config_mgr = ConfigManager::with_env(env)?;
-
         // Include font if configured
         let mut final_content = colors_content;
-        let chosen_font = config_mgr.get_current_font().ok().flatten();
-        let font_family = chosen_font.or_else(|| {
-            crate::adapter::font::FontAdapter::detect_installed_fonts()
-                .ok()
-                .and_then(|f| f.into_iter().next())
-        });
-        if let Some(family) = font_family {
-            final_content = format!("font_family {}\n\n{}", family, final_content);
+        if let Some(font_content) = font_content {
+            final_content = font_content + "\n" + &final_content;
         }
 
         config_mgr.write_managed_file("kitty", "theme.conf", &final_content)?;
@@ -295,6 +283,16 @@ impl ToolAdapter for KittyAdapter {
     }
 
     fn reload(&self) -> Result<()> {
+        let session = crate::session::SessionContext::from_process();
+        if session.is_isolated() {
+            return Ok(());
+        }
+        if session.is_remote() {
+            return Err(crate::error::SlateError::ReloadFailed(
+                "kitty".into(),
+                "SSH cannot reload the client terminal".into(),
+            ));
+        }
         // Kitty does NOT auto-reload included files. Use `kitten @ set-colors`
         // to push colors to all running Kitty windows immediately.
         // Requires `allow_remote_control` in kitty.conf (we add it automatically).
@@ -307,51 +305,125 @@ impl ToolAdapter for KittyAdapter {
         }
 
         let sockets = list_kitty_sockets();
-        let color_outcome = broadcast_to_kitty_sockets(&sockets, |socket_path| {
-            Command::new("kitten")
-                .args([
-                    "@",
-                    "--to",
-                    socket_path,
-                    "set-colors",
-                    "--all",
-                    "--configured",
-                ])
-                .arg(&theme_path)
-                .output()
-                .map(|output| output.status.success())
-                .unwrap_or(false)
-        });
-
-        let opacity = config_mgr
-            .get_current_opacity_preset()
-            .unwrap_or(crate::opacity::OpacityPreset::Solid);
-        let opacity_outcome = broadcast_to_kitty_sockets(&sockets, |socket_path| {
-            Command::new("kitten")
-                .args(["@", "--to", socket_path, "set-background-opacity", "--all"])
-                .arg(format!("{}", opacity.to_f32()))
-                .output()
-                .map(|output| output.status.success())
-                .unwrap_or(false)
-        });
-
-        if matches!(color_outcome, KittyBroadcastOutcome::AllFailed)
-            && matches!(opacity_outcome, KittyBroadcastOutcome::AllFailed)
-        {
-            return Err(crate::error::SlateError::Internal(
-                "Failed to reload any running Kitty instance".to_string(),
-            ));
-        }
-
-        Ok(())
+        reload_kitty_sockets(
+            &config_mgr,
+            &sockets,
+            |socket_path| {
+                kitty_command_succeeded(
+                    Command::new("kitten")
+                        .args([
+                            "@",
+                            "--to",
+                            socket_path,
+                            "set-colors",
+                            "--all",
+                            "--configured",
+                        ])
+                        .arg(&theme_path),
+                )
+            },
+            |socket_path, opacity| {
+                kitty_command_succeeded(
+                    Command::new("kitten")
+                        .args(["@", "--to", socket_path, "set-background-opacity", "--all"])
+                        .arg(format!("{}", opacity.to_f32())),
+                )
+            },
+        )
     }
+}
+
+fn reload_kitty_sockets(
+    config: &ConfigManager,
+    sockets: &[String],
+    colors: impl FnMut(&str) -> bool,
+    mut opacity: impl FnMut(&str, crate::opacity::OpacityPreset) -> bool,
+) -> Result<()> {
+    if sockets.is_empty() {
+        return Ok(());
+    }
+    // Read before either broadcast: an unreadable/invalid preference must not
+    // partially update colors and then silently replace opacity with Solid.
+    // An absent preference retains ConfigManager's normal Solid default.
+    let preset = config.get_current_opacity_preset().map_err(|error| {
+        crate::error::SlateError::ReloadFailed(
+            "kitty".into(),
+            format!("Saved opacity could not be read: {error}. No Kitty update commands were sent. Check with: slate doctor opacity."),
+        )
+    })?;
+    let color_outcome = broadcast_to_kitty_sockets(sockets, colors);
+    let opacity_outcome = broadcast_to_kitty_sockets(sockets, |socket| opacity(socket, preset));
+    ensure_kitty_reload(&[("colors", color_outcome), ("opacity", opacity_outcome)])
+}
+
+/// Reload the original config after restoring preview files, including user
+/// overrides and opacity. Unlike set-colors, this also works without managed files.
+pub(crate) fn reload_config_after_preview(env: &SlateEnv) -> Result<()> {
+    if !env.session().can_reload_terminal() {
+        return Ok(());
+    }
+    let sockets = list_kitty_sockets();
+    let result = broadcast_to_kitty_sockets(&sockets, |socket| {
+        kitty_command_succeeded(Command::new("kitten").args(["@", "--to", socket, "load-config"]))
+    });
+    ensure_kitty_reload(&[("restored config", result)])
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KittyBroadcastOutcome {
     NoSockets,
+    AllSucceeded,
     PartialSuccess,
     AllFailed,
+}
+
+fn ensure_kitty_reload(outcomes: &[(&str, KittyBroadcastOutcome)]) -> Result<()> {
+    let incomplete: Vec<_> = outcomes
+        .iter()
+        .filter(|(_, outcome)| {
+            matches!(
+                outcome,
+                KittyBroadcastOutcome::PartialSuccess | KittyBroadcastOutcome::AllFailed
+            )
+        })
+        .map(|(stage, _)| *stage)
+        .collect();
+    if incomplete.is_empty() {
+        // No sockets is a quiet no-op, not proof of live activation. Successful
+        // command exits likewise do not verify the appearance of a window.
+        return Ok(());
+    }
+    Err(crate::error::SlateError::ReloadFailed(
+        "kitty".into(),
+        format!(
+            "Update not confirmed for every discovered Kitty socket: {}. Reload the config in Kitty. Files were not rolled back.",
+            incomplete.join(", ")
+        ),
+    ))
+}
+
+fn kitty_command_succeeded(command: &mut Command) -> bool {
+    kitty_command_succeeded_with_limits(
+        command,
+        crate::platform::process_output::Limits {
+            timeout: std::time::Duration::from_secs(2),
+            max_output: 16 * 1024,
+        },
+    )
+}
+
+fn kitty_command_succeeded_with_limits(
+    command: &mut Command,
+    limits: crate::platform::process_output::Limits,
+) -> bool {
+    use crate::platform::process_output::{capture, Completion};
+    // Reuse the owned-process-group capture used by other native adapters.
+    // stdin is closed so kitten cannot consume picker input. Deadline/output
+    // limits apply per command, not to the complete multi-socket broadcast.
+    // Raw native output is deliberately not printed into the interactive UI.
+    capture(command, limits).is_ok_and(
+        |output| matches!(output.completion, Completion::Exited(status) if status.success()),
+    )
 }
 
 /// Kitty appends `-{pid}` to the configured `listen_on` path, so we scan the
@@ -407,7 +479,9 @@ where
         }
     }
 
-    if successful > 0 {
+    if successful == sockets.len() {
+        KittyBroadcastOutcome::AllSucceeded
+    } else if successful > 0 {
         KittyBroadcastOutcome::PartialSuccess
     } else {
         KittyBroadcastOutcome::AllFailed
@@ -417,27 +491,28 @@ where
 /// Write opacity configuration to managed Kitty config file.
 /// Kitty uses `background_opacity` (0.0 to 1.0).
 pub fn write_opacity_config(env: &SlateEnv, opacity: crate::opacity::OpacityPreset) -> Result<()> {
-    let config_manager = ConfigManager::with_env(env)?;
-
-    let opacity_value = opacity.to_f32();
-    let config_content = format!("background_opacity {}\n", opacity_value);
-
-    config_manager.write_managed_file("kitty", "opacity.conf", &config_content)?;
-
-    Ok(())
+    crate::opacity::ManagedFile::KittyOpacity.write(env, opacity)
 }
 
 /// Push opacity to running Kitty via socket (for live preview).
 pub fn push_opacity_live(opacity: crate::opacity::OpacityPreset) {
+    let _ = try_push_opacity_live(opacity);
+}
+
+/// Explicit saved changes report failed refreshes; live previews stay best-effort.
+pub(crate) fn try_push_opacity_live(opacity: crate::opacity::OpacityPreset) -> Result<()> {
+    if !crate::session::SessionContext::from_process().can_reload_terminal() {
+        return Ok(());
+    }
     let sockets = list_kitty_sockets();
-    let _ = broadcast_to_kitty_sockets(&sockets, |socket_path| {
-        Command::new("kitten")
-            .args(["@", "--to", socket_path, "set-background-opacity", "--all"])
-            .arg(format!("{}", opacity.to_f32()))
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+    let outcome = broadcast_to_kitty_sockets(&sockets, |socket_path| {
+        kitty_command_succeeded(
+            Command::new("kitten")
+                .args(["@", "--to", socket_path, "set-background-opacity", "--all"])
+                .arg(format!("{}", opacity.to_f32())),
+        )
     });
+    ensure_kitty_reload(&[("opacity", outcome)])
 }
 
 #[cfg(test)]
@@ -557,6 +632,67 @@ mod tests {
         let content2 = fs::read_to_string(&temp_path).unwrap();
         assert_eq!(content1, content2);
         assert_eq!(content2.matches("include ").count(), 1);
+    }
+
+    #[test]
+    fn test_ensure_integration_matches_exact_directives_and_continuations() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let file = tempdir.path().join("kitty.conf");
+        let managed = tempdir.path().join("managed/theme.conf");
+        let expected_line = format!("include {}\n", managed.display());
+        for original in [
+            format!("include {}.custom\n", managed.display()),
+            format!("include_extra {}\n", managed.display()),
+            format!("include /mirror{}\n", managed.display()),
+            format!("include {}\n\\.custom\n", managed.display()),
+            format!("# comment\n\\include {}\n", managed.display()),
+        ] {
+            fs::write(&file, &original).unwrap();
+            KittyAdapter::ensure_integration_includes_managed(&file, &managed).unwrap();
+            let expected = format!("{original}{expected_line}");
+            assert_eq!(fs::read_to_string(&file).unwrap(), expected);
+            KittyAdapter::ensure_integration_includes_managed(&file, &managed).unwrap();
+            assert_eq!(fs::read_to_string(&file).unwrap(), expected);
+        }
+        let original = format!(
+            "include\u{2003}{}/\r\n\u{2003}\\theme.conf\r\n",
+            managed.parent().unwrap().display()
+        );
+        fs::write(&file, &original).unwrap();
+        let modified = fs::metadata(&file).unwrap().modified().unwrap();
+        KittyAdapter::ensure_integration_includes_managed(&file, &managed).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), original);
+        assert_eq!(fs::metadata(&file).unwrap().modified().unwrap(), modified);
+    }
+
+    #[test]
+    fn test_ensure_remote_control_ignores_key_prefix_collisions() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let file = tempdir.path().join("kitty.conf");
+        let original = "allow_remote_control_extra yes\nlisten_on_extra unix:/tmp/user\ndynamic_background_opacity_extra yes\n";
+        fs::write(&file, original).unwrap();
+        KittyAdapter::ensure_remote_control(&file).unwrap();
+        let content = fs::read_to_string(&file).unwrap();
+        assert!(content.ends_with(original));
+        for key in [
+            b"allow_remote_control".as_slice(),
+            b"listen_on",
+            b"dynamic_background_opacity",
+        ] {
+            assert_eq!(
+                super::super::kitty_config::lines(content.as_bytes())
+                    .filter(|line| line.value(key).is_some())
+                    .count(),
+                1
+            );
+        }
+        KittyAdapter::ensure_remote_control(&file).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), content);
+
+        let user_settings = "allow_remote_control no\nlisten_on unix:/tmp/my-socket\ndynamic_background_opacity no\n";
+        fs::write(&file, user_settings).unwrap();
+        KittyAdapter::ensure_remote_control(&file).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), user_settings);
     }
 
     #[test]
@@ -683,6 +819,181 @@ mod tests {
 
         assert!(!called);
         assert_eq!(outcome, KittyBroadcastOutcome::NoSockets);
+    }
+
+    #[test]
+    fn kitty_reload_reports_every_incomplete_stage_without_retrying() {
+        let sockets: Vec<_> = (0..3).map(|i| format!("fixture-{i}")).collect();
+        // Cover all success/failure combinations across three sockets, not
+        // just "at least one succeeded". Never invoke kitten or real sockets.
+        for colors in 0u8..8 {
+            for opacity in 0u8..8 {
+                let mut outcomes = Vec::new();
+                for (stage, successes) in [("colors", colors), ("opacity", opacity)] {
+                    let mut visited = Vec::new();
+                    let outcome = broadcast_to_kitty_sockets(&sockets, |socket| {
+                        let index = visited.len();
+                        visited.push(socket.to_owned());
+                        successes & (1 << index) != 0
+                    });
+                    assert_eq!(visited, sockets, "each socket must be tried exactly once");
+                    assert_eq!(
+                        outcome,
+                        match successes {
+                            0 => KittyBroadcastOutcome::AllFailed,
+                            7 => KittyBroadcastOutcome::AllSucceeded,
+                            _ => KittyBroadcastOutcome::PartialSuccess,
+                        }
+                    );
+                    outcomes.push((stage, outcome));
+                }
+                let result = ensure_kitty_reload(&outcomes);
+                assert_eq!(result.is_ok(), colors == 7 && opacity == 7);
+                if let Err(error) = result {
+                    let message = error.to_string();
+                    assert_eq!(message.contains("colors"), colors != 7);
+                    assert_eq!(message.contains("opacity"), opacity != 7);
+                    assert!(message.contains("Reload the config in Kitty"));
+                    assert!(message.contains("Files were not rolled back"));
+                }
+            }
+        }
+        assert!(ensure_kitty_reload(&[
+            ("colors", KittyBroadcastOutcome::NoSockets),
+            ("opacity", KittyBroadcastOutcome::NoSockets),
+        ])
+        .is_ok());
+    }
+
+    #[test]
+    fn kitty_preview_restore_reports_partial_reload() {
+        for outcome in [
+            KittyBroadcastOutcome::PartialSuccess,
+            KittyBroadcastOutcome::AllFailed,
+        ] {
+            let error = ensure_kitty_reload(&[("restored config", outcome)]).unwrap_err();
+            assert!(error.to_string().contains("restored config"));
+        }
+        for outcome in [
+            KittyBroadcastOutcome::NoSockets,
+            KittyBroadcastOutcome::AllSucceeded,
+        ] {
+            assert!(ensure_kitty_reload(&[("restored config", outcome)]).is_ok());
+        }
+    }
+
+    #[test]
+    fn kitty_commands_have_bounded_capture_and_cannot_read_picker_input() {
+        use crate::platform::process_output::Limits;
+        use std::time::Duration;
+        for (body, expected) in [
+            ("exit 0", true),
+            ("exit 7", false),
+            ("read value && exit 9; exit 0", true),
+            ("while :; do :; done", false),
+            ("while :; do printf PRIVATE_OUTPUT; done", false),
+        ] {
+            let mut command = Command::new("/bin/sh");
+            command.env_clear().args(["-c", body]);
+            assert_eq!(
+                kitty_command_succeeded_with_limits(
+                    &mut command,
+                    Limits {
+                        timeout: Duration::from_millis(200),
+                        max_output: 1024,
+                    }
+                ),
+                expected,
+                "{body}"
+            );
+        }
+        let home = tempfile::tempdir().unwrap();
+        let mut missing = Command::new(home.path().join("nonexistent-kitten"));
+        assert!(!kitty_command_succeeded(&mut missing));
+    }
+
+    #[test]
+    fn kitty_reload_rejects_invalid_opacity_before_sending_any_commands() {
+        for fault in ["invalid", "directory", "non-utf8"] {
+            let home = tempfile::tempdir().unwrap();
+            let env = SlateEnv::with_home(home.path().to_owned());
+            let config = ConfigManager::with_env(&env).unwrap();
+            let path = env.managed_file("current-opacity");
+            match fault {
+                "directory" => fs::create_dir(&path).unwrap(),
+                "non-utf8" => fs::write(&path, [0xff]).unwrap(),
+                _ => fs::write(&path, "not-an-opacity").unwrap(),
+            }
+            let error = reload_kitty_sockets(
+                &config,
+                &["fixture".into()],
+                |_| panic!("colors sent before validating opacity"),
+                |_, _| panic!("invalid opacity must not become Solid"),
+            )
+            .unwrap_err();
+            assert!(error
+                .to_string()
+                .contains("No Kitty update commands were sent"));
+            assert!(error.to_string().contains("slate doctor opacity"));
+            if fault == "directory" {
+                assert!(path.is_dir());
+            } else {
+                let expected: &[u8] = if fault == "non-utf8" {
+                    &[0xff]
+                } else {
+                    b"not-an-opacity"
+                };
+                assert_eq!(fs::read(&path).unwrap(), expected);
+            }
+            // Without any discovered instance, no read/error or commands are needed.
+            reload_kitty_sockets(
+                &config,
+                &[],
+                |_| panic!("no sockets"),
+                |_, _| panic!("no sockets"),
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn kitty_reload_uses_saved_opacity_and_keeps_missing_preference_default() {
+        use crate::opacity::OpacityPreset;
+        for saved in [
+            None,
+            Some(OpacityPreset::Solid),
+            Some(OpacityPreset::Frosted),
+            Some(OpacityPreset::Clear),
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            let env = SlateEnv::with_home(home.path().to_owned());
+            let config = ConfigManager::with_env(&env).unwrap();
+            if let Some(preset) = saved {
+                config.set_current_opacity_preset(preset).unwrap();
+            }
+            let calls = std::cell::RefCell::new(Vec::new());
+            reload_kitty_sockets(
+                &config,
+                &["fixture".into()],
+                |socket| {
+                    assert_eq!(socket, "fixture");
+                    calls.borrow_mut().push("colors");
+                    true
+                },
+                |socket, preset| {
+                    assert_eq!(socket, "fixture");
+                    assert_eq!(preset, saved.unwrap_or(OpacityPreset::Solid));
+                    calls.borrow_mut().push("opacity");
+                    true
+                },
+            )
+            .unwrap();
+            assert_eq!(*calls.borrow(), ["colors", "opacity"]);
+            assert_eq!(
+                env.managed_file("current-opacity").exists(),
+                saved.is_some()
+            );
+        }
     }
 
     /// contract: the trait-level `apply_theme_with_env` must honor

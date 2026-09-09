@@ -214,12 +214,15 @@ fn test_shell_loader_restore_removes_absent_auto_theme_watcher_from_baseline() {
     let baseline = begin_restore_point_baseline_with_env(&env).unwrap();
 
     let watcher = env.config_dir().join("managed/bin/slate-dark-mode-notify");
+    let helper = env.config_dir().join("managed/bin/slate-appearance-helper");
     std::fs::create_dir_all(watcher.parent().unwrap()).unwrap();
     std::fs::write(&watcher, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::write(&helper, "event helper fixture\n").unwrap();
 
     let receipt = execute_restore_with_env(&env, &baseline.id).unwrap();
     assert!(receipt.is_fully_successful());
     assert!(!watcher.exists());
+    assert!(!helper.exists());
 }
 
 // Regression: GitHub issue #3. A dotfile containing non-UTF-8 bytes must not abort

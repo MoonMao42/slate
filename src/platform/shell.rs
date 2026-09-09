@@ -24,6 +24,22 @@ pub fn detect_backend() -> ShellBackend {
     detect_backend_from_shell(std::env::var("SHELL").ok().as_deref())
 }
 
+/// A literal UTF-8 word for Fish source. Unlike POSIX single quotes, Fish
+/// interprets escaped backslashes and apostrophes inside single quotes.
+/// https://fishshell.com/docs/current/language.html#quotes
+pub(crate) fn fish_quote(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('\'');
+    for character in value.chars() {
+        if matches!(character, '\\' | '\'') {
+            quoted.push('\\');
+        }
+        quoted.push(character);
+    }
+    quoted.push('\'');
+    quoted
+}
+
 pub fn detect_backend_from_shell(shell: Option<&str>) -> ShellBackend {
     let Some(shell) = shell else {
         return ShellBackend::Unsupported;
@@ -64,6 +80,25 @@ pub fn capability_report() -> CapabilityReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fish_paths_quote_literals_without_posix_backslash_assumptions() {
+        for (input, expected) in [
+            ("", "''"),
+            ("plain space 中文", "'plain space 中文'"),
+            (r"two\\slashes", r"'two\\\\slashes'"),
+            (r"trailing\", r"'trailing\\'"),
+            (r"slash\'quote", r"'slash\\\'quote'"),
+            ("a'b", r"'a\'b'"),
+            (
+                "$HOME (literal) $(literal) `literal`;*?#[]",
+                "'$HOME (literal) $(literal) `literal`;*?#[]'",
+            ),
+            ("line\nnext\tcolumn", "'line\nnext\tcolumn'"),
+        ] {
+            assert_eq!(fish_quote(input), expected, "{input:?}");
+        }
+    }
 
     #[test]
     fn test_detect_backend_from_shell_recognizes_supported_shells() {

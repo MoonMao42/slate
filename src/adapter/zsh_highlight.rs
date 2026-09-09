@@ -7,47 +7,110 @@ use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
 use crate::detection;
 use crate::env::SlateEnv;
-use crate::error::{Result, SlateError};
+use crate::error::Result;
 use crate::theme::ThemeVariant;
-use std::fs;
 use std::path::PathBuf;
 
 /// zsh-syntax-highlighting adapter implementing the ToolAdapter trait.
 pub struct ZshHighlightAdapter;
 
 impl ZshHighlightAdapter {
-    /// Get home directory
-    fn home() -> Result<PathBuf> {
-        let env = SlateEnv::from_process()?;
-        let home = env.home().to_str().ok_or(SlateError::MissingHomeDir)?;
-        Ok(PathBuf::from(home))
-    }
-
     /// Build semantic map for ZSH_HIGHLIGHT_STYLES
     /// Maps palette colors to zsh-syntax-highlighting token types
     fn build_semantic_map() -> Vec<(&'static str, &'static str)> {
         vec![
-            ("mauve", "keyword"),
+            ("magenta", "reserved-word"),
             ("blue", "builtin"),
             ("green", "function"),
-            ("overlay1", "comment"),
-            ("red", "error"),
-            ("red", "arg0"),
-            ("yellow", "arg1"),
-            ("green", "string"),
-            ("yellow", "number"),
-            ("cyan", "reserved"),
-            ("magenta", "variable"),
-            ("white", "default"),
+            ("bright_black", "comment"),
+            ("red", "unknown-token"),
+            ("green", "arg0"),
+            ("green", "command"),
+            ("green", "single-quoted-argument"),
+            ("green", "double-quoted-argument"),
+            ("green", "dollar-quoted-argument"),
+            ("yellow", "single-hyphen-option"),
+            ("yellow", "double-hyphen-option"),
+            ("yellow", "redirection"),
+            ("cyan", "commandseparator"),
+            ("magenta", "dollar-double-quoted-argument"),
+            ("magenta", "command-substitution-delimiter"),
+            ("blue", "path"),
+            ("blue", "globbing"),
+            ("foreground", "default"),
         ]
     }
 
     fn render_highlight_styles(theme: &ThemeVariant) -> Result<String> {
-        PaletteRenderer::to_shell_vars_from_pairs(&theme.palette, &Self::build_semantic_map())
+        theme.palette.validate()?;
+        let mut map = Self::build_semantic_map();
+        for (palette_key, token) in &mut map {
+            if *token == "comment" {
+                *palette_key = Self::comment_color(theme).0;
+            }
+        }
+        let assignments = PaletteRenderer::to_shell_vars_from_pairs(&theme.palette, &map)?;
+        let keys = map
+            .iter()
+            .map(|(_, key)| format!("'{key}'"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        // The theme owns foregrounds, not personal backgrounds or decorations.
+        // An anonymous function keeps all bookkeeping local and uses no eval.
+        let mut output = format!(
+            r#"typeset -gA ZSH_HIGHLIGHT_STYLES
+() {{
+emulate -L zsh
+local _slate_key
+local -A _slate_saved
+local -a _slate_attrs
+for _slate_key in {keys}; do
+  _slate_attrs=("${{(@s:,:)ZSH_HIGHLIGHT_STYLES[$_slate_key]}}")
+  _slate_attrs=("${{(@)_slate_attrs:#fg=*}}")
+  _slate_attrs=("${{(@)_slate_attrs:#none}}")
+  _slate_attrs=("${{(@)_slate_attrs:#}}")
+  _slate_saved[$_slate_key]="${{(j:,:)_slate_attrs}}"
+done
+"#
+        );
+        output.push_str(
+            assignments
+                .strip_prefix("typeset -gA ZSH_HIGHLIGHT_STYLES\n")
+                .expect("shell renderer header"),
+        );
+        output.push_str(&format!(
+            r#"for _slate_key in {keys}; do
+  if [[ -n $_slate_saved[$_slate_key] ]]; then
+    ZSH_HIGHLIGHT_STYLES[$_slate_key]+=",${{_slate_saved[$_slate_key]}}"
+  fi
+done
+}}
+"#
+        ));
+        Ok(output)
     }
 
-    fn managed_config_path_with_env(env: &SlateEnv) -> PathBuf {
-        env.config_dir().join("managed").join("zsh")
+    fn comment_color(theme: &ThemeVariant) -> (&'static str, &str) {
+        let p = &theme.palette;
+        // Keep the original subdued shade when legible; prefer other native
+        // grays before falling back to body text. Transparency is not modeled.
+        [
+            ("bright_black", Some(&p.bright_black)),
+            ("overlay2", p.overlay2.as_ref()),
+            ("subtext0", p.subtext0.as_ref()),
+            ("subtext1", p.subtext1.as_ref()),
+        ]
+        .into_iter()
+        .find_map(|(key, color)| {
+            color
+                .filter(|color| crate::wcag::contrast_hex(color, &p.background) >= 4.5)
+                .map(|color| (key, color.as_str()))
+        })
+        .unwrap_or(("foreground", p.foreground.as_str()))
+    }
+
+    pub fn theme_path(env: &SlateEnv) -> PathBuf {
+        env.managed_file("managed/zsh/highlight-styles.sh")
     }
 }
 
@@ -57,12 +120,15 @@ impl ToolAdapter for ZshHighlightAdapter {
     }
 
     fn is_installed(&self) -> Result<bool> {
-        Ok(detection::detect_tool_presence(self.tool_name()).installed)
+        self.is_installed_with_env(&SlateEnv::from_process()?)
+    }
+
+    fn is_installed_with_env(&self, env: &SlateEnv) -> Result<bool> {
+        Ok(detection::detect_tool_presence_with_env(self.tool_name(), env).installed)
     }
 
     fn integration_config_path(&self) -> Result<PathBuf> {
-        let home = Self::home()?;
-        Ok(home.join(".zshrc"))
+        Ok(SlateEnv::from_process()?.zshrc_path())
     }
 
     fn managed_config_path(&self) -> PathBuf {
@@ -87,12 +153,12 @@ impl ToolAdapter for ZshHighlightAdapter {
         // Step 1: Build semantic map for ZSH_HIGHLIGHT_STYLES
         let highlight_styles = Self::render_highlight_styles(theme)?;
 
-        // Step 3: Write to managed config directory
-        let managed_dir = Self::managed_config_path_with_env(env);
-        fs::create_dir_all(&managed_dir)?;
-
-        let highlight_file = managed_dir.join("highlight-styles.sh");
-        crate::config::atomic_write_synced(&highlight_file, highlight_styles.as_bytes())?;
+        super::managed_fragment::write(
+            env,
+            &Self::theme_path(env),
+            highlight_styles.as_bytes(),
+            "Zsh highlighting",
+        )?;
 
         // zsh-syntax-highlighting styles are sourced during shell init;
         // already-running shells won't pick up new colors until restart.
@@ -114,6 +180,159 @@ impl ToolAdapter for ZshHighlightAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    #[test]
+    fn zsh_foreground_sync_preserves_decorations_and_has_no_bookkeeping_leaks() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("styles.zsh");
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        fs::write(
+            &path,
+            ZshHighlightAdapter::render_highlight_styles(&theme).unwrap(),
+        )
+        .unwrap();
+        let output = assert_cmd::Command::new("/bin/zsh")
+            .env_clear().env("HOME", temp.path()).env("PATH", temp.path()).current_dir(temp.path())
+            .args(["-f", "-c", r#"
+typeset -A ZSH_HIGHLIGHT_STYLES
+ZSH_HIGHLIGHT_STYLES[path]='fg=red,underline,bg=#101010'
+ZSH_HIGHLIGHT_STYLES[unknown-token]='none,fg=yellow,bold'
+ZSH_HIGHLIGHT_STYLES[default]=none
+ZSH_HIGHLIGHT_STYLES[function]='fg=red,$(print BAD > MARKER)'
+ZSH_HIGHLIGHT_STYLES[custom-fixture]=italic
+ZSH_HIGHLIGHT_HIGHLIGHTERS=(main brackets)
+_slate_key=PRIVATE_KEY
+typeset -A _slate_saved; _slate_saved[fixture]=PRIVATE_SAVED
+_slate_attrs=(PRIVATE_ATTR)
+source "$1" || exit 71
+first="${(kv)ZSH_HIGHLIGHT_STYLES}"
+source "$1" || exit 72
+[[ "$first" == "${(kv)ZSH_HIGHLIGHT_STYLES}" ]] || exit 73
+[[ $_slate_key == PRIVATE_KEY && $_slate_saved[fixture] == PRIVATE_SAVED && $_slate_attrs[1] == PRIVATE_ATTR ]] || exit 74
+[[ $ZSH_HIGHLIGHT_STYLES[custom-fixture] == italic && "$ZSH_HIGHLIGHT_HIGHLIGHTERS" == 'main brackets' ]] || exit 75
+print -r -- $ZSH_HIGHLIGHT_STYLES[path]
+print -r -- $ZSH_HIGHLIGHT_STYLES[unknown-token]
+print -r -- $ZSH_HIGHLIGHT_STYLES[default]
+print -r -- $ZSH_HIGHLIGHT_STYLES[function]
+"#, "private-styles"]).arg(&path).timeout(std::time::Duration::from_secs(5))
+            .assert().success().stderr("").get_output().stdout.clone();
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            format!(
+                "fg={},underline,bg=#101010\nfg={},bold\nfg={}\nfg={},$(print BAD > MARKER)\n",
+                theme.palette.blue,
+                theme.palette.red,
+                theme.palette.foreground,
+                theme.palette.green
+            )
+        );
+        assert!(!temp.path().join("MARKER").exists());
+    }
+
+    #[test]
+    fn zsh_comments_remain_legible_against_each_opaque_theme_background() {
+        let mut failures = Vec::new();
+        for theme in crate::theme::ThemeRegistry::new().unwrap().all() {
+            let styles = ZshHighlightAdapter::render_highlight_styles(theme).unwrap();
+            let line = styles
+                .lines()
+                .find(|line| line.starts_with("ZSH_HIGHLIGHT_STYLES[comment]="))
+                .unwrap();
+            let color = line.split_once("fg=").unwrap().1.trim_end_matches('\'');
+            let contrast = crate::wcag::contrast_hex(color, &theme.palette.background);
+            if contrast < 4.5 {
+                failures.push(format!("{}: {contrast:.2}", theme.id));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "Low-contrast comments: {}",
+            failures.join(", ")
+        );
+    }
+
+    #[test]
+    #[ignore = "requires explicit SLATE_ZSH_HIGHLIGHT_PLUGIN; private non-executed input buffers"]
+    fn zsh_native_highlighter_uses_palette_for_builtin_quotes_and_unknown_commands() {
+        let plugin = fs::canonicalize(
+            std::env::var_os("SLATE_ZSH_HIGHLIGHT_PLUGIN").expect("set plugin explicitly"),
+        )
+        .unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let styles = temp.path().join("styles.zsh");
+        for theme in crate::theme::ThemeRegistry::new().unwrap().all() {
+            let rendered = ZshHighlightAdapter::render_highlight_styles(theme).unwrap();
+            for (_, key) in ZshHighlightAdapter::build_semantic_map() {
+                assert!(
+                    rendered.contains(&format!("ZSH_HIGHLIGHT_STYLES[{key}]=")),
+                    "{} missing {key}",
+                    theme.id
+                );
+            }
+            fs::write(&styles, rendered).unwrap();
+            let output = assert_cmd::Command::new("/bin/zsh")
+                .env_clear()
+                .env("HOME", temp.path())
+                .env("PATH", temp.path())
+                .current_dir(temp.path())
+                .args([
+                    "-f",
+                    "-c",
+                    r#"
+source "$1" || exit 71
+ZSH_HIGHLIGHT_STYLES[custom-fixture]=bold
+source "$2" || exit 72
+[[ $ZSH_HIGHLIGHT_STYLES[custom-fixture] == bold ]] || exit 73
+PREBUFFER=''; CONTEXT=start
+BUFFER='print "hello"'; CURSOR=$#BUFFER; region_highlight=()
+_zsh_highlight_highlighter_main_paint
+print -rl -- $region_highlight
+BUFFER='slate_missing_fixture'; CURSOR=$#BUFFER; region_highlight=()
+_zsh_highlight_highlighter_main_paint
+print -rl -- $region_highlight
+setopt interactivecomments
+# The normal dispatcher snapshots options before calling the painter. Mirror
+# that input here because this fixture calls the native painter directly.
+typeset -A zsyh_user_options
+zsyh_user_options=("${(kv)options[@]}")
+BUFFER='# note'; CURSOR=$#BUFFER; region_highlight=()
+_zsh_highlight_highlighter_main_paint
+print -rl -- $region_highlight
+"#,
+                    "private-highlight",
+                ])
+                .arg(&plugin)
+                .arg(&styles)
+                .timeout(std::time::Duration::from_secs(5))
+                .assert()
+                .success()
+                .stderr("")
+                .get_output()
+                .stdout
+                .clone();
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(&format!(
+                    "0 6 fg={}",
+                    ZshHighlightAdapter::comment_color(theme).1.to_lowercase()
+                )),
+                "{} comment: {output:?}",
+                theme.id
+            );
+            for (span, color) in [
+                ("0 5", &theme.palette.blue),
+                ("6 13", &theme.palette.green),
+                ("0 21", &theme.palette.red),
+            ] {
+                assert!(
+                    output.contains(&format!("{span} fg={}", color.to_lowercase())),
+                    "{} {span}: {output:?}",
+                    theme.id
+                );
+            }
+        }
+    }
 
     #[test]
     fn test_tool_name() {
@@ -155,8 +374,7 @@ mod tests {
     fn test_semantic_map_has_expected_keys() {
         let map = ZshHighlightAdapter::build_semantic_map();
         assert!(!map.is_empty());
-        // Verify at least keyword token type is present
-        let has_keyword = map.iter().any(|(_, token)| *token == "keyword");
+        let has_keyword = map.iter().any(|(_, token)| *token == "reserved-word");
         assert!(has_keyword);
     }
 
@@ -172,8 +390,8 @@ mod tests {
             .filter(|(palette_key, _)| *palette_key == "green")
             .count();
 
-        assert_eq!(red_count, 2);
-        assert_eq!(green_count, 2);
+        assert_eq!(red_count, 1);
+        assert_eq!(green_count, 6);
     }
 
     #[test]
@@ -181,18 +399,79 @@ mod tests {
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
         let styles = ZshHighlightAdapter::render_highlight_styles(&theme).unwrap();
 
-        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[error]='fg=#"));
+        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[unknown-token]='fg=#"));
         assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[arg0]='fg=#"));
         assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[function]='fg=#"));
-        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[string]='fg=#"));
+        assert!(styles.contains("ZSH_HIGHLIGHT_STYLES[single-quoted-argument]='fg=#"));
     }
 
     #[test]
-    fn test_apply_theme_creates_highlight_styles_file() {
-        // This is an integration test; verify the structure exists
-        let adapter = ZshHighlightAdapter;
-        assert_eq!(adapter.tool_name(), "zsh-syntax-highlighting");
-        // Actual file writing would require mocking filesystem
+    fn zsh_apply_writes_only_the_injected_snippet_and_preserves_startup() {
+        use std::os::unix::fs::MetadataExt;
+        let home = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(home.path().to_owned());
+        let startup = env.zshrc_path();
+        fs::write(&startup, "# PRIVATE STARTUP\n").unwrap();
+        let original = fs::metadata(&startup).unwrap();
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        let result = ToolAdapter::apply_theme_with_env(&ZshHighlightAdapter, &theme, &env).unwrap();
+        assert!(matches!(
+            result,
+            ApplyOutcome::Applied {
+                requires_new_shell: true
+            }
+        ));
+        assert_eq!(
+            fs::read_to_string(ZshHighlightAdapter::theme_path(&env)).unwrap(),
+            ZshHighlightAdapter::render_highlight_styles(&theme).unwrap()
+        );
+        assert_eq!(fs::read_to_string(&startup).unwrap(), "# PRIVATE STARTUP\n");
+        assert_eq!(fs::metadata(&startup).unwrap().ino(), original.ino());
+        assert!(!env.managed_file("current").exists());
+        assert!(!env.managed_file("config.toml").exists());
+        assert!(!env.managed_file("managed/shell").exists());
+        assert!(!env.slate_cache_dir().exists());
+    }
+
+    #[test]
+    fn zsh_apply_refuses_linked_oversized_and_invalid_inputs_without_overwriting() {
+        use std::os::unix::fs::{symlink, MetadataExt};
+        let home = tempfile::tempdir().unwrap();
+        let env = SlateEnv::with_home(home.path().to_owned());
+        let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
+        let path = ZshHighlightAdapter::theme_path(&env);
+        let personal = env.zshrc_path();
+        fs::write(&personal, "# PRIVATE STARTUP\n").unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        symlink(&personal, &path).unwrap();
+        assert!(ZshHighlightAdapter
+            .apply_theme_with_env(&theme, &env)
+            .is_err());
+        assert!(fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read_to_string(&personal).unwrap(),
+            "# PRIVATE STARTUP\n"
+        );
+        fs::remove_file(&path).unwrap();
+        let size = crate::config::file_read::MAX_TOOL_CONFIG_BYTES + 1;
+        fs::File::create(&path).unwrap().set_len(size).unwrap();
+        let original = fs::metadata(&path).unwrap();
+        assert!(ZshHighlightAdapter
+            .apply_theme_with_env(&theme, &env)
+            .is_err());
+        assert_eq!(fs::metadata(&path).unwrap().len(), size);
+        assert_eq!(fs::metadata(&path).unwrap().ino(), original.ino());
+        fs::remove_file(&path).unwrap();
+        let mut invalid = theme;
+        invalid.palette.foreground = "not a color".into();
+        assert!(ZshHighlightAdapter
+            .apply_theme_with_env(&invalid, &env)
+            .is_err());
+        assert!(!path.exists());
+        assert!(!env.slate_cache_dir().exists());
     }
 
     #[test]
