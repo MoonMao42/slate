@@ -32,12 +32,13 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
-      - name: Install Fish for native completion and shell checks
+      - name: Install shells for native completion and startup checks
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fish
+          sudo apt-get install -y --no-install-recommends fish zsh
           fish --version
+          zsh --version
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings

@@ -1,6 +1,5 @@
-//! SFX sink. Implements `EventSink` to intercept `BrandEvent`
-//! dispatches from the 40 Phase-18-planted sites and play subtle SFX.
-//! Contract (see ``):
+//! SFX sink. Implements `EventSink` to play subtle sounds for `BrandEvent`.
+//! Behavior:
 //! - 6 samples, 1-per-variant
 //! - PickerMove 50ms debounce
 //! - 60ms priority-fold window (SetupComplete > ApplyComplete > Failure > Success > Selection > Navigation)
@@ -8,8 +7,8 @@
 //! - `auto || quiet` → NoopSink
 //! - lives in `src/brand/` (not `src/cli/`)
 //! Implementation pattern: dedicated consumer thread + `std::sync::mpsc`
-//! channel + `recv_timeout(60ms)` coalesce loop (RESEARCH §8).
-//! Fire-and-forget subprocess playback (RESEARCH §2).
+//! channel + `recv_timeout(60ms)` coalesce loop.
+//! Fire-and-forget subprocess playback.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -85,8 +84,7 @@ impl PlayBackend for SubprocessPlayer {
 
 #[cfg(target_os = "macos")]
 fn spawn_platform_player(path: &Path) {
-    // Fire-and-forget — mirrors the shape of the soon-to-be-deleted
-    // src/cli/sound.rs:25-34.
+    // Playback must not block the menu.
     let _ = std::process::Command::new("afplay")
         .arg(path)
         .stdin(std::process::Stdio::null())
@@ -97,7 +95,7 @@ fn spawn_platform_player(path: &Path) {
 
 #[cfg(target_os = "linux")]
 fn spawn_platform_player(path: &Path) {
-    // Probe chain per RESEARCH §2 — first `.spawn().is_ok()` wins.
+    // First successfully spawned player wins.
     // `aplay -q` suppresses PCM-format chatter that would otherwise leak into
     // the picker's alt-screen (Pitfall 4).
     for player in ["pw-play", "paplay", "aplay"] {
@@ -252,7 +250,7 @@ fn coalesce_window(rx: &Receiver<Msg>, first: BrandEvent) -> (BrandEvent, Vec<Se
     (best, flush_acks)
 }
 
-/// Priority ranking per . Higher number wins the 60ms fold.
+/// Higher priority wins the 60ms fold.
 fn priority(e: &BrandEvent) -> u8 {
     match e {
         BrandEvent::SetupComplete => 6,
@@ -264,7 +262,7 @@ fn priority(e: &BrandEvent) -> u8 {
     }
 }
 
-/// Event → sample map per (one sample per top-level variant).
+/// One sample per top-level event variant.
 fn sample_for(e: &BrandEvent) -> Sample {
     match e {
         BrandEvent::SetupComplete => Sample::Hero,
@@ -366,6 +364,14 @@ mod tests {
         }
     }
 
+    fn wait_for_player(sink: &SoundSink) {
+        // Production flush is deliberately bounded for responsive exit. Tests
+        // wait for an explicit acknowledgment even on a busy CI scheduler.
+        let (tx, rx) = channel();
+        sink.tx.send(Msg::Flush(tx)).unwrap();
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
     #[test]
     fn routing_maps_each_brand_event_to_correct_sample() {
         let (mock, played) = MockPlayer::new();
@@ -374,17 +380,17 @@ mod tests {
         // Flush after each event so the test waits for the async player loop
         // instead of depending on CI thread scheduling and fixed sleeps.
         sink.dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
-        sink.flush();
+        wait_for_player(&sink);
         sink.dispatch(BrandEvent::Failure(FailureKind::ThemeApplyFailed));
-        sink.flush();
+        wait_for_player(&sink);
         sink.dispatch(BrandEvent::Navigation(NavKind::WizardNext));
-        sink.flush();
+        wait_for_player(&sink);
         sink.dispatch(BrandEvent::Selection(SelectKind::PickerEnter));
-        sink.flush();
+        wait_for_player(&sink);
         sink.dispatch(BrandEvent::SetupComplete);
-        sink.flush();
+        wait_for_player(&sink);
         sink.dispatch(BrandEvent::ApplyComplete);
-        sink.flush();
+        wait_for_player(&sink);
 
         let p = played.lock().unwrap().clone();
         assert_eq!(
@@ -408,7 +414,7 @@ mod tests {
         sink.dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
         sink.dispatch(BrandEvent::ApplyComplete);
         sink.dispatch(BrandEvent::SetupComplete);
-        sleep(Duration::from_millis(200));
+        wait_for_player(&sink);
         let p = played.lock().unwrap().clone();
         assert_eq!(
             p,
@@ -482,7 +488,7 @@ mod tests {
         sink.dispatch(BrandEvent::ApplyComplete);
         sleep(Duration::from_millis(5));
         sink.dispatch(BrandEvent::SetupComplete);
-        sleep(Duration::from_millis(200));
+        wait_for_player(&sink);
         let p = played.lock().unwrap().clone();
         assert_eq!(
             p,

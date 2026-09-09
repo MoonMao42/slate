@@ -72,6 +72,14 @@ impl Fixture {
     fn load(&self, binary: &Path, initial: Option<&str>) -> String {
         let mut cmd = assert_cmd::Command::new(binary);
         cmd.env_clear()
+            .env(
+                "LC_ALL",
+                if cfg!(target_os = "macos") {
+                    "en_US.UTF-8"
+                } else {
+                    "C.UTF-8"
+                },
+            )
             .env("HOME", self.env.home())
             .env("PATH", "/usr/bin:/bin")
             .env("XDG_CONFIG_HOME", self.env.xdg_config_home())

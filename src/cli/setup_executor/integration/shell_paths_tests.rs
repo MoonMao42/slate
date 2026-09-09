@@ -51,6 +51,15 @@ fn command(binary: &Path, env: &SlateEnv) -> assert_cmd::Command {
     let mut command = assert_cmd::Command::new(binary);
     command
         .env_clear()
+        // These fixtures exercise UTF-8 paths, not the shell's ASCII locale.
+        .env(
+            "LC_ALL",
+            if cfg!(target_os = "macos") {
+                "en_US.UTF-8"
+            } else {
+                "C.UTF-8"
+            },
+        )
         .env("HOME", env.home())
         .env("XDG_CONFIG_HOME", env.xdg_config_home())
         .env("XDG_CACHE_HOME", env.cache_dir())

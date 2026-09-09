@@ -96,6 +96,14 @@ impl Fixture {
         let mut command = assert_cmd::Command::new(binary);
         command
             .env_clear()
+            .env(
+                "LC_ALL",
+                if cfg!(target_os = "macos") {
+                    "en_US.UTF-8"
+                } else {
+                    "C.UTF-8"
+                },
+            )
             .env("HOME", self.env.home())
             .env("XDG_CONFIG_HOME", self.env.xdg_config_home())
             .env("XDG_CACHE_HOME", self.env.cache_dir())
