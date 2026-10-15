@@ -90,39 +90,6 @@ If the destination is a symlink, use the package manager that owns it (for Homeb
 <sub>* GitHub README recordings render silently; the installed CLI still plays the curated runtime SFX unless disabled.</sub>
 
 
-## Know which build you are trying
-
-The hub's **About This Build** page shows the running executable's path, embedded
-source tag, target, Cargo profile class/features and built-in theme/adapter/prompt
-capabilities. It returns to the main menu without changing settings. For support
-or when comparing an installed binary with a development build:
-
-```sh
-slate -V                         # short package version, unchanged
-slate --version                  # version plus embedded source tag and target/profile
-slate about                      # this executable and its compiled capabilities
-slate about --json               # read-only report, schema_version 1
-```
-
-The direct commands work without HOME, valid settings or Git, including while a
-configuration writer or preview recovery blocks mutations. They do not inspect
-installed tools, read personal configuration, run native probes or check for
-updates. Capability lists come from the compiled registries; they are not proof
-that an adapter is installed, configured or visually active. The executable path
-can expose your local username; review it before sharing the report. Unavailable
-paths/source tags are `null` in JSON, and non-UTF-8 paths are labeled as lossy.
-
-`fnv1a64-v1-…` is a non-cryptographic, build-time label over sorted relative paths
-and bytes of `src/**/*.rs`, Cargo manifest/lockfile, the build scripts and selected
-embedded resources (listed in `build_metadata.rs`). Unrelated docs, `.git`, build
-outputs, timestamps and absolute build paths are excluded. Missing, unreadable,
-symlinked or oversized inputs yield an unavailable tag, never a partial tag;
-scans are limited to 16,384 source-tree entries, 64 directory levels and 64 MiB.
-This is not a Git revision, signature, binary checksum or exact-artifact identity:
-toolchain, native helper and compiler settings can differ despite equal tags.
-Cargo-normalized feature names and Cargo's `debug`/`release` profile classification
-are separate labels. Packaged/normalized manifests can produce a different tag
-from the checkout; no repository is needed when running the compiled binary.
 ## Themes
 
 20 variants across 9 families: Catppuccin · Solarized · Tokyo Night · Rosé Pine · Kanagawa · Everforest · Dracula · Nord · Gruvbox.
