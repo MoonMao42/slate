@@ -65,35 +65,6 @@ If the destination is a symlink, use the package manager that owns it (for Homeb
   <sub>One command: <code>slate setup</code>.</sub>
 </p>
 
-## Try one change first
-
-Run `slate --help` and check that your executable offers `tools` and `prompt`.
-This guide describes this branch; older installed releases may lack these entries.
-If a command is missing, check which binary your terminal runs (`command -v slate`
-on macOS/Linux) before rerunning full setup.
-
-1. **Browse without applying:** `slate prompt --list` shows five illustrative
-   layouts; `slate tools` opens tool discovery. Opening details neither installs
-   software nor syncs colors. Samples are not screenshots of your current terminal.
-2. **Change only the prompt layout:** inspect `slate prompt classic --dry-run`,
-   then use `slate prompt classic` to review and confirm. This needs a saved theme
-   and the relevant integration; it does not install tools.
-3. **Sync one tool:** start with `slate tools info btop`, then
-   `slate tools sync btop --dry-run`. Review the paths before confirming
-   `slate tools sync btop`. The tool must be detected and a theme saved; sync does
-   not install software or edit shell startup files.
-   During confirmation, changes to target file contents, permissions or identity
-   invalidate the review. Reads are bounded to 8 MiB per file and 64 MiB total;
-   this recheck is not an atomic lock against external editors.
-4. **Undo a change:** find its recovery point with `slate restore --list`, inspect
-   `slate restore <ID> --dry-run`, then enter the restore flow with
-   `slate restore <ID>`. Replace `<ID>` with the actual listed ID. File recovery
-   does not automatically undo derived caches or running application state.
-
-Live preview in `slate theme` may temporarily write to several detected adapters;
-it is not read-only browsing. Esc restores preview files. `slate clean` removes
-integration rather than restoring your previous personal configuration. Change
-one thing, check its actual application behavior, then move to the next.
 
 ## What it does
 
