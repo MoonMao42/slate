@@ -50,13 +50,6 @@ cargo install slate-cli
 
 然后运行 `slate` 进入菜单；只有需要整套终端、字体和 Shell 接入时才运行 `slate setup`。
 
-通过脚本安装的版本，重新运行安装脚本即可升级。脚本会校验归档的 SHA-256，
-在目标目录内暂存新文件，然后原子替换旧版本；最后的重命名步骤之前失败时，
-旧可执行文件保持不变。若恰好在重命名瞬间中断，目标可能是旧版或完整的新版。
-它不会运行下载的程序，也不会修改 Slate 配置；
-升级成功后不保留旧可执行文件的备份。如果目标是符号链接，请使用管理它的包管理器
-（Homebrew 使用 `brew upgrade slate-cli`），或用 `SLATE_INSTALL_DIR` 选择独立目录。
-
 <p align="center">
   <img src="./assets/setup-demo.gif" alt="slate setup demo" width="600" />
   <br />
@@ -67,7 +60,6 @@ cargo install slate-cli
 ## 它做了什么
 
 - 一套配色同步到 Ghostty、Kitty、Alacritty、Neovim、Starship、bat、btop、Yazi、Zellij、delta、ls、eza、lazygit、fastfetch、tmux、zsh-syntax-highlighting。
-
 - 🌓 自动跟随系统深浅色：macOS 走原生 watcher，Linux 优先走 XDG Desktop Portal（GNOME 可退回 `gsettings`）。
 - 配色保存在独立文件中，只向现有配置添加必要的集成设置；支持快照和只读恢复预览，便于检查与撤销改动。
 - 所有命令共用一套视觉语言。标题、提示符号、树形结果都走同一个渲染契约，所以 `slate setup`、`slate status`、报错信息看起来都像出自一手。
@@ -86,6 +78,100 @@ cargo install slate-cli
 </p>
 
 <sub>* GitHub README 录屏无声；安装后的 CLI 仍会播放内置反馈音，除非手动关闭。</sub>
+
+## Neovim 同步跟随
+
+slate 内置 20 套对应全部主题家族的 Neovim 配色，切换主题时已打开的 buffer 当场重载。
+
+<p align="center">
+  <img src="./assets/nvim-before.png" alt="Neovim with Catppuccin Frappé" width="700" />
+</p>
+
+<p align="center">
+  <img src="./assets/nvim-after.png" alt="Neovim with Kanagawa Lotus" width="700" />
+</p>
+
+兼容 LazyVim、kickstart.nvim，或者一个裸 init.lua。
+
+## 自动深浅色
+
+```
+浅色模式 → 浅色主题 + 匹配的提示符、语法高亮、工具配色
+深色模式 → 深色主题 + 匹配的提示符、语法高亮、工具配色
+```
+
+从主菜单里开启（`slate` → Auto-Theme）。每个主题家族自带深浅色配对，也可以在主菜单里自己重新配对。
+
+## 支持情况
+
+官方构建目标：`x86_64-apple-darwin`、`aarch64-apple-darwin`、`x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu`。Linux 主要在 Debian/Ubuntu + GNOME 上验证。
+
+| 等级 | 平台 | 状态与说明 |
+|------|------|------------|
+| Tier 1 — 一线（每次发版 CI smoke test） | macOS（Apple Silicon + Intel） | Ghostty、Kitty、Alacritty、Terminal.app（部分支持——无 live preview、无透明度、字体无法自动应用）。 |
+| Tier 1 — 一线（每次发版 CI smoke test） | Debian / Ubuntu + GNOME（x86_64 + aarch64） | Ghostty、Kitty、Alacritty 全部接好；各自的热重载都跑通。 |
+| Tier 2 — 尽力而为（接好但不进 CI） | 其他 Linux 发行版（Fedora、Arch）以及其他桌面（KDE、Sway） | 主题仍能应用；热重载视所用终端而定。 |
+| Tier 3 — 不支持 | Windows | 没有支持计划。 |
+
+Shell：`zsh`、`bash`、`fish`。`zsh` 已在本机验证；`bash` 与 `fish` 已接入，尚待更大范围测试。
+
+<details>
+<summary><strong>各终端逐项状态</strong></summary>
+
+| 终端 | 状态 | 说明 |
+|------|------|------|
+| Ghostty | 最推荐 | 完整支持——热重载、透明度、watcher 自动拉起 |
+| Kitty | 完整 | `kitten @ set-colors` 实时推送；透明度 + Nerd Font 同步 |
+| Alacritty | 完整 | 行内预览与热重载 |
+| Terminal.app | 部分 | 仅 macOS；不支持 live preview、不支持透明度、字体无法自动更换 |
+| 其他 | 尽力而为 | Shell 与 CLI 工具层主题通用；终端自身视觉效果看其能力 |
+
+</details>
+
+<details>
+<summary><strong>全部命令</strong></summary>
+
+```bash
+slate                         # 交互式主菜单
+slate setup                   # 引导式配置
+slate setup --quick           # 非交互、默认值
+slate setup --only starship   # 单独重配某个工具
+slate theme                   # 带实时预览的主题选择器
+slate theme <name>            # 按名称应用
+slate theme --auto            # 跟随系统深浅色
+slate tools                   # 浏览、安装并同步 16 款工具配色
+slate prompt                  # 选择 Starship 提示符样式
+slate font                    # Nerd Font 选择器
+slate config set opacity frosted  # 透明度：solid / frosted / clear
+slate config set sound off    # 反馈音开关
+slate export                  # 把当前配置导成 URI
+slate import <uri>            # 从 URI 恢复配置
+slate share                   # 截取带水印的终端图
+slate status                  # 查看当前配置
+slate doctor ghostty          # 检查 Ghostty 配置问题
+slate list                    # 列出所有主题
+slate restore                 # 选一个快照回滚
+slate restore --list          # 列出所有回滚点
+slate clean                   # 清除 slate 写下的一切
+```
+
+</details>
+
+<details>
+<summary><strong>工作原理</strong></summary>
+
+slate 通过独立的 include 文件跟你现有的配置共存，不会替换你的 dotfile：
+
+```text
+~/.config/slate/config.toml        # 偏好（主题、字体、开关）
+~/.config/slate/auto.toml          # 深浅色配对
+~/.config/slate/managed/<tool>/*   # slate 自管的生成物
+~/.config/<tool>/...               # 你的原有配置，加上必要的集成设置
+```
+
+Ghostty 用 `config-file = ...`；Kitty/Alacritty 用 `include`/`import`；zsh/bash/fish 是 rc 文件里一段带明确 START/END 标记的代码块；Neovim 是 `init.lua`（或 `init.vim`）里一行 `pcall(require, 'slate')` —— slate 卸载后 pcall 自动降级为 no-op。slate 的文件归 slate 管，你自己的文件永远不动。
+
+</details>
 
 ## 主题
 
@@ -126,10 +212,6 @@ cargo install slate-cli
 
 </details>
 
-## 开发说明
-
-借助 AI 辅助开发，每一处改动都经过人工 review 和测试后才合入。
-
 ## 许可
 
 MIT。
@@ -137,4 +219,4 @@ MIT。
 ## 致谢
 
 站在一堆很棒的项目之上：
-[Ghostty](https://ghostty.org/) · [Kitty](https://sw.kovidgoyal.net/kitty/) · [Alacritty](https://github.com/alacritty/alacritty) · [Neovim](https://neovim.io/) · [Starship](https://github.com/starship/starship) · [bat](https://github.com/sharkdp/bat) · [delta](https://github.com/dandavison/delta) · [eza](https://github.com/eza-community/eza) · [lazygit](https://github.com/jesseduffield/lazygit) · [fastfetch](https://github.com/fastfetch-cli/fastfetch) · [tmux](https://github.com/tmux/tmux) · [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting) · [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts)。
+[Ghostty](https://ghostty.org/) · [Kitty](https://sw.kovidgoyal.net/kitty/) · [Alacritty](https://github.com/alacritty/alacritty) · [Neovim](https://neovim.io/) · [Starship](https://github.com/starship/starship) · [bat](https://github.com/sharkdp/bat) · [btop](https://github.com/aristocratos/btop) · [Yazi](https://github.com/sxyazi/yazi) · [Zellij](https://zellij.dev/) · [delta](https://github.com/dandavison/delta) · [eza](https://github.com/eza-community/eza) · [lazygit](https://github.com/jesseduffield/lazygit) · [fastfetch](https://github.com/fastfetch-cli/fastfetch) · [tmux](https://github.com/tmux/tmux) · [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting) · [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts)。

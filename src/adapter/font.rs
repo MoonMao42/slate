@@ -229,8 +229,9 @@ impl ToolAdapter for FontAdapter {
     }
 
     fn managed_config_path(&self) -> PathBuf {
-        let env = SlateEnv::from_process().expect("Failed to read environment");
-        env.config_dir().to_path_buf()
+        SlateEnv::from_process()
+            .map(|env| env.config_dir().to_path_buf())
+            .unwrap_or_else(|_| PathBuf::from(".config/slate"))
     }
 
     fn apply_strategy(&self) -> ApplyStrategy {

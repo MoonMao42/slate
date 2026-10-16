@@ -189,8 +189,7 @@ pub trait ToolAdapter: Send + Sync {
     /// (`integration_config_path`, `managed_config_path`) without any call to
     /// `SlateEnv::from_process()`. That in turn lets integration tests assert
     /// real file-level rollback against the injected env with zero
-    /// `std::env::set_var` — closing the "signature lie" that
-    /// Gemini's review surfaced.
+    /// `std::env::set_var`.
     /// Adapters that write files must override this method. The default is
     /// only appropriate for pure signal/no-op adapters that do not resolve
     /// user paths during apply.

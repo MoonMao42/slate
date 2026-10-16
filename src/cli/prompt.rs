@@ -142,6 +142,9 @@ pub fn handle(env: &SlateEnv, options: &PromptOptions) -> Result<()> {
     if options.list {
         return print_catalog_options(options);
     }
+    if interactive() {
+        super::ui_language::load_saved_ui_language(env)?;
+    }
     let Some(style) = options.style else {
         return handle_menu(env);
     };

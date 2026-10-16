@@ -104,6 +104,7 @@ pub(super) fn handle(env: &SlateEnv) -> Result<()> {
     if !interactive() {
         return print_catalog(false);
     }
+    crate::cli::ui_language::load_saved_ui_language(env)?;
     let mut page = None;
     let result = handle_pages(env, &mut page);
     match page {

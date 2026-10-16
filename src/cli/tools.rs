@@ -101,6 +101,9 @@ pub fn validate_options(options: &ToolsOptions) -> Result<()> {
 
 pub fn handle(env: &SlateEnv, options: &ToolsOptions) -> Result<()> {
     validate_options(options)?;
+    if interactive() {
+        super::ui_language::load_saved_ui_language(env)?;
+    }
     match &options.command {
         Some(ToolsCommand::Install {
             tool,
@@ -131,6 +134,9 @@ pub(super) fn handle_hub_menu(env: &SlateEnv) -> Result<()> {
 fn menu(env: &SlateEnv, from_hub: bool) -> Result<()> {
     if !interactive() {
         return inventory::print(env, false);
+    }
+    if !from_hub {
+        super::ui_language::load_saved_ui_language(env)?;
     }
     let mut last_opened = None;
     loop {

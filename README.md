@@ -50,15 +50,6 @@ cargo install slate-cli
 
 Then run `slate` to open the menu. Use `slate setup` when you want the full terminal, font, and shell integration workflow.
 
-To upgrade a script-installed copy, rerun the install script. It verifies the
-archive's SHA-256, stages the new executable beside the destination, then replaces
-the old file atomically. Failures before the final rename leave the previous
-executable in place. An interruption at the rename boundary may leave either the
-old or the complete new executable. It does not run the downloaded binary or change
-your Slate configuration. A successful upgrade does not keep a backup executable.
-If the destination is a symlink, use the package manager that owns it (for Homebrew,
-`brew upgrade slate-cli`) or choose a separate directory with `SLATE_INSTALL_DIR`.
-
 <p align="center">
   <img src="./assets/setup-demo.gif" alt="slate setup demo" width="600" />
   <br />
@@ -69,7 +60,6 @@ If the destination is a symlink, use the package manager that owns it (for Homeb
 ## What it does
 
 - One palette across Ghostty, Kitty, Alacritty, Neovim, Starship, bat, btop, Yazi, Zellij, delta, ls, eza, lazygit, fastfetch, tmux, and zsh-syntax-highlighting.
-
 - 🌓 Auto dark/light pairing — native watcher on macOS, XDG Desktop Portal (with GNOME fallback) on Linux.
 - Colors live in managed files, with small integration edits to your existing configuration. Snapshots and read-only restore previews help you inspect and recover changes.
 - One visual language across every command. Headings, severity markers, and tree receipts all flow through the same render contract, so `slate setup`, `slate status`, and an error message all look like they came from the same tool.
@@ -89,6 +79,99 @@ If the destination is a symlink, use the package manager that owns it (for Homeb
 
 <sub>* GitHub README recordings render silently; the installed CLI still plays the curated runtime SFX unless disabled.</sub>
 
+## Neovim follows along
+
+Slate ships 20 Neovim colorschemes mirroring every terminal family and reloads open buffers the moment you switch.
+
+<p align="center">
+  <img src="./assets/nvim-before.png" alt="Neovim with Catppuccin Frappé" width="700" />
+</p>
+
+<p align="center">
+  <img src="./assets/nvim-after.png" alt="Neovim with Kanagawa Lotus" width="700" />
+</p>
+
+Works with LazyVim, kickstart.nvim, or a bare init.lua.
+
+## Auto-theme
+
+```
+Light mode  →  your light theme + matching prompt, syntax, tools
+Dark mode   →  your dark theme + matching prompt, syntax, tools
+```
+
+Enable from the hub (`slate` → Auto-Theme). Every theme family ships a built-in dark/light pair, and you can override the pairing there too.
+
+## Support
+
+Official targets: `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`. Linux is validated on Debian/Ubuntu + GNOME.
+
+| Tier | Platform | Status & Notes |
+|------|----------|----------------|
+| Tier 1 — first-class (CI smoke-tested every release) | macOS (Apple Silicon + Intel) | Ghostty, Kitty, Alacritty, Terminal.app (partial — no live preview, no opacity, font cannot auto-apply). |
+| Tier 1 — first-class (CI smoke-tested every release) | Debian / Ubuntu + GNOME (x86_64 + aarch64) | Ghostty, Kitty, Alacritty all wired up; live reload works on each. |
+| Tier 2 — best effort (wired up, not in CI) | Other Linux distros (Fedora, Arch) and other desktops (KDE, Sway) | Themes still apply; live reload depends on the terminal you run. |
+| Tier 3 — out of scope | Windows | No plans to support. |
+
+Shells: `zsh`, `bash`, `fish`. `zsh` is locally verified; `bash` and `fish` are wired up but pending broader testing.
+
+<details>
+<summary><strong>Per-terminal status</strong></summary>
+
+| Terminal | Status | Notes |
+|----------|--------|-------|
+| Ghostty | Recommended | Full support — live reload, opacity, watcher relaunch |
+| Kitty | Full | Live palette push via `kitten @ set-colors`; opacity + Nerd Font sync |
+| Alacritty | Full | Inline preview and reload |
+| Terminal.app | Partial | macOS only — no live preview, no opacity, font cannot be auto-applied |
+| Other | Best effort | Shell and CLI tool theming works; terminal visuals depend on the app |
+
+</details>
+
+<details>
+<summary><strong>All commands</strong></summary>
+
+```bash
+slate                         # interactive hub
+slate setup                   # guided setup
+slate setup --quick           # non-interactive, defaults
+slate setup --only starship   # retry a single tool
+slate theme                   # live preview picker
+slate theme <name>            # apply by name
+slate theme --auto            # follow system dark/light
+slate tools                   # browse, install, and sync 16 tools
+slate prompt                  # choose Starship prompt layout
+slate font                    # Nerd Font picker
+slate config set opacity frosted  # solid / frosted / clear
+slate config set sound off    # toggle feedback sound
+slate export                  # export current config as URI
+slate import <uri>            # re-apply from URI
+slate share                   # screenshot terminal with watermark
+slate status                  # show current config
+slate doctor ghostty          # inspect Ghostty config issues
+slate list                    # list available themes
+slate restore                 # pick a snapshot to roll back
+slate restore --list          # list restore points
+slate clean                   # remove everything slate wrote
+```
+
+</details>
+
+<details>
+<summary><strong>How it works</strong></summary>
+
+Slate composes managed config files alongside your existing setup rather than replacing your dotfiles.
+
+```text
+~/.config/slate/config.toml        # preferences (theme, font, toggles)
+~/.config/slate/auto.toml          # dark/light theme pairing
+~/.config/slate/managed/<tool>/*   # generated assets slate owns
+~/.config/<tool>/...               # your existing configs, with targeted integration edits
+```
+
+For Ghostty: `config-file = ...`. For Kitty/Alacritty: managed `include`/`import` entries. For zsh/bash/fish: a removable marker block in the shell rc. For Neovim: a `pcall(require, 'slate')` marker block in `init.lua` (`init.vim` works too) that falls back silently if slate is uninstalled. Slate-owned files stay slate-owned; yours stay yours.
+
+</details>
 
 ## Themes
 
@@ -129,10 +212,6 @@ Regenerate with `scripts/render-theme-gallery.sh`; future drift is caught by `te
 
 </details>
 
-## Development
-
-Built with AI assistance, with every change reviewed and tested by a human before it lands.
-
 ## License
 
 MIT.
@@ -140,4 +219,4 @@ MIT.
 ## Credits
 
 Built on top of great work from others:
-[Ghostty](https://ghostty.org/) · [Kitty](https://sw.kovidgoyal.net/kitty/) · [Alacritty](https://github.com/alacritty/alacritty) · [Neovim](https://neovim.io/) · [Starship](https://github.com/starship/starship) · [bat](https://github.com/sharkdp/bat) · [delta](https://github.com/dandavison/delta) · [eza](https://github.com/eza-community/eza) · [lazygit](https://github.com/jesseduffield/lazygit) · [fastfetch](https://github.com/fastfetch-cli/fastfetch) · [tmux](https://github.com/tmux/tmux) · [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting) · [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts).
+[Ghostty](https://ghostty.org/) · [Kitty](https://sw.kovidgoyal.net/kitty/) · [Alacritty](https://github.com/alacritty/alacritty) · [Neovim](https://neovim.io/) · [Starship](https://github.com/starship/starship) · [bat](https://github.com/sharkdp/bat) · [btop](https://github.com/aristocratos/btop) · [Yazi](https://github.com/sxyazi/yazi) · [Zellij](https://zellij.dev/) · [delta](https://github.com/dandavison/delta) · [eza](https://github.com/eza-community/eza) · [lazygit](https://github.com/jesseduffield/lazygit) · [fastfetch](https://github.com/fastfetch-cli/fastfetch) · [tmux](https://github.com/tmux/tmux) · [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting) · [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts).

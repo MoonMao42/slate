@@ -13,11 +13,7 @@ use serde::Serialize;
 use setup_executor::ToolInstallMethod;
 
 fn wording(zh: &'static str, en: &'static str) -> &'static str {
-    if super::interactive() {
-        super::super::ui_language::tr(zh, en)
-    } else {
-        en
-    }
+    crate::config::ui_language::Text { zh, en }.get(super::super::ui_language::output_language())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -100,9 +96,9 @@ fn prepare_with(
 
 fn render_prepared(prepared: &PreparedInstall) -> String {
     let mut display = prepared.review.clone();
-    if super::interactive() {
+    if super::super::ui_language::is_interactive_output() {
         if let Some(plan) = &prepared.plan {
-            let language = super::super::ui_language::current();
+            let language = super::super::ui_language::output_language();
             display.route = plan.description_in(display.tool, language);
             display.fallback = plan.fallback_description_in(language);
         }
@@ -202,12 +198,12 @@ fn completion(
     method: &ToolInstallMethod,
     presence: &crate::detection::ToolPresence,
 ) -> Result<String> {
-    let language = if super::interactive() {
-        super::super::ui_language::current()
-    } else {
-        crate::config::ui_language::UiLanguage::English
-    };
-    completion_in_language(id, method, presence, language)
+    completion_in_language(
+        id,
+        method,
+        presence,
+        super::super::ui_language::output_language(),
+    )
 }
 
 fn completion_in_language(

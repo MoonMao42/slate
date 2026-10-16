@@ -15,7 +15,7 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -36,9 +36,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fish zsh
+          sudo apt-get install -y --no-install-recommends fish zsh tmux
           fish --version
           zsh --version
+          tmux -V
 
       - name: Clippy
         run: cargo clippy --locked --profile local-check --all-targets -- -D warnings
@@ -58,7 +59,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           RUST_TEST_THREADS: '2'
-        run: cargo test --locked --profile local-check --quiet --no-fail-fast --features has-nvim,has-fish
+        run: cargo test --locked --profile local-check --quiet --no-fail-fast --features has-nvim,has-fish,has-tmux
 
       - name: Install script smoke test
         run: bash tests/install-script-smoke.sh

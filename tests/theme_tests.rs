@@ -1,11 +1,7 @@
 use slate_cli::theme::ThemeRegistry;
 
-/// `slate demo` command has been retired. Re-adding a Demo
-/// variant to the `Commands` enum (or an `emit_demo_hint_once` call site)
-/// would silently resurrect DEMO-02 and betray the CONTEXT
-/// §domain "Gemini: previewing is a purchasing behavior, not a possession
-/// behavior". This test locks the absence of the symbols at the source
-/// level (sibling to `brand::migration::tests::no_raw_styling_ansi_...`).
+/// `slate demo` command has been retired. This test locks the absence of
+/// the retired symbols at the source level.
 #[test]
 fn slate_demo_surface_stays_retired_post_phase_19() {
     use std::fs;

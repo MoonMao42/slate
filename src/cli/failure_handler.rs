@@ -190,8 +190,7 @@ impl ExecutionSummary {
     }
 
     pub fn format_completion_message_for_terminal(&self, terminal: &TerminalProfile) -> String {
-        use std::io::IsTerminal;
-        if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        if super::ui_language::is_interactive_output() {
             return self.compact_completion(terminal, super::ui_language::output_language());
         }
         let mut output = String::new();

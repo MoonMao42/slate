@@ -177,6 +177,14 @@ fn show_recovery_hub_once(
 
 /// Compact, aligned status rows. Only the theme value carries an accent;
 /// repeated bullets, pills and italic font names distract from the menu.
+const HUB_STATUS_LABEL_WIDTH: usize = 8;
+
+fn format_hub_status_row(label: &str, value: impl std::fmt::Display) -> String {
+    let width = console::measure_text_width(label);
+    let spaces = HUB_STATUS_LABEL_WIDTH.saturating_sub(width).max(1);
+    format!("{label}{:spaces$}{value}", "")
+}
+
 fn format_hub_status_panel(
     r: &Roles<'_>,
     theme_name: &str,
@@ -191,13 +199,9 @@ fn format_hub_status_panel(
         other => other,
     };
     vec![
-        format!("{}    {}", tr("主题", "Theme"), r.theme_name(theme_name)),
-        format!("{}  {opacity}", tr("透明度", "Opacity")),
-        format!(
-            "{}    {}",
-            tr("字体", "Font"),
-            font.unwrap_or(tr("未设置", "Not set"))
-        ),
+        format_hub_status_row(tr("主题", "Theme"), r.theme_name(theme_name)),
+        format_hub_status_row(tr("透明度", "Opacity"), opacity),
+        format_hub_status_row(tr("字体", "Font"), font.unwrap_or(tr("未设置", "Not set"))),
     ]
 }
 
@@ -306,7 +310,7 @@ fn show_hub_once(
         );
         if let Some(style) = saved.prompt_style {
             let label = tr(super::prompt::menu_style_label(style), style.label());
-            lines.push(format!("{}  {label}", tr("提示符", "Prompt")));
+            lines.push(format_hub_status_row(tr("提示符", "Prompt"), label));
         }
         let terminal = console::Term::stderr();
         for line in lines {
@@ -1057,6 +1061,33 @@ mod tests {
                 );
             }
         }
+
+        std::thread::spawn(move || {
+            use crate::config::ui_language::{self, UiLanguage};
+            let home = TempDir::new().unwrap();
+            let env = SlateEnv::with_home(home.path().to_owned());
+            ui_language::save(&env, UiLanguage::English).unwrap();
+            super::super::ui_language::load_saved_ui_language(&env).unwrap();
+            let ctx = mock_context_with_mode(&theme, RenderMode::None);
+            let r = Roles::new(&ctx);
+            let mut lines =
+                format_hub_status_panel(&r, "Catppuccin Mocha", "Solid", Some("JetBrains Mono"));
+            lines.push(format_hub_status_row(tr("提示符", "Prompt"), "Minimal"));
+            assert_eq!(
+                lines.join("\n"),
+                "Theme   Catppuccin Mocha\nOpacity Solid\nFont    JetBrains Mono\nPrompt  Minimal"
+            );
+            for (line, value) in
+                lines
+                    .iter()
+                    .zip(["Catppuccin Mocha", "Solid", "JetBrains Mono", "Minimal"])
+            {
+                let prefix = line.strip_suffix(value).expect("row ends with value");
+                assert_eq!(console::measure_text_width(prefix), HUB_STATUS_LABEL_WIDTH);
+            }
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]
