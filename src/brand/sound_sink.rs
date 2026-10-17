@@ -127,6 +127,8 @@ fn spawn_platform_player(_path: &Path) {
 enum Msg {
     Event(BrandEvent),
     Flush(Sender<()>),
+    #[cfg(test)]
+    Gate(Receiver<()>),
 }
 
 /// The sound sink. `install` wires it into the EventSink
@@ -213,6 +215,11 @@ fn player_loop<P: PlayBackend>(rx: Receiver<Msg>, backend: P) {
                 let _ = ack.send(());
                 continue;
             }
+            #[cfg(test)]
+            Ok(Msg::Gate(release)) => {
+                let _ = release.recv();
+                continue;
+            }
             Err(_) => return,
         };
         let (best, flush_acks) = coalesce_window(&rx, first);
@@ -236,6 +243,17 @@ fn coalesce_window(rx: &Receiver<Msg>, first: BrandEvent) -> (BrandEvent, Vec<Se
     let mut best = first;
     let mut flush_acks = Vec::new();
     loop {
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                Msg::Event(next) if priority(&next) > priority(&best) => best = next,
+                Msg::Event(_) => {}
+                Msg::Flush(ack) => flush_acks.push(ack),
+                #[cfg(test)]
+                Msg::Gate(release) => {
+                    let _ = release.recv();
+                }
+            }
+        }
         let now = Instant::now();
         if now >= deadline {
             break;
@@ -244,6 +262,10 @@ fn coalesce_window(rx: &Receiver<Msg>, first: BrandEvent) -> (BrandEvent, Vec<Se
             Ok(Msg::Event(next)) if priority(&next) > priority(&best) => best = next,
             Ok(Msg::Event(_)) => {}
             Ok(Msg::Flush(ack)) => flush_acks.push(ack),
+            #[cfg(test)]
+            Ok(Msg::Gate(release)) => {
+                let _ = release.recv();
+            }
             Err(_) => break,
         }
     }
@@ -333,7 +355,6 @@ mod tests {
         dispatch, reset_sink_for_tests, FailureKind, NavKind, SelectKind, SuccessKind,
     };
     use std::sync::Mutex;
-    use std::thread::sleep;
 
     /// Serialize tests that mutate the global sink singleton. Prevents
     /// cross-test races in the shared lib-test process without relying on
@@ -370,6 +391,12 @@ mod tests {
         let (tx, rx) = channel();
         sink.tx.send(Msg::Flush(tx)).unwrap();
         rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    fn hold_player(sink: &SoundSink) -> Sender<()> {
+        let (tx, rx) = channel();
+        sink.tx.send(Msg::Gate(rx)).unwrap();
+        tx
     }
 
     #[test]
@@ -411,9 +438,11 @@ mod tests {
     fn priority_fold_picks_highest_in_60ms_window() {
         let (mock, played) = MockPlayer::new();
         let sink = SoundSink::with_backend_for_tests(mock);
+        let gate = hold_player(&sink);
         sink.dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
         sink.dispatch(BrandEvent::ApplyComplete);
         sink.dispatch(BrandEvent::SetupComplete);
+        drop(gate);
         wait_for_player(&sink);
         let p = played.lock().unwrap().clone();
         assert_eq!(
@@ -483,11 +512,11 @@ mod tests {
     fn setup_cascade_folds_to_setup_complete_hero() {
         let (mock, played) = MockPlayer::new();
         let sink = SoundSink::with_backend_for_tests(mock);
+        let gate = hold_player(&sink);
         sink.dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
-        sleep(Duration::from_millis(5));
         sink.dispatch(BrandEvent::ApplyComplete);
-        sleep(Duration::from_millis(5));
         sink.dispatch(BrandEvent::SetupComplete);
+        drop(gate);
         wait_for_player(&sink);
         let p = played.lock().unwrap().clone();
         assert_eq!(
@@ -501,6 +530,7 @@ mod tests {
     fn flush_waits_for_pending_coalesced_event() {
         let (mock, played) = MockPlayer::new();
         let sink = SoundSink::with_backend_for_tests(mock);
+        wait_for_player(&sink);
 
         sink.dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
         sink.flush();
