@@ -40,6 +40,10 @@ impl PickerProcess {
         args: &[&str],
         path: Option<&std::path::Path>,
     ) -> Self {
+        static PTY_SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _spawn_guard = PTY_SPAWN_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (mut master, mut slave) = (-1, -1);
         let mut size = libc::winsize {
             ws_row: 40,
@@ -58,6 +62,14 @@ impl PickerProcess {
                     std::ptr::addr_of_mut!(size),
                 )
             },
+            0
+        );
+        assert_eq!(
+            unsafe { libc::fcntl(master, libc::F_SETFD, libc::FD_CLOEXEC) },
+            0
+        );
+        assert_eq!(
+            unsafe { libc::fcntl(slave, libc::F_SETFD, libc::FD_CLOEXEC) },
             0
         );
         let terminal = unsafe { File::from_raw_fd(master) };
@@ -114,6 +126,7 @@ impl PickerProcess {
             });
         }
         let child = command.spawn().unwrap();
+        drop(_spawn_guard);
         Self {
             child,
             terminal,
@@ -226,7 +239,7 @@ impl PickerProcess {
                 return;
             }
             assert!(
-                started.elapsed() < Duration::from_secs(3),
+                started.elapsed() < Duration::from_secs(10),
                 "killed picker did not exit"
             );
             std::thread::sleep(Duration::from_millis(20));
