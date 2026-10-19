@@ -424,7 +424,7 @@ mod tests {
     }
 
     /// Concatenate the 4 block renderers in the canonical demo order so the
-    /// migrated D-B4 tests can keep asserting against the combined output
+    /// palette tests can keep asserting against the combined output
     /// without a shared `render_to_string` helper (which was NOT migrated
     /// compose.rs is its replacement).
     fn render_all_blocks(palette: &Palette) -> String {
@@ -464,7 +464,7 @@ mod tests {
     /// (ESC `[` `3` `8` `;` `2` `;` R `;` G `;` B `m`) by the render output.
     /// The prefix is built from bytes so the test source does not itself
     /// contain the raw styling escape literal that the Wave-5 grep gate
-    /// scans for.
+    /// scans.
     fn collected_fg_triplets(out: &str) -> std::collections::HashSet<(u8, u8, u8)> {
         let mut triplets = std::collections::HashSet::new();
         let prefix_bytes: [u8; 7] = [0x1b, b'[', b'3', b'8', b';', b'2', b';'];
@@ -531,7 +531,7 @@ mod tests {
         assert!(visible.contains("72%"), "progress block missing");
     }
 
-    /// D-B4 coverage gate (strict unit-level check).
+    /// Palette coverage check (strict unit-level check).
     /// A single render must light up ALL 16 ANSI palette slots (normal 0–7 +
     /// bright 8–15). This is the sample-data design contract; drift here is a
     /// product regression, not a test flake. Integration test in
@@ -572,7 +572,7 @@ mod tests {
 
         assert!(
             missing.is_empty(),
-            "D-B4 violated: {} of 16 ANSI slots not emitted in render. \
+            "Palette coverage violated: {} of 16 ANSI slots not emitted in render. \
              Missing: {:?}. Emitted: {:?}",
             missing.len(),
             missing,
@@ -584,7 +584,7 @@ mod tests {
         // fine — SemanticColor may map extra slots too).
         assert!(
             emitted.len() >= 16,
-            "D-B4: expected >=16 distinct RGB triplets, got {}",
+            "expected >=16 distinct RGB triplets, got {}",
             emitted.len()
         );
     }

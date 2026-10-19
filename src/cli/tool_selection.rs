@@ -479,7 +479,7 @@ pub fn compute_install_candidates(installed: &HashMap<String, ToolPresence>) -> 
 }
 
 /// Missing catalog tools that this platform has a concrete installation route
-/// for. Existing installed/configuration-only tools are handled independently.
+/// Existing installed/configuration-only tools are handled independently.
 pub(crate) fn compute_install_candidates_for_platform(
     installed: &HashMap<String, ToolPresence>,
     context: crate::platform::packages::InstallContext,
@@ -743,7 +743,7 @@ mod tests {
 
     /// snapshot — the `ReviewReceipt` format body routed through
     /// a MockTheme-backed `Roles`. Locks the `◆ heading + ┃ ├─` tree
-    /// narrative for the review pane. Deterministic bytes per.
+    /// narrative for the review pane. Deterministic output bytes.
     #[test]
     fn tool_selection_review_receipt_basic_mode_snapshot() {
         use crate::brand::render_context::{mock_context_with_mode, mock_theme, RenderMode};

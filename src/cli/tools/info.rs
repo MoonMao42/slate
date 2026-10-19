@@ -171,6 +171,14 @@ fn installation(id: &str, context: InstallContext) -> InstallationAdvice {
             "apt",
             format!("Slate can offer apt package {} with administrator access. Network and installation permissions have not been checked.", packages::apt::package_name(id).expect("apt route has a mapping")),
         ),
+        Ok(ToolInstallRoute::Pacman) => (
+            "pacman",
+            format!("Slate can offer pacman package {} with administrator access. Network and installation permissions have not been checked.", packages::pacman::package_name(id).expect("pacman route has a mapping")),
+        ),
+        Ok(ToolInstallRoute::Dnf) => (
+            "dnf",
+            format!("Slate can offer dnf package {} with administrator access. Network and installation permissions have not been checked.", packages::dnf::package_name(id).expect("dnf route has a mapping")),
+        ),
         Ok(ToolInstallRoute::UserLocalStarship) => (
             "user-local-starship",
             "Slate can offer a user-local Starship download. This requires curl and network access; neither has been checked here.".into(),

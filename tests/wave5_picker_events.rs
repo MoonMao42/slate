@@ -1,4 +1,4 @@
-//! event-seam integration test (18-06-PLAN.md Task 2 Step E).
+//! event-seam integration test.
 //! The `BrandEvent` dispatch sites planted in `src/cli/picker/event_loop.rs`
 //! flow through a process-global `OnceLock<Arc<dyn EventSink>>`. Running
 //! this file as its own integration-test binary means the `OnceLock`
@@ -61,7 +61,7 @@ fn shared_sink() -> (&'static CountingSink, std::sync::MutexGuard<'static, ()>) 
         // seated a different sink first (shouldn't happen within this
         // binary — no other `set_sink` call exists here), the routing
         // assertions degrade to checking the Noop path, which is still
-        // correct behavior for.
+        // expected behavior.
         let _ = set_sink(sink.clone() as Arc<dyn EventSink>);
         sink
     });

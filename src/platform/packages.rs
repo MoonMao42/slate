@@ -3,7 +3,9 @@ use crate::env::SlateEnv;
 use crate::error::{Result, SlateError};
 use crate::platform::capabilities::CapabilityReport;
 pub(crate) mod apt;
+pub(crate) mod dnf;
 pub(crate) mod homebrew;
+pub(crate) mod pacman;
 mod routes;
 pub(crate) use routes::{InstallContext, ToolInstallRoute};
 
@@ -18,6 +20,8 @@ pub enum BrewKind {
 pub enum PackageManagerBackend {
     Homebrew,
     Apt,
+    Pacman,
+    Dnf,
     Unsupported,
 }
 
@@ -26,6 +30,8 @@ impl PackageManagerBackend {
         match self {
             Self::Homebrew => "Homebrew",
             Self::Apt => "apt",
+            Self::Pacman => "pacman",
+            Self::Dnf => "dnf",
             Self::Unsupported => "unsupported",
         }
     }
@@ -43,8 +49,16 @@ pub fn detect_backend() -> PackageManagerBackend {
         return PackageManagerBackend::Unsupported;
     }
 
-    if cfg!(target_os = "linux") && detection::command_path("apt-get").is_some() {
-        return PackageManagerBackend::Apt;
+    if cfg!(target_os = "linux") {
+        if detection::command_path("apt-get").is_some() {
+            return PackageManagerBackend::Apt;
+        }
+        if detection::command_path("pacman").is_some() {
+            return PackageManagerBackend::Pacman;
+        }
+        if detection::command_path("dnf").is_some() {
+            return PackageManagerBackend::Dnf;
+        }
     }
 
     PackageManagerBackend::Unsupported
@@ -54,9 +68,11 @@ fn capability_report_for_backend(backend: PackageManagerBackend) -> CapabilityRe
     match backend {
         PackageManagerBackend::Homebrew => CapabilityReport::supported("homebrew"),
         PackageManagerBackend::Apt => CapabilityReport::supported("apt"),
+        PackageManagerBackend::Pacman => CapabilityReport::supported("pacman"),
+        PackageManagerBackend::Dnf => CapabilityReport::supported("dnf"),
         PackageManagerBackend::Unsupported => CapabilityReport::unsupported(
             "unsupported",
-            "No supported package manager was found. Slate currently supports Homebrew on macOS and apt on Linux.",
+            "No supported package manager was found. Slate currently supports Homebrew on macOS and apt/pacman/dnf on Linux.",
         ),
     }
 }
@@ -71,8 +87,10 @@ pub fn install_tool_package(tool_id: &str, brew_package: &str, _env: &SlateEnv) 
     match detect_backend() {
         PackageManagerBackend::Homebrew => install_with_homebrew(brew_package, BrewKind::Formula),
         PackageManagerBackend::Apt => apt::install(tool_id),
+        PackageManagerBackend::Pacman => pacman::install(tool_id),
+        PackageManagerBackend::Dnf => dnf::install(tool_id),
         PackageManagerBackend::Unsupported => Err(SlateError::Internal(
-            "No supported package manager was found. Slate currently supports Homebrew on macOS and apt on Linux.".to_string(),
+            "No supported package manager was found. Slate currently supports Homebrew on macOS and apt/pacman/dnf on Linux.".to_string(),
         )),
     }
 }
@@ -94,6 +112,8 @@ mod tests {
     fn test_backend_labels() {
         assert_eq!(PackageManagerBackend::Homebrew.label(), "Homebrew");
         assert_eq!(PackageManagerBackend::Apt.label(), "apt");
+        assert_eq!(PackageManagerBackend::Pacman.label(), "pacman");
+        assert_eq!(PackageManagerBackend::Dnf.label(), "dnf");
     }
 
     #[test]

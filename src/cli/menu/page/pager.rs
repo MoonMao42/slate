@@ -60,12 +60,25 @@ fn frame(
     let rows = wrapped(text, width);
     let mut footer = wrapped(&format!("◆ {title}\n│ ● {back}\n└"), width);
     let available = height.saturating_sub(1);
-    if rows.len() > available.saturating_sub(footer.len()) {
+    let scrollable = rows.len() > available.saturating_sub(footer.len());
+    if scrollable {
         footer = wrapped(&format!("◆ {title} · ↑↓\n│ ● {back}\n└"), width);
     }
     let visible = available.saturating_sub(footer.len());
     let max_start = rows.len().saturating_sub(visible.max(1));
     *start = (*start).min(max_start);
+    if scrollable && visible > 0 && !rows.is_empty() {
+        let first_row = *start + 1;
+        let last_row = (*start + visible).min(rows.len());
+        let total_rows = rows.len();
+        let detailed_header = format!("◆ {title} · ↑↓ {first_row}-{last_row}/{total_rows}");
+        if console::measure_text_width(&detailed_header) <= width {
+            let candidate = wrapped(&format!("{detailed_header}\n│ ● {back}\n└"), width);
+            if candidate.len() == footer.len() {
+                footer = candidate;
+            }
+        }
+    }
     let mut output = rows
         .iter()
         .skip(*start)
@@ -152,5 +165,19 @@ mod tests {
                     .all(|row| console::measure_text_width(row) <= width));
             }
         }
+    }
+
+    #[test]
+    fn report_frames_include_scroll_range_when_wide_enough() {
+        let text = (1..=30).map(|i| format!("row {i}\n")).collect::<String>();
+        let mut start = 0;
+        let (output, visible, max_start) = frame(&text, "工具总览", "返回", 12, 60, &mut start);
+        assert_eq!(visible, 8);
+        assert_eq!(max_start, 22);
+        assert!(output.contains("◆ 工具总览 · ↑↓ 1-8/30"), "{output}");
+
+        start = max_start;
+        let (bottom, _, _) = frame(&text, "工具总览", "返回", 12, 60, &mut start);
+        assert!(bottom.contains("◆ 工具总览 · ↑↓ 23-30/30"), "{bottom}");
     }
 }

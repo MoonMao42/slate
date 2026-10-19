@@ -76,6 +76,70 @@ fn saved_request(env: &SlateEnv) -> Result<ImportRequest> {
     )?
     .unwrap_or_default();
     let doc: toml::Value = preferences.parse().map_err(|_| invalid("config.toml"))?;
+    let prompt = match doc.get("prompt") {
+        Some(section) => {
+            let table = section
+                .as_table()
+                .ok_or_else(|| invalid("config.toml [prompt]"))?;
+            match table.get("style") {
+                Some(value) => {
+                    let s = value
+                        .as_str()
+                        .ok_or_else(|| invalid("config.toml [prompt].style"))?;
+                    Some(
+                        super::parse_prompt_segment(s)
+                            .map_err(|_| invalid("config.toml [prompt].style"))?
+                            .ok_or_else(|| invalid("config.toml [prompt].style"))?,
+                    )
+                }
+                None => None,
+            }
+        }
+        None => None,
+    };
+    let auto_raw = read_optional(
+        &env.managed_file("auto.toml"),
+        MAX_DOCUMENT_BYTES,
+        "auto.toml",
+    )?
+    .unwrap_or_default();
+    let auto_doc: toml::Value = auto_raw.parse().map_err(|_| invalid("auto.toml"))?;
+    let dark_theme = match auto_doc.get("dark_theme") {
+        Some(v) => {
+            let s = v
+                .as_str()
+                .ok_or_else(|| invalid("auto.toml dark_theme"))?
+                .trim();
+            if s.is_empty() {
+                None
+            } else {
+                Some(
+                    super::parse_paired_theme_segment(s, crate::theme::ThemeAppearance::Dark)
+                        .map_err(|_| invalid("auto.toml dark_theme"))?
+                        .ok_or_else(|| invalid("auto.toml dark_theme"))?,
+                )
+            }
+        }
+        None => None,
+    };
+    let light_theme = match auto_doc.get("light_theme") {
+        Some(v) => {
+            let s = v
+                .as_str()
+                .ok_or_else(|| invalid("auto.toml light_theme"))?
+                .trim();
+            if s.is_empty() {
+                None
+            } else {
+                Some(
+                    super::parse_paired_theme_segment(s, crate::theme::ThemeAppearance::Light)
+                        .map_err(|_| invalid("auto.toml light_theme"))?
+                        .ok_or_else(|| invalid("auto.toml light_theme"))?,
+                )
+            }
+        }
+        None => None,
+    };
     let fastfetch = match fs::symlink_metadata(env.managed_file("autorun-fastfetch")) {
         Ok(metadata) if metadata.is_file() => true,
         Ok(_) => return Err(invalid("autorun-fastfetch marker")),
@@ -91,6 +155,9 @@ fn saved_request(env: &SlateEnv) -> Result<ImportRequest> {
             highlighting: tool_flag(&doc, "zsh_highlighting")?,
             fastfetch,
         },
+        prompt,
+        dark_theme,
+        light_theme,
     })
 }
 
@@ -113,11 +180,26 @@ fn encode(request: &ImportRequest) -> String {
     .filter_map(|(name, enabled)| enabled.then_some(name))
     .collect::<Vec<_>>()
     .join(",");
-    format!(
+    let base = format!(
         "slate://v1/{}/{font}/{opacity}/{}",
         request.theme.as_deref().unwrap_or("none"),
         if tools.is_empty() { "none" } else { &tools }
-    )
+    );
+    let mut query = Vec::new();
+    if let Some(prompt) = request.prompt {
+        query.push(format!("prompt={}", prompt.id()));
+    }
+    if let Some(dark) = &request.dark_theme {
+        query.push(format!("dark={dark}"));
+    }
+    if let Some(light) = &request.light_theme {
+        query.push(format!("light={light}"));
+    }
+    if query.is_empty() {
+        base
+    } else {
+        format!("{base}?{}", query.join("&"))
+    }
 }
 
 pub(crate) fn build_export_uri(env: &SlateEnv) -> Result<String> {
@@ -132,7 +214,7 @@ pub fn handle_export_with_options(raw: bool) -> Result<()> {
         format!("{uri}\n")
     } else {
         // Style from the already-validated theme, not another profile read.
-        let registry = ThemeRegistry::new()?;
+        let registry = ThemeRegistry::with_env(&env)?;
         let theme = registry
             .get(request.theme.as_deref().unwrap_or(DEFAULT_THEME_ID))
             .ok_or_else(|| invalid("saved theme"))?;

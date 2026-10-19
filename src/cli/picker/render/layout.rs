@@ -127,13 +127,14 @@ pub(super) fn list(
         let effective = get_effective_opacity_for_rendering(state);
         if cols >= 70 {
             footer.push(captured_line(|out| {
-                queue_io(queue!(out, Print(tr("  透明度：  ", "  Opacity:  "))))?;
+                let prefix = muted(roles, tr("  透明度：  ", "  Opacity:  "));
+                queue_io(queue!(out, Print(prefix)))?;
                 for slot in [
                     OpacityPreset::Solid,
                     OpacityPreset::Frosted,
                     OpacityPreset::Clear,
                 ] {
-                    render_opacity_slot(out, slot, effective)?;
+                    render_opacity_slot(out, slot, effective, roles)?;
                     queue_io(queue!(out, Print("  ")))?;
                 }
                 Ok(())
@@ -207,7 +208,7 @@ fn list_body(
             .map(str::to_owned)
             .collect());
     }
-    let registry = ThemeRegistry::new()?;
+    let registry = ThemeRegistry::from_process_or_embedded()?;
     let themes: Vec<_> = state
         .theme_ids()
         .iter()
@@ -280,7 +281,17 @@ pub(super) fn full(
             roles,
             tr("Enter 保存 · Esc 取消", "Enter save · Esc cancel"),
         ),
-        muted(roles, tr("↑↓ 主题 · Tab 返回", "↑↓ theme · Tab return")),
+        muted(
+            roles,
+            if cols >= 60 {
+                tr(
+                    "↑↓ 主题 · ←→ 透明度 · s 保存配对 · Tab 返回",
+                    "↑↓ theme · ←→ opacity · s save-auto · Tab return",
+                )
+            } else {
+                tr("↑↓ 主题 · Tab 返回", "↑↓ theme · Tab return")
+            },
+        ),
     ];
     if let Some(flash) = flash {
         if rows >= 12 {

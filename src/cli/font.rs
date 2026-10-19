@@ -233,7 +233,7 @@ fn handle_with_policy(
 
 /// Format `✓ <font> downloaded` — success line emitted after a catalog
 /// download completes. Routes through `Roles::status_success` so the ✓
-/// glyph carries theme.green (never lavender per D-01a).
+/// glyph carries theme.green (never lavender).
 fn format_font_downloaded(r: Option<&Roles<'_>>, font_name: &str) -> String {
     let font_name = choices::terminal_text(font_name);
     match r {
@@ -324,7 +324,7 @@ fn compact_font_apply_report(report: &FontApplyReport) -> String {
 }
 
 /// Format `✗ Download failed: <reason>` via `Roles::status_error`
-/// (theme.red — NEVER lavender per D-01a).
+/// (theme.red, never lavender).
 fn format_font_download_failed(r: Option<&Roles<'_>>, reason: &str) -> String {
     match r {
         Some(r) => r.status_error(&format!("Download failed: {}", reason)),
@@ -859,7 +859,7 @@ mod tests {
         insta::assert_snapshot!("font_downloaded_basic", out);
     }
 
-    /// D-01a — the download-failed line uses `Roles::status_error`
+    /// the download-failed line uses `Roles::status_error`
     /// (theme.red — NEVER brand lavender). Asserts the lavender byte
     /// triple (`38;2;114;135;253`, from `BRAND_LAVENDER_FIXED`) is
     /// absent across Truecolor / Basic / None.
@@ -872,7 +872,7 @@ mod tests {
             let out = format_font_download_failed(Some(&r), "connection reset");
             assert!(
                 !out.contains("38;2;114;135;253"),
-                "D-01a violation in mode {mode:?}: {out:?}"
+                "severity color invariant violation in mode {mode:?}: {out:?}"
             );
         }
     }

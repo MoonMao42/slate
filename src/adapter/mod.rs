@@ -81,7 +81,7 @@ pub enum ApplyStrategy {
 /// truthfully declare whether its change becomes visible inside the current shell
 /// session (e.g. Ghostty hot-reload) or only after the user spawns a new shell
 /// (e.g. `BAT_THEME` env var, `EZA_CONFIG_DIR`, starship palette select).
-/// This drives the UX-01 "new-terminal" reminder.
+/// This drives the "new-terminal" reminder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyOutcome {
     Applied { requires_new_shell: bool },

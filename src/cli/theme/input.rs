@@ -34,7 +34,7 @@ pub fn validate_selection(name: Option<&str>, auto: bool) -> Result<()> {
                 "A theme name cannot be combined with `--auto`. Choose `slate theme <theme>` or `slate theme --auto`; no theme was applied.".into(),
             ));
         }
-        ThemeRegistry::new()?.require_by_id_or_name(name)?;
+        ThemeRegistry::from_process_or_embedded()?.require_by_id_or_name(name)?;
     }
     Ok(())
 }

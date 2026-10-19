@@ -154,4 +154,11 @@ impl ConfigManager {
     pub fn get_prompt_style(&self) -> Result<Option<PromptStyle>> {
         saved_style(self.environment())
     }
+
+    pub fn set_prompt_style(&self, style: PromptStyle) -> Result<()> {
+        let path = self.base_path.join("config.toml");
+        let mut doc = flags::read_document(&path)?.unwrap_or_default();
+        remember(&mut doc, style)?;
+        flags::write_document(&path, &doc)
+    }
 }

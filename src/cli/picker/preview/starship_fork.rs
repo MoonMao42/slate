@@ -4,7 +4,7 @@
 //! so the preview renders the real theme-aware prompt the user will see
 //! after committing. Never forks on the default browsing path.
 //! Design rules enforced here:
-//! - **Path guard (V12 / RESEARCH §Pitfall 5)**: `managed_toml` MUST live
+//! - **Path guard**: `managed_toml` MUST live
 //! inside `managed_dir`. A rogue theme_id must not be able to push the
 //! fork to read an arbitrary file via path concatenation.
 //! - Both output streams are captured privately with a combined byte cap.
@@ -17,7 +17,7 @@
 //! lets tests pass an explicit (non-existent) path to exercise the
 //! `NotInstalled` branch without mutating global `PATH` — per user
 //! MEMORY `feedback_no_tech_debt` (pure function testing, no global
-//! env var mutation in tests) and CONTEXT §Anti-patterns.
+//! env var mutation in tests).
 
 use crate::config::file_read::{self, Links, MAX_TOOL_CONFIG_BYTES};
 use crate::platform::process_output::{self, Completion, Limits};
@@ -35,7 +35,7 @@ const PROMPT_LIMITS: Limits = Limits {
 #[derive(Debug)]
 #[allow(dead_code)] // event_loop wiring removes the attribute.
                     // `pub(crate)` → `pub` so integration tests can match on
-                    // the error variants (V-11 integration coverage for the V12 path-guard).
+                    // the error variants.
 pub enum StarshipForkError {
     /// Either `which::which("starship")` failed OR the caller-injected
     /// `starship_bin` path doesn't exist on disk.
@@ -75,7 +75,7 @@ pub fn fork_starship_prompt(
     width: u16,
     starship_bin: Option<&Path>,
 ) -> Result<String, StarshipForkError> {
-    // 1. Path-traversal guard (V12). Must run before any binary resolution
+    // 1. Path-traversal guard. Must run before any binary resolution
     // so a hostile path never triggers a fork, not even a failed one.
     let managed_toml = validate_config(managed_toml, managed_dir)?;
 
@@ -152,7 +152,6 @@ mod tests {
 
     // NOTE: these tests are PURE function calls — no `std::env::set_var`,
     // no `PathGuard`, no `PATH_LOCK`. Per user MEMORY feedback_no_tech_debt
-    // + CONTEXT §Anti-patterns: "pure function testing, no global env var
     // mutation in tests". The `NotInstalled` branch is exercised by
     // injecting a non-existent binary path via the `starship_bin` parameter.
 

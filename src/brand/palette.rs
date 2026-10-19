@@ -1,46 +1,32 @@
 //! Brand palette primitives.
 //! Pure-render helpers used by the Role API (`src/brand/roles.rs`) and the
-//! `RenderContext` builder. Mirrors the shape of `src/adapter/ls_colors.rs`
-//! palette/hex in, bytes/tuple out, no I/O.
-//! Decisions honored:
-//! - **** `BRAND_LAVENDER_FIXED` is the single source of truth for brand
-//! anchors (slate logo, ✦, ◆, ★, error frame icon). Everyday role surfaces
-//! pull the active theme's `brand_accent` via [`theme_brand_accent`].
-//! - **Pitfall 4** per-appearance blend ratios — Dark themes blend
-//! 14 % accent, Light themes blend 24 % accent (so the pill stays legible
-//! against bright backgrounds and passes WCAG 3:1 vs the accent fg).
+//! `RenderContext` builder.
+//!
+//! - `BRAND_LAVENDER_FIXED` is the single source of truth for brand
+//!   anchors (slate logo, ✦, ◆, ★). Everyday role surfaces pull the active
+//!   theme's `brand_accent` via [`theme_brand_accent`].
+//! - Per-appearance blend ratios: dark themes blend 14 % accent, light themes
+//!   blend 24 % accent so pills remain legible against bright backgrounds.
 
 use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::error::Result;
 use crate::theme::{Palette, ThemeAppearance};
 
-/// Slate's fixed brand anchor color — the **lavender** (#7287fd) used for the
-/// `slate` wordmark, the ✦ glyph, ◆ section headings, the completion ★, and
-/// every error-frame icon. Stays constant regardless of the active theme
-/// (hybrid-strategy).
+/// Slate's fixed brand anchor color — the lavender (`#7287fd`) used for the
+/// `slate` wordmark, the ✦ glyph, ◆ section headings, and the completion ★.
 pub const BRAND_LAVENDER_FIXED: &str = "#7287fd";
 
 /// Dark-appearance pill blend ratio — accent weighted at 14 % against bg.
 const DARK_BLEND_RATIO: f32 = 0.14;
 /// Light-appearance pill blend ratio — accent weighted at 24 % against bg.
-/// Heavier blend than dark because light backgrounds need more accent
-/// saturation to stay visible (Pitfall 4).
 const LIGHT_BLEND_RATIO: f32 = 0.24;
 
-/// Resolve the active theme's designer-picked `brand_accent` slot. Used by
-/// daily-chrome roles (command pill, theme name, inline `slate` verb) per
-/// hybrid strategy.
+/// Resolve the active theme's `brand_accent` slot.
 pub fn theme_brand_accent(palette: &Palette) -> &str {
     &palette.brand_accent
 }
 
-/// dynamic pill background — compute `accent × ratio + bg × (1-ratio)`
-/// per appearance (Pitfall 4: 14 % dark / 24 % light). Returns the blended
-/// RGB triple. Caller converts to ANSI via
-/// [`PaletteRenderer::rgb_to_ansi_24bit`].
-/// Input hex strings must be `#RRGGBB`; the function propagates parse
-/// failures from [`PaletteRenderer::hex_to_rgb`] so validation lives in one
-/// place.
+/// Compute `accent × ratio + bg × (1-ratio)` per appearance (14 % dark / 24 % light).
 pub fn pill_background_rgb(
     accent_hex: &str,
     background_hex: &str,
@@ -68,9 +54,7 @@ fn blend_channel(accent: u8, background: u8, ratio: f32) -> u8 {
     mixed.round().clamp(0.0, 255.0) as u8
 }
 
-/// WCAG 3:1 minimum-contrast gate for small-text pill combinations. Used by
-/// the light-theme smoke test (Pitfall 4) and by roles that want to trigger
-/// a pill → `› text ‹` fallback when contrast fails.
+/// WCAG 3:1 minimum-contrast gate for small-text pill combinations.
 pub fn contrast_ratio_passes_3_to_1(fg_hex: &str, bg_hex: &str) -> bool {
     let Ok((fr, fg_, fb)) = PaletteRenderer::hex_to_rgb(fg_hex) else {
         return false;
@@ -111,13 +95,8 @@ mod tests {
         assert_eq!(BRAND_LAVENDER_FIXED, "#7287fd");
     }
 
-    /// Catppuccin Mocha sanity check — `#7287fd × 14% + #1e1e2e × 86%`
-    /// lands on `(42, 45, 75)` = `#2a2d4b` after round-to-nearest on each
-    /// channel. This is the locked deterministic blend value referenced by
-    /// 18-VALIDATION row `18-W0-blend-math`. (The plan body's `(35, 40, 62)`
-    /// expectation was a hand-calculation error — recomputed and locked
-    /// against the formula `accent × 0.14 + background × 0.86` on
-    /// `(114, 135, 253) × 0.14 + (30, 30, 46) × 0.86`.)
+    /// Catppuccin Mocha sanity check: `#7287fd × 14% + #1e1e2e × 86%`
+    /// lands on `(42, 45, 75)` = `#2a2d4b`.
     #[test]
     fn alpha_blend_matches_expected_catppuccin_mocha() {
         let blended =
@@ -125,9 +104,6 @@ mod tests {
         assert_eq!(blended, (42, 45, 75));
     }
 
-    /// Dark-appearance smoke — Mocha blend must at minimum flip the
-    /// background channels *away* from the raw theme bg so the pill is
-    /// visually distinct from the terminal surface (the point of).
     #[test]
     fn dark_pill_blend_is_not_identical_to_background() {
         let (r, g, b) =
@@ -139,18 +115,6 @@ mod tests {
         );
     }
 
-    /// Light-appearance smoke (Pitfall 4 tracer): the 24 % ratio moves the
-    /// blended bg away from the raw theme bg in the accent direction. The
-    /// WCAG 3:1 verdict on Catppuccin Latte specifically is left to the
-    /// manual smoke test in Ghostty — the research pitfall flags it
-    /// as a reasoned hypothesis, not an empirically locked guarantee.
-    /// What this test locks:
-    /// 1. `pill_background_rgb` succeeds on a valid light palette.
-    /// 2. The blended bg is *not* identical to the raw theme bg (the
-    /// function actually applies the ratio).
-    /// 3. The `contrast_ratio_passes_3_to_1` helper remains callable
-    /// future waves flip this assertion to a hard gate once the
-    /// manual-smoke verdict lands.
     #[test]
     fn light_pill_blend_shifts_background_and_contrast_helper_runs() {
         let (r, g, b) =

@@ -4,7 +4,7 @@
 //! live alongside the code they exercise in `src/cli/clean.rs` and
 //! `src/cli/config.rs` because the helpers they drive are crate-private
 //! moving the assertions next to the helpers keeps tests honest without
-//! widening public surface (plan Task 5 option (b)).
+//! widening public surface.
 //! Tests that spawn `nvim --headless` are feature-gated behind `has-nvim`
 //! so `cargo test` on a machine without nvim still compiles and runs the
 //! non-spawning tests. When `has-nvim` IS set but the binary is not on
@@ -50,7 +50,7 @@ fn skip_if_no_nvim(test_name: &str) -> bool {
     }
 }
 
-// Task 1 — nvim_headless_source_all_variants
+// nvim_headless_source_all_variants
 
 /// After `NvimAdapter::setup` writes the 20 shims + loader, every
 /// variant's shim must source cleanly via `nvim --headless` and set
@@ -125,7 +125,7 @@ fn nvim_headless_source_all_variants() {
     );
 }
 
-// Task 2 — state_file_atomic_write_single_event
+// state_file_atomic_write_single_event
 
 /// atomic-write contract, proven in two parts via a `notify`
 /// watcher plus a post-write content read:
@@ -244,7 +244,7 @@ fn state_file_atomic_write_single_event() {
     );
 }
 
-// Task 3a — watcher_debounces_multi_fire
+// watcher_debounces_multi_fire
 
 /// The loader's 100 ms debounce collapses rapid state-file rewrites into
 /// a single reload. Three writes within 20 ms must land on the last
@@ -351,7 +351,7 @@ vim.cmd('qa!')
     );
 }
 
-// Task 3b — lualine_refresh_fires
+// lualine_refresh_fires
 
 /// Installs a stand-in ColorScheme autocmd (no real lualine needed) that
 /// records slate-* fires, drives a state-file-driven swap, and asserts
@@ -470,9 +470,9 @@ vim.cmd('qa!')
     );
 }
 
-// Task 4a — marker_block_lua_comment_regression
+// marker_block_lua_comment_regression
 
-/// Pitfall 4 regression gate: the slate marker block as written by
+/// Regression gate: the slate marker block as written by
 /// Option A must parse as valid Lua. Exercises three realistic
 /// init.lua shapes: clean (marker only), lazy-prelude + marker, and
 /// marker sandwiched by user content. All three must `luafile` cleanly.
@@ -563,7 +563,7 @@ fn assert_luafile_ok(path: &std::path::Path, label: &str) {
     );
 }
 
-// Task 4b — loader_lua_parses_via_luafile
+// loader_lua_parses_via_luafile
 
 /// The loader body contains every variant's `PALETTES['<id>'] = { ... }`
 /// sub-table spliced from `render_colorscheme`. `luafile`ing the full
@@ -611,12 +611,12 @@ fn loader_lua_parses_via_luafile() {
     );
 }
 
-// Task 5 — clean + config editor disable (cross-reference)
+// clean + config editor disable (cross-reference)
 // The `clean_removes_all_nvim_files` and
 // `config_editor_disable_preserves_colors` contracts live alongside the
 // helpers they exercise (`remove_nvim_managed_references` in
 // `src/cli/clean.rs`, `handle_config_set_with_env` in
-// `src/cli/config.rs`) — plan Task 5 option (b). Those helpers are
+// `src/cli/config.rs`)  Those helpers are
 // crate-private; routing tests through the crate's own `#[cfg(test)]
 // mod tests` blocks keeps the public surface tight rather than
 // widening it to `pub` just so the integration harness can reach in.
@@ -626,7 +626,7 @@ fn loader_lua_parses_via_luafile() {
 // full install → clean takes colors/, lua/slate/, state, marker
 // back to pristine state.
 // * `cli::clean::tests::remove_nvim_managed_references_leaves_user_files_alone`
-// Pitfall 7: user-owned colors/ files survive the clean sweep.
+// user-owned colors/ files survive the clean sweep.
 // * `cli::clean::tests::remove_nvim_managed_references_is_noop_on_empty_home`
 // clean on a fresh home is a no-op, not an error.
 // * `cli::config::tests::config_editor_disable_removes_marker_leaves_colors`

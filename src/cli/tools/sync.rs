@@ -75,7 +75,7 @@ fn prepare(env: &SlateEnv, names: &[String]) -> Result<SyncPlan> {
     let theme = ConfigManager::from_env_paths(env).get_current_theme()
         .map_err(|_| SlateError::InvalidConfig("Cannot read the saved theme; no tools were changed.".into()))?
         .ok_or_else(|| SlateError::InvalidConfig("Save a theme first with `slate theme`, or use `slate setup`. No tools were changed.".into()))?;
-    if ThemeRegistry::new()?.get(&theme).is_none() {
+    if ThemeRegistry::with_env(env)?.get(&theme).is_none() {
         return Err(SlateError::InvalidConfig(
             "Saved theme is unknown; no fallback theme or tool changes were applied.".into(),
         ));

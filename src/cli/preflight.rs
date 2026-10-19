@@ -286,12 +286,12 @@ pub fn run_checks_for_setup_with_env(
         blocking: false,
     });
 
-    // (LS-03 / D-B1): On macOS, if `gls` (GNU ls from coreutils) is
+    //  On macOS, if `gls` (GNU ls from coreutils) is
     // absent AND the user hasn't been nudged before, push a non-blocking
     // advisory explaining why the slate-managed LS_COLORS needs GNU `ls`.
     // Preflight is read-only. Successful setup remembers the advisory later;
     // cancellation must not create profile directories or acknowledgement flags.
-    // Scenario gate (RESEARCH §Pattern 3 "scenario gate"): only emit during
+    // Scenario gate: only emit during
     // first-touch flows (GuidedSetup / QuickSetup). RetryInstall and
     // ConfigOnlyReconfigure are re-runs against an existing slate install
     // where the user already saw the message on their first setup; the ack
@@ -913,7 +913,7 @@ mod tests {
         assert!(description.contains("no supported Nerd Font detected yet"));
     }
 
-    // LS-03 BSD-`ls` capability preflight check
+    // BSD-`ls` capability preflight check
     // The new check lives inside `run_checks_for_setup_with_env` gated by
     // `#[cfg(target_os = "macos")]`. It must:
     // - emit a non-blocking `PreflightCheck { name: "GNU ls", ... }` on
@@ -961,7 +961,7 @@ mod tests {
         );
         assert!(
             !ls_check.blocking,
-            "GNU ls check must be non-blocking (LS-03 is a one-time nudge, not a gate)",
+            "GNU ls check must be non-blocking (is a one-time nudge, not a gate)",
         );
     }
 
@@ -1019,7 +1019,7 @@ mod tests {
         assert!(
             result.checks.iter().all(|c| c.name != "GNU ls"),
             "preflight must NOT emit 'GNU ls' check when acknowledgement flag is present \
-             (LS-03 is a one-time nudge — suppressed forever for this machine)",
+             (is a one-time nudge — suppressed forever for this machine)",
         );
     }
 
@@ -1060,7 +1060,7 @@ mod tests {
 
         assert!(
             result.checks.iter().all(|c| c.name != "GNU ls"),
-            "LS-03 is macOS-only — the check block must be compile-eliminated on Linux"
+            "is macOS-only — the check block must be compile-eliminated on Linux"
         );
     }
 }

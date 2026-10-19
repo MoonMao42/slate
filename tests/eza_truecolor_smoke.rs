@@ -1,8 +1,7 @@
-//! Task 2: eza truecolor empirical smoke test.
-//! Closes the MEDIUM-confidence open question from RESEARCH §Pitfall 3 /
+//! eza truecolor empirical smoke test.
 //! Assumption A1: eza's `eza_colors(5)` manpage documents `38;5;nnn` for
 //! 256-colour but is silent on `38;2;R;G;B` truecolor. Slate's Phase-16
-//! strategy hinges on eza accepting truecolor in `EZA_COLORS` (D-A5 forbids
+//! strategy hinges on eza accepting truecolor in `EZA_COLORS` (
 //! a 256-colour fallback).
 //! This test is the one empirical check that cannot be answered by reading
 //! source: set `EZA_COLORS="reset:*.rs=38;2;255;0;0"`, invoke `eza
@@ -12,8 +11,7 @@
 //! * eza on PATH, truecolor accepted → test passes, A1 confirmed.
 //! * eza on PATH, truecolor rejected → test panics with the
 //! `EZA TRUECOLOR REJECTED` contingency message so the executor
-//! surfaces the fallback path (theme.yml file-type layer, RESEARCH
-//! §Pitfall 3).
+//! surfaces the fallback path (theme.yml file-type layer).
 //! * eza absent → test prints a skip line and returns. Not `#[ignore]`d,
 //! because we want it to run silently on dev machines where eza is
 //! installed via slate's own adapter.
@@ -42,7 +40,7 @@ fn eza_accepts_truecolor_in_eza_colors_env_var() {
         None => {
             println!(
                 "eza not available on PATH; skipping empirical truecolor smoke \
-                 (see RESEARCH §Pitfall 3)"
+                 "
             );
             return;
         }
@@ -87,17 +85,15 @@ fn eza_accepts_truecolor_in_eza_colors_env_var() {
     );
 
     if !truecolor_present {
-        // Contingency trigger — RESEARCH §Pitfall 3 / Assumption A1 landed.
+        // Truecolor unsupported by eza:
         // The panic message names the pitfall and points the executor /
         // reviewer at the fallback plan: move the file-type layer into
         // `EzaAdapter::render_eza_yaml` (eza theme.yml) and surface the
         // contingency to the user via the UAT checkpoint.
         panic!(
-            "EZA TRUECOLOR REJECTED — RESEARCH §Pitfall 3 / Assumption A1 landed. \
+            "EZA TRUECOLOR REJECTED. \
              Contingency: move the file-type layer into EzaAdapter::render_eza_yaml \
-             (eza theme.yml) instead of EZA_COLORS env var. See RESEARCH §Pitfall 3 \
-             fallback.  must surface to user via Task 3 checkpoint.\n\n\
-             stdout bytes (lossy):\n{}",
+             (eza theme.yml) instead of EZA_COLORS env var.              stdout bytes (lossy):\n{}",
             String::from_utf8_lossy(stdout),
         );
     }

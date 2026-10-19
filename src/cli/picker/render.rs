@@ -4,10 +4,12 @@ use crate::cli::ui_language::tr;
 use crate::error::Result;
 use crate::opacity::OpacityPreset;
 use crate::theme::{ThemeAppearance, ThemeRegistry, ThemeVariant};
+#[cfg(test)]
+use crossterm::style::Color;
 use crossterm::{
     cursor::MoveTo,
     queue,
-    style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor},
+    style::{Attribute, Print, ResetColor, SetAttribute},
     terminal::{self, Clear, ClearType},
 };
 use std::env;
@@ -45,12 +47,12 @@ pub(super) fn render_into<W: io::Write>(
     rows: u16,
 ) -> Result<()> {
     if state.preview_mode_full && state.has_selection() {
-        // Task 02: the full-preview path accepts an optional
+        // The full-preview path accepts an optional
         // forked-prompt string. `render_into` is read-only (`&PickerState`)
         // so it does NOT perform the fork itself — that's the event_loop's
         // job (Tab arm; cache populated on new theme entry). Here we
         // simply consult the cache via `cached_prompt` when
-        // fork has populated it; otherwise compose self-draws per.
+        // fork has populated it; otherwise compose self-draws.
         let override_prompt = state.cached_prompt(state.get_current_theme_id());
         render_full_preview(out, state, flash_text, cols, rows, override_prompt)
     } else {
@@ -86,7 +88,7 @@ fn render_list_dominant<W: io::Write>(
 /// `prompt_line_override` is glue point: the caller (event
 /// loop / `render_into`) looks up `PickerState::cached_prompt`
 /// for the current theme and passes `Some(&forked)` when a fork landed;
-/// `None` falls back to the self-drawn SAMPLE_TOKENS prompt per.
+/// `None` falls back to the self-drawn SAMPLE_TOKENS prompt.
 /// This renderer stays fork-agnostic.
 fn render_full_preview<W: io::Write>(
     out: &mut W,
@@ -350,29 +352,26 @@ fn render_opacity_slot<W: io::Write>(
     out: &mut W,
     slot: OpacityPreset,
     effective: OpacityPreset,
+    roles: Option<&Roles<'_>>,
 ) -> Result<()> {
     let is_active = slot == effective;
     let label = opacity_to_label(slot);
     let dot = if is_active { "●" } else { "○" };
 
     if is_active {
-        queue_io(queue!(
-            out,
-            SetForegroundColor(Color::Cyan),
-            Print("< "),
-            SetAttribute(Attribute::Bold),
-            Print(format!("{} {}", dot, label)),
-            SetAttribute(Attribute::Reset),
-            Print(" >"),
-            ResetColor,
-        ))?;
+        let text = format!("< {dot} {label} >");
+        let styled = match roles {
+            Some(r) => r.theme_name(&text),
+            None => text,
+        };
+        queue_io(queue!(out, Print(styled)))?;
     } else {
-        queue_io(queue!(
-            out,
-            SetForegroundColor(Color::DarkGrey),
-            Print(format!("  {} {}  ", dot, label)),
-            ResetColor,
-        ))?;
+        let text = format!("  {dot} {label}  ");
+        let styled = match roles {
+            Some(r) => r.path(&text),
+            None => text,
+        };
+        queue_io(queue!(out, Print(styled)))?;
     }
     Ok(())
 }
@@ -532,7 +531,7 @@ mod tests {
         }
     }
 
-    /// Task 02: `render_full_preview` accepts a
+    /// `render_full_preview` accepts a
     /// `prompt_line_override: Option<&str>` and forwards it into
     /// `compose::compose_full` so starship fork can inject
     /// the real forked prompt into the `◆ Prompt` block.

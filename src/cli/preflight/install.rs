@@ -36,6 +36,10 @@ pub(super) fn retry_check(tool_id: &str, context: InstallContext) -> PreflightCh
             "Homebrew route; package access is checked during installation"
         }
         Ok(ToolInstallRoute::Apt) => "apt route; package access is checked during installation",
+        Ok(ToolInstallRoute::Pacman) => {
+            "pacman route; package access is checked during installation"
+        }
+        Ok(ToolInstallRoute::Dnf) => "dnf route; package access is checked during installation",
         Ok(ToolInstallRoute::UserLocalStarship) => {
             "user-local installer; curl, network and target checks run during installation"
         }

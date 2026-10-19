@@ -207,7 +207,7 @@ fn inject_slate_palette(doc: &mut DocumentMut, theme: &ThemeVariant) {
         // Light themes: pick from {bg_darkest|black, background, foreground}
         // by maximising the MIN WCAG 2.1 contrast across the 6 representative
         // starship pill bgs (cyan, mauve|magenta, blue, yellow, red, green).
-        // See `crate::wcag::pick_light_powerline_fg` and CONTEXT.
+        // See `crate::wcag::pick_light_powerline_fg` .
         // Dark themes: unchanged — bg_darkest with cascade to black.
         let powerline_fg: String = if theme.appearance == crate::theme::ThemeAppearance::Light {
             crate::wcag::pick_light_powerline_fg(p)
@@ -626,7 +626,7 @@ crust = "#111111"
     /// 3-candidate slate `[bg_darkest|black, background, foreground]`. This
     /// proves the picker is doing its job — no candidate that the picker
     /// rejected can outperform the picker's choice.
-    /// **NOTE on the 4.5:1 WCAG AA floor.** CONTEXT specified the
+    /// **NOTE on the 4.5:1 WCAG AA floor.** The
     /// 3-candidate slate `{bg_darkest, background, foreground}` with the
     /// expectation that at least one candidate would always hit ≥4.5:1
     /// across the 6 pills. That holds for 4 of 7 Light themes shipped today

@@ -30,6 +30,9 @@ struct ImportRequest {
     font: Option<String>,
     opacity: Option<OpacityPreset>,
     tools: ToolImportFlags,
+    prompt: Option<crate::config::prompt::PromptStyle>,
+    dark_theme: Option<String>,
+    light_theme: Option<String>,
 }
 
 /// A validated URI with its font request resolved for this host. Constructed
@@ -48,7 +51,7 @@ pub fn handle_export() -> Result<()> {
 /// Import a slate config from a shareable URI.
 /// Parses the URI and applies theme, font, opacity, and tool toggles.
 /// On success emits the share-success line via `Roles::status_success`
-/// (theme.green per D-01a — NEVER lavender) and dispatches
+/// (theme.green, never lavender) and dispatches
 /// `BrandEvent::Success(SuccessKind::ConfigSet)` so
 /// SoundSink can ring the share-import completion moment alongside the
 /// other config-mutation surfaces.
@@ -104,7 +107,7 @@ fn apply_request(env: &SlateEnv, request: &ImportRequest, theme_tools: &[String]
     if let Some(theme_id) = request.theme.as_deref() {
         // The pre-import checkpoint covers font + theme + flags together. Do
         // not take the narrower theme snapshot after the font has changed.
-        let registry = ThemeRegistry::new()?;
+        let registry = ThemeRegistry::with_env(env)?;
         let theme = registry
             .get(theme_id)
             .ok_or_else(|| SlateError::ThemeNotFound(theme_id.into()))?;
@@ -119,7 +122,7 @@ fn apply_request(env: &SlateEnv, request: &ImportRequest, theme_tools: &[String]
 
     let config = ConfigManager::with_env(env)?;
 
-    let themes = ThemeRegistry::new()?;
+    let themes = ThemeRegistry::with_env(env)?;
     let current_theme = config.get_current_theme()?;
     let ctx = themes
         .get(
@@ -150,6 +153,18 @@ fn apply_request(env: &SlateEnv, request: &ImportRequest, theme_tools: &[String]
         );
     }
 
+    if let Some(prompt_style) = request.prompt {
+        config.set_prompt_style(prompt_style)?;
+        config.refresh_shell_integration()?;
+    }
+
+    if request.dark_theme.is_some() || request.light_theme.is_some() {
+        config.write_auto_config(
+            request.dark_theme.as_deref(),
+            request.light_theme.as_deref(),
+        )?;
+    }
+
     apply_imported_tool_flags(&config, request.tools)?;
 
     println!();
@@ -168,7 +183,7 @@ fn apply_request(env: &SlateEnv, request: &ImportRequest, theme_tools: &[String]
 }
 
 /// Format a `log::success` body via `Roles::status_success` (theme.green
-/// NEVER lavender per D-01a), falling back to plain `✓ message`.
+/// never lavender), falling back to plain `✓ message`.
 fn status_success_line(r: Option<&Roles<'_>>, message: &str) -> String {
     match r {
         Some(r) => r.status_success(message),
@@ -177,7 +192,7 @@ fn status_success_line(r: Option<&Roles<'_>>, message: &str) -> String {
 }
 
 /// Wrap a literal value (path, hex, opacity preset) in `Roles::code`
-/// (inline-code pill per Sketch 001), falling back to bare text when
+/// (inline-code pill), falling back to bare text when
 /// Roles is unavailable.
 fn code_text(r: Option<&Roles<'_>>, text: &str) -> String {
     match r {
@@ -208,15 +223,89 @@ fn parse_import_intent(uri: &str) -> Result<ImportRequest> {
         .strip_prefix("slate://")
         .ok_or_else(|| SlateError::InvalidConfig("URI must start with slate://".to_string()))?;
 
-    let parts: Vec<&str> = stripped.split('/').collect();
-    let (theme, font, opacity, tools, encoded) = match parts.as_slice() {
-        [theme, font, opacity, tools] => (*theme, *font, *opacity, *tools, false),
-        ["v1", theme, font, opacity, tools] => (*theme, *font, *opacity, *tools, true),
-        [_, _, _, _, _] => return Err(SlateError::InvalidConfig("Unsupported share-code version. Use v1 or a legacy four-part code.".into())),
-        _ => return Err(SlateError::InvalidConfig(
-            "Expected slate://v1/theme/font/opacity/tools or legacy slate://theme/font/opacity/tools".into(),
-        )),
+    let (path_part, query_part) = match stripped.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (stripped, None),
     };
+
+    let parts: Vec<&str> = path_part.split('/').collect();
+    let (theme, font, opacity, tools, encoded, v2_extras) = match parts.as_slice() {
+        [theme, font, opacity, tools] => (*theme, *font, *opacity, *tools, false, None),
+        ["v1", theme, font, opacity, tools] => (*theme, *font, *opacity, *tools, true, None),
+        ["v2", theme, font, opacity, tools, prompt, dark, light] => (
+            *theme,
+            *font,
+            *opacity,
+            *tools,
+            true,
+            Some((*prompt, *dark, *light)),
+        ),
+        [_, _, _, _, _] => {
+            return Err(SlateError::InvalidConfig(
+                "Unsupported share-code version. Use v1, v2, or a legacy four-part code.".into(),
+            ))
+        }
+        _ => {
+            return Err(SlateError::InvalidConfig(
+                "Expected slate://v1/theme/font/opacity/tools or legacy slate://theme/font/opacity/tools".into(),
+            ))
+        }
+    };
+
+    if !encoded && query_part.is_some() {
+        return Err(SlateError::InvalidConfig(
+            "Query parameters require a versioned slate://v1/... or slate://v2/... share code."
+                .into(),
+        ));
+    }
+
+    let mut prompt = None;
+    let mut dark_theme = None;
+    let mut light_theme = None;
+
+    if let Some((p_seg, d_seg, l_seg)) = v2_extras {
+        prompt = parse_prompt_segment(p_seg)?;
+        dark_theme = parse_paired_theme_segment(d_seg, crate::theme::ThemeAppearance::Dark)?;
+        light_theme = parse_paired_theme_segment(l_seg, crate::theme::ThemeAppearance::Light)?;
+    }
+
+    if let Some(query) = query_part {
+        if query.is_empty() {
+            return Err(SlateError::InvalidConfig(
+                "Share code query string must not be empty.".into(),
+            ));
+        }
+        let mut seen_keys = std::collections::BTreeSet::new();
+        for pair in query.split('&') {
+            let Some((key, value)) = pair.split_once('=') else {
+                return Err(SlateError::InvalidConfig(
+                    "Malformed share code query parameter; expected key=value.".into(),
+                ));
+            };
+            if !seen_keys.insert(key) {
+                return Err(SlateError::InvalidConfig(format!(
+                    "Duplicate share code query parameter '{key}'."
+                )));
+            }
+            match key {
+                "prompt" => prompt = parse_prompt_segment(value)?,
+                "dark" => {
+                    dark_theme =
+                        parse_paired_theme_segment(value, crate::theme::ThemeAppearance::Dark)?
+                }
+                "light" => {
+                    light_theme =
+                        parse_paired_theme_segment(value, crate::theme::ThemeAppearance::Light)?
+                }
+                _ => {
+                    return Err(SlateError::InvalidConfig(
+                        "Unsupported share code query parameter. Use prompt, dark, or light."
+                            .into(),
+                    ))
+                }
+            }
+        }
+    }
 
     Ok(ImportRequest {
         theme: parse_theme_segment(theme)?,
@@ -229,7 +318,49 @@ fn parse_import_intent(uri: &str) -> Result<ImportRequest> {
         },
         opacity: parse_opacity_segment(opacity)?,
         tools: parse_tool_flags(tools)?,
+        prompt,
+        dark_theme,
+        light_theme,
     })
+}
+
+fn parse_prompt_segment(prompt: &str) -> Result<Option<crate::config::prompt::PromptStyle>> {
+    if prompt == "none" {
+        return Ok(None);
+    }
+    crate::config::prompt::PromptStyle::ALL
+        .into_iter()
+        .find(|style| style.id() == prompt)
+        .map(Some)
+        .ok_or_else(|| {
+            SlateError::InvalidConfig(
+                "Invalid shared prompt style. Use rainbow, minimal, compact, classic, focus, branch, or none.".into(),
+            )
+        })
+}
+
+fn parse_paired_theme_segment(
+    theme: &str,
+    expected: crate::theme::ThemeAppearance,
+) -> Result<Option<String>> {
+    let Some(id) = parse_theme_segment(theme)? else {
+        return Ok(None);
+    };
+    let registry = ThemeRegistry::from_process_or_embedded()?;
+    let variant = registry
+        .get(&id)
+        .ok_or_else(|| SlateError::ThemeNotFound(id.clone()))?;
+    if variant.appearance != expected {
+        let label = match expected {
+            crate::theme::ThemeAppearance::Dark => "dark",
+            crate::theme::ThemeAppearance::Light => "light",
+        };
+        return Err(SlateError::InvalidConfig(format!(
+            "Shared {label} pairing slot requires a {label} theme, got '{}'.",
+            variant.id
+        )));
+    }
+    Ok(Some(id))
 }
 
 fn parse_theme_segment(theme: &str) -> Result<Option<String>> {
@@ -237,7 +368,7 @@ fn parse_theme_segment(theme: &str) -> Result<Option<String>> {
         return Ok(None);
     }
 
-    let registry = ThemeRegistry::new()?;
+    let registry = ThemeRegistry::from_process_or_embedded()?;
     if registry.get(theme).is_none() {
         let preview: String = theme.chars().take(80).collect();
         return Err(SlateError::InvalidConfig(format!(
@@ -450,7 +581,7 @@ mod tests {
             .exists());
     }
 
-    /// D-01a invariant — the share-import success line uses theme.green,
+    /// the share-import success line uses theme.green,
     /// never brand-lavender, across every render mode.
     #[test]
     fn share_status_success_line_never_emits_brand_lavender() {
@@ -461,7 +592,7 @@ mod tests {
             let out = status_success_line(Some(&r), "Config imported successfully");
             assert!(
                 !out.contains("38;2;114;135;253"),
-                "D-01a violation in mode {mode:?}: {out:?}"
+                "severity color invariant violation in mode {mode:?}: {out:?}"
             );
         }
     }
@@ -478,5 +609,49 @@ mod tests {
         // None-fallback returns plain backticked text.
         let plain = code_text(None, "frosted");
         assert_eq!(plain, "`frosted`");
+    }
+
+    #[test]
+    fn share_code_round_trips_prompt_and_auto_theme_pairing_via_query_and_v2() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let env = SlateEnv::with_home(temp.path().to_path_buf());
+        let config = ConfigManager::with_env(&env).unwrap();
+
+        config.set_current_theme("catppuccin-mocha").unwrap();
+        config
+            .set_prompt_style(crate::config::prompt::PromptStyle::Compact)
+            .unwrap();
+        config
+            .write_auto_config(Some("catppuccin-mocha"), Some("catppuccin-latte"))
+            .unwrap();
+
+        let uri = build_export_uri(&env).unwrap();
+        assert_eq!(
+            uri,
+            "slate://v1/catppuccin-mocha/none/none/s,h?prompt=compact&dark=catppuccin-mocha&light=catppuccin-latte"
+        );
+
+        let parsed = parse_import_intent(&uri).unwrap();
+        assert_eq!(
+            parsed.prompt,
+            Some(crate::config::prompt::PromptStyle::Compact)
+        );
+        assert_eq!(parsed.dark_theme.as_deref(), Some("catppuccin-mocha"));
+        assert_eq!(parsed.light_theme.as_deref(), Some("catppuccin-latte"));
+
+        let v2_parsed = parse_import_intent(
+            "slate://v2/nord/none/frosted/s/minimal/catppuccin-mocha/catppuccin-latte",
+        )
+        .unwrap();
+        assert_eq!(v2_parsed.theme.as_deref(), Some("nord"));
+        assert_eq!(
+            v2_parsed.prompt,
+            Some(crate::config::prompt::PromptStyle::Minimal)
+        );
+        assert_eq!(v2_parsed.dark_theme.as_deref(), Some("catppuccin-mocha"));
+        assert_eq!(v2_parsed.light_theme.as_deref(), Some("catppuccin-latte"));
+
+        // Mismatched appearance in dark/light pairing is rejected.
+        assert!(parse_import_intent("slate://v1/nord/none/none/s?dark=catppuccin-latte").is_err());
     }
 }

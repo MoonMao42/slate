@@ -281,7 +281,6 @@ fn test_solarized_bg_darkest_uses_anchor_dark_for_starship_crust() {
     }
 }
 
-/// · VALIDATION row 1 — PickerState must surface its `theme_ids`
 /// array grouped by `FAMILY_SORT_ORDER`.
 /// We walk the returned ids, resolve each to its family, and assert the
 /// family-index in `FAMILY_SORT_ORDER` is monotonically non-decreasing.

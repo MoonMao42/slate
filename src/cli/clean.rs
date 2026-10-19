@@ -47,7 +47,7 @@ fn handle_clean_inner() -> Result<()> {
 
     // Build a RenderContext up-front so every user-visible status line
     // shares the same byte contract (sketch 003 tree narrative
-    // daily chrome + D-01a severity). graceful degrade — plain text
+    // daily chrome). graceful degrade — plain text
     // when the theme registry fails to load.
     let ctx = RenderContext::from_active_theme().ok();
     let r = ctx.as_ref().map(Roles::new);
@@ -172,7 +172,7 @@ fn handle_clean_inner() -> Result<()> {
 
     // completion receipt is a static tree-narrative anchor — bypass
     // cliclack and println! via Roles::heading / tree_branch / tree_end.
-    // Sketch 003 canon: `◆ Cleanup summary ┃ ├─ … └─ ★ Ready for a fresh start`.
+    // `◆ Cleanup summary ┃ ├─ … └─ ★ Ready for a fresh start`.
     println!();
     println!("{}", heading_text(r.as_ref(), "Cleanup summary"));
     for section in &removed_sections {
@@ -206,7 +206,7 @@ File restoration does not restore running application state.",
 
 /// Build the intro header title. Always starts with the ✦ brand glyph
 /// (routed through `Roles::brand` when available) so the wordmark keeps
-/// the lavender anchor that Sketch 002 locks in.
+/// the lavender anchor  integration tests.
 fn intro_title(r: Option<&Roles<'_>>, text: &str) -> String {
     match r {
         Some(r) => format!("{} {}", r.brand("✦"), text),
@@ -215,7 +215,7 @@ fn intro_title(r: Option<&Roles<'_>>, text: &str) -> String {
 }
 
 /// Format a `log::success` body via `Roles::status_success` (theme.green
-/// NEVER lavender per D-01a), falling back to plain `✓ message`.
+/// never lavender), falling back to plain `✓ message`.
 fn status_success_line(r: Option<&Roles<'_>>, message: &str) -> String {
     match r {
         Some(r) => r.status_success(message),
@@ -395,7 +395,7 @@ fn remove_nvim_managed_references(env: &SlateEnv) -> Result<()> {
 
     // 1. Remove every `slate-*.lua` shim under ~/.config/nvim/colors/.
     // User-owned files (my-custom.lua, theme.lua, …) are preserved
-    // Pitfall 7 guard verified by
+    // Verified by
     // `remove_nvim_managed_references_leaves_user_files_alone`.
     let colors_dir = nvim_home.join("colors");
     if colors_dir.exists() {
@@ -575,7 +575,7 @@ mod tests {
     }
 
     /// Truecolor variant — anchors every tree glyph to the lavender
-    /// brand byte triple (`38;2;114;135;253`) per Sketch 002.
+    /// brand byte triple (`38;2;114;135;253`) .
     #[test]
     fn clean_summary_truecolor_snapshot() {
         let theme = mock_theme();
@@ -610,7 +610,7 @@ mod tests {
         assert!(out.contains("└─ ★ Ready for a fresh start"));
     }
 
-    /// D-01a invariant — `status_success_line` uses theme.green, never
+    /// `status_success_line` uses theme.green, never
     /// brand lavender, across every RenderMode.
     #[test]
     fn status_success_line_never_emits_brand_lavender() {
@@ -621,7 +621,7 @@ mod tests {
             let out = status_success_line(Some(&r), "Watcher stopped");
             assert!(
                 !out.contains("38;2;114;135;253"),
-                "D-01a violation in mode {mode:?}: {out:?}"
+                "severity color invariant violation in mode {mode:?}: {out:?}"
             );
         }
     }
@@ -697,7 +697,7 @@ mod tests {
         );
     }
 
-    /// Pitfall 7 guard: `remove_nvim_managed_references` must not
+    /// `remove_nvim_managed_references` must not
     /// touch user-owned files in `~/.config/nvim/colors/` — only
     /// entries whose filename starts with `slate-`. A user's custom
     /// `my-custom.lua` or `theme.lua` survives the clean.

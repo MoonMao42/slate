@@ -61,7 +61,7 @@ impl PickerState {
     /// Takes current theme_id and opacity as starting point (snapshots for rollback).
     /// Positions cursor on the current theme, and sets current opacity.
     pub fn new(current_theme_id: &str, current_opacity: OpacityPreset) -> Result<Self> {
-        let registry = ThemeRegistry::new()?;
+        let registry = ThemeRegistry::from_process_or_embedded()?;
 
         // Build ordered theme ID list from FAMILY_SORT_ORDER
         let mut theme_ids = Vec::new();
@@ -70,6 +70,22 @@ impl PickerState {
         for family_name in FAMILY_SORT_ORDER.iter() {
             if let Some(themes_in_family) = by_family.get(*family_name) {
                 // Sort themes within family alphabetically by ID for consistency
+                let mut family_themes: Vec<_> =
+                    themes_in_family.iter().map(|t| t.id.clone()).collect();
+                family_themes.sort();
+                theme_ids.extend(family_themes);
+            }
+        }
+
+        // Append any custom families not in FAMILY_SORT_ORDER, sorted by family name then ID.
+        let mut extra_families: Vec<_> = by_family
+            .keys()
+            .filter(|family| !FAMILY_SORT_ORDER.contains(&family.as_str()))
+            .cloned()
+            .collect();
+        extra_families.sort();
+        for family_name in extra_families {
+            if let Some(themes_in_family) = by_family.get(&family_name) {
                 let mut family_themes: Vec<_> =
                     themes_in_family.iter().map(|t| t.id.clone()).collect();
                 family_themes.sort();
@@ -99,7 +115,7 @@ impl PickerState {
             original_opacity: current_opacity,
             committed: Arc::new(AtomicBool::new(false)),
             opacity_override_in_session: false,
-            preview_mode_full: false, //  default; Tab toggles
+            preview_mode_full: false, // default; Tab toggles
             preview_scroll: 0,
             prompt_cache: std::collections::HashMap::new(),
         })
@@ -263,7 +279,7 @@ impl PickerState {
 
     /// Get current theme variant from registry
     pub fn get_current_theme(&self) -> Result<ThemeVariant> {
-        let registry = ThemeRegistry::new()?;
+        let registry = ThemeRegistry::from_process_or_embedded()?;
         registry
             .get(self.get_current_theme_id())
             .cloned()
@@ -528,8 +544,6 @@ mod tests {
         assert_eq!(theme.id, "catppuccin-mocha");
     }
 
-    // Task 01 additions (invariants)
-
     /// default: picker opens in list-dominant mode, NOT full preview.
     #[test]
     fn preview_mode_full_defaults_to_list_dominant() {
@@ -583,8 +597,6 @@ mod tests {
         }
     }
 
-    // Task 02 additions (prompt_cache contract)
-
     /// Fresh state: no entries cached, so any lookup misses.
     #[test]
     fn prompt_cache_returns_none_for_missing_theme() {
@@ -624,7 +636,7 @@ mod tests {
         assert_eq!(state.cached_prompt("gruvbox-dark"), None);
     }
 
-    /// Task 19-03-01 Test 4 — the committed flag is shared via
+    /// the committed flag is shared via
     /// `Arc<AtomicBool>` so `RollbackGuard` and the panic hook can observe
     /// commit decisions made on the state after they clone the handle.
     #[test]

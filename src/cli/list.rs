@@ -99,7 +99,7 @@ pub fn handle_with_options(options: &ListOptions) -> Result<()> {
             "`--json` and `--ids` cannot be used together".into(),
         ));
     }
-    let registry = ThemeRegistry::new()?;
+    let registry = ThemeRegistry::from_process_or_embedded()?;
     let mut themes = registry.search(options.query.as_deref().unwrap_or_default());
     themes.retain(|theme| {
         options
@@ -202,7 +202,7 @@ fn theme_name_text(r: Option<&Roles<'_>>, name: &str) -> String {
 }
 
 /// Render a description / metadata blurb through `Roles::path` (dim +
-/// italic per Sketch 002), falling back to bare text when Roles is
+/// italic ), falling back to bare text when Roles is
 /// unavailable.
 fn path_text(r: Option<&Roles<'_>>, text: &str) -> String {
     match r {
@@ -258,7 +258,7 @@ mod tests {
     }
 
     /// chrome contract — family heading carries brand-lavender
-    /// bytes in truecolor (Sketch 002 anchor for grouped listings).
+    /// bytes in truecolor (grouped listing header).
     #[test]
     fn list_family_heading_carries_brand_lavender_in_truecolor() {
         let theme = mock_theme();

@@ -97,7 +97,7 @@ fn spawn_platform_player(path: &Path) {
 fn spawn_platform_player(path: &Path) {
     // First successfully spawned player wins.
     // `aplay -q` suppresses PCM-format chatter that would otherwise leak into
-    // the picker's alt-screen (Pitfall 4).
+    // the picker's alt-screen.
     for player in ["pw-play", "paplay", "aplay"] {
         let mut cmd = std::process::Command::new(player);
         if player == "aplay" {
@@ -140,7 +140,7 @@ pub struct SoundSink {
 
 impl SoundSink {
     /// Install the sink as the process-wide EventSink. Must be called before
-    /// any `brand::events::dispatch` call (Pitfall 5).
+    /// any `brand::events::dispatch` call.
     /// Short-circuits to `NoopSink` when:
     /// - `auto || quiet`
     /// - `slate config set sound off`

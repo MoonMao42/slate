@@ -1,4 +1,4 @@
-//! event-seam integration test (18-07-PLAN.md Task 2 Test F).
+//! event-seam integration test.
 //! The Wave-6 dispatch sites (`AutoThemeFailed` across `src/cli/auto_theme.rs`;
 //! `ConfigSet` across `src/cli/config.rs` + `src/cli/share.rs` + the
 //! auto-theme configure flow) flow through a process-global

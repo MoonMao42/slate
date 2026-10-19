@@ -402,7 +402,7 @@ fn run() -> Result<()> {
     };
 
     // register the EventSink seam with the real SoundSink
-    // implementation. Must precede any brand-event dispatch (Pitfall 5).
+    // implementation. Must precede any brand-event dispatch.
     // `auto || quiet || config.sound=off || cache-unpack-fail` internally
     // degrades to NoopSink — this call never panics and never surfaces errors.
     // Diagnostics and opening the hub must remain read-only, including sound

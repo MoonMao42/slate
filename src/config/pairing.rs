@@ -211,6 +211,37 @@ impl PreparedPairing {
         self.save_with(|_| {})
     }
 
+    /// Publish a pairing update from inside an active picker session where the
+    /// preview journal lock is already held. Validates and writes atomically
+    /// with private permissions without creating backup directories.
+    pub(crate) fn save_in_preview(&self) -> Result<()> {
+        self.verify()?;
+        if !self.changed() {
+            return Ok(());
+        }
+        self.publish()
+    }
+
+    fn publish(&self) -> Result<()> {
+        self.verify()?;
+        fs::create_dir_all(
+            self.path
+                .parent()
+                .ok_or_else(|| failure("missing parent"))?,
+        )?;
+        self.verify()?;
+        super::state_files::atomic_write_synced_mode(
+            &self.path,
+            self.desired
+                .as_deref()
+                .ok_or_else(|| failure("unexpected absent pairing update"))?,
+            self.original
+                .as_ref()
+                .and_then(|source| source.mode)
+                .or(Some(0o600)),
+        )
+    }
+
     fn save_with(&self, after_checkpoint: impl FnOnce(&str)) -> Result<Option<String>> {
         let _guard = ConfigWriteGuard::acquire(&self.env)?;
         self.verify()?;
@@ -220,26 +251,7 @@ impl PreparedPairing {
         let targets = recovery_paths::targets(&self.env, [self.path.clone()], "Pairing")?;
         let point = super::snapshot_config_targets_with_env(&self.env, &targets)?;
         after_checkpoint(&point.id);
-        let publish = || {
-            self.verify()?;
-            fs::create_dir_all(
-                self.path
-                    .parent()
-                    .ok_or_else(|| failure("missing parent"))?,
-            )?;
-            self.verify()?;
-            super::state_files::atomic_write_synced_mode(
-                &self.path,
-                self.desired
-                    .as_deref()
-                    .ok_or_else(|| failure("unexpected absent pairing update"))?,
-                self.original
-                    .as_ref()
-                    .and_then(|source| source.mode)
-                    .or(Some(0o600)),
-            )
-        };
-        publish().map_err(|error| failure(format!("pairing was not confirmed saved: {error}. Inspect file recovery with `slate restore {} --dry-run`", point.id)))?;
+        self.publish().map_err(|error| failure(format!("pairing was not confirmed saved: {error}. Inspect file recovery with `slate restore {} --dry-run`", point.id)))?;
         Ok(Some(point.id))
     }
 }

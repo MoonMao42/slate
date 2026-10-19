@@ -1,16 +1,10 @@
 //! Rendering context for the brand text-role system.
-//! Decisions honored:
-//! - **** graceful degradation — `RenderMode::None` when the terminal
-//! does not support color, `RenderMode::Basic` when truecolor probe fails
-//! but a TTY is present, `RenderMode::Truecolor` otherwise.
-//! - **** `MockTheme` injection — tests build a [`RenderContext`]
-//! directly from the `mock_theme()` fixture rather than mutating
-//! `std::env`, so snapshot ANSI bytes are deterministic across CI and
-//! contributor workstations.
-//! - **Pitfall 3 / feedback_no_tech_debt** — env-probe logic is split into
-//! the pure [`classify_env`] helper plus the cached
-//! [`detect_render_mode`] wrapper. Tests drive `classify_env` with
-//! explicit arguments; production reads the cached `OnceLock`.
+//!
+//! - Graceful degradation: `RenderMode::None` when the terminal does not
+//!   support color, `RenderMode::Basic` when truecolor probe fails on a TTY,
+//!   and `RenderMode::Truecolor` otherwise.
+//! - Deterministic testing: tests build a [`RenderContext`] from
+//!   `mock_theme()` rather than mutating `std::env`.
 
 #[cfg(test)]
 use crate::adapter::palette_renderer::PaletteRenderer;
@@ -38,9 +32,6 @@ pub enum RenderMode {
 /// Per-call rendering context — the active theme + the cached RenderMode +
 /// (optionally) a pre-computed pill background to avoid recomputing the
 /// blend on every pill render.
-/// Built once at the top of each user-facing handler and threaded as
-/// `&RenderContext` into [`crate::brand::Roles`] methods (never cloned
-/// see `Anti-Patterns` in 18-RESEARCH).
 pub struct RenderContext<'a> {
     pub theme: &'a ThemeVariant,
     pub mode: RenderMode,
@@ -76,7 +67,7 @@ impl<'a> RenderContext<'a> {
     /// (which would also break every other slate command — correctness
     /// guard, not a routine failure).
     pub fn from_active_theme() -> Result<RenderContext<'static>> {
-        let registry = ThemeRegistry::new()?;
+        let registry = ThemeRegistry::from_process_or_embedded()?;
         let configured_theme_id = current_theme_id()?;
         let resolved_theme_id = resolve_active_theme_id(configured_theme_id.as_deref(), &registry)?;
         Ok(RenderContext::new(cached_theme_ref(resolved_theme_id)?))
@@ -123,7 +114,7 @@ fn cached_theme_ref(theme_id: &str) -> Result<&'static ThemeVariant> {
         }
     }
 
-    let registry = ThemeRegistry::new()?;
+    let registry = ThemeRegistry::from_process_or_embedded()?;
     let theme = registry
         .get(theme_id)
         .ok_or_else(|| {
@@ -331,8 +322,7 @@ mod tests {
         );
     }
 
-    /// 18-VALIDATION row `18-W0-classify-env`: `COLORTERM=truecolor`
-    /// with a TTY must upgrade to `RenderMode::Truecolor`.
+    /// `COLORTERM=truecolor` with a TTY upgrades to `RenderMode::Truecolor`.
     #[test]
     fn classify_env_returns_expected_mode() {
         assert_eq!(

@@ -251,11 +251,12 @@ struct SharedShellModel {
     bat_theme: String,
     eza_config_dir: String,
     lazygit: lazygit::Config,
-    // (D-A6): shell-quoted LS_COLORS / EZA_COLORS strings,
+    //: shell-quoted LS_COLORS / EZA_COLORS strings,
     // rendered from the active palette by `ls_colors::render_strings` and
     // emitted from render_shared_exports (POSIX) / render_fish_shell (fish).
     ls_colors: String,
     eza_colors: String,
+    fzf_default_opts: String,
     fastfetch_config_path: String,
     plain_starship_path: String,
     active_starship_path: String,
@@ -314,11 +315,12 @@ impl SharedShellModel {
             path_entries.push(Self::path_entry(local_bin.to_string(), quote));
         }
 
-        // D-A6: project the active palette into shell-ready
+        // project the active palette into shell-ready
         // LS_COLORS / EZA_COLORS strings. The renderer lives in
         // `src/adapter/ls_colors.rs`; quote once for the target shell before
         // interpolating into its assignments. Fish must not reuse POSIX words.
         let (raw_ls, raw_eza) = crate::adapter::ls_colors::render_strings(&theme.palette);
+        let raw_fzf = crate::adapter::ls_colors::render_fzf_colors(&theme.palette);
 
         Self {
             path_entries,
@@ -333,6 +335,7 @@ impl SharedShellModel {
             lazygit: lazygit::Config::new(options, quote),
             ls_colors: quote(&raw_ls),
             eza_colors: quote(&raw_eza),
+            fzf_default_opts: quote(&raw_fzf),
             fastfetch_config_path: quote(&format!(
                 "{}/fastfetch/config.jsonc",
                 options.managed_root
@@ -385,6 +388,10 @@ fn render_shared_exports(content: &mut String, model: &SharedShellModel) {
     model.lazygit.posix(content);
     content.push_str(&format!("export LS_COLORS={}\n", model.ls_colors));
     content.push_str(&format!("export EZA_COLORS={}\n", model.eza_colors));
+    content.push_str(&format!(
+        "export FZF_DEFAULT_OPTS={}\n",
+        model.fzf_default_opts
+    ));
 }
 
 fn render_posix_fastfetch_wrapper(content: &mut String, model: &SharedShellModel) {
@@ -528,6 +535,10 @@ fn render_fish_shell(model: &SharedShellModel) -> String {
     model.lazygit.fish(&mut content);
     content.push_str(&format!("set -gx LS_COLORS {}\n", model.ls_colors));
     content.push_str(&format!("set -gx EZA_COLORS {}\n", model.eza_colors));
+    content.push_str(&format!(
+        "set -gx FZF_DEFAULT_OPTS {}\n",
+        model.fzf_default_opts
+    ));
     fastfetch::fish(&mut content, &model.fastfetch_config_path);
 
     if model.starship_enabled {
@@ -1071,11 +1082,11 @@ mod tests {
         let fish = render_fish_shell(&sample_model());
         assert!(
             !fish.contains("export LS_COLORS"),
-            "fish renderer must not use POSIX `export LS_COLORS` syntax (D-A2)",
+            "fish renderer must not use POSIX `export LS_COLORS` syntax",
         );
         assert!(
             !fish.contains("export EZA_COLORS"),
-            "fish renderer must not use POSIX `export EZA_COLORS` syntax (D-A2)",
+            "fish renderer must not use POSIX `export EZA_COLORS` syntax",
         );
     }
 

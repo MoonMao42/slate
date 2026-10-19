@@ -1,4 +1,4 @@
-//! Task 5 — insta snapshot harness for slate-tuned tmThemes.
+//! Insta snapshot harness for slate-tuned tmThemes.
 //! Locks the rendered XML for every registered theme. Snapshots are
 //! byte-stable because `render_tmtheme` derives the `<key>uuid</key>`
 //! value via UUIDv5 over a fixed namespace + theme_id (see

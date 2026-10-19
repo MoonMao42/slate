@@ -1,23 +1,17 @@
-//! `SlateTheme : impl cliclack::Theme` — cliclack framing integration
-//! for.
-//! Decisions honored:
-//! - **** — override the 9 methods that govern slate-visible framing.
-//! CONTEXT named `prompt_style` / `error_style`; those do NOT exist
-//! on cliclack 0.5.4's `Theme` trait (see RESEARCH Pitfall 1 — the
-//! authoritative list is encoded here).
-//! - **** — intro / outro framing carries the fixed brand lavender
-//! `#7287fd`; outro emits the sketch-003 completion glyph `└─ ★`.
-//! - **D-01a** — the error symbol uses theme.red, NEVER lavender.
+//! `SlateTheme : impl cliclack::Theme` — cliclack framing integration.
+//!
+//! Overrides the 9 methods that govern visible framing:
+//! - Intro / outro framing carries the fixed brand lavender `#7287fd`;
+//!   outro emits the completion glyph `└─ ★`.
+//! - The error symbol uses theme red, never lavender.
+//!
 //! Startup ordering: call [`init`] exactly once from `main.rs::run()`
-//! **before** any `cliclack::*` call fires. Second and later calls are a
-//! silent override (cliclack 0.5.4 uses `Lazy<RwLock<Box<dyn Theme>>>`);
-//! has no runtime reconfiguration path, so a single call is
-//! sufficient.
+//! before any `cliclack::*` call fires.
 
 use cliclack::{Theme, ThemeState};
 use console::Style;
 
-/// Slate's cliclack theme — lavender bar color, sketch-003 intro/outro
+/// Slate's cliclack theme — lavender bar color, intro/outro
 /// framing, severity-correct error/warn symbols.
 pub struct SlateTheme;
 
@@ -66,12 +60,12 @@ impl Theme for SlateTheme {
         Style::new().yellow().apply_to("▲").to_string()
     }
 
-    /// Error bullet — theme red. D-01a invariant: NEVER lavender here.
+    /// Error bullet — theme red, never lavender.
     fn error_symbol(&self) -> String {
         Style::new().red().apply_to("■").to_string()
     }
 
-    /// Intro framing — `✦ title` on a lavender bar (sketch 003 winner).
+    /// Intro framing — `✦ title` on a lavender bar.
     fn format_intro(&self, title: &str) -> String {
         let color = Style::new().color256(183);
         format!(
@@ -81,15 +75,13 @@ impl Theme for SlateTheme {
         )
     }
 
-    /// Outro framing — `└─ ★ message` on a lavender bar (sketch 003
-    /// completion glyph).
+    /// Outro framing — `└─ ★ message` on a lavender bar.
     fn format_outro(&self, message: &str) -> String {
         let color = Style::new().color256(183);
         format!("{end}  {message}\n", end = color.apply_to("└─ ★"))
     }
 
-    /// Cancel-path outro — red body, red framing. D-01a invariant: the
-    /// message NEVER carries lavender bytes.
+    /// Cancel-path outro — red body, red framing.
     fn format_outro_cancel(&self, message: &str) -> String {
         let red = Style::new().red();
         format!(
@@ -112,15 +104,8 @@ pub fn init() {
 mod tests {
     use super::*;
 
-    /// Row `18-W0-cliclack-theme` — intro framing carries the brand-anchor
-    /// lavender ansi-256 index (183) AND the `✦` glyph. Byte-locked via
-    /// `insta` so sketch-003 drift is flagged at CI.
-    /// `console::Style` suppresses ANSI output when stdout is not a TTY
-    /// (CI runners, `cargo test` without a pty). We force colors ON for
-    /// this test so the byte-locked assertion exercises the real
-    /// production code path; production always runs attached to a TTY
-    /// because it's only reached via `cliclack::intro(...)` which
-    /// already guards on that.
+    /// Intro framing carries the brand-anchor lavender ansi-256 index (183)
+    /// and the `✦` glyph.
     #[test]
     fn intro_uses_lavender_bar() {
         console::set_colors_enabled(true);
@@ -136,22 +121,15 @@ mod tests {
         insta::assert_snapshot!("slate_theme_format_intro", out);
     }
 
-    /// Row `18-W0-cliclack-init` — `init()` is callable without panic.
-    /// Called once per test; cliclack's global `RwLock<Box<dyn Theme>>`
-    /// absorbs the second call silently.
+    /// `init()` is callable without panic.
     #[test]
     fn set_theme_is_callable() {
         init();
-        // Second call must not panic either (documented anti-pattern but
-        // the runtime tolerates it).
         init();
     }
 
-    /// D-01a guard at the cliclack-framing layer: `error_symbol` and
-    /// `format_outro_cancel` must NEVER emit the lavender `38;5;183`
-    /// tint. Forces `console::set_colors_enabled(true)` so this test
-    /// exercises the full styling path (same reason as
-    /// `intro_uses_lavender_bar`).
+    /// `error_symbol` and `format_outro_cancel` must never emit the lavender
+    /// `38;5;183` tint.
     #[test]
     fn error_symbol_is_not_lavender() {
         console::set_colors_enabled(true);

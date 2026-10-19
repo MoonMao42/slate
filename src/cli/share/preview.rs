@@ -17,6 +17,12 @@ struct ImportPreview<'a> {
     theme: Option<&'a str>,
     font: Option<&'a str>,
     opacity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dark_theme: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    light_theme: Option<&'a str>,
     tools: ToolImportFlags,
     notes: &'static [&'static str],
 }
@@ -31,6 +37,9 @@ impl<'a> From<&'a ImportRequest> for ImportPreview<'a> {
             opacity: request
                 .opacity
                 .map(|value| value.to_string().to_lowercase()),
+            prompt: request.prompt.map(|style| style.id()),
+            dark_theme: request.dark_theme.as_deref(),
+            light_theme: request.light_theme.as_deref(),
             tools: request.tools,
             notes: &NOTES,
         }
@@ -50,14 +59,26 @@ pub fn handle_import_preview(uri: &str, json: bool) -> Result<()> {
             .unwrap_or_else(|| "keep current".into());
         let flag = |enabled| if enabled { "enable" } else { "disable" };
         let mut text = format!(
-            "Import preview — no changes made\n\nTheme: {}\nFont request: {}\nOpacity: {}\nStarship: {}\nZsh highlighting: {}\nFastfetch startup: {}\n\n",
+            "Import preview — no changes made\n\nTheme: {}\nFont request: {}\nOpacity: {}\n",
             plan.theme.unwrap_or("keep current"),
             font,
             plan.opacity.as_deref().unwrap_or("keep current"),
+        );
+        if let Some(prompt) = plan.prompt {
+            text.push_str(&format!("Prompt style: {prompt}\n"));
+        }
+        if let Some(dark) = plan.dark_theme {
+            text.push_str(&format!("Auto-theme dark slot: {dark}\n"));
+        }
+        if let Some(light) = plan.light_theme {
+            text.push_str(&format!("Auto-theme light slot: {light}\n"));
+        }
+        text.push_str(&format!(
+            "Starship: {}\nZsh highlighting: {}\nFastfetch startup: {}\n\n",
             flag(plan.tools.starship),
             flag(plan.tools.highlighting),
             flag(plan.tools.fastfetch),
-        );
+        ));
         for note in NOTES {
             text.push_str(note);
             text.push('\n');

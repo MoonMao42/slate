@@ -1,4 +1,4 @@
-//! Task 1: end-to-end integration tests for the
+//! End-to-end integration tests for the
 //! `LS_COLORS` / `EZA_COLORS` shell-integration pipeline.
 //! Scope: builds the full managed shell-integration file set via the
 //! public `ConfigManager::write_shell_integration_file` entry point and
@@ -6,12 +6,12 @@
 //! * carry both `LS_COLORS` and `EZA_COLORS` with the correct shell-specific
 //! export syntax (POSIX `export X='…'` vs fish `set -gx X '…'`);
 //! * use 24-bit truecolor escapes (`38;2;R;G;B`) and never fall back to the
-//! 256-colour form (`38;5;…`) — D-A5, regression guard for Pitfall 3;
+//! 256-colour form (`38;5;…`) ;
 //! * round-trip through the Phase-15 file-type classifier — the ANSI code
 //! under `:*.rs=…` matches `PaletteRenderer::rgb_to_ansi_24bit(palette
 //! .resolve(classify("main.rs", FileKind::Regular)))`;
 //! * pass `zsh -n` parsing when `zsh` is available on PATH (skips gracefully
-//! otherwise — guards Pitfall 5, shell-quoting regressions).
+//! otherwise — guards shell-quoting regressions).
 //! Tests deliberately target the full managed-file pipeline rather than the
 //! pure rendering functions (which are `pub(crate)` to `ls_colors.rs`); this
 //! lets us catch shell-quoting and wiring regressions a unit test could not.
@@ -109,14 +109,14 @@ fn env_zsh_contains_ls_colors_and_eza_colors_exports() {
     let ls_value = single_quoted_value(ls_line);
     let eza_value = single_quoted_value(eza_line);
 
-    // LS_COLORS must open with the GNU reset / normal sentinels (D-A3).
+    // LS_COLORS must open with the GNU reset / normal sentinels.
     assert!(
         ls_value.starts_with("rs=0:no=0:"),
         "LS_COLORS body does not start with `rs=0:no=0:` (got `{ls_value}`)",
     );
 
     // EZA_COLORS must open with `reset:` so eza's built-in extension map is
-    // cleared before our palette entries land (D-A4, RESEARCH §Pattern 2).
+    // cleared before our palette entries land .
     assert!(
         eza_value.starts_with("reset:"),
         "EZA_COLORS body does not start with `reset:` (got `{eza_value}`)",
@@ -134,7 +134,7 @@ fn env_zsh_contains_ls_colors_and_eza_colors_exports() {
         "EZA_COLORS body has no 38;2;R;G;B escape (got `{eza_value}`)",
     );
 
-    // Anti-pattern sweep — no 256-colour regressions (D-A5).
+    // Anti-pattern sweep — no 256-colour regressions.
     assert!(
         !ls_value.contains("38;5;"),
         "LS_COLORS body contains forbidden 256-colour escape",
@@ -180,7 +180,7 @@ fn env_fish_uses_set_gx_for_ls_eza_colors() {
         "env.fish must not emit `export EZA_COLORS` (POSIX-only syntax)",
     );
 
-    // Per D-A5 — fish side must also be truecolor only.
+    // fish side must also be truecolor only.
     assert!(
         !ls_value.contains("38;5;"),
         "fish LS_COLORS body contains forbidden 256-colour escape",
@@ -200,7 +200,7 @@ fn env_zsh_passes_shell_syntax_check() {
         None => {
             println!(
                 "zsh not available on PATH — skipping env.zsh syntax check \
-                 (see RESEARCH §Pitfall 5)"
+                 "
             );
             return;
         }

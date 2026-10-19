@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-19
+
+### Added
+
+- User theme files in `~/.config/slate/themes/*.toml`, with palette validation and automatic dark/light appearance detection.
+- Linux package manager support for `pacman` and `dnf` in tool installation and preflight checks.
+- `FZF_DEFAULT_OPTS` color exports in managed Zsh, Bash and Fish shell integration.
+- Prompt layout and auto-theme pairing support in `slate export` and `slate import`.
+- Aggregated read-only diagnostics via `slate doctor overview`.
+- Window opacity and sound feedback controls in the Hub Terminal Preferences menu.
+
+### Improved
+
+- Scroll position indicators on multi-page diagnostic views and wider shortcut hints in the theme picker footer.
+- Kitty terminal detection during `slate setup --quick`.
+- Active UI language propagation across parallel tool sync workers and multiselect validation prompts.
+- Theme picker quick-save pairing validation, atomic file permissions and palette-based opacity selector styling.
+- Read-only profile inspection paths so preview and status checks do not create configuration directories.
+
 ## [0.5.0] - 2026-09-09
 
 ### Added
@@ -239,6 +258,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Three-tier config architecture (managed / integration / user override)
 - Homebrew tap distribution (`brew install MoonMao42/tap/slate-cli`)
 
+[0.6.0]: https://github.com/MoonMao42/slate/releases/tag/v0.6.0
 [0.5.0]: https://github.com/MoonMao42/slate/releases/tag/v0.5.0
 [0.4.0]: https://github.com/MoonMao42/slate/releases/tag/v0.4.0
 [0.3.4]: https://github.com/MoonMao42/slate/releases/tag/v0.3.4

@@ -204,10 +204,8 @@ fn resolve_with_fallback(palette: &Palette, role: SemanticColor) -> String {
     }
 }
 
-// ── Task 2: state-file plumbing ─────────────────────────────
-
 /// Atomically write the active-variant state file observed by the Lua
-/// watcher registered by `render_loader` (Task 3).
+/// watcher registered by `render_loader`.
 /// Path: `<env.slate_cache_dir()>/current_theme.lua`.
 /// Content: `return "<variant-id>"\n` — a minimal Lua string literal so
 /// `dofile(path)` / `pcall(dofile, path)` returns the variant id.
@@ -251,7 +249,6 @@ fn lua_string_literal(s: &str) -> String {
     out
 }
 
-// ── Task 3: Lua loader template ─────────────────────────────
 // The three `LOADER_TEMPLATE_*` constants below, sandwiched around the
 // spliced per-variant PALETTES entries produced by `render_colorscheme`
 // and an (empty in this plan) `LUALINE_THEMES` block, form the complete
@@ -266,7 +263,7 @@ fn lua_string_literal(s: &str) -> String {
 const LOADER_TEMPLATE_HEAD: &str = "\
 -- slate-managed: do not edit. Regenerate via `slate setup`.
 local M = {}
-local uv = vim.uv or vim.loop  -- nvim 0.8 compat (Pitfall 1)
+local uv = vim.uv or vim.loop  -- nvim 0.8 compat
 
 -- Per-variant highlight tables. Populated by slate setup from HIGHLIGHT_GROUPS.
 local PALETTES = {
@@ -276,7 +273,7 @@ local PALETTES = {
 const LOADER_TEMPLATE_MID: &str = "\
 }
 
--- Per-variant lualine theme tables.  populates; empty stub now.
+-- Per-variant lualine theme tables.
 local LUALINE_THEMES = {
 ";
 
@@ -296,7 +293,7 @@ function M.load(variant)
     vim.api.nvim_set_hl(0, name, spec)
   end
 
-  -- Lualine refresh guard (Pitfall 5)
+  -- Lualine refresh guard
   if package.loaded['lualine'] and LUALINE_THEMES[variant] then
     local ok, lualine = pcall(require, 'lualine')
     if ok then
@@ -431,7 +428,7 @@ return M
 /// 3. LOADER_TEMPLATE_MID — close PALETTES + open LUALINE_THEMES.
 /// 4. (empty in — splices per-variant lualine themes)
 /// 5. LOADER_TEMPLATE_TAIL — close LUALINE_THEMES + M.load / M.setup
-/// / watcher / debounce / cleanup / `return M`.
+/// Watcher, debounce, cleanup, and `return M`.
 /// Deterministic: iteration order is `ThemeRegistry::all()` order, which
 /// is the TOML declaration order (stable). Two calls yield byte-identical
 /// strings.
@@ -478,8 +475,6 @@ fn render_loader_for_state(state_expression: &str) -> String {
     out.push_str(&LOADER_TEMPLATE_TAIL.replace("__SLATE_STATE_PATH__", state_expression));
     out
 }
-
-// ── Task 2: NvimAdapter — ToolAdapter impl + setup ──────────
 
 /// Neovim colorscheme adapter.
 /// Two entry points:
@@ -832,7 +827,7 @@ mod tests {
         insta::assert_snapshot!("nvim_render_colorscheme_catppuccin_mocha", out);
     }
 
-    // ── write_state_file — Task 2 ──────────────────────────
+    // ── write_state_file ───────────────────────────────────
 
     #[test]
     fn write_state_file_writes_exact_content() {
@@ -923,28 +918,28 @@ mod tests {
         assert_eq!(got, "return \"variant-24\"\n");
     }
 
-    // ── render_loader — Task 3 ──────────────────────────────
+    // ── render_loader ───────────────────────────────────────
 
     #[test]
     fn render_loader_includes_uv_compat_shim() {
-        // Pitfall 1 (17-RESEARCH §Pitfall 1): nvim 0.8–0.9 ship only
+        // nvim 0.8–0.9 ship only
         // `vim.loop`; `vim.uv` alias arrives in 0.10. The compat shim
         // keeps the watcher working across supported versions.
         let out = render_loader();
         assert!(
             out.contains("local uv = vim.uv or vim.loop"),
-            "Pitfall 1: missing uv compat shim"
+            "missing uv compat shim"
         );
     }
 
     #[test]
     fn render_loader_includes_100ms_debounce() {
-        // Pitfall 2: macOS APFS fires 2–3 fs_events on an atomic rename;
+        // macOS APFS fires 2–3 fs_events on an atomic rename;
         // the 100 ms debounce collapses them so M.load runs once.
         let out = render_loader();
         assert!(
             out.contains("start(100, 0,"),
-            "Pitfall 2: missing 100ms debounce timer start"
+            "missing 100ms debounce timer start"
         );
     }
 
@@ -961,14 +956,14 @@ mod tests {
 
     #[test]
     fn render_loader_guards_lualine_package_load() {
-        // Pitfall 5: only refresh lualine when it's already loaded — we
+        // only refresh lualine when it's already loaded — we
         // must never force-require it.
         let out = render_loader();
         let single_quoted = out.contains("package.loaded['lualine']");
         let double_quoted = out.contains("package.loaded[\"lualine\"]");
         assert!(
             single_quoted || double_quoted,
-            "Pitfall 5: lualine must be package.loaded-guarded"
+            "lualine must be package.loaded-guarded"
         );
     }
 
@@ -1057,8 +1052,6 @@ mod tests {
         );
     }
 
-    // ── Task 3: lualine theme splice ────────────────────────
-
     #[test]
     fn render_loader_populates_lualine_themes_for_all_variants() {
         let out = render_loader();
@@ -1120,8 +1113,6 @@ mod tests {
             out.len()
         );
     }
-
-    // ── Task 2: NvimAdapter ─────────────────────────────────
 
     #[test]
     fn nvim_adapter_tool_name() {

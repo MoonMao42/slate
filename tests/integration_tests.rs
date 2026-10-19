@@ -275,7 +275,7 @@ fn test_status_command_runs() {
     assert!(stdout.contains("Core Vibe")); // Section 1
     assert!(stdout.contains("Typography")); // Section 2
     assert!(stdout.contains("Background")); // Section 3
-    assert!(stdout.contains("Platform Capabilities")); //  section
+    assert!(stdout.contains("Platform Capabilities")); // Platform Capabilities section
     assert!(stdout.contains("Desktop Appearance"));
     assert!(stdout.contains("Share Capture"));
     assert!(stdout.contains("Package Manager"));
@@ -301,9 +301,9 @@ fn test_list_command_runs() {
 
     // slate list shows families grouped under tree-narrative headings
     // (migration replaced the legacy `━━ {family} ━━`
-    // separator with `◆ {family}` via Roles::heading per Sketch 003).
-    assert!(stdout.contains("Catppuccin")); // First family in  order
-    assert!(stdout.contains("Tokyo Night")); // Second family in  order
+    // separator with `◆ {family}` via Roles::heading ).
+    assert!(stdout.contains("Catppuccin")); // First family in sort order
+    assert!(stdout.contains("Tokyo Night")); // Second family in sort order
     assert!(stdout.contains("◆")); // Brand-anchor family heading glyph
     assert!(stdout.contains("Solarized Dark"));
     assert!(stdout.contains("Solarized Light"));

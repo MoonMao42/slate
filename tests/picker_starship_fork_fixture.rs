@@ -1,9 +1,7 @@
 //! · · Wave-6 integration gate — starship fork
-//! fixture suite (VALIDATION rows 12 + 14 integration scope).
 //! These tests exercise the `fork_starship_prompt` function at integration
 //! scope (separate crate → can only see `pub` items, which is why Plan
 //! 19-08 promoted the symbol to `pub` in the preview module).
-//! Per user MEMORY `feedback_no_tech_debt` + CONTEXT §Anti-patterns, both
 //! tests use the `starship_bin: Option<&Path>` dependency-injection
 //! parameter and/or explicit managed_dir paths. NO `std::env::set_var`,
 //! NO `PathGuard`, NO `PATH_LOCK`, NO `Command::new` shelling into slate.
@@ -150,7 +148,6 @@ fn preview_starship_rejects_resolved_escapes_and_unsafe_inputs_before_spawn() {
     assert!(managed.join("valid.toml.called").exists());
 }
 
-/// VALIDATION row 12 — integration scope · fork fallback when the
 /// starship binary is absent.
 /// Mirrors the unit test in `starship_fork::tests::fork_missing_binary_falls_back`
 /// but lives in the `tests/` tree so we cover the `pub` API surface that
@@ -177,7 +174,6 @@ fn fork_missing_binary_falls_back() {
     );
 }
 
-/// VALIDATION row 14 / V-11 fix — integration scope · V12 path-traversal
 /// guard must reject managed_toml paths that don't live under managed_dir.
 /// The unit test (`config_path_is_managed_only` in `starship_fork`) covers
 /// the same branch; the integration companion proves the guard is still

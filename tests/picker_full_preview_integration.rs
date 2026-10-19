@@ -6,8 +6,7 @@
 //! `silent_preview_apply` adapter pipeline (now env-injected per)
 //! so every managed/* write lands under the tempdir — zero developer-home
 //! pollution, zero `std::env::set_var` global mutation.
-//! Rules enforced here per user MEMORY `feedback_no_tech_debt` + CONTEXT
-//! §Anti-patterns:
+//! Test invariants:
 //! - NO `std::env::set_var`, NO `PathGuard`, NO `PATH_LOCK`
 //! - NO subprocess `Command::new` against `slate` — call library functions
 //! directly with an injected `SlateEnv`
@@ -59,7 +58,6 @@ fn seed_ghostty_integration(env: &SlateEnv) {
     }
 }
 
-/// VALIDATION row 3 — layer 1 (two-layer ephemeral): navigating in
 /// the picker MUST NOT persist anything to `~/.config/slate/current`.
 /// Commit happens only on Enter; Up/Down/arrow keys are navigation-only.
 /// We simulate navigation by calling `PickerState::move_down`/`move_up`
@@ -105,12 +103,11 @@ fn picker_nav_does_not_persist_current_file() {
     );
 }
 
-/// VALIDATION row 5 — layer 1 (triple-guard rollback, active Esc):
 /// when the user navigates mid-picker (managed/ghostty-config drifts),
 /// then presses Esc (the picker event loop calls
 /// `silent_preview_apply(env, original_theme, original_opacity)`), the
 /// managed file MUST match the pre-drift baseline byte-for-byte.
-/// V-08 fix: the previous `if !exists { return; }` silent-skip escape
+/// the previous `if !exists { return; }` silent-skip escape
 /// hatch is replaced with a hard `assert!` — if the tempdir SlateEnv
 /// wiring is broken (e.g. adapter not env-aware), the test MUST fail
 /// loudly rather than pretend-pass.
@@ -130,7 +127,7 @@ fn picker_esc_rolls_back_managed_ghostty() {
         .expect("initial silent_preview_apply must succeed in tempdir env");
 
     let managed_ghostty = managed_ghostty_theme_path(&env);
-    // V-08 fix: HARD assertion — if silent_preview_apply did not produce
+    // HARD assertion — if silent_preview_apply did not produce
     // the expected managed file in the tempdir, the env-injection wiring
     // is broken (regression) and we must surface it here, not
     // silently pass.
@@ -169,7 +166,6 @@ fn picker_esc_rolls_back_managed_ghostty() {
     );
 }
 
-/// VALIDATION row 1 (Tab mode) — Tab toggles `preview_mode_full` in-memory
 /// only. The `current` file, which encodes the committed theme, must not
 /// change when the user enters/exits full preview.
 /// Complements the Esc-rollback test: together they lock the

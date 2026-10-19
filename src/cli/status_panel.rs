@@ -324,7 +324,7 @@ fn brand_glyph(r: Option<&Roles<'_>>, glyph: &str) -> String {
 }
 
 /// Section header — `◆ title` with brand-lavender `◆` via
-/// `Roles::heading` (/ Sketch 003 canon).
+/// `Roles::heading` .
 fn section_heading(r: Option<&Roles<'_>>, title: &str) -> String {
     match r {
         Some(r) => r.heading(title),
@@ -359,7 +359,7 @@ fn code_text(r: Option<&Roles<'_>>, text: &str) -> String {
 
 /// Toolkit cell: `{glyph} {tool:<16}`. Success → theme.green `✓`,
 /// not-installed → theme.red `✗`. Both emit via the severity roles so
-/// D-01a's "severity never lavender" invariant is honored.
+/// "severity never lavender" invariant is honored.
 /// Passing a 16-char left-justified label through `Roles::status_*` keeps
 /// the theme-colored envelope wrapping the whole cell — the subsequent
 /// two-space gap between cells is appended by the caller to preserve the
@@ -552,7 +552,7 @@ mod tests {
         assert!(labels.contains(&"Desktop Appearance"));
     }
 
-    /// Task 1 Test 1 — full `slate status` panel snapshot under MockTheme
+    /// full `slate status` panel snapshot under MockTheme
     /// in Basic mode (byte-stable across CI and workstations because
     /// Basic mode omits truecolor bytes that would vary per theme).
     #[test]
@@ -580,7 +580,7 @@ mod tests {
         insta::assert_snapshot!("status_panel_full_basic", out);
     }
 
-    /// Task 1 Test 2 — the palette swatch survives migration.
+    /// the palette swatch survives migration.
     /// `render()` pipes `render_color_blocks(&palette)` into the Core
     /// Vibe row; the emitted bytes MUST still contain the ESC CSI
     /// `38;2;` SGR prefix so the 4-glyph theme-color preview is
@@ -623,7 +623,7 @@ mod tests {
         );
     }
 
-    /// Task 1 Test 3 — invariant: the `◆ Core Vibe` section heading
+    /// invariant: the `◆ Core Vibe` section heading
     /// renders through `Roles::heading`, which locks the brand-anchor
     /// glyph to `BRAND_LAVENDER_FIXED` (`#7287fd` → `38;2;114;135;253`)
     /// under truecolor mode regardless of the active theme's

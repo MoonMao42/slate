@@ -13,7 +13,7 @@ mod inspect;
 pub mod pairing;
 mod shell_settings;
 
-pub(super) fn set_shell_preference(
+pub(in crate::cli) fn set_shell_preference(
     config: &ConfigManager,
     preference: crate::config::shell_change::ShellPreference,
 ) -> Result<()> {
@@ -47,7 +47,7 @@ pub(crate) fn disable_auto_theme(config: &ConfigManager) -> Result<()> {
         crate::config::shell_change::ShellPreference::AutoTheme(false),
     )?;
 
-    // UX-02 (D-D2): inline trigger — disable also mutates shell integration
+    // inline trigger — disable also mutates shell integration
     // (we re-render env files without the watcher hook).
     crate::cli::new_shell_reminder::emit_new_shell_reminder_once(false, false);
 
@@ -56,11 +56,11 @@ pub(crate) fn disable_auto_theme(config: &ConfigManager) -> Result<()> {
 
 /// Handle `slate config set <key> <value>` command.
 /// migration: every successful set emits via `Roles::status_success`
-/// (theme.green per D-01a — NEVER lavender) and dispatches
+/// (theme.green, never lavender) and dispatches
 /// `BrandEvent::Success(SuccessKind::ConfigSet)` so SoundSink
 /// rings the same completion-event channel for every config mutation.
 /// Where the value is a user-facing literal (opacity preset, sub-action),
-/// it routes through `Roles::code` (inline-code pill per Sketch 001).
+/// it routes through `Roles::code` (inline-code pill).
 pub fn handle_config_set(key: &str, value: &str) -> Result<()> {
     validate_set(key, value)?;
     if key == "auto-theme" && value == "configure" {
@@ -259,7 +259,7 @@ fn handle_config_set_with_env(key: &str, value: &str, env: &SlateEnv) -> Result<
 }
 
 /// Format a success body via `Roles::status_success` (theme.green
-/// NEVER lavender per D-01a), falling back to plain `✓ message`.
+/// never lavender), falling back to plain `✓ message`.
 fn status_success_line(r: Option<&Roles<'_>>, message: &str) -> String {
     match r {
         Some(r) => r.status_success(message),
@@ -310,13 +310,13 @@ mod tests {
             .exists());
     }
 
-    /// UX-02 wiring tests. Each config sub-command tail emits via
+    /// wiring tests. Each config sub-command tail emits via
     /// `emit_new_shell_reminder_once(false, false)` on the success path. We
     /// keep these legacy checks narrowly focused on reminder dispatch. Actual
     /// isolated watcher-start behavior is covered by the runtime's own tests;
     /// SLATE_HOME/injected isolated environments never start a desktop watcher.
     /// The opacity sub-command has NO corresponding emit call in the
-    /// handler body (RESEARCH Q4: terminal-hot-reloadable); we verify this
+    /// handler body; we verify this
     /// by running the full handler end-to-end and asserting the flag
     /// remains false. This is the load-bearing negative test that catches
     /// a future regression where someone adds `emit_new_shell_reminder_once`
@@ -386,7 +386,7 @@ mod tests {
     }
 
     /// Load-bearing negative test: the opacity sub-command is
-    /// terminal-hot-reloadable per RESEARCH Q4, so it MUST NOT emit the
+    /// terminal-hot-reloadable , so it MUST NOT emit the
     /// reminder. We invoke the real handler (opacity goes through
     /// `apply_opacity` without touching the watcher, so this is safe) and
     /// assert that the flag stays in its reset state.
@@ -403,7 +403,7 @@ mod tests {
 
         assert!(
             !crate::cli::new_shell_reminder::reminder_flag_for_tests(),
-            "opacity sub-command is terminal-hot-reloadable (RESEARCH Q4) and MUST NOT emit the new-shell reminder"
+            "opacity sub-command is terminal-hot-reloadable and MUST NOT emit the new-shell reminder"
         );
     }
 
@@ -543,7 +543,7 @@ mod tests {
         );
     }
 
-    /// D-01a invariant — the config-set success line uses theme.green,
+    /// the config-set success line uses theme.green,
     /// never brand-lavender, across every render mode.
     #[test]
     fn config_status_success_line_never_emits_brand_lavender() {
@@ -554,7 +554,7 @@ mod tests {
             let out = status_success_line(Some(&r), "Auto theme enabled");
             assert!(
                 !out.contains("38;2;114;135;253"),
-                "D-01a violation in mode {mode:?}: {out:?}"
+                "severity color invariant violation in mode {mode:?}: {out:?}"
             );
         }
     }

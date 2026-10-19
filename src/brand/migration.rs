@@ -1,7 +1,6 @@
 //! Grep-in-test invariant: per-wave "zero raw styling ANSI" assertion.
 //! Each wave enables its own test by removing the `#[ignore]` attribute
-//! when the wave lands. seeds the scaffold and allowlist so Waves
-//! 1–6 only have to drop the ignore.
+//! when the wave lands. validates that migrated CLI modules emit no raw styling ANSI escapes.
 //! Allowlist (NOT flagged as style-drift):
 //! * `\x1b[?1049l` / `\x1b[?25h` / `\x1b[?25l` — alt-screen / cursor
 //! visibility (terminal control, not styling).
@@ -24,7 +23,7 @@ mod tests {
     /// `src/cli/status_panel.rs::swatch_cell` helper renders theme
     /// palette colors as visible swatches, so its `\x1b[38;2;...m` +
     /// `\x1b[0m` bytes are intentional and must not trip the gate).
-    /// extends the allowlist with `// TERMINAL-CONTROL:` — a
+    /// Also supports `// TERMINAL-CONTROL:` — a
     /// narrower, **single-line** marker that covers ONLY the very next
     /// source line. This is for alt-screen / cursor-visibility / screen-
     /// clear escapes that are harder to encode as bare `\x1b[...l` /
@@ -37,8 +36,7 @@ mod tests {
     /// brace depth (counted from the opening `{` that starts the marked
     /// function) returns to zero. This survives nested blocks (match
     /// arms, closures, if/else) without needing a real Rust parser.
-    /// Returns 0 for missing files so can seed the scaffold
-    /// without every wave's file set needing to exist yet.
+    /// Returns 0 for missing files.
     fn count_style_ansi_in(path: &Path) -> usize {
         let Ok(contents) = fs::read_to_string(path) else {
             return 0;
@@ -325,7 +323,7 @@ fn render() {
 
     /// Final post-Phase-18 sweep — after lands, no file in
     /// `src/cli/` or `src/brand/language.rs` should carry
-    /// `#![allow(deprecated)]`. Task 3 inserted those
+    /// `#![allow(deprecated)]`. Inserted those
     /// attributes during the Wave-0 deprecation seeding; each migrating
     /// wave was supposed to drop them as it touched the file. This
     /// test makes the sweep CI-authoritative — a future regression

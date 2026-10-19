@@ -229,7 +229,7 @@ pub fn handle_with_options(
         }
         target @ ("kitty" | "alacritty" | "nvim" | "zsh" | "bash" | "fish" | "opencode"
         | "opacity" | "font" | "btop" | "starship" | "yazi" | "zellij" | "lazygit"
-        | "eza" | "fastfetch") => {
+        | "eza" | "fastfetch" | "overview" | "all") => {
             let env = SlateEnv::from_process()?;
             integrations::handle(target, &env, json, check_version)
         }

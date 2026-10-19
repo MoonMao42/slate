@@ -309,7 +309,7 @@ impl ToolRegistry {
 }
 
 /// Aggregate `requires_new_shell` across a batch of adapter results.
-/// / D-D6: returns `true` iff at least one result is a successful
+/// Returns `true` iff at least one result is a successful
 /// apply (`ToolApplyStatus::Applied`) **and** carries `requires_new_shell ==
 /// true`. `Failed` and `Skipped` results never contribute — the aggregator
 /// reflects changes that actually landed, so it only counts successes.
@@ -317,7 +317,7 @@ impl ToolRegistry {
 /// `config`) in . Each handler reads this bool once at the end of
 /// its run and decides whether to emit the platform-aware new-terminal
 /// reminder. Keeping the aggregator as a free function (not a method on
-/// `ToolRegistry` / `ToolApplyResult`) matches RESEARCH §Pattern 5 Option A
+/// `ToolRegistry` / `ToolApplyResult`)
 /// and keeps call sites to a single one-liner.
 pub fn requires_new_shell(results: &[ToolApplyResult]) -> bool {
     results
@@ -546,7 +546,7 @@ mod registry_extended_tests {
 
 #[cfg(test)]
 mod requires_new_shell_tests {
-    //! Task 2: D-D6-compliant aggregator — only successful
+    //! aggregator — only successful
     //! `Applied` results with `requires_new_shell == true` contribute;
     //! `Failed` / `Skipped` never do.
 
@@ -596,7 +596,7 @@ mod requires_new_shell_tests {
 
     #[test]
     fn requires_new_shell_ignores_failed_adapters() {
-        // D-D6: failures never contribute even if the failed adapter set the
+        // failures never contribute even if the failed adapter set the
         // signal bool to true.
         let results = vec![failed("bat", true)];
         assert!(!requires_new_shell(&results));

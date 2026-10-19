@@ -12,8 +12,8 @@ impl Language {
     pub const SETUP_REVIEW: &str = "Review and confirm:";
     pub const SETUP_APPLYING: &str = "Applying configuration...";
     pub const SETUP_COMPLETE: &str = "✦ Your terminal is now beautiful!";
-    pub const SETUP_QUICK_PENDING: &str = "Quick setup mode lands in .";
-    pub const SETUP_INTERACTIVE_PENDING: &str = "Interactive setup wizard lands in .";
+    pub const SETUP_QUICK_PENDING: &str = "Quick setup mode is not yet available.";
+    pub const SETUP_INTERACTIVE_PENDING: &str = "Interactive setup wizard is not yet available.";
 
     // Receipt and completion polish
     pub const RECEIPT_HEADER: &str = "Review your setup:";
@@ -54,8 +54,8 @@ impl Language {
     pub const RESTORE_SUCCESS: &str = "✓ Configuration restored";
     pub const SET_PICKER_PENDING: &str =
         "Interactive theme picker coming soon. For now, use: slate set <theme-name>";
-    pub const STATUS_PENDING: &str = "Status display lands in .";
-    pub const LIST_PENDING: &str = "Theme listing lands in .";
+    pub const STATUS_PENDING: &str = "Status display is not yet available.";
+    pub const LIST_PENDING: &str = "Theme listing is not yet available.";
 
     // Status indicators
     pub const INSTALLED: &str = "✓ installed";
@@ -169,7 +169,7 @@ impl Language {
     // CLI surface
     pub const SLATE_SET_DEPRECATION_TIP: &str = "(i) Tip: 'slate set' is transitioning to 'slate theme'. Try 'slate theme <name>' next time.";
 
-    // (LS-03 / UX-03) — brand-voiced shell-integration copy
+    // (/ ) — brand-voiced shell-integration copy
 
     /// macOS variant of the reveal-framed new-shell reminder.
     /// Points to `⌘N` as the canvas where the new palette lives. Active voice;
@@ -182,10 +182,9 @@ impl Language {
     pub const NEW_SHELL_REMINDER_LINUX: &str =
         "✦ Open a new terminal — your new palette lives there";
 
-    /// UX-03 (D-D7): platform-aware reveal-framed reminder emitted at the tail
+    /// platform-aware reveal-framed reminder emitted at the tail
     /// of `slate setup` / `theme` / `font` / `config` when any successful
-    /// adapter declared `RequiresNewShell`. Compile-time branch per RESEARCH
-    /// §Pattern 7 — simpler than routing through `platform::packages` and
+    /// adapter declared `RequiresNewShell`. Compile-time branch     /// §Pattern 7 — simpler than routing through `platform::packages` and
     /// keeps `Language` self-contained.
     pub fn new_shell_reminder() -> &'static str {
         if cfg!(target_os = "macos") {
@@ -195,7 +194,7 @@ impl Language {
         }
     }
 
-    /// LS-03 (D-B4): one-time macOS BSD-`ls` capability message emitted from
+    /// one-time macOS BSD-`ls` capability message emitted from
     /// the setup preflight when `gls` (GNU ls from coreutils) is absent.
     /// Shape: observation → consequence → `brew install coreutils`. Tone
     /// is gentle, brand-voiced, and ends with the fix.
@@ -315,7 +314,7 @@ mod tests {
         assert!(summary.contains("5"));
     }
 
-    // LS-03 / UX-03 brand-voice contract
+    // / brand-voice contract
 
     #[test]
     fn ls_capability_message_shape() {
@@ -507,7 +506,7 @@ mod tests {
 
     /// Marker comment is spliced above the `pcall(require, 'slate')`
     /// line in init.lua — must start with `--` so the resulting file
-    /// remains syntactically valid Lua (Pitfall 4 contract).
+    /// remains syntactically valid Lua.
     #[test]
     fn nvim_consent_marker_comment_is_lua_comment() {
         assert!(

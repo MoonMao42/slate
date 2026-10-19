@@ -43,7 +43,7 @@ fn handle_impl(
     };
     // Build a RenderContext once at the top so every sub-handler shares
     // the same byte contract (daily chrome + sketch 003 tree shape +
-    // D-01a severity). graceful degrade — plain text when the theme
+    // theme severity). graceful degrade — plain text when the theme
     // registry cannot boot.
     let ctx = RenderContext::from_active_theme().ok();
     let roles = ctx.as_ref().map(Roles::new);
@@ -130,7 +130,7 @@ fn handle_restore_direct(
 
     // completion receipt is a static tree-narrative anchor
     // bypass cliclack and println! via Roles::heading / tree_branch /
-    // tree_end. Sketch 003 canon: `◆ Restored … ┃ ├─ … └─ ★ Back on track`.
+    // tree_end. `◆ Restored … ┃ ├─ … └─ ★ Back on track`.
     let failures = receipt.failed_results();
     if compact && failures.is_empty() {
         println!(
@@ -203,9 +203,9 @@ fn handle_restore_direct(
                     status_success_line(r, &format!("Re-applying theme: {}", theme.name)),
                 );
                 // Apply without snapshotting again (we just restored)
-                let report = crate::cli::theme_apply::ThemeApplyCoordinator::with_snapshot_policy(
+                let report = crate::cli::apply::ThemeApplyCoordinator::with_snapshot_policy(
                     &env,
-                    crate::cli::theme_apply::SnapshotPolicy::Skip,
+                    crate::cli::apply::SnapshotPolicy::Skip,
                 )
                 .preserving_auto_pair()
                 .apply(theme)
@@ -213,7 +213,7 @@ fn handle_restore_direct(
                     "Snapshot files were restored, but theme reapplication failed: {error} Undo with `slate restore {}`.",
                     receipt.pre_restore_point_id,
                 )))?;
-                crate::cli::theme_apply::log_apply_report(&report);
+                crate::cli::apply::log_apply_report(&report);
                 if let Err(error) = report.ensure_no_failures() {
                     return Err(crate::error::SlateError::BackupFailed(format!(
                         "Snapshot files were restored, but theme reapplication failed: {error} Undo with `slate restore {}`.",
@@ -494,7 +494,7 @@ fn tree_end_text(r: Option<&Roles<'_>>, text: &str) -> String {
 }
 
 /// Render `✓ message` via `Roles::status_success` (theme.green
-/// NEVER lavender per D-01a), falling back to plain `✓ message`.
+/// never lavender), falling back to plain `✓ message`.
 fn status_success_line(r: Option<&Roles<'_>>, message: &str) -> String {
     match r {
         Some(r) => r.status_success(message),
@@ -503,7 +503,7 @@ fn status_success_line(r: Option<&Roles<'_>>, message: &str) -> String {
 }
 
 /// Render `✗ message` via `Roles::status_error` (theme.red — NEVER
-/// lavender per D-01a), falling back to plain `✗ message`.
+/// lavender), falling back to plain `✗ message`.
 fn status_error_line(r: Option<&Roles<'_>>, message: &str) -> String {
     match r {
         Some(r) => r.status_error(message),
@@ -564,7 +564,7 @@ mod tests {
     }
 
     /// Truecolor variant — anchors every tree glyph to the brand
-    /// lavender byte triple (`38;2;114;135;253`) per Sketch 002.
+    /// lavender byte triple (`38;2;114;135;253`) .
     #[test]
     fn restore_summary_truecolor_snapshot() {
         let theme = mock_theme();
@@ -612,7 +612,7 @@ mod tests {
         assert!(out.contains("└─ ★ Back on track"));
     }
 
-    /// D-01a invariant — `status_error_line` uses theme.red, never
+    /// `status_error_line` uses theme.red, never
     /// brand lavender, across every RenderMode. Covers both the direct
     /// error line (e.g. the baseline-delete rejection) and the wrapped
     /// error lines inside the failure tree branches.
@@ -625,12 +625,12 @@ mod tests {
             let out = status_error_line(Some(&r), "permission denied");
             assert!(
                 !out.contains("38;2;114;135;253"),
-                "D-01a violation in mode {mode:?}: {out:?}"
+                "severity color invariant violation in mode {mode:?}: {out:?}"
             );
         }
     }
 
-    /// D-01a invariant — `status_success_line` uses theme.green, never
+    /// `status_success_line` uses theme.green, never
     /// brand lavender.
     #[test]
     fn status_success_line_never_emits_brand_lavender() {
@@ -641,7 +641,7 @@ mod tests {
             let out = status_success_line(Some(&r), "Restore point deleted");
             assert!(
                 !out.contains("38;2;114;135;253"),
-                "D-01a violation in mode {mode:?}: {out:?}"
+                "severity color invariant violation in mode {mode:?}: {out:?}"
             );
         }
     }

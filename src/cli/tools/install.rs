@@ -216,6 +216,8 @@ fn completion_in_language(
     let route = match method {
         ToolInstallMethod::Homebrew => "Homebrew",
         ToolInstallMethod::Apt => "apt",
+        ToolInstallMethod::Pacman => "pacman",
+        ToolInstallMethod::Dnf => "dnf",
         ToolInstallMethod::UserLocal(_) if chinese => "用户目录安装",
         ToolInstallMethod::UserLocal(_) => "user-local installation",
     };

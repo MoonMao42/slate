@@ -220,7 +220,7 @@ fn inspect_selected(
             super::info::validate_id(id)?;
         }
     }
-    let themes = ThemeRegistry::new()?;
+    let themes = ThemeRegistry::with_env(env)?;
     let (theme, warning, theme_selection_available, theme_notice) = match ConfigManager::from_env_paths(env)
         .get_current_theme()
     {

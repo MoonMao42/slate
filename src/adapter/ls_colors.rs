@@ -33,7 +33,7 @@
 //! `or` / `so` / `pi` / `bd` / `cd` do not appear in the Phase-15 classifier
 //! (`FileKind` has no Pipe / Socket / BlockDevice / CharDevice variants).
 //! Extending `FileKind` is deferred — until then, the closest semantically
-//! adjacent role is emitted per RESEARCH §Pitfall 4.
+//! adjacent role is emitted .
 //! ## `reset:` sentinel on EZA_COLORS
 //! Per `eza_colors(5)`, eza merges `EZA_COLORS` on top of its built-in
 //! extension → color map. Setting `EZA_COLORS="*.rs=…"` alone does not
@@ -41,7 +41,7 @@
 //! through. To keep "one palette across the stack" true, `render_eza_colors`
 //! prepends `reset:` — eza wipes its built-in DB on `reset` and then honours
 //! only the palette-driven entries we emit (with `no=0` handling everything
-//! else as default foreground). See RESEARCH §Pattern 2 lines 338-384.
+//! else as default foreground).
 //! Note on `allow(dead_code)`: the `pub(crate)` render functions and the
 //! `FILE_TYPE_KIND_KEYS` table are consumed by (`SharedShellModel`)
 //! in . Until that wave lands they have no non-test call sites; the
@@ -133,7 +133,7 @@ pub(crate) fn render_eza_colors(palette: &Palette) -> String {
         let _ = write!(out, ":{name}={}", ansi_code(palette, *role));
     }
 
-    // eza-specific identity keys (D-A4):
+    // eza-specific identity keys:
     // uu / gu → current user + group → Text (primary foreground emphasis)
     // un / gn / da → other users / groups / dates → Muted (secondary metadata)
     let text = ansi_code(palette, SemanticColor::Text);
@@ -152,6 +152,27 @@ pub(crate) fn render_eza_colors(palette: &Palette) -> String {
 /// Render the LS_COLORS and EZA_COLORS exports, in that order, without IO.
 pub fn render_strings(palette: &Palette) -> (String, String) {
     (render_ls_colors(palette), render_eza_colors(palette))
+}
+
+/// Render `FZF_DEFAULT_OPTS` `--color=...` specification from the active palette.
+pub fn render_fzf_colors(palette: &Palette) -> String {
+    let fg = palette.resolve(SemanticColor::Text);
+    let bg = palette.resolve(SemanticColor::Background);
+    let hl = palette.resolve(SemanticColor::Accent);
+    let fg_plus = palette.resolve(SemanticColor::Text);
+    let bg_plus = palette.resolve(SemanticColor::Surface);
+    let hl_plus = palette.resolve(SemanticColor::Prompt);
+    let info = palette.resolve(SemanticColor::Muted);
+    let prompt = palette.resolve(SemanticColor::Prompt);
+    let pointer = &palette.brand_accent;
+    let marker = palette.resolve(SemanticColor::Success);
+    let spinner = palette.resolve(SemanticColor::Accent);
+    let header = palette.resolve(SemanticColor::Subtext);
+    let border = palette.resolve(SemanticColor::Border);
+
+    format!(
+        "--color=fg:{fg},bg:{bg},hl:{hl},fg+:{fg_plus},bg+:{bg_plus},hl+:{hl_plus},info:{info},prompt:{prompt},pointer:{pointer},marker:{marker},spinner:{spinner},header:{header},border:{border}"
+    )
 }
 
 /// LS_COLORS / EZA_COLORS adapter.
@@ -176,7 +197,7 @@ impl ToolAdapter for LsColorsAdapter {
     fn is_installed(&self) -> Result<bool> {
         // Always applicable: writing `LS_COLORS` is a silent no-op on BSD
         // `ls` and takes effect the moment the user installs GNU coreutils
-        // (D-B5). Never gated.
+        //. Never gated.
         Ok(true)
     }
 
@@ -204,8 +225,7 @@ impl ToolAdapter for LsColorsAdapter {
         // String emission is owned by `SharedShellModel::new`,
         // which calls `render_strings(&palette)` during shell-integration
         // composition. This adapter's job is purely to declare the
-        // `requires_new_shell` signal honestly (D-C3 / Pitfall from 16-CONTEXT
-        // D-C4 — env vars only materialise in a fresh shell).
+        // `requires_new_shell` signal honestly (env vars only materialise in a fresh shell).
         Ok(ApplyOutcome::Applied {
             requires_new_shell: true,
         })
@@ -522,13 +542,13 @@ mod tests {
             ApplyOutcome::Applied {
                 requires_new_shell: true,
             },
-            "LsColorsAdapter must declare requires_new_shell: true per D-C3",
+            "LsColorsAdapter must declare requires_new_shell: true ",
         );
     }
 
     #[test]
     fn ls_colors_adapter_is_installed_is_always_true() {
-        // D-B5: env var is a silent no-op on BSD ls; never gate writes.
+        // env var is a silent no-op on BSD ls; never gate writes.
         let adapter = LsColorsAdapter;
         assert!(adapter.is_installed().expect("is_installed ok"));
     }

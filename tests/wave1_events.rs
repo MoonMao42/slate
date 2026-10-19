@@ -1,4 +1,4 @@
-//! event-seam integration test (18-02-PLAN.md Task 2 Step E).
+//! event-seam integration test.
 //! The `BrandEvent` dispatch sites planted in `src/cli/setup.rs` and
 //! `src/cli/setup_executor/mod.rs` flow through a process-global
 //! `OnceLock<Arc<dyn EventSink>>`. Running this file as its own

@@ -1,25 +1,12 @@
-//! Brand event seam — the sound / analytics plumbing.
-//! ships the trait + `NoopSink` default only.
-//! `SoundSink : impl EventSink` will register via [`set_sink`] on
-//! startup; no other code changes.
-//! Decisions honored:
-//! - ** / / ** — `BrandEvent` enum + `EventSink` trait +
-//! `NoopSink` default + `OnceLock<Arc<dyn EventSink>>` singleton.
-//! Six top-level variants (Success / Failure / Navigation / Selection /
-//! SetupComplete / ApplyComplete) — the 4 broad categories from
-//! plus two whole-flow milestones for to latch onto.
-//! ## Ordering (Pitfall 5)
-//! `set_sink` **MUST** be called before the first `dispatch` on a given
-//! process. Once `dispatch` has run, the `OnceLock` is initialized with
-//! [`NoopSink`] and `set_sink` will error with the attempted `Arc` back
-//! (so can log a "registered too late" message). relies
-//! on `NoopSink` being the default, so absent any `set_sink` call the
-//! dispatches are observably no-ops.
+//! Brand event seam for runtime sound feedback.
+//!
+//! `SoundSink` registers via [`set_sink`] on startup before the first
+//! [`dispatch`] call; when no sink is registered, [`NoopSink`] is used by
+//! default so dispatches remain no-ops.
 
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// High-level user-facing events emitted from `src/cli/*` during Waves
-/// 1–6 migration. maps each variant to an SFX.
+/// High-level user-facing events emitted from CLI workflows.
 #[derive(Debug, Clone)]
 pub enum BrandEvent {
     /// A user-observable success (theme applied, config set, font downloaded…).
@@ -149,9 +136,7 @@ pub fn set_sink(sink: Arc<dyn EventSink>) -> std::result::Result<(), Arc<dyn Eve
     }
 }
 
-/// Explicitly register the default [`NoopSink`] — optional in
-/// (dispatch self-initializes) but `main.rs` calls this to make the
-/// Pitfall 5 ordering explicit so has a documented template.
+/// Explicitly initialize the default [`NoopSink`].
 pub fn ensure_default_sink() {
     let _ = sink_state();
 }
@@ -186,9 +171,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    /// Row `18-W0-event-noop` — dispatching with no sink registered must
-    /// be a silent no-op (returns without panic; observable flag
-    /// confirms the `NoopSink` default).
+    /// Dispatching with no sink registered is a silent no-op.
     #[test]
     fn dispatch_with_default_sink_is_noop() {
         let _sink_guard = reset_sink_for_tests();
@@ -206,10 +189,7 @@ mod tests {
         }
     }
 
-    /// Row `18-W0-event-routing` — `set_sink(TestSink)` routes subsequent
-    /// dispatches. The test-only reset helper restores the global sink
-    /// state between cases so this stays deterministic inside the shared
-    /// lib-test process.
+    /// `set_sink(TestSink)` routes subsequent dispatches.
     #[test]
     fn set_sink_routes_subsequent_dispatches() {
         let _sink_guard = reset_sink_for_tests();

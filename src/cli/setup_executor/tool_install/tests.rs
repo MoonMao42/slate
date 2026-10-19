@@ -20,6 +20,8 @@ fn install_review_dispatch_consumes_the_given_route_without_selecting_a_backend(
             ToolInstallMethod::Homebrew,
         ),
         (ToolInstallRoute::Apt, "delta", ToolInstallMethod::Apt),
+        (ToolInstallRoute::Pacman, "delta", ToolInstallMethod::Pacman),
+        (ToolInstallRoute::Dnf, "delta", ToolInstallMethod::Dnf),
         (
             ToolInstallRoute::UserLocalStarship,
             "starship",
@@ -36,6 +38,8 @@ fn install_review_dispatch_consumes_the_given_route_without_selecting_a_backend(
                     match route {
                         ToolInstallRoute::Homebrew => PackageManagerBackend::Homebrew,
                         ToolInstallRoute::Apt => PackageManagerBackend::Apt,
+                        ToolInstallRoute::Pacman => PackageManagerBackend::Pacman,
+                        ToolInstallRoute::Dnf => PackageManagerBackend::Dnf,
                         ToolInstallRoute::UserLocalStarship =>
                             panic!("local route must not invoke a package manager"),
                     }

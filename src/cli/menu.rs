@@ -1,5 +1,6 @@
 //! Shared circular menus and opt-in confirmations with Slate styling.
 //! Own navigation so migrated entry points have the same edge behavior.
+use super::ui_language::tr;
 use crate::brand::cliclack_theme::SlateTheme;
 use cliclack::{Theme, ThemeState};
 use console::{Key, Term};
@@ -304,7 +305,7 @@ impl<T: Clone + Eq, const MULTI: bool> Menu<T, MULTI> {
                 Ok(Some(Key::Enter)) if choices_visible && !resized => {
                     state = if MULTI && self.required && !self.items.iter().any(|item| item.checked)
                     {
-                        ThemeState::Error("Input required".into())
+                        ThemeState::Error(tr("请至少选择一项", "Input required").into())
                     } else {
                         ThemeState::Submit
                     };

@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 
 // Re-export theme variants
 pub mod catppuccin;
+pub mod custom;
 pub mod dracula;
 pub mod everforest;
 pub mod gruvbox;
@@ -326,9 +327,10 @@ impl EmbeddedThemes {
 }
 
 /// Theme loader and registry.
-/// Embedded in binary; loads and validates all variants once per process.
+/// Embedded in binary; optionally augmented with user themes from `~/.config/slate/themes/*.toml`.
 pub struct ThemeRegistry {
     embedded: &'static EmbeddedThemes,
+    custom: Vec<ThemeVariant>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -450,19 +452,43 @@ impl ThemeRegistry {
     pub fn new() -> Result<Self> {
         Ok(Self {
             embedded: embedded_themes()?,
+            custom: Vec::new(),
         })
+    }
+
+    /// Create registry with embedded themes plus any valid user custom themes
+    /// under `<config_dir>/themes/*.toml`.
+    pub fn with_env(env: &crate::env::SlateEnv) -> Result<Self> {
+        let embedded = embedded_themes()?;
+        let custom = custom::load_custom_themes(env, embedded);
+        Ok(Self { embedded, custom })
+    }
+
+    /// Load custom themes when a process `SlateEnv` is available, falling back
+    /// to embedded themes when `HOME` / `SLATE_HOME` is unset.
+    pub fn from_process_or_embedded() -> Result<Self> {
+        match crate::env::SlateEnv::from_process() {
+            Ok(env) => Self::with_env(&env),
+            Err(_) => Self::new(),
+        }
+    }
+
+    pub(super) fn iter(&self) -> impl Iterator<Item = &ThemeVariant> {
+        self.embedded.all().chain(self.custom.iter())
     }
 
     /// Get theme variant by ID.
     pub fn get(&self, id: &str) -> Option<&ThemeVariant> {
-        self.embedded.get(id)
+        self.embedded
+            .get(id)
+            .or_else(|| self.custom.iter().find(|theme| theme.id == id))
     }
 
     /// Get a theme by canonical ID or display name.
     pub fn get_by_id_or_name(&self, query: &str) -> Option<&ThemeVariant> {
         self.get(query).or_else(|| {
             let normalized_query = normalize_theme_lookup(query);
-            self.embedded.all().find(|theme| {
+            self.iter().find(|theme| {
                 normalize_theme_lookup(&theme.id) == normalized_query
                     || normalize_theme_lookup(&theme.name) == normalized_query
             })
@@ -471,18 +497,18 @@ impl ThemeRegistry {
 
     /// Get all theme variants in their TOML order.
     pub fn all(&self) -> Vec<&ThemeVariant> {
-        self.embedded.all().collect()
+        self.iter().collect()
     }
 
     /// List all theme IDs in their TOML order.
     pub fn list_ids(&self) -> Vec<String> {
-        self.embedded.all().map(|theme| theme.id.clone()).collect()
+        self.iter().map(|theme| theme.id.clone()).collect()
     }
 
     /// Get themes grouped by family.
     pub fn by_family(&self) -> HashMap<String, Vec<&ThemeVariant>> {
         let mut families = HashMap::new();
-        for variant in self.embedded.all() {
+        for variant in self.iter() {
             families
                 .entry(variant.family.clone())
                 .or_insert_with(Vec::new)

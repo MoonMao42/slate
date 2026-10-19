@@ -86,7 +86,7 @@ where
     std::panic::set_hook(Box::new(move |info| {
         if hook_active.load(Ordering::SeqCst) && !committed.load(Ordering::SeqCst) {
             // 1. Restore the terminal FIRST so the panic backtrace prints to a
-            // sane surface (not into the alt-screen). RESEARCH V7
+            // sane surface (not into the alt-screen).
             // info-disclosure mitigation.
             restore_terminal_surface();
             // 2. Silent managed/* rollback.
@@ -110,17 +110,8 @@ fn restore_terminal_surface() {
     );
 }
 
-/// V-03 BEHAVIOR-PROVING test variant (test-only).
-/// Same structure as `install_rollback_panic_hook` but at step 2 it flips
-/// a caller-provided `AtomicBool` sentinel INSTEAD of calling
-/// `silent_preview_apply`. This lets the test suite PROVE the hook body
-/// actually reached the rollback branch — a critical invariant given
-/// `panic = "abort"` makes Drop unreliable in release.
-/// Why not assert via `silent_preview_apply`? Because it writes real
-/// managed/* files on disk and would be destructive + flaky in parallel
-/// tests. The sentinel proves the hook fired at the SAME point where
-/// production calls `silent_preview_apply`; the production path is
-/// exercised separately at integration scope in.
+/// Test variant that flips a caller-provided `AtomicBool` sentinel instead
+/// of writing managed files on disk.
 #[cfg(test)]
 pub(crate) fn install_rollback_panic_hook_with_sentinel(
     sentinel: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -268,8 +259,7 @@ mod tests {
     #[test]
     fn panic_hook_rollback_on_abort_profile() {
         let _lock = hook_test_lock();
-        // V-03 BEHAVIOR-PROVING TEST (checker feedback + RESEARCH §Pitfall 1):
-        // install the sentinel-variant hook, provoke a panic inside
+        // // install the sentinel-variant hook, provoke a panic inside
         // `catch_unwind`, assert the sentinel flipped. This proves the
         // hook body EXECUTED the rollback branch — not a source-grep.
         // `catch_unwind` works in test/debug mode even when the release
@@ -426,7 +416,7 @@ mod tests {
         );
         assert!(
             source.contains("restore_terminal_surface"),
-            "panic hook MUST restore terminal BEFORE letting the previous hook run — RESEARCH V7 info-disclosure mitigation"
+            "panic hook MUST restore terminal BEFORE letting the previous hook run "
         );
         assert!(
             source.contains("LeaveAlternateScreen"),

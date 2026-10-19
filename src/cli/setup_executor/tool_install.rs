@@ -8,6 +8,8 @@ use std::path::PathBuf;
 pub(crate) enum ToolInstallMethod {
     Homebrew,
     Apt,
+    Pacman,
+    Dnf,
     UserLocal(PathBuf),
 }
 
@@ -25,7 +27,7 @@ impl ToolInstallMethod {
         use crate::config::ui_language::UiLanguage;
         let label = terminal_text(label);
         match self {
-            Self::Homebrew | Self::Apt => match language {
+            Self::Homebrew | Self::Apt | Self::Pacman | Self::Dnf => match language {
                 UiLanguage::Chinese => format!("✓ {label} 已安装"),
                 UiLanguage::English => format!("✓ {label} installed"),
             },
@@ -51,6 +53,8 @@ mod receipt_tests {
             for method in [
                 ToolInstallMethod::Homebrew,
                 ToolInstallMethod::Apt,
+                ToolInstallMethod::Pacman,
+                ToolInstallMethod::Dnf,
                 ToolInstallMethod::UserLocal(PathBuf::from("/fixture/\x1b[2J\n/bin")),
             ] {
                 let text = method.success_message_in("Starship\rtest", language);
@@ -86,6 +90,8 @@ pub(crate) fn install_tool(
         |backend| match backend {
             PackageManagerBackend::Homebrew => packages::install_with_homebrew(package, kind),
             PackageManagerBackend::Apt => packages::apt::install(tool_id),
+            PackageManagerBackend::Pacman => packages::pacman::install(tool_id),
+            PackageManagerBackend::Dnf => packages::dnf::install(tool_id),
             PackageManagerBackend::Unsupported => unreachable!("rejected before installation"),
         },
         super::starship::install,
@@ -108,6 +114,8 @@ pub(crate) fn install_planned(
                 packages::install_with_homebrew(tool.brew_package, tool.brew_kind)
             }
             PackageManagerBackend::Apt => packages::apt::install(tool.id),
+            PackageManagerBackend::Pacman => packages::pacman::install(tool.id),
+            PackageManagerBackend::Dnf => packages::dnf::install(tool.id),
             PackageManagerBackend::Unsupported => unreachable!("not a package route"),
         },
         super::starship::install,
@@ -141,12 +149,16 @@ fn install_via_route(
     let backend = match route {
         ToolInstallRoute::Homebrew => PackageManagerBackend::Homebrew,
         ToolInstallRoute::Apt => PackageManagerBackend::Apt,
+        ToolInstallRoute::Pacman => PackageManagerBackend::Pacman,
+        ToolInstallRoute::Dnf => PackageManagerBackend::Dnf,
         ToolInstallRoute::UserLocalStarship => unreachable!("handled before package installation"),
     };
     match package_install(backend) {
         Ok(()) => Ok(match backend {
             PackageManagerBackend::Homebrew => ToolInstallMethod::Homebrew,
             PackageManagerBackend::Apt => ToolInstallMethod::Apt,
+            PackageManagerBackend::Pacman => ToolInstallMethod::Pacman,
+            PackageManagerBackend::Dnf => ToolInstallMethod::Dnf,
             PackageManagerBackend::Unsupported => unreachable!("rejected before installation"),
         }),
         Err(err) if tool_id == "starship" && should_try_local_starship_fallback(&err) => {

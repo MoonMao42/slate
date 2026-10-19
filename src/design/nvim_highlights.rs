@@ -803,7 +803,7 @@ pub static HIGHLIGHT_GROUPS: &[(&str, HighlightSpec)] = &[
         HighlightSpec::fg(SemanticColor::Number),
     ),
     // ── Plugin coverage — (~130 entries) ───────────────────
-    // Source: 17-RESEARCH §Pattern 5. Role mappings are verbatim from the
+    //  Role mappings are verbatim from the
     // research; each block lifts the plugin's canonical group names and
     // translates a "link" directive into `HighlightSpec::linked(...)`.
     // • Telescope — 13 entries
@@ -1239,7 +1239,7 @@ pub static HIGHLIGHT_GROUPS: &[(&str, HighlightSpec)] = &[
 
 /// Render the lualine theme table as a Lua literal, ready for splicing into
 /// `render_loader`'s `LUALINE_THEMES` block.
-/// Shape (per the lualine "writing a theme" docs, 17-RESEARCH §Pattern 6):
+/// Shape (per the lualine "writing a theme" docs):
 /// ```text
 /// {
 /// normal = { a = { fg = '#..', bg = '#..', gui = 'bold' },
@@ -1342,7 +1342,7 @@ mod tests {
     /// Every fg/bg `SemanticColor` referenced by an entry must resolve to a
     /// well-formed hex on every embedded theme. This guards both the new
     /// Plan-01 SemanticColor variants and the cascading fallbacks landed in
-    /// Task 1 — a missing fallback for Solarized would surface here.
+    /// a missing fallback for Solarized would surface here.
     #[test]
     fn every_entry_resolves_for_every_theme() {
         let registry = ThemeRegistry::new().expect("registry init");
@@ -1532,8 +1532,6 @@ mod tests {
         }
     }
 
-    // ── Task 1: plugin coverage tests ───────────────────────
-
     #[test]
     fn plugin_telescope_groups_present() {
         let names: HashSet<&str> = HIGHLIGHT_GROUPS.iter().map(|(n, _)| *n).collect();
@@ -1701,8 +1699,6 @@ mod tests {
         }
     }
 
-    // ── Task 2: lualine_theme tests ─────────────────────────
-
     #[test]
     fn lualine_theme_contains_all_six_modes() {
         let v = ThemeRegistry::new()
@@ -1801,7 +1797,7 @@ mod tests {
 
     #[test]
     fn lualine_theme_inactive_uses_muted_fg() {
-        // Per 17-RESEARCH §Pattern 6: inactive mode uses Muted fg + Surface bg
+        // inactive mode uses Muted fg + Surface bg
         // rather than an accent color. The test verifies the Muted hex shows up
         // at least once inside the `inactive = { ... }` block.
         let v = ThemeRegistry::new()

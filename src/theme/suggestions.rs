@@ -54,8 +54,7 @@ impl ThemeRegistry {
             _ => 3,
         };
         let mut candidates: Vec<_> = self
-            .embedded
-            .all()
+            .iter()
             .filter_map(|theme| {
                 let distance = [&theme.id, &theme.name]
                     .into_iter()

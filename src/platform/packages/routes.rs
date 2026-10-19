@@ -12,6 +12,8 @@ pub(crate) struct InstallContext {
 pub(crate) enum ToolInstallRoute {
     Homebrew,
     Apt,
+    Pacman,
+    Dnf,
     UserLocalStarship,
 }
 
@@ -20,14 +22,18 @@ pub(crate) enum Unavailable {
     UnsupportedOs,
     MissingPackageManager,
     NoAptMapping,
+    NoPacmanMapping,
+    NoDnfMapping,
 }
 
 impl Unavailable {
     pub(crate) fn reason(self) -> &'static str {
         match self {
             Self::UnsupportedOs => "automatic tool installation supports macOS and Linux only",
-            Self::MissingPackageManager => "no supported package manager; install this tool manually or provide Homebrew on macOS / apt on Linux",
+            Self::MissingPackageManager => "no supported package manager; install this tool manually or provide Homebrew on macOS / apt, pacman, or dnf on Linux",
             Self::NoAptMapping => "no apt mapping for this tool; install it manually before configuration",
+            Self::NoPacmanMapping => "no pacman mapping for this tool; install it manually before configuration",
+            Self::NoDnfMapping => "no dnf mapping for this tool; install it manually before configuration",
         }
     }
 }
@@ -51,6 +57,14 @@ impl InstallContext {
                 Ok(ToolInstallRoute::Apt)
             }
             PackageManagerBackend::Apt => Err(Unavailable::NoAptMapping),
+            PackageManagerBackend::Pacman if super::pacman::package_name(tool_id).is_some() => {
+                Ok(ToolInstallRoute::Pacman)
+            }
+            PackageManagerBackend::Pacman => Err(Unavailable::NoPacmanMapping),
+            PackageManagerBackend::Dnf if super::dnf::package_name(tool_id).is_some() => {
+                Ok(ToolInstallRoute::Dnf)
+            }
+            PackageManagerBackend::Dnf => Err(Unavailable::NoDnfMapping),
             PackageManagerBackend::Unsupported => Err(Unavailable::MissingPackageManager),
         }
     }
@@ -85,6 +99,18 @@ mod tests {
         assert_eq!(apt.route("bat"), Ok(ToolInstallRoute::Apt));
         assert_eq!(apt.route("yazi"), Err(Unavailable::NoAptMapping));
         assert_eq!(apt.route("unknown"), Err(Unavailable::NoAptMapping));
+        let pacman = InstallContext {
+            package_manager: PackageManagerBackend::Pacman,
+            ..context
+        };
+        assert_eq!(pacman.route("yazi"), Ok(ToolInstallRoute::Pacman));
+        assert_eq!(pacman.route("unknown"), Err(Unavailable::NoPacmanMapping));
+        let dnf = InstallContext {
+            package_manager: PackageManagerBackend::Dnf,
+            ..context
+        };
+        assert_eq!(dnf.route("bat"), Ok(ToolInstallRoute::Dnf));
+        assert_eq!(dnf.route("yazi"), Err(Unavailable::NoDnfMapping));
         let brew = InstallContext {
             package_manager: PackageManagerBackend::Homebrew,
             ..context
@@ -94,6 +120,8 @@ mod tests {
         for backend in [
             PackageManagerBackend::Homebrew,
             PackageManagerBackend::Apt,
+            PackageManagerBackend::Pacman,
+            PackageManagerBackend::Dnf,
             PackageManagerBackend::Unsupported,
         ] {
             assert_eq!(

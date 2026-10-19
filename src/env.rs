@@ -507,7 +507,7 @@ mod tests {
     fn test_from_process_reads_home() {
         // This test only checks that from_process can be called
         // We don't assert on the actual result since we can't control HOME in tests
-        // without isolation. Real validation happens in integration tests.
+        // without isolation. Real validation happens in.
         let _result = SlateEnv::from_process();
         // If it doesn't panic, the test passes
     }
@@ -591,7 +591,7 @@ mod tests {
 
 #[cfg(test)]
 mod slate_cache_dir_tests {
-    //! Task 1: dedicated coverage for `SlateEnv::slate_cache_dir`.
+    //! Dedicated coverage for `SlateEnv::slate_cache_dir`.
     //! These tests prove the accessor is XDG-aware (via the `from_process`
     //! / `with_home` constructors) and stable across calls — without
     //! mutating `std::env::set_var` (per user preference `feedback_no_tech_debt`,

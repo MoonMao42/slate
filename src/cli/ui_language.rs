@@ -5,6 +5,26 @@ use crate::{
 };
 use std::cell::Cell;
 use std::io::IsTerminal;
+use std::sync::atomic::{AtomicU8, Ordering};
+
+const LANG_CHINESE: u8 = 0;
+const LANG_ENGLISH: u8 = 1;
+
+static GLOBAL_CURRENT: AtomicU8 = AtomicU8::new(LANG_CHINESE);
+
+const fn encode_language(language: UiLanguage) -> u8 {
+    match language {
+        UiLanguage::Chinese => LANG_CHINESE,
+        UiLanguage::English => LANG_ENGLISH,
+    }
+}
+
+const fn decode_language(raw: u8) -> UiLanguage {
+    match raw {
+        LANG_ENGLISH => UiLanguage::English,
+        _ => UiLanguage::Chinese,
+    }
+}
 
 thread_local! {
     static CURRENT: Cell<UiLanguage> = const { Cell::new(UiLanguage::Chinese) };
@@ -13,6 +33,7 @@ thread_local! {
 }
 
 fn set_current(language: UiLanguage) {
+    GLOBAL_CURRENT.store(encode_language(language), Ordering::Relaxed);
     CURRENT.with(|current| current.set(language));
     #[cfg(test)]
     INITIALIZED.with(|initialized| initialized.set(true));
@@ -30,12 +51,23 @@ pub(crate) fn is_interactive_output() -> bool {
     }
 }
 
-pub(super) fn tr(zh: &'static str, en: &'static str) -> &'static str {
-    CURRENT.with(|current| crate::config::ui_language::Text { zh, en }.get(current.get()))
+pub(crate) fn tr(zh: &'static str, en: &'static str) -> &'static str {
+    crate::config::ui_language::Text { zh, en }.get(current())
 }
 
-pub(super) fn current() -> UiLanguage {
-    CURRENT.with(Cell::get)
+pub(crate) fn tr_output(zh: &'static str, en: &'static str) -> &'static str {
+    crate::config::ui_language::Text { zh, en }.get(output_language())
+}
+
+pub(crate) fn current() -> UiLanguage {
+    #[cfg(test)]
+    {
+        CURRENT.with(Cell::get)
+    }
+    #[cfg(not(test))]
+    {
+        decode_language(GLOBAL_CURRENT.load(Ordering::Relaxed))
+    }
 }
 
 /// Display policy only. Never use this to grant non-interactive consent.
@@ -142,5 +174,13 @@ mod tests {
             }
             assert_eq!(language_for_output(true, true, saved), saved);
         }
+    }
+
+    #[test]
+    fn atomic_language_encoding_round_trips_both_variants() {
+        for language in [UiLanguage::Chinese, UiLanguage::English] {
+            assert_eq!(decode_language(encode_language(language)), language);
+        }
+        assert_eq!(decode_language(u8::MAX), UiLanguage::Chinese);
     }
 }

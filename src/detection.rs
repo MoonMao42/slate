@@ -544,7 +544,7 @@ pub fn command_path(command: &str) -> Option<PathBuf> {
 }
 
 /// GNU `ls` is installed as `gls` by Homebrew's coreutils formula.
-/// Used by the macOS preflight BSD-`ls` capability message (D-B1).
+/// Used by the macOS preflight BSD-`ls` capability message.
 pub fn is_gnu_ls_present() -> bool {
     command_path("gls").is_some()
 }
@@ -1033,7 +1033,7 @@ mod tests {
         assert!(summary.font_apply.contains("localized"));
     }
 
-    // is_gnu_ls_present helper (LS-03)
+    // is_gnu_ls_present helper
 
     /// Pure-delegation check. `is_gnu_ls_present` must equal `command_path("gls").is_some()`
     /// by construction; any future divergence should fail here loudly.

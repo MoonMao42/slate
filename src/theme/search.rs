@@ -17,8 +17,7 @@ impl ThemeRegistry {
         if terms.is_empty() {
             return Vec::new();
         }
-        self.embedded
-            .all()
+        self.iter()
             .filter(|theme| {
                 let fields = normalize_theme_lookup(&format!(
                     "{} {} {}",

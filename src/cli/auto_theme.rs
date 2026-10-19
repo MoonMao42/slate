@@ -300,7 +300,7 @@ fn configure_auto_theme_inner() -> Result<()> {
 }
 
 /// Build the intro header title. Always starts with the ✦ brand glyph so
-/// the wordmark keeps the lavender anchor that Sketch 002 locks in.
+/// the wordmark keeps the lavender anchor  integration tests.
 fn intro_title(r: Option<&Roles<'_>>, text: &str) -> String {
     match r {
         Some(r) => format!("{} {}", r.brand("✦"), text),
@@ -321,7 +321,7 @@ fn brand_glyph(r: Option<&Roles<'_>>, glyph: char) -> String {
 }
 
 /// Format a `log::success` body via `Roles::status_success` (theme.green
-/// NEVER lavender per D-01a), falling back to plain `✓ message`.
+/// never lavender), falling back to plain `✓ message`.
 fn status_success_line(r: Option<&Roles<'_>>, message: &str) -> String {
     match r {
         Some(r) => r.status_success(message),
@@ -471,7 +471,7 @@ mod tests {
         assert!(resolved == "catppuccin-mocha" || resolved == "catppuccin-latte");
     }
 
-    /// D-01a invariant — the `status_success_line` helper used by the
+    /// the `status_success_line` helper used by the
     /// auto-theme configure flow must use theme.green, never the brand
     /// lavender RGB triple. Tests every render mode to lock the
     /// invariant file-wide.
@@ -484,12 +484,12 @@ mod tests {
             let out = status_success_line(Some(&r), "Auto-theme preferences saved.");
             assert!(
                 !out.contains("38;2;114;135;253"),
-                "D-01a violation in mode {mode:?}: {out:?}"
+                "severity color invariant violation in mode {mode:?}: {out:?}"
             );
         }
     }
 
-    /// D-01a invariant variant — even though `auto_theme.rs` does not
+    /// even though `auto_theme.rs` does not
     /// emit `Roles::status_error` directly today (errors propagate via
     /// the outer wrapper to the caller's `error::display`), assert the
     /// invariant locally so a future refactor that adds an error
@@ -502,11 +502,11 @@ mod tests {
             let r = Roles::new(&ctx);
             // Simulate the byte shape of any error rendering this file
             // might emit in the future. status_error must NEVER carry
-            // brand-accent lavender bytes (D-01a).
+            // brand-accent lavender bytes .
             let out = r.status_error("dark-mode-notify install failed");
             assert!(
                 !out.contains("38;2;114;135;253"),
-                "D-01a violation for status_error in mode {mode:?}: {out:?}"
+                "severity color invariant violation for status_error in mode {mode:?}: {out:?}"
             );
         }
     }

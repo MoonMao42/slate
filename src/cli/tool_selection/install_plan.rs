@@ -129,6 +129,22 @@ impl InstallPlan {
                 "apt package ({}; administrator access)",
                 packages::apt::package_name(id)?
             ),
+            ToolInstallRoute::Pacman if chinese => format!(
+                "pacman 软件包（{}；需要管理员权限）",
+                packages::pacman::package_name(id)?
+            ),
+            ToolInstallRoute::Pacman => format!(
+                "pacman package ({}; administrator access)",
+                packages::pacman::package_name(id)?
+            ),
+            ToolInstallRoute::Dnf if chinese => format!(
+                "dnf 软件包（{}；需要管理员权限）",
+                packages::dnf::package_name(id)?
+            ),
+            ToolInstallRoute::Dnf => format!(
+                "dnf package ({}; administrator access)",
+                packages::dnf::package_name(id)?
+            ),
             ToolInstallRoute::UserLocalStarship if chinese => format!(
                 "用户目录中的可执行文件 {:?}（需要 curl）",
                 self.local_binary

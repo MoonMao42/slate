@@ -39,7 +39,7 @@ pub(super) fn theme_uuid(theme_id: &str) -> Uuid {
 /// XML-escape the 5 standard plist entities (& < > " ').
 /// slate's palette hex strings (`#RRGGBB`) and theme ids (kebab-case
 /// ASCII) are XML-safe today, so most calls return the input borrowed
-/// unchanged. The helper exists as defense-in-depth (RESEARCH §P2): if a
+/// unchanged. The helper exists as defense-in-depth: if a
 /// future palette field carries an `&` or `<`, the rendered tmTheme must
 /// stay a valid plist or `bat cache --build` rejects it as malformed.
 pub(super) fn xml_escape(s: &str) -> Cow<'_, str> {
@@ -93,7 +93,7 @@ pub fn render_tmtheme(palette: &Palette, theme_id: &str) -> String {
         .unwrap_or(&palette.background);
     let gutter_foreground = &palette.bright_black;
 
-    // Per-scope colors — direct ANSI-slot mapping per RESEARCH §Q13.
+    // Per-scope colors — direct ANSI-slot mapping .
     let comment = &palette.bright_black;
     let string_color = &palette.green;
     let keyword = &palette.magenta;

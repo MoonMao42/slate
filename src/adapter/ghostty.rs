@@ -1102,7 +1102,7 @@ mod tests {
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
 
         // Route through the TRAIT method — this is what ToolRegistry dispatches
-        // to when `apply_theme_to_tools_with_env` is used (Task 01).
+        // to when `apply_theme_to_tools_with_env` is used.
         let outcome = ToolAdapter::apply_theme_with_env(&adapter, &theme, &env).unwrap();
         assert!(matches!(outcome, ApplyOutcome::Applied { .. }));
 

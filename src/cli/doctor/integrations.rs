@@ -304,6 +304,58 @@ fn inspect(target: &str, env: &SlateEnv) -> Report {
                 }
             }
         }
+        "overview" | "all" => {
+            report.scope = "Aggregated read-only file-check summary across managed tool integrations; no external binaries are launched.";
+            for sub in [
+                "kitty",
+                "alacritty",
+                "nvim",
+                "zsh",
+                "bash",
+                "fish",
+                "opencode",
+                "btop",
+                "starship",
+                "yazi",
+                "zellij",
+                "lazygit",
+                "eza",
+                "fastfetch",
+                "opacity",
+            ] {
+                let sub_report = inspect(sub, env);
+                let ok_count = sub_report
+                    .checks
+                    .iter()
+                    .filter(|c| c.status == "ok")
+                    .count();
+                let warn_count = sub_report
+                    .checks
+                    .iter()
+                    .filter(|c| c.status == "warning")
+                    .count();
+                let err_count = sub_report
+                    .checks
+                    .iter()
+                    .filter(|c| c.status == "error")
+                    .count();
+                let status = if err_count > 0 {
+                    "error"
+                } else if warn_count > 0 {
+                    "warning"
+                } else {
+                    "ok"
+                };
+                let suggestion = (warn_count > 0 || err_count > 0)
+                    .then(|| format!("Run `slate doctor {sub}` for detailed diagnostics."));
+                report.add(
+                    status,
+                    format!("{sub}: {ok_count} ok, {warn_count} warning(s), {err_count} error(s)"),
+                    env.config_dir(),
+                    suggestion,
+                );
+            }
+        }
         _ => unreachable!("doctor target is validated by the caller"),
     }
     report
@@ -724,5 +776,23 @@ mod tests {
             assert!(crate::adapter::kitty_config::lines(content.as_bytes())
                 .all(|line| line.value(b"include").is_none()));
         }
+    }
+
+    #[test]
+    fn doctor_overview_aggregates_tool_checks_without_writing_files() {
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().into());
+        let report = inspect("overview", &env);
+        assert_eq!(report.target, "overview");
+        assert_eq!(report.checks.len(), 15);
+        assert!(report
+            .checks
+            .iter()
+            .any(|c| c.message.starts_with("kitty:")));
+        assert!(report
+            .checks
+            .iter()
+            .any(|c| c.message.starts_with("starship:")));
+        assert_eq!(fs::read_dir(td.path()).unwrap().count(), 0);
     }
 }

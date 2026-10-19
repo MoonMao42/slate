@@ -14,7 +14,7 @@ pub(crate) fn is_interactive() -> bool {
 }
 
 pub(crate) fn wording(zh: &'static str, en: &'static str) -> &'static str {
-    crate::config::ui_language::Text { zh, en }.get(super::ui_language::output_language())
+    super::ui_language::tr_output(zh, en)
 }
 
 pub(crate) fn tool_pitch(tool: &crate::cli::tool_selection::ToolMetadata) -> &'static str {

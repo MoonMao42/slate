@@ -182,7 +182,7 @@ mod tests {
 
     /// Brand-anchor invariant — the ✦ glyph passed to `render_aura_body`
     /// carries the brand-lavender bytes in truecolor mode so the easter
-    /// egg still wears the slate wordmark anchor (Sketch 002).
+    /// egg still wears the slate wordmark anchor .
     #[test]
     fn aura_anchor_glyph_uses_brand_lavender_in_truecolor() {
         let theme = mock_theme();

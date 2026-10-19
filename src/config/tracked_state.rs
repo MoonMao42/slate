@@ -78,7 +78,7 @@ impl ConfigManager {
         }
     }
 
-    /// (LS-03 / D-B3): has the user already seen the macOS BSD-`ls`
+    ///  has the user already seen the macOS BSD-`ls`
     /// capability message? Presence of the flat marker file means yes.
     /// The marker lives directly under `~/.config/slate/` (flat, matching the
     /// `autorun-fastfetch` convention) — not under a `state/` subdir.
@@ -86,7 +86,7 @@ impl ConfigManager {
         Ok(self.base_path.join("ls-capability-acknowledged").exists())
     }
 
-    /// (LS-03 / D-B3): mark the BSD-`ls` capability message as seen.
+    ///  mark the BSD-`ls` capability message as seen.
     /// Creates `~/.config/slate/ls-capability-acknowledged` atomically. Idempotent:
     /// calling twice is fine; `slate clean` wipes the whole base_path so no
     /// disable helper is needed.
@@ -134,8 +134,7 @@ mod tests {
             "flat marker file must exist at base_path/ls-capability-acknowledged"
         );
         // Negative: we did NOT create a `state/` subdirectory. The codebase uses
-        // flat state files and CONTEXT D-B3's working-name reference to a sibling
-        // of `state/` was corrected in RESEARCH §Pattern 3.
+        // flat state files and stored in the config directory.
         assert!(
             !temp.path().join("state").exists(),
             "acknowledge must NOT create a state/ subdir"

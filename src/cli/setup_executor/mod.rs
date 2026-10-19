@@ -344,7 +344,7 @@ fn heading(r: Option<&Roles<'_>>, title: &str) -> String {
 }
 
 /// Render `✗ message` via Roles::status_error (theme red — never
-/// lavender per D-01a), falling back to plain text without color when
+/// lavender), falling back to plain text without color when
 /// no Roles is available.
 fn status_error(r: Option<&Roles<'_>>, message: &str) -> String {
     match r {
@@ -895,7 +895,7 @@ error_symbol = "[>](bold red)"
         assert_eq!(status_success(None, "ok"), "✓ ok");
     }
 
-    /// D-01a invariant — status_error, across all modes, must never
+    /// status_error, across all modes, must never
     /// leak brand-anchor lavender bytes (error severity stays warning-
     /// colored).
     #[test]
@@ -909,7 +909,7 @@ error_symbol = "[>](bold red)"
             let out = status_error(Some(&r), "something failed");
             assert!(
                 !out.contains("38;2;114;135;253"),
-                "D-01a violation in mode {mode:?}: {out:?}"
+                "severity color invariant violation in mode {mode:?}: {out:?}"
             );
         }
     }

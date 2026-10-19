@@ -82,7 +82,7 @@ impl Drop for TerminalGuard {
 pub fn launch_picker(env: &SlateEnv) -> Result<()> {
     let preview = std::sync::Arc::new(PreviewSnapshot::capture(env)?);
     let initial_state = (|| -> Result<PickerState> {
-        let config = crate::config::ConfigManager::with_env(env)?;
+        let config = crate::config::ConfigManager::from_env_paths(env);
         let theme = config
             .get_current_theme()?
             .unwrap_or_else(|| "catppuccin-mocha".to_string());
@@ -301,7 +301,7 @@ fn handle_key(
         }
         KeyCode::Up | KeyCode::Char('k') => {
             state.move_up();
-            // picker navigation — NoopSink in , SoundSink in.
+            // picker navigation event
             dispatch(BrandEvent::Navigation(NavKind::PickerMove));
             Ok(KeyOutcome::Continue)
         }
@@ -415,9 +415,7 @@ fn fork_and_cache_prompt(state: &mut PickerState, env: &SlateEnv) {
     // invalidates successes and failures together, permitting another attempt.
     state.cache_prompt_failure(&theme_id);
 
-    let Ok(config) = crate::config::ConfigManager::with_env(env) else {
-        return;
-    };
+    let config = crate::config::ConfigManager::from_env_paths(env);
     let Ok(enabled) = config.is_starship_enabled() else {
         return;
     };
@@ -452,7 +450,7 @@ fn prepare_preview_starship_config(
     env: &SlateEnv,
 ) -> Result<std::path::PathBuf> {
     let theme = state.get_current_theme()?;
-    let config = crate::config::ConfigManager::with_env(env)?;
+    let config = crate::config::ConfigManager::from_env_paths(env);
     let content = preview_starship_content(&config, env, &theme)?;
     if content.len() as u64 > crate::config::file_read::MAX_TOOL_CONFIG_BYTES {
         return Err(crate::error::SlateError::InvalidConfig(
@@ -660,12 +658,11 @@ mod tests {
         }
     }
 
-    // Task 01 (Tab branch + dirty-flag contract)
+    // Tab branch + dirty-flag contract
 
-    /// VALIDATION row 6: Tab is a no-event surface.
     /// Tab must flip `preview_mode_full` and return `KeyOutcome::Continue`
     /// WITHOUT firing any `BrandEvent` (no PickerMove, no PickerEnter).
-    /// CONTEXT §Established Patterns: Tab has no "selection" semantics.
+    /// Tab has no "selection" semantics.
     /// Implementation detail: the `brand::events` sink is a process-global
     /// `OnceLock` and `cargo test` runs tests in parallel, so a counter-
     /// delta assertion on a shared sink is inherently race-prone. Instead
@@ -723,7 +720,7 @@ mod tests {
         );
         assert!(
             !tab_block.contains("dispatch("),
-            "Tab arm MUST NOT call dispatch() — CONTEXT §Established Patterns: \
+            "Tab arm MUST NOT call dispatch() : \
              Tab has no selection semantics and  SoundSink must stay \
              silent on mode switches. Offending block:\n{tab_block}"
         );
@@ -887,7 +884,7 @@ mod tests {
         );
     }
 
-    /// V-04 BEHAVIOR PROOF: Tab → `KeyOutcome::Continue` → outer loop
+    /// Tab → `KeyOutcome::Continue` → outer loop
     /// sets `dirty = true` → next loop-top iteration renders with the
     /// new `preview_mode_full` value. We replicate that cycle with a
     /// render-count spy to prove the contract behaviorally — not just
@@ -968,7 +965,7 @@ mod tests {
         assert!(state.preview_mode_full, "Tab must have flipped the mode");
     }
 
-    /// V-09 (resize contract): `invalidate_prompt_cache` clears
+    /// `invalidate_prompt_cache` clears
     /// all cached forked prompts. Pins the resize→cache-clear contract
     /// so a future optimizer ("only evict stale entries") cannot break
     /// the `--terminal-width` coupling baked into each cached prompt.
@@ -983,7 +980,7 @@ mod tests {
         );
 
         // This is exactly what the event_loop `had_resize` branch will
-        // call (Task 19-07-01 action C).
+        // call.
         state.invalidate_prompt_cache();
 
         assert_eq!(

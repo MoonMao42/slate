@@ -173,7 +173,7 @@ fn push_heading(out: &mut String, roles: Option<&Roles<'_>>, title: &str) {
 // These helpers render 2-3 lines of palette-tinted text. They're NOT full
 // renderers — real diff / lazygit / nvim block renderers can land in a
 // follow-up if UAT shows the placeholders are too sparse (see
-// CONTEXT §deferred). Real Palette field names per V-07 preflight:
+// Palette field mappings:
 // `palette.green`, `palette.red`, `palette.blue`, `palette.magenta`
 // (semantic names), NOT `ansi_00..ansi_15`.
 
@@ -287,8 +287,6 @@ mod tests {
         crate::brand::render_context::mock_theme().palette
     }
 
-    // ── Task 19-04-01 tests ─────────────────────────────────────────────
-
     /// mini-preview contract — exactly 3 `\n` characters: swatch row, prompt row, separator row.
     /// `compose_mini` must stay compact because render.rs layers its help line below.
     #[test]
@@ -349,8 +347,6 @@ mod tests {
             "self_draw_prompt_from_sample_tokens must not end with newline (caller policy), got: {out:?}"
         );
     }
-
-    // ── Task 19-04-02 tests ─────────────────────────────────────────────
 
     /// Minimum tier — exactly 4 `◆ ` heading labels.
     #[test]

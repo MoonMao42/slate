@@ -1,15 +1,15 @@
 //! Platform-aware reveal-framed "open a new shell" reminder emitted at the
 //! tail of `slate setup` / `slate theme` / `slate font` / `slate config` when
-//! any successful adapter declared `RequiresNewShell` (D-D1/D-D4/D-D5).
+//! any successful adapter declared `RequiresNewShell` .
 //! Emitted at most once per process. Session-local AtomicBool latch (no
 //! longer mirrors any demo.rs code — DEMO-02 retired in).
 //! `--auto` / `--quiet` suppression is checked BEFORE the flag swap so
-//! suppressed calls don't burn the flag (RESEARCH §Pitfall 1).
+//! suppressed calls don't burn the flag.
 //! The copy itself lives in `Language::new_shell_reminder()` (platform-aware;
 //! macOS gets `⌘N`, Linux gets "terminal"). This module owns only dedup +
 //! emission sequencing.
 //! migration: the reminder body routes through the Roles API so
-//! the brand-anchor ✦ glyph carries the lavender accent (Sketch 002),
+//! the brand-anchor ✦ glyph carries the lavender accent ,
 //! and on macOS the `⌘N` keycap renders through `Roles::shortcut`
 //! (bordered keycap pill per sketch manifest); on Linux the equivalent
 //! "open a new terminal" phrase routes through `Roles::path` (dim italic).
@@ -23,7 +23,7 @@ use crate::brand::roles::Roles;
 static REMINDER_EMITTED: AtomicBool = AtomicBool::new(false);
 
 /// Emit the new-terminal reveal reminder at most once per process.
-/// Order of checks (load-bearing per RESEARCH §Pitfall 1):
+/// Order of checks (load-bearing ):
 /// 1. Early-return on `auto || quiet` WITHOUT touching the flag — this is
 /// what protects `slate theme --auto --quiet` (the Ghostty watcher path)
 /// from emitting OR consuming the one-shot flag.
@@ -149,7 +149,7 @@ mod tests {
     /// keeps the fix local and avoids adding a crate for the handful of tests.
     /// We assert flag state directly rather than capturing stdout: stdout
     /// capture across threads is finicky, and the flag is the load-bearing
-    /// state per §Pitfall 1 (did the early-return happen BEFORE the swap?).
+    /// state (did the early-return happen BEFORE the swap?).
     #[test]
     fn reminder_emits_once_per_process() {
         let _guard = REMINDER_TEST_LOCK
@@ -178,7 +178,7 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         reset_reminder_flag_for_tests();
         emit_new_shell_reminder_once(true, false);
-        // Critical §Pitfall 1 assertion: the early return MUST happen before
+        // Assertion: the early return MUST happen before
         // the swap, so `auto=true` leaves the flag in its reset state. If a
         // future refactor moves the swap above the `if auto || quiet` guard,
         // this test flips red.

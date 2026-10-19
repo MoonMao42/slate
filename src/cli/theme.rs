@@ -190,7 +190,7 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
             }
         };
 
-        let registry = ThemeRegistry::new()?;
+        let registry = ThemeRegistry::with_env(&env)?;
         let theme = match registry.get(&theme_id) {
             Some(theme) => theme,
             None => {
@@ -256,7 +256,7 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         Ok(())
     } else if let Some(name) = theme_name {
         // Direct apply path: accept canonical kebab-case IDs and display-name aliases.
-        let registry = ThemeRegistry::new()?;
+        let registry = ThemeRegistry::with_env(&env)?;
 
         let theme = registry.require_by_id_or_name(&name)?;
 
@@ -288,9 +288,9 @@ pub fn handle_theme(theme_name: Option<String>, auto: bool, quiet: bool) -> Resu
         dispatch(BrandEvent::Success(SuccessKind::ThemeApplied));
         dispatch(BrandEvent::ApplyComplete);
 
-        // UX-02 (D-D3): new-shell reminder sits BEFORE the demo hint on the
+        // new-shell reminder sits BEFORE the demo hint on the
         // explicit-name branch only. The `--auto` branch and the picker branch
-        // do NOT emit (D-D5 / Pitfall 1: Ghostty watcher fires on every dark-
+        // do NOT emit (Ghostty watcher fires on every dark-
         // mode flip, and the picker has its own afterglow receipt).
         // `quiet` is forwarded so `slate theme <name> --quiet` stays silent.
         if crate::adapter::registry::requires_new_shell(&report.results) {
@@ -315,7 +315,7 @@ fn validate_theme_report(report: &ThemeApplyReport) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    //! UX-02 wiring tests for the `slate theme <name>` explicit branch.
+    //! wiring tests for the `slate theme <name>` explicit branch.
     //! The full `handle_theme` body touches `ConfigManager`, `SlateEnv`, and
     //! the dark-mode watcher lifecycle, so isolating the wiring behind
     //! minimal branch helpers is the pragmatic path per 16-06-PLAN.md
@@ -384,7 +384,7 @@ mod tests {
         crate::cli::new_shell_reminder::reset_reminder_flag_for_tests();
 
         // quiet=true must reach the emitter and trigger the early-return
-        // suppression BEFORE the flag swap (RESEARCH §Pitfall 1).
+        // suppression BEFORE the flag swap.
         theme_explicit_branch_emit(&[applied("bat", true)], true);
 
         assert!(
@@ -439,7 +439,7 @@ mod tests {
 
     /// Truecolor variant — verifies the lavender theme_name styling lands
     /// inside the status_success body, and the ✓ glyph uses theme.green
-    /// (NEVER lavender per D-01a — the prefix is the success glyph from
+    /// (never lavender — the prefix is the success glyph from
     /// `Roles::status_success`, wrapped with green).
     #[test]
     fn theme_switch_success_truecolor_snapshot() {
@@ -501,7 +501,7 @@ mod tests {
         );
     }
 
-    /// D-01a invariant — theme-switch success body is styled via
+    /// theme-switch success body is styled via
     /// `status_success` (theme green), with the theme_name carrying the
     /// lavender accent. The OUTER envelope (the ✓ glyph + green fg) must
     /// NEVER leak the brand-lavender byte triple in its own color slot,
