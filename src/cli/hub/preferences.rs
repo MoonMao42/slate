@@ -51,7 +51,10 @@ pub(super) fn toggle_sound_from_preferences(config: &ConfigManager) -> Result<()
         point.id
     );
     std::fs::create_dir_all(config.base_path())?;
-    config.set_sound_enabled(!was_enabled)
+    let enabled = !was_enabled;
+    config.set_sound_enabled(enabled)?;
+    crate::brand::events::set_sound_enabled(enabled);
+    Ok(())
 }
 
 pub(super) fn apply_opacity_from_preferences(
@@ -310,10 +313,14 @@ pub(super) fn handle_tool_toggles(env: &crate::env::SlateEnv) -> Result<()> {
             "back" => return Ok(()),
             _ => return Ok(()),
         }
-        crate::cli::file_output::write_output(tr(
-            "设置已保存，新开终端标签页后生效。\n",
-            "Settings saved; open a new terminal tab to use them.\n",
-        ))?;
+        crate::cli::file_output::write_output(if selection == "sound" {
+            tr("设置已保存。\n", "Settings saved.\n")
+        } else {
+            tr(
+                "设置已保存，新开终端标签页后生效。\n",
+                "Settings saved; open a new terminal tab to use them.\n",
+            )
+        })?;
         next_selection = "back";
     }
 }

@@ -700,6 +700,7 @@ mod tests {
 
     #[test]
     fn toggle_sound_from_preferences_creates_checkpoint_and_flips_state() {
+        let _sink_guard = crate::brand::events::reset_sink_for_tests();
         let temp = TempDir::new().unwrap();
         let env = SlateEnv::with_home(temp.path().to_path_buf());
         let config = ConfigManager::from_env_paths(&env);

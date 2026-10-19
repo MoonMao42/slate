@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "live_sound.rs"]
+mod live_sound;
+
 #[test]
 fn tools_entry_guidance_matches_escape_destination() {
     for from_hub in [false, true] {

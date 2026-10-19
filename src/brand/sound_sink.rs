@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -125,7 +125,7 @@ fn spawn_platform_player(_path: &Path) {
 /// Message to the player consumer thread. `Shutdown` is implicit — dropping
 /// the `Sender` closes the channel and the consumer's `recv()` returns `Err`.
 enum Msg {
-    Event(BrandEvent),
+    Event(BrandEvent, u64),
     Flush(Sender<()>),
     #[cfg(test)]
     Gate(Receiver<()>),
@@ -136,6 +136,13 @@ enum Msg {
 /// (CLI main thread) never blocks on subprocess spawn.
 pub struct SoundSink {
     tx: Sender<Msg>,
+    state: Arc<Mutex<SoundState>>,
+    cache_dir: Option<PathBuf>,
+}
+
+struct SoundState {
+    enabled: bool,
+    generation: u64,
 }
 
 impl SoundSink {
@@ -143,8 +150,9 @@ impl SoundSink {
     /// any `brand::events::dispatch` call.
     /// Short-circuits to `NoopSink` when:
     /// - `auto || quiet`
-    /// - `slate config set sound off`
-    /// - cache-dir creation fails (silent degrade — no user-visible error)
+    /// A disabled preference still registers this sink, so Hub can enable it
+    /// later in the same process without unpacking the cache during browsing.
+    /// Cache creation failure keeps it silent (no user-visible error).
     /// A double-install is a caller bug, not a user-visible error, so the
     /// `set_sink` Err path is swallowed.
     pub fn install(env: &SlateEnv, auto: bool, quiet: bool) {
@@ -158,19 +166,14 @@ impl SoundSink {
         let enabled = ConfigManager::from_env_paths(env)
             .is_sound_enabled()
             .unwrap_or(false);
-        if !enabled {
-            let _ = set_sink(Arc::new(NoopSink) as Arc<dyn EventSink>);
-            return;
-        }
-        // Cache unpack. Any I/O failure → silent NoopSink (never panic, never
-        // log loudly — a user with a read-only home shouldn't see warnings).
         let cache_dir = env.slate_cache_dir().join("sounds");
-        if ensure_cache(&cache_dir).is_err() {
-            let _ = set_sink(Arc::new(NoopSink) as Arc<dyn EventSink>);
-            return;
+        let backend = SubprocessPlayer {
+            cache_dir: cache_dir.clone(),
+        };
+        let sink = Self::spawn_with_backend(backend, Some(cache_dir), false);
+        if enabled {
+            sink.set_sound_enabled(true);
         }
-        let backend = SubprocessPlayer { cache_dir };
-        let sink = Self::spawn_with_backend(backend);
         let _ = set_sink(Arc::new(sink) as Arc<dyn EventSink>);
     }
 
@@ -178,21 +181,40 @@ impl SoundSink {
     /// unit tests can assert on `Sample` identity without spawning subprocesses.
     #[cfg(test)]
     pub(crate) fn with_backend_for_tests<P: PlayBackend>(backend: P) -> Self {
-        Self::spawn_with_backend(backend)
+        Self::spawn_with_backend(backend, None, true)
     }
 
-    fn spawn_with_backend<P: PlayBackend>(backend: P) -> Self {
+    fn spawn_with_backend<P: PlayBackend>(
+        backend: P,
+        cache_dir: Option<PathBuf>,
+        enabled: bool,
+    ) -> Self {
         let (tx, rx) = channel::<Msg>();
-        thread::spawn(move || player_loop(rx, backend));
-        Self { tx }
+        let state = Arc::new(Mutex::new(SoundState {
+            enabled,
+            generation: 0,
+        }));
+        thread::spawn({
+            let state = Arc::clone(&state);
+            move || player_loop(rx, backend, state)
+        });
+        Self {
+            tx,
+            state,
+            cache_dir,
+        }
     }
 }
 
 impl EventSink for SoundSink {
     fn dispatch(&self, event: BrandEvent) {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if !state.enabled {
+            return;
+        }
         // Channel send failure (receiver dropped) is silently swallowed
         // we never want a brand-event dispatch to surface an error.
-        let _ = self.tx.send(Msg::Event(event));
+        let _ = self.tx.send(Msg::Event(event, state.generation));
     }
 
     fn flush(&self) {
@@ -201,16 +223,33 @@ impl EventSink for SoundSink {
             let _ = ack_rx.recv_timeout(Duration::from_millis(FOLD_WINDOW_MS + 120));
         }
     }
+
+    fn set_sound_enabled(&self, enabled: bool) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.enabled == enabled {
+            return;
+        }
+        if enabled
+            && self
+                .cache_dir
+                .as_deref()
+                .is_some_and(|dir| ensure_cache(dir).is_err())
+        {
+            return;
+        }
+        state.generation = state.generation.wrapping_add(1);
+        state.enabled = enabled;
+    }
 }
 
 /// Consumer loop — owns the mpsc receiver and the player backend for the
 /// sink's entire lifetime. Exits cleanly when the channel closes (sender
 /// dropped), so `SoundSink` drop is effectively a shutdown signal.
-fn player_loop<P: PlayBackend>(rx: Receiver<Msg>, backend: P) {
+fn player_loop<P: PlayBackend>(rx: Receiver<Msg>, backend: P, state: Arc<Mutex<SoundState>>) {
     let last_picker_ms = AtomicU64::new(0);
     loop {
         let first = match rx.recv() {
-            Ok(Msg::Event(e)) => e,
+            Ok(Msg::Event(e, generation)) => (e, generation),
             Ok(Msg::Flush(ack)) => {
                 let _ = ack.send(());
                 continue;
@@ -222,14 +261,16 @@ fn player_loop<P: PlayBackend>(rx: Receiver<Msg>, backend: P) {
             }
             Err(_) => return,
         };
-        let (best, flush_acks) = coalesce_window(&rx, first);
-        if !passes_debounce(&best, &last_picker_ms) {
-            for ack in flush_acks {
-                let _ = ack.send(());
+        let ((best, generation), flush_acks) = coalesce_window(&rx, first);
+        {
+            let state = state.lock().unwrap_or_else(|e| e.into_inner());
+            if state.enabled
+                && state.generation == generation
+                && passes_debounce(&best, &last_picker_ms)
+            {
+                backend.play(sample_for(&best));
             }
-            continue;
         }
-        backend.play(sample_for(&best));
         for ack in flush_acks {
             let _ = ack.send(());
         }
@@ -238,15 +279,23 @@ fn player_loop<P: PlayBackend>(rx: Receiver<Msg>, backend: P) {
 
 /// Drains `rx` for up to 60ms after the first event, tracking the
 /// highest-priority event seen. Returns the winner for playback.
-fn coalesce_window(rx: &Receiver<Msg>, first: BrandEvent) -> (BrandEvent, Vec<Sender<()>>) {
+fn coalesce_window(
+    rx: &Receiver<Msg>,
+    first: (BrandEvent, u64),
+) -> ((BrandEvent, u64), Vec<Sender<()>>) {
     let deadline = Instant::now() + Duration::from_millis(FOLD_WINDOW_MS);
     let mut best = first;
     let mut flush_acks = Vec::new();
     loop {
         while let Ok(msg) = rx.try_recv() {
             match msg {
-                Msg::Event(next) if priority(&next) > priority(&best) => best = next,
-                Msg::Event(_) => {}
+                Msg::Event(next, generation)
+                    if generation > best.1
+                        || (generation == best.1 && priority(&next) > priority(&best.0)) =>
+                {
+                    best = (next, generation)
+                }
+                Msg::Event(_, _) => {}
                 Msg::Flush(ack) => flush_acks.push(ack),
                 #[cfg(test)]
                 Msg::Gate(release) => {
@@ -259,8 +308,13 @@ fn coalesce_window(rx: &Receiver<Msg>, first: BrandEvent) -> (BrandEvent, Vec<Se
             break;
         }
         match rx.recv_timeout(deadline - now) {
-            Ok(Msg::Event(next)) if priority(&next) > priority(&best) => best = next,
-            Ok(Msg::Event(_)) => {}
+            Ok(Msg::Event(next, generation))
+                if generation > best.1
+                    || (generation == best.1 && priority(&next) > priority(&best.0)) =>
+            {
+                best = (next, generation)
+            }
+            Ok(Msg::Event(_, _)) => {}
             Ok(Msg::Flush(ack)) => flush_acks.push(ack),
             #[cfg(test)]
             Ok(Msg::Gate(release)) => {
@@ -435,6 +489,50 @@ mod tests {
     }
 
     #[test]
+    fn live_toggle_drops_pending_events_and_resumes_without_reinstalling() {
+        let (mock, played) = MockPlayer::new();
+        let sink = SoundSink::spawn_with_backend(mock, None, false);
+
+        sink.dispatch(BrandEvent::SetupComplete);
+        wait_for_player(&sink);
+        assert!(played.lock().unwrap().is_empty());
+
+        sink.set_sound_enabled(true);
+        sink.dispatch(BrandEvent::Success(SuccessKind::ConfigSet));
+        wait_for_player(&sink);
+        assert_eq!(*played.lock().unwrap(), vec![Sample::Success]);
+
+        let gate = hold_player(&sink);
+        sink.dispatch(BrandEvent::SetupComplete);
+        sink.set_sound_enabled(false);
+        sink.dispatch(BrandEvent::ApplyComplete);
+        sink.set_sound_enabled(true);
+        sink.dispatch(BrandEvent::Navigation(NavKind::WizardNext));
+        drop(gate);
+        wait_for_player(&sink);
+        assert_eq!(
+            *played.lock().unwrap(),
+            vec![Sample::Success, Sample::Click]
+        );
+
+        sink.set_sound_enabled(false);
+        sink.dispatch(BrandEvent::ApplyComplete);
+        wait_for_player(&sink);
+        assert_eq!(
+            *played.lock().unwrap(),
+            vec![Sample::Success, Sample::Click]
+        );
+
+        sink.set_sound_enabled(true);
+        sink.dispatch(BrandEvent::Selection(SelectKind::PickerEnter));
+        wait_for_player(&sink);
+        assert_eq!(
+            *played.lock().unwrap(),
+            vec![Sample::Success, Sample::Click, Sample::Select]
+        );
+    }
+
+    #[test]
     fn priority_fold_picks_highest_in_60ms_window() {
         let (mock, played) = MockPlayer::new();
         let sink = SoundSink::with_backend_for_tests(mock);
@@ -542,8 +640,8 @@ mod tests {
     #[test]
     fn disabled_config_silent() {
         // End-to-end write sound=off under an injected SlateEnv, then
-        // install — the sink slot must be latched with a silent NoopSink,
-        // and subsequent dispatches must not panic.
+        // install — the sink slot must be latched without creating the sound
+        // cache, and subsequent dispatches must not panic.
         // No std::env::set_var — tests stay pure per user rule
         // `feedback_no_tech_debt` (no global env var mutation in tests).
         let _g = SINK_LOCK.lock().unwrap();
@@ -554,8 +652,8 @@ mod tests {
         cm.set_sound_enabled(false).unwrap();
 
         SoundSink::install(&env, false, false);
-        // Slot latched — a follow-up set_sink Errs regardless of which
-        // sink `install` chose (NoopSink, SoundSink, …).
+        assert!(!env.slate_cache_dir().join("sounds").exists());
+        // Slot latched — a follow-up set_sink Errs.
         let dummy = Arc::new(NoopSink) as Arc<dyn EventSink>;
         assert!(
             set_sink(dummy).is_err(),

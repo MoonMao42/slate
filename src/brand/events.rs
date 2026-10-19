@@ -62,6 +62,9 @@ pub trait EventSink: Send + Sync {
     fn dispatch(&self, event: BrandEvent);
 
     fn flush(&self) {}
+
+    /// Update a live sound consumer after the Hub saves its preference.
+    fn set_sound_enabled(&self, _enabled: bool) {}
 }
 
 /// Default no-op sink — zero behavior change when no sink is registered.
@@ -117,6 +120,19 @@ pub fn flush() {
         state.sink.clone()
     };
     sink.flush();
+}
+
+/// Apply a saved sound preference to an already registered consumer. A
+/// read-only Hub visit may have no sound sink yet, and NoopSink intentionally
+/// ignores this (including processes started with --auto or --quiet).
+pub fn set_sound_enabled(enabled: bool) {
+    let sink = {
+        let state = sink_state()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.sink.clone()
+    };
+    sink.set_sound_enabled(enabled);
 }
 
 /// Register a sink. Returns `Err(sink)` if the `OnceLock` has already
