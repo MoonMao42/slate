@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Theme picker quick-save pairing validation, atomic file permissions and palette-based opacity selector styling.
 - Read-only profile inspection paths so preview and status checks do not create configuration directories.
 
+### Fixed
+
+- Custom theme lookup across preview, save, tool sync, automatic pairing and shell refresh; Bat assets and live Neovim updates include custom palettes.
+- Fzf integration preserves user options and replaces its previous Slate colors when sourced again.
+- Hub sound preference changes take effect in the current session, including enabling a previously muted session.
+- Fedora Zellij installation is marked as manual because it requires a separately prepared COPR repository.
+- Unrelated files no longer consume the custom-theme scan limit; candidates are selected in deterministic path order.
+
 ## [0.5.0] - 2026-09-09
 
 ### Added
