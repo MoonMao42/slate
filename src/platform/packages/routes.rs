@@ -24,6 +24,7 @@ pub(crate) enum Unavailable {
     NoAptMapping,
     NoPacmanMapping,
     NoDnfMapping,
+    DnfZellijRequiresCopr,
 }
 
 impl Unavailable {
@@ -34,6 +35,7 @@ impl Unavailable {
             Self::NoAptMapping => "no apt mapping for this tool; install it manually before configuration",
             Self::NoPacmanMapping => "no pacman mapping for this tool; install it manually before configuration",
             Self::NoDnfMapping => "no dnf mapping for this tool; install it manually before configuration",
+            Self::DnfZellijRequiresCopr => "Zellij requires the varlad/zellij COPR repository on Fedora; prepare that repository and install Zellij manually before configuration",
         }
     }
 }
@@ -61,6 +63,9 @@ impl InstallContext {
                 Ok(ToolInstallRoute::Pacman)
             }
             PackageManagerBackend::Pacman => Err(Unavailable::NoPacmanMapping),
+            PackageManagerBackend::Dnf if tool_id == "zellij" => {
+                Err(Unavailable::DnfZellijRequiresCopr)
+            }
             PackageManagerBackend::Dnf if super::dnf::package_name(tool_id).is_some() => {
                 Ok(ToolInstallRoute::Dnf)
             }
@@ -110,6 +115,10 @@ mod tests {
             ..context
         };
         assert_eq!(dnf.route("bat"), Ok(ToolInstallRoute::Dnf));
+        assert_eq!(dnf.route("zellij"), Err(Unavailable::DnfZellijRequiresCopr));
+        assert!(Unavailable::DnfZellijRequiresCopr
+            .reason()
+            .contains("varlad/zellij COPR"));
         assert_eq!(dnf.route("yazi"), Err(Unavailable::NoDnfMapping));
         let brew = InstallContext {
             package_manager: PackageManagerBackend::Homebrew,

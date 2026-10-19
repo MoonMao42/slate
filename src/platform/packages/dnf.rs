@@ -22,7 +22,6 @@ pub(crate) fn package_name(tool_id: &str) -> Option<&'static str> {
         "delta" => Some("git-delta"),
         "eza" => Some("eza"),
         "fastfetch" => Some("fastfetch"),
-        "zellij" => Some("zellij"),
         "zsh-syntax-highlighting" => Some("zsh-syntax-highlighting"),
         _ => None,
     }
@@ -47,6 +46,10 @@ fn install_resolving(
         if tool_id == "starship" {
             SlateError::Internal(
                 "Starship uses the user-local route; run slate setup --only starship instead of the dnf package API.".into(),
+            )
+        } else if tool_id == "zellij" {
+            SlateError::Internal(
+                "Zellij requires the varlad/zellij COPR repository on Fedora; prepare that repository yourself before installing Zellij manually.".into(),
             )
         } else {
             SlateError::Internal(format!(
@@ -126,7 +129,19 @@ mod tests {
     fn dnf_mappings_cover_fedora_packages() {
         assert_eq!(package_name("bat"), Some("bat"));
         assert_eq!(package_name("delta"), Some("git-delta"));
-        assert_eq!(package_name("zellij"), Some("zellij"));
+        assert_eq!(package_name("zellij"), None);
         assert_eq!(package_name("unknown"), None);
+    }
+
+    #[test]
+    fn zellij_does_not_start_dnf_without_its_copr_prerequisite() {
+        let result = install_resolving(
+            "zellij",
+            true,
+            |_| panic!("dnf must not be resolved for Zellij"),
+            LIMITS,
+        );
+        let error = result.expect_err("Zellij must require manual preparation");
+        assert!(error.to_string().contains("varlad/zellij COPR"));
     }
 }
