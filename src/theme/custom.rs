@@ -305,19 +305,29 @@ pub(super) fn load_custom_themes(env: &SlateEnv, embedded: &EmbeddedThemes) -> V
     };
 
     let mut paths = Vec::new();
-    for entry in entries.take(MAX_CUSTOM_THEME_FILES) {
+    for entry in entries {
         let Ok(entry) = entry else {
             continue;
         };
         let path = entry.path();
-        if path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
+        if entry.file_type().is_ok_and(|kind| kind.is_file())
+            && path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
         {
             paths.push(path);
         }
     }
     paths.sort();
+    if paths.len() > MAX_CUSTOM_THEME_FILES {
+        eprintln!(
+            "Slate: found {} custom theme files in {}; loading the first {} in path order",
+            paths.len(),
+            themes_dir.display(),
+            MAX_CUSTOM_THEME_FILES
+        );
+        paths.truncate(MAX_CUSTOM_THEME_FILES);
+    }
 
     let mut seen_ids: HashSet<String> = embedded.all().map(|t| t.id.clone()).collect();
     let mut loaded = Vec::new();
@@ -422,5 +432,43 @@ bright_white = "#ffffff"
             "Nord",
             "embedded theme must not be shadowed by custom file"
         );
+    }
+
+    #[test]
+    fn unrelated_files_and_non_regular_toml_entries_do_not_use_theme_limit() {
+        let home = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(home.path().to_owned());
+        let themes_dir = env.config_dir().join("themes");
+        fs::create_dir_all(&themes_dir).unwrap();
+        for index in 0..256 {
+            fs::write(
+                themes_dir.join(format!("unrelated-{index:03}.txt")),
+                "ignored",
+            )
+            .unwrap();
+        }
+        fs::create_dir(themes_dir.join("not-a-file.toml")).unwrap();
+        fs::write(themes_dir.join("custom.toml"), SAMPLE_CUSTOM_TOML).unwrap();
+
+        let registry = crate::theme::ThemeRegistry::with_env(&env).unwrap();
+        assert!(registry.get("cyberpunk-neon").is_some());
+    }
+
+    #[test]
+    fn custom_theme_limit_selects_first_regular_toml_files_in_path_order() {
+        let home = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(home.path().to_owned());
+        let themes_dir = env.config_dir().join("themes");
+        fs::create_dir_all(&themes_dir).unwrap();
+        for index in (0..=MAX_CUSTOM_THEME_FILES).rev() {
+            let source =
+                SAMPLE_CUSTOM_TOML.replace("cyberpunk-neon", &format!("custom-{index:03}"));
+            fs::write(themes_dir.join(format!("{index:03}.toml")), source).unwrap();
+        }
+
+        let registry = crate::theme::ThemeRegistry::with_env(&env).unwrap();
+        assert!(registry.get("custom-000").is_some());
+        assert!(registry.get("custom-127").is_some());
+        assert!(registry.get("custom-128").is_none());
     }
 }
