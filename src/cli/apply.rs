@@ -434,7 +434,7 @@ fn apply_theme_with_registry(
     // One publication can yield multiple/coalesced filesystem events and is
     // not evidence that an editor received or rendered the theme.
     if !nvim_will_be_notified {
-        if let Err(err) = crate::adapter::nvim::write_state_file(env, &theme.id) {
+        if let Err(err) = crate::adapter::nvim::write_state_file_for_theme(env, theme) {
             report.reload_warnings.push(ReloadWarning {
                 informational: false,
                 tool_name: "nvim".into(),

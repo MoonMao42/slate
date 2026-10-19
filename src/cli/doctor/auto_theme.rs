@@ -28,7 +28,7 @@ struct Report {
 }
 
 fn inspect(env: &SlateEnv) -> Result<Report> {
-    let registry = ThemeRegistry::new()?;
+    let registry = ThemeRegistry::with_env(env)?;
     let pairing = pairing::inspect(env).ok();
     let resolution = resolution::inspect(env, &registry, pairing.as_ref());
     let enabled = ConfigManager::from_env_paths(env)

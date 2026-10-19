@@ -303,7 +303,7 @@ pub(super) fn render_menu(info: &ToolInfo) -> String {
             .to_owned()
         },
         |id| {
-            crate::theme::ThemeRegistry::new()
+            crate::theme::ThemeRegistry::from_process_or_embedded()
                 .ok()
                 .and_then(|registry| registry.get(id).map(|theme| theme.name.clone()))
                 .unwrap_or_else(|| crate::cli::file_output::terminal_text(id))

@@ -3,7 +3,9 @@ use crate::brand::roles::Roles;
 use crate::cli::ui_language::tr;
 use crate::error::Result;
 use crate::opacity::OpacityPreset;
-use crate::theme::{ThemeAppearance, ThemeRegistry, ThemeVariant};
+#[cfg(test)]
+use crate::theme::ThemeRegistry;
+use crate::theme::{ThemeAppearance, ThemeVariant};
 #[cfg(test)]
 use crossterm::style::Color;
 use crossterm::{

@@ -120,7 +120,7 @@ pub fn render() -> Result<()> {
 }
 
 pub(crate) fn render_report(env: &SlateEnv, report: &super::status::StatusReport) -> Result<()> {
-    let registry = ThemeRegistry::new()?;
+    let registry = ThemeRegistry::with_env(env)?;
 
     let current_theme = report
         .theme

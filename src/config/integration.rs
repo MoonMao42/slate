@@ -159,7 +159,7 @@ impl ConfigManager {
     }
 
     fn current_shell_theme(&self) -> Result<crate::theme::ThemeVariant> {
-        let registry = crate::theme::ThemeRegistry::new()?;
+        let registry = crate::theme::ThemeRegistry::with_env(self.environment())?;
         let tracked_theme_id = self
             .get_current_theme()?
             .unwrap_or_else(|| crate::theme::DEFAULT_THEME_ID.to_string());

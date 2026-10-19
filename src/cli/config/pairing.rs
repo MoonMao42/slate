@@ -36,6 +36,10 @@ pub struct PairingOptions {
 
 impl PairingOptions {
     pub fn validate(&self) -> Result<()> {
+        self.validate_with_registry(&ThemeRegistry::from_process_or_embedded()?)
+    }
+
+    fn validate_with_registry(&self, registry: &ThemeRegistry) -> Result<()> {
         if (self.clear_dark && self.dark.is_some()) || (self.clear_light && self.light.is_some()) {
             return Err(crate::error::SlateError::InvalidConfig(
                 "A pairing slot cannot be set and cleared in the same request.".into(),
@@ -46,7 +50,7 @@ impl PairingOptions {
                 "Pairing preview requires --dark, --light, --clear-dark or --clear-light.".into(),
             ));
         }
-        pairing::validate(self.dark.as_deref(), self.light.as_deref())
+        pairing::validate(registry, self.dark.as_deref(), self.light.as_deref())
     }
     fn changes(&self) -> bool {
         self.dark.is_some() || self.light.is_some() || self.clear_dark || self.clear_light
@@ -146,8 +150,8 @@ struct Report {
 }
 
 pub fn handle(env: &SlateEnv, options: &PairingOptions) -> Result<()> {
-    options.validate()?;
-    let registry = ThemeRegistry::new()?;
+    let registry = ThemeRegistry::with_env(env)?;
+    options.validate_with_registry(&registry)?;
     let path = env.managed_file("auto.toml");
     let mut report = Report {
         schema_version: 1,

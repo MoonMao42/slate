@@ -24,6 +24,7 @@ pub(super) struct PreviewSelection {
 /// Original snapshot for rollback on ESC
 /// Commit flag for Drop guard behavior
 pub struct PickerState {
+    pub(super) registry: ThemeRegistry,
     /// Theme IDs in family sort order
     theme_ids: Vec<String>,
     /// Current selected theme index (wraps on move_up/move_down)
@@ -61,8 +62,30 @@ impl PickerState {
     /// Takes current theme_id and opacity as starting point (snapshots for rollback).
     /// Positions cursor on the current theme, and sets current opacity.
     pub fn new(current_theme_id: &str, current_opacity: OpacityPreset) -> Result<Self> {
-        let registry = ThemeRegistry::from_process_or_embedded()?;
+        Self::from_registry(
+            ThemeRegistry::from_process_or_embedded()?,
+            current_theme_id,
+            current_opacity,
+        )
+    }
 
+    pub fn with_env(
+        env: &crate::env::SlateEnv,
+        current_theme_id: &str,
+        current_opacity: OpacityPreset,
+    ) -> Result<Self> {
+        Self::from_registry(
+            ThemeRegistry::with_env(env)?,
+            current_theme_id,
+            current_opacity,
+        )
+    }
+
+    fn from_registry(
+        registry: ThemeRegistry,
+        current_theme_id: &str,
+        current_opacity: OpacityPreset,
+    ) -> Result<Self> {
         // Build ordered theme ID list from FAMILY_SORT_ORDER
         let mut theme_ids = Vec::new();
         let by_family = registry.by_family();
@@ -108,6 +131,7 @@ impl PickerState {
             .unwrap_or(0);
 
         Ok(Self {
+            registry,
             theme_ids,
             selected_theme_index,
             selected_opacity: current_opacity,
@@ -279,8 +303,7 @@ impl PickerState {
 
     /// Get current theme variant from registry
     pub fn get_current_theme(&self) -> Result<ThemeVariant> {
-        let registry = ThemeRegistry::from_process_or_embedded()?;
-        registry
+        self.registry
             .get(self.get_current_theme_id())
             .cloned()
             .ok_or_else(|| {
@@ -344,6 +367,31 @@ impl Drop for PickerState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn picker_uses_its_captured_profile_catalog_for_custom_themes() {
+        let home = tempfile::tempdir().unwrap();
+        let env = crate::env::SlateEnv::with_home(home.path().into());
+        let mut theme = ThemeRegistry::new().unwrap().get("nord").unwrap().clone();
+        theme.id = "private-custom".into();
+        theme.name = "Private Custom".into();
+        theme.tool_refs = Default::default();
+        theme.family = "Private".into();
+        let path = env.config_dir().join("themes/custom.toml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, toml::to_string(&theme).unwrap()).unwrap();
+        let state = PickerState::with_env(&env, &theme.id, OpacityPreset::Solid).unwrap();
+        assert_eq!(state.get_current_theme().unwrap().name, theme.name);
+        // Rendering keeps the captured catalog even if a definition disappears
+        // while the picker is open. Apply performs its own fresh validation.
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(state.get_current_theme().unwrap().id, theme.id);
+        let mut output = Vec::new();
+        crate::cli::picker::render::render_into(&mut output, &state, None, 100, 30).unwrap();
+        assert!(String::from_utf8(output)
+            .unwrap()
+            .contains("Private Custom"));
+    }
 
     #[test]
     fn test_picker_state_creation() {

@@ -178,7 +178,7 @@ impl BatAdapter {
             return Ok(ApplyOutcome::Skipped(SkipReason::NotInstalled));
         };
         env.validate_bat_paths()?;
-        let registry = ThemeRegistry::new()?;
+        let registry = ThemeRegistry::with_env(env)?;
         let all_owned: Vec<ThemeVariant> = registry.all().into_iter().cloned().collect();
         let target_dir = self.themes_dir(env);
         self.sync_tmtheme_files(&all_owned, &target_dir, env, &binary)?;

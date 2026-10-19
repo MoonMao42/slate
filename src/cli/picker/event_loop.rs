@@ -89,7 +89,7 @@ pub fn launch_picker(env: &SlateEnv) -> Result<()> {
         let opacity = config
             .get_current_opacity_preset()
             .unwrap_or(OpacityPreset::Solid);
-        PickerState::new(&theme, opacity)
+        PickerState::with_env(env, &theme, opacity)
     })();
     let mut state = match initial_state {
         Ok(state) => state,

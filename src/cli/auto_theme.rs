@@ -48,10 +48,10 @@ pub fn resolve_auto_theme(env: &SlateEnv, config: &ConfigManager) -> Result<Stri
     }
 }
 
-fn resolve_auto_theme_inner(_env: &SlateEnv, config: &ConfigManager) -> Result<String> {
+fn resolve_auto_theme_inner(env: &SlateEnv, config: &ConfigManager) -> Result<String> {
     // Query the desktop once, then use the same policy as pairing inspection.
     let system_appearance = detect_system_appearance()?;
-    let registry = ThemeRegistry::new()?;
+    let registry = ThemeRegistry::with_env(env)?;
     let choice = crate::config::auto_resolution::resolve(
         config.environment(),
         &registry,
@@ -127,7 +127,7 @@ fn configure_auto_theme_inner() -> Result<()> {
     super::file_output::write_output(
         tr("选择系统深色、浅色模式对应的主题。这里只保存配对，不立即换色，也不启停后台。\n", "Choose themes for system dark and light modes. This saves pairing only; it does not apply colors or start/stop the service.\n"),
     )?;
-    let registry = ThemeRegistry::new()?;
+    let registry = ThemeRegistry::with_env(&env)?;
 
     // Selection is local state only. Escape goes back one step; returning
     // from the light list keeps the previously chosen dark theme highlighted.

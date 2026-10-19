@@ -140,7 +140,7 @@ impl Wizard {
                 force: false,
                 start_time: None,
             },
-            theme_selector: ThemeSelector::new()?,
+            theme_selector: ThemeSelector::with_env(env)?,
             reviewed_installs: None,
             selected_tool_choices: Vec::new(),
             focused_tool: None,
@@ -702,8 +702,7 @@ impl Wizard {
         let selected_theme_id =
             wizard_support::resolve_theme_id_for_opacity(&self.context, &self.theme_selector)?;
 
-        let registry = crate::theme::ThemeRegistry::new()?;
-        let theme = registry.get(&selected_theme_id).ok_or_else(|| {
+        let theme = self.theme_selector.get_theme(&selected_theme_id).ok_or_else(|| {
             crate::error::SlateError::InvalidThemeData(
                 tr("无法识别所选主题，请重新选择主题；尚未设置透明度。", "Selected theme is unknown; choose a recognized theme before inferring opacity. No opacity was selected.").into(),
             )

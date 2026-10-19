@@ -41,7 +41,7 @@ pub(crate) fn add_theme_paths(
         "bat" => {
             env.validate_bat_paths()?;
             let directory = BatAdapter.themes_dir(env);
-            for theme in ThemeRegistry::new()?.all() {
+            for theme in ThemeRegistry::with_env(env)?.all() {
                 files.insert(directory.join(format!("slate-{}.tmTheme", theme.id)));
             }
         }

@@ -16,7 +16,7 @@ pub(crate) fn resolve_selected_theme(theme: Option<&str>, env: &SlateEnv) -> Res
         crate::theme::DEFAULT_THEME_ID.to_string()
     };
 
-    let registry = ThemeRegistry::new()?;
+    let registry = ThemeRegistry::with_env(env)?;
     registry.get(&theme_id).cloned().ok_or_else(|| {
         crate::error::SlateError::InvalidThemeData(format!(
             "Theme '{}' not found",

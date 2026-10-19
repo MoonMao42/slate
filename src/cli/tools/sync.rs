@@ -461,13 +461,11 @@ fn execute(env: &SlateEnv, reviewed: &SyncPlan) -> Result<ThemeApplyReport> {
     if prepare(env, &reviewed.tools)? != *reviewed {
         return Err(changed_plan());
     }
+    let themes = ThemeRegistry::with_env(env)?;
+    let theme = themes.get(&reviewed.theme).ok_or_else(changed_plan)?;
     let targets =
         crate::config::recovery_paths::targets(env, reviewed.configuration_paths.clone(), "Tools")?;
     let point = crate::config::snapshot_theme_targets_with_env(env, &targets)?;
-    let themes = ThemeRegistry::new()?;
-    let theme = themes
-        .get(&reviewed.theme)
-        .expect("validated built-in theme");
     // Deliberately do not call global theme apply: it writes shared shell files,
     // current theme, pairing and the editor notification even for a subset.
     let mut report = ThemeApplyReport {

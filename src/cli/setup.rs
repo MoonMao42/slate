@@ -624,7 +624,7 @@ fn run_allowed_nvim_activation_flow(env: &SlateEnv, non_interactive: bool) -> Re
     let current_theme = crate::config::ConfigManager::from_env_paths(env)
         .get_current_theme()?
         .unwrap_or_else(|| crate::theme::DEFAULT_THEME_ID.into());
-    let registry = crate::theme::ThemeRegistry::new()?;
+    let registry = crate::theme::ThemeRegistry::with_env(env)?;
     let theme = registry.get(&current_theme).ok_or_else(|| {
         crate::error::SlateError::InvalidThemeData(format!(
             "Cannot activate Neovim with unknown saved theme '{}'",

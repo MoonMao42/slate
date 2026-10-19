@@ -1,7 +1,5 @@
+//! Theme choices for the setup wizard, grouped in stable family order.
 use crate::error::Result;
-/// Theme selection for setup wizard.
-/// and
-/// Provides access to 20 theme variants grouped by family.
 use crate::theme::{ThemeRegistry, DEFAULT_THEME_ID, FAMILY_SORT_ORDER};
 use std::collections::{HashMap, HashSet};
 
@@ -18,8 +16,14 @@ impl ThemeSelector {
         })
     }
 
-    /// Get all available theme variants
-    /// Should be exactly 20 (Catppuccin 4 + Solarized 2 + Tokyo Night 2 + Rosé Pine 3 + Kanagawa 3 + Everforest 2 + Dracula + Nord + Gruvbox 2)
+    /// Create a selector for the selected profile, including custom themes.
+    pub fn with_env(env: &crate::env::SlateEnv) -> Result<Self> {
+        Ok(Self {
+            registry: ThemeRegistry::with_env(env)?,
+        })
+    }
+
+    /// Get all available theme variants in stable family order.
     pub fn all_themes(&self) -> Vec<&crate::theme::ThemeVariant> {
         let by_family = self.registry.by_family();
         let mut themes = Vec::new();

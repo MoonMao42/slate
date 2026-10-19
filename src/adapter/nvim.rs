@@ -207,18 +207,46 @@ fn resolve_with_fallback(palette: &Palette, role: SemanticColor) -> String {
 /// Atomically write the active-variant state file observed by the Lua
 /// watcher registered by `render_loader`.
 /// Path: `<env.slate_cache_dir()>/current_theme.lua`.
-/// Content: `return "<variant-id>"\n` — a minimal Lua string literal so
-/// `dofile(path)` / `pcall(dofile, path)` returns the variant id.
+/// Content: `return "<variant-id>"\n` for built-ins; custom themes return
+/// the id, current highlight table, and lualine table from one atomic file.
+/// `dofile(path)` still returns the variant id as its first value.
 /// Atomicity: `AtomicWriteFile::commit()` performs `fsync → rename`, so
 /// readers see a complete old or new value. Filesystem events can arrive
 /// in bursts; the loader watches the parent directory and debounces them.
 /// The parent directory is created if missing (first-run safety).
 pub fn write_state_file(env: &SlateEnv, variant_id: &str) -> Result<()> {
+    let registry = ThemeRegistry::with_env(env)?;
+    if let Some(theme) = registry.get(variant_id) {
+        return write_state_file_for_theme(env, theme);
+    }
+    write_state_file_content(env, variant_id, None)
+}
+
+/// Publish the selected theme itself, so an apply uses its validated palette
+/// even when the source TOML changed between selection and publication.
+pub fn write_state_file_for_theme(env: &SlateEnv, theme: &ThemeVariant) -> Result<()> {
+    let custom = ThemeRegistry::new()?.get(&theme.id).is_none();
+    write_state_file_content(env, &theme.id, custom.then_some(theme))
+}
+
+fn write_state_file_content(
+    env: &SlateEnv,
+    variant_id: &str,
+    custom: Option<&ThemeVariant>,
+) -> Result<()> {
     let path = state_file_path(env);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let content = format!("return {}\n", lua_string_literal(variant_id));
+    let mut content = format!("return {}", lua_string_literal(variant_id));
+    if let Some(theme) = custom {
+        let rendered = render_colorscheme(&theme.palette, &theme.id);
+        let highlights = rendered
+            .split_once('\n')
+            .map_or(rendered.as_str(), |(_, body)| body);
+        let _ = write!(content, ", {highlights}, {}", lualine_theme(&theme.palette));
+    }
+    content.push('\n');
     crate::config::atomic_write_synced(&path, content.as_bytes())?;
     Ok(())
 }
@@ -251,7 +279,7 @@ fn lua_string_literal(s: &str) -> String {
 
 // The three `LOADER_TEMPLATE_*` constants below, sandwiched around the
 // spliced per-variant PALETTES entries produced by `render_colorscheme`
-// and an (empty in this plan) `LUALINE_THEMES` block, form the complete
+// and the `LUALINE_THEMES` block, form the complete
 // `~/.config/nvim/lua/slate/init.lua` module ships through
 // `NvimAdapter::apply_setup`.
 // Keep the uv compatibility shim, 100 ms debounce, owned-handle cleanup,
@@ -282,8 +310,8 @@ local LUALINE_THEMES = {
 /// cleanup, bootstrap via `M.setup()`, and return M.
 const LOADER_TEMPLATE_TAIL: &str = r#"}
 
-function M.load(variant)
-  local pal = PALETTES[variant]
+function M.load(variant, current_palette, current_lualine)
+  local pal = current_palette or PALETTES[variant]
   if not pal then return end
   vim.cmd('hi clear')
   if vim.fn.exists('syntax_on') == 1 then vim.cmd('syntax reset') end
@@ -294,11 +322,12 @@ function M.load(variant)
   end
 
   -- Lualine refresh guard
-  if package.loaded['lualine'] and LUALINE_THEMES[variant] then
+  local line_theme = current_lualine or LUALINE_THEMES[variant]
+  if package.loaded['lualine'] and line_theme then
     local ok, lualine = pcall(require, 'lualine')
     if ok then
       local cfg = lualine.get_config()
-      cfg.options.theme = LUALINE_THEMES[variant]
+      cfg.options.theme = line_theme
       lualine.setup(cfg)
       lualine.refresh({ force = true })
     end
@@ -312,8 +341,8 @@ local STATE_DIR = vim.fn.fnamemodify(STATE_PATH, ':h')
 local STATE_NAME = vim.fn.fnamemodify(STATE_PATH, ':t')
 
 local function read_state()
-  local ok, mod = pcall(dofile, STATE_PATH)
-  if ok and type(mod) == 'string' then return mod end
+  local ok, variant, palette, line_theme = pcall(dofile, STATE_PATH)
+  if ok and type(variant) == 'string' then return variant, palette, line_theme end
   return nil
 end
 
@@ -354,8 +383,8 @@ local function schedule_reload()
     if stopped or debounce_timer ~= timer then return end
     debounce_timer = nil
     close_handle(timer) -- release even if a colorscheme/plugin hook raises
-    local variant = read_state()
-    if variant then M.load(variant) end
+    local variant, palette, line_theme = read_state()
+    if variant then M.load(variant, palette, line_theme) end
   end))
   if not ok then
     debounce_timer = nil
@@ -405,9 +434,9 @@ function M.setup(opts)
     warn('theme auto-reload unavailable: ' .. tostring(err) .. '; call require("slate").setup() to retry')
   end
   -- Arm before reading, so a concurrent state update cannot be missed.
-  local variant = read_state()
+  local variant, palette, line_theme = read_state()
   if variant then
-    local loaded, load_err = pcall(M.load, variant)
+    local loaded, load_err = pcall(M.load, variant, palette, line_theme)
     if not loaded then M.stop(); error(load_err) end
   end
   return ok, err
@@ -433,13 +462,12 @@ return M
 /// is the TOML declaration order (stable). Two calls yield byte-identical
 /// strings.
 pub fn render_loader() -> String {
-    render_loader_for_state("((vim.env.XDG_CACHE_HOME and vim.env.XDG_CACHE_HOME ~= '' and vim.env.XDG_CACHE_HOME:sub(1, 1) == '/') and vim.env.XDG_CACHE_HOME or vim.fn.expand('~/.cache')) .. '/slate/current_theme.lua'")
-}
-
-fn render_loader_for_state(state_expression: &str) -> String {
     let registry =
         ThemeRegistry::new().expect("ThemeRegistry must initialise — validated at phase-load time");
+    render_loader_for_state(&registry, "((vim.env.XDG_CACHE_HOME and vim.env.XDG_CACHE_HOME ~= '' and vim.env.XDG_CACHE_HOME:sub(1, 1) == '/') and vim.env.XDG_CACHE_HOME or vim.fn.expand('~/.cache')) .. '/slate/current_theme.lua'")
+}
 
+fn render_loader_for_state(registry: &ThemeRegistry, state_expression: &str) -> String {
     let mut out = String::with_capacity(32 * 1024);
     out.push_str(LOADER_TEMPLATE_HEAD);
 
@@ -477,14 +505,9 @@ fn render_loader_for_state(state_expression: &str) -> String {
 }
 
 /// Neovim colorscheme adapter.
-/// Two entry points:
-/// - [`NvimAdapter::setup`] (slow path) — writes the full install (one
-/// `slate-<id>.lua` shim per built-in variant + the loader module + the
-/// initial state file). Called from the `slate setup` wizard; idempotent.
-/// - [`ToolAdapter::apply_theme`] (fast path) — writes only the state file
-/// at `~/.cache/slate/current_theme.lua`. The loader's `vim.uv.fs_event`
-/// watcher (rendered by [`render_loader`]) picks up the change and
-/// hot-reloads the colorscheme in every running nvim instance.
+/// `setup` installs shims and a loader for currently known themes.
+/// Theme apply writes the current palette into one state file, which the
+/// loader watches so a running editor can use themes added after setup.
 /// `apply_theme` (trait impl) obtains a [`SlateEnv`] via
 /// `SlateEnv::from_process()` and delegates to
 /// [`NvimAdapter::apply_theme_with_env`]. The helper exists so unit tests
@@ -493,8 +516,8 @@ fn render_loader_for_state(state_expression: &str) -> String {
 pub struct NvimAdapter;
 
 impl NvimAdapter {
-    /// Full install: writes 20 `slate-<id>.lua` shims + the loader
-    /// (`lua/slate/init.lua`) + the initial state file.
+    /// Full install: writes one `slate-<id>.lua` shim per known theme,
+    /// the loader (`lua/slate/init.lua`), and the initial state file.
     /// Called from the `slate setup` wizard . Idempotent
     /// re-running with the same env+theme produces byte-identical files
     /// via `AtomicWriteFile`.
@@ -506,25 +529,27 @@ impl NvimAdapter {
         std::fs::create_dir_all(&colors_dir)?;
         std::fs::create_dir_all(&lua_slate_dir)?;
 
-        // 1. Write one `slate-<id>.lua` shim per built-in variant.
+        // 1. Write one `slate-<id>.lua` shim per known variant.
         // Iterating the registry keeps future variants automatic.
-        let registry = ThemeRegistry::new()?;
+        let registry = ThemeRegistry::with_env(env)?;
         for variant in registry.all() {
             let shim_path = colors_dir.join(format!("slate-{}.lua", variant.id));
             let shim_content = render_shim(&variant.id);
             write_atomic(&shim_path, &shim_content)?;
         }
 
-        // 2. Write the loader file. `render_loader` splices every variant's
+        // 2. Write the loader file. `render_loader_for_state` splices every variant's
         // palette + lualine theme so the generated Lua is self-contained.
         let loader_path = lua_slate_dir.join("init.lua");
-        let loader_content =
-            render_loader_for_state(&lua_string_literal(&state_file_path(env).to_string_lossy()));
+        let loader_content = render_loader_for_state(
+            &registry,
+            &lua_string_literal(&state_file_path(env).to_string_lossy()),
+        );
         write_atomic(&loader_path, &loader_content)?;
 
         // 3. Seed the state file so a nvim instance that starts after
         // `slate setup` picks up the initial theme immediately.
-        write_state_file(env, &initial_theme.id)?;
+        write_state_file_for_theme(env, initial_theme)?;
 
         Ok(())
     }
@@ -534,15 +559,14 @@ impl NvimAdapter {
     /// without mutating process env vars. The trait's `apply_theme` method
     /// delegates here using `SlateEnv::from_process()`.
     /// Running nvim instances pick up the state-file change via the
-    /// `vim.uv.fs_event` watcher rendered by [`render_loader`]. The 20
-    /// shims + loader are in place from [`NvimAdapter::setup`] — the fast
-    /// path never re-emits them.
+    /// `vim.uv.fs_event` watcher rendered by [`render_loader`]. The shims
+    /// and loader remain in place from [`NvimAdapter::setup`].
     pub(crate) fn apply_theme_with_env(
         &self,
         theme: &ThemeVariant,
         env: &SlateEnv,
     ) -> Result<ApplyOutcome> {
-        write_state_file(env, &theme.id)?;
+        write_state_file_for_theme(env, theme)?;
         Ok(ApplyOutcome::Applied {
             requires_new_shell: false,
         })
@@ -594,7 +618,7 @@ impl ToolAdapter for NvimAdapter {
     }
 
     fn apply_theme(&self, theme: &ThemeVariant) -> Result<ApplyOutcome> {
-        // FAST PATH: state-file-only. The 20 shims + loader are written
+        // FAST PATH: state-file-only. The shims + loader are written
         // by `NvimAdapter::setup` during the wizard; running nvim instances
         // hot-reload via the file watcher when the state file changes.
         let env = SlateEnv::from_process()?;
@@ -838,6 +862,27 @@ mod tests {
         write_state_file(&env, "catppuccin-mocha").expect("write ok");
         let got = std::fs::read_to_string(state_file_path(&env)).expect("read");
         assert_eq!(got, "return \"catppuccin-mocha\"\n");
+    }
+
+    #[test]
+    fn write_state_file_for_theme_uses_supplied_custom_palette() {
+        use tempfile::TempDir;
+
+        let td = TempDir::new().unwrap();
+        let env = SlateEnv::with_home(td.path().to_path_buf());
+        let mut theme = ThemeRegistry::new()
+            .unwrap()
+            .get("catppuccin-mocha")
+            .unwrap()
+            .clone();
+        theme.id = "synthetic-custom".into();
+        theme.palette.background = "#123456".into();
+
+        write_state_file_for_theme(&env, &theme).unwrap();
+
+        let state = std::fs::read_to_string(state_file_path(&env)).unwrap();
+        assert!(state.starts_with("return \"synthetic-custom\", {\n"));
+        assert!(state.contains("bg = '#123456'"));
     }
 
     #[test]

@@ -42,7 +42,7 @@ pub(crate) struct StatusReport {
 impl StatusReport {
     pub(super) fn inspect(env: &SlateEnv) -> Result<Self> {
         let config = ConfigManager::from_env_paths(env);
-        let registry = ThemeRegistry::new()?;
+        let registry = ThemeRegistry::with_env(env)?;
         let mut warnings = Vec::new();
         let theme = match config.get_current_theme() {
             Ok(id) => id.map(|id| {

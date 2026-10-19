@@ -50,6 +50,67 @@ fn skip_if_no_nvim(test_name: &str) -> bool {
     }
 }
 
+fn custom_theme_source(background: &str) -> String {
+    format!(
+        r##"id = "nvim-custom"
+name = "Neovim Custom"
+appearance = "Dark"
+
+[palette]
+foreground = "#f0f0f0"
+background = "{background}"
+black = "#111111"
+red = "#ff4444"
+green = "#44ff44"
+yellow = "#ffff44"
+blue = "#4444ff"
+magenta = "#ff44ff"
+cyan = "#44ffff"
+white = "#eeeeee"
+bright_black = "#555555"
+bright_red = "#ff8888"
+bright_green = "#88ff88"
+bright_yellow = "#ffff88"
+bright_blue = "#8888ff"
+bright_magenta = "#ff88ff"
+bright_cyan = "#88ffff"
+bright_white = "#ffffff"
+"##
+    )
+}
+
+#[test]
+fn custom_theme_setup_writes_shim_loader_and_current_palette() {
+    use slate_cli::adapter::NvimAdapter;
+    use slate_cli::env::SlateEnv;
+    use slate_cli::theme::ThemeRegistry;
+    use tempfile::TempDir;
+
+    let td = TempDir::new().unwrap();
+    let env = SlateEnv::with_home(td.path().to_path_buf());
+    let themes_dir = env.config_dir().join("themes");
+    std::fs::create_dir_all(&themes_dir).unwrap();
+    std::fs::write(
+        themes_dir.join("nvim-custom.toml"),
+        custom_theme_source("#112233"),
+    )
+    .unwrap();
+    let registry = ThemeRegistry::with_env(&env).unwrap();
+    let theme = registry.get("nvim-custom").unwrap();
+
+    NvimAdapter::setup(&env, theme).unwrap();
+
+    assert!(env
+        .nvim_config_dir()
+        .join("colors/slate-nvim-custom.lua")
+        .is_file());
+    let loader = std::fs::read_to_string(env.nvim_config_dir().join("lua/slate/init.lua")).unwrap();
+    assert!(loader.contains("['nvim-custom'] = "));
+    let state = std::fs::read_to_string(env.slate_cache_dir().join("current_theme.lua")).unwrap();
+    assert!(state.starts_with("return \"nvim-custom\", {\n"));
+    assert!(state.contains("bg = '#112233'"));
+}
+
 // nvim_headless_source_all_variants
 
 /// After `NvimAdapter::setup` writes the 20 shims + loader, every
@@ -122,6 +183,113 @@ fn nvim_headless_source_all_variants() {
         "headless-source failures ({} variant(s)):\n{}",
         failures.len(),
         failures.join("\n---\n")
+    );
+}
+
+#[test]
+#[cfg(feature = "has-nvim")]
+fn running_nvim_loads_new_custom_theme_and_updated_palette() {
+    use slate_cli::adapter::nvim::write_state_file_for_theme;
+    use slate_cli::adapter::NvimAdapter;
+    use slate_cli::env::SlateEnv;
+    use slate_cli::theme::ThemeRegistry;
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+    use tempfile::TempDir;
+
+    if skip_if_no_nvim("running_nvim_loads_new_custom_theme_and_updated_palette") {
+        return;
+    }
+
+    fn wait_for_marker(path: &std::path::Path, child: &mut Child) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while Instant::now() < deadline {
+            if path.is_file() {
+                return true;
+            }
+            if child.try_wait().unwrap().is_some() {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    let td = TempDir::new().unwrap();
+    let env = SlateEnv::with_home(td.path().to_path_buf());
+    let builtins = ThemeRegistry::new().unwrap();
+    NvimAdapter::setup(&env, builtins.get("catppuccin-mocha").unwrap()).unwrap();
+
+    let ready = td.path().join("ready");
+    let added = td.path().join("added");
+    let script = format!(
+        r#"
+vim.opt.runtimepath:prepend({rtp})
+require('slate')
+local function bg()
+  local ok, hl = pcall(vim.api.nvim_get_hl_by_name, 'Normal', true)
+  return ok and hl.background or -1
+end
+local function marker(path)
+  local f = assert(io.open(path, 'w'))
+  f:write('ready')
+  f:close()
+end
+marker({ready})
+local loaded = vim.wait(5000, function() return bg() == 0x112233 end, 20)
+if loaded then marker({added}) end
+local changed = loaded and vim.wait(5000, function() return bg() == 0x654321 end, 20)
+io.stderr:write(string.format('ADDED=%s CHANGED=%s FINAL=%d', tostring(loaded), tostring(changed), bg()))
+io.stderr:flush()
+vim.cmd('qa!')
+"#,
+        rtp = format!("{:?}", env.nvim_config_dir().to_string_lossy()),
+        ready = format!("{:?}", ready.to_string_lossy()),
+        added = format!("{:?}", added.to_string_lossy()),
+    );
+    let script_path = td.path().join("custom_exercise.lua");
+    std::fs::write(&script_path, script).unwrap();
+    let mut child = Command::new("nvim")
+        .args([
+            "--headless",
+            "-u",
+            "NONE",
+            "-l",
+            script_path.to_str().unwrap(),
+        ])
+        .env("HOME", td.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    assert!(
+        wait_for_marker(&ready, &mut child),
+        "Neovim did not start the custom-theme exercise"
+    );
+    let themes_dir = env.config_dir().join("themes");
+    std::fs::create_dir_all(&themes_dir).unwrap();
+    let theme_path = themes_dir.join("nvim-custom.toml");
+    std::fs::write(&theme_path, custom_theme_source("#112233")).unwrap();
+    let registry = ThemeRegistry::with_env(&env).unwrap();
+    write_state_file_for_theme(&env, registry.get("nvim-custom").unwrap()).unwrap();
+    assert!(
+        wait_for_marker(&added, &mut child),
+        "Neovim did not load the newly added custom palette"
+    );
+
+    std::fs::write(&theme_path, custom_theme_source("#654321")).unwrap();
+    let registry = ThemeRegistry::with_env(&env).unwrap();
+    write_state_file_for_theme(&env, registry.get("nvim-custom").unwrap()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "Neovim exited with an error: {stderr}"
+    );
+    assert!(
+        stderr.contains("ADDED=true CHANGED=true FINAL=6636321"),
+        "Neovim did not apply the revised custom palette: {stderr}"
     );
 }
 

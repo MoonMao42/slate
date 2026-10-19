@@ -149,7 +149,7 @@ fn load_theme_colors() -> (String, String) {
         return (default_accent, default_subtext);
     };
 
-    let Ok(registry) = ThemeRegistry::new() else {
+    let Ok(registry) = ThemeRegistry::with_env(&env) else {
         return (default_accent, default_subtext);
     };
     let Some(theme) = registry.get(&theme_id) else {

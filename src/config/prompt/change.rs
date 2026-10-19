@@ -125,7 +125,7 @@ impl PreparedPrompt {
     // preferences, Starship files, backup storage or any native prompt probe.
     fn read_theme(env: &SlateEnv) -> Result<(File, Option<ThemeVariant>)> {
         let input = File::read(env, env.managed_file("current"), MAX_STATE_BYTES)?;
-        let registry = ThemeRegistry::new()?;
+        let registry = ThemeRegistry::with_env(env)?;
         let theme = registry.get(input.text()?.trim()).cloned();
         Ok((input, theme))
     }

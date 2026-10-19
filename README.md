@@ -177,6 +177,8 @@ For Ghostty: `config-file = ...`. For Kitty/Alacritty: managed `include`/`import
 
 20 variants across 9 families: Catppuccin · Solarized · Tokyo Night · Rosé Pine · Kanagawa · Everforest · Dracula · Nord · Gruvbox.
 
+Add your own palettes with [custom theme files](docs/custom-themes.md). Custom themes work with the picker, tool sync and automatic dark/light pairing.
+
 <details>
 <summary><strong>All 20 variants — palette gallery</strong></summary>
 

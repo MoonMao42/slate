@@ -196,7 +196,7 @@ fn handle_restore_direct(
     let config = crate::config::ConfigManager::from_env_paths(&env);
     if may_reapply_theme {
         if let Ok(Some(theme_id)) = config.get_current_theme() {
-            let registry = crate::theme::ThemeRegistry::new()?;
+            let registry = crate::theme::ThemeRegistry::with_env(&env)?;
             if let Some(theme) = registry.get(&theme_id) {
                 println!(
                     "{}",

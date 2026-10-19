@@ -261,7 +261,7 @@ fn apply_auto_theme_quiet_with_env(env: &SlateEnv) -> Result<bool> {
         return Ok(true);
     }
     let theme_id = crate::cli::auto_theme::resolve_auto_theme(env, &config)?;
-    let registry = crate::theme::ThemeRegistry::new()?;
+    let registry = crate::theme::ThemeRegistry::with_env(env)?;
     let theme = registry
         .get(&theme_id)
         .ok_or_else(|| error(format!("Auto-resolved theme '{theme_id}' not found")))?;

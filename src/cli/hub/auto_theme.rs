@@ -104,7 +104,7 @@ fn saved_pairing_summary(env: &crate::env::SlateEnv) -> String {
         )
         .into();
     };
-    let Ok(registry) = ThemeRegistry::new() else {
+    let Ok(registry) = ThemeRegistry::with_env(env) else {
         return tr(
             "主题目录无法读取，暂时不能显示已保存配对。\n",
             "Theme catalog is unreadable; saved pairing cannot be displayed.\n",

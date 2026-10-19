@@ -208,7 +208,7 @@ fn list_body(
             .map(str::to_owned)
             .collect());
     }
-    let registry = ThemeRegistry::from_process_or_embedded()?;
+    let registry = &state.registry;
     let themes: Vec<_> = state
         .theme_ids()
         .iter()

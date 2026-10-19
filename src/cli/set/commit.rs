@@ -64,7 +64,7 @@ fn silent_commit_apply_with_effects(
     apply_opacity: impl FnOnce(&SlateEnv, OpacityPreset, OpacityApplyOptions) -> Result<()>,
     finish_reload: impl FnOnce(&SlateEnv, &mut ThemeApplyReport),
 ) -> Result<()> {
-    let registry = ThemeRegistry::new()?;
+    let registry = ThemeRegistry::with_env(env)?;
     let theme = registry
         .get(theme_id)
         .ok_or_else(|| SlateError::InvalidThemeData(format!("Theme '{}' not found", theme_id)))?;

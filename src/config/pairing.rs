@@ -23,9 +23,12 @@ fn failure(reason: impl std::fmt::Display) -> SlateError {
     ))
 }
 
-/// Validate exact embedded IDs without consulting a profile or native programs.
-pub(crate) fn validate(dark: Option<&str>, light: Option<&str>) -> Result<()> {
-    let registry = ThemeRegistry::new()?;
+/// Validate exact IDs and appearances from the selected profile catalog.
+pub(crate) fn validate(
+    registry: &ThemeRegistry,
+    dark: Option<&str>,
+    light: Option<&str>,
+) -> Result<()> {
     for (value, appearance, option) in [
         (dark, ThemeAppearance::Dark, "--dark"),
         (light, ThemeAppearance::Light, "--light"),
@@ -139,7 +142,7 @@ impl PreparedPairing {
         dark: SlotEdit<'_>,
         light: SlotEdit<'_>,
     ) -> Result<Self> {
-        validate(dark.value(), light.value())?;
+        validate(&ThemeRegistry::with_env(env)?, dark.value(), light.value())?;
         if matches!((dark, light), (SlotEdit::Keep, SlotEdit::Keep)) {
             return Err(failure("select a slot to set or clear before saving"));
         }

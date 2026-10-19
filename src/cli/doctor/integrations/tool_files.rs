@@ -79,7 +79,7 @@ pub(super) fn saved_theme(report: &mut Report, env: &SlateEnv) -> Option<ThemeVa
     .ok()?;
     let theme = content
         .as_deref()
-        .and_then(|id| ThemeRegistry::new().ok()?.get(id.trim()).cloned());
+        .and_then(|id| ThemeRegistry::with_env(env).ok()?.get(id.trim()).cloned());
     report.add_code(
         "saved_theme",
         if theme.is_some() { "ok" } else { "warning" },

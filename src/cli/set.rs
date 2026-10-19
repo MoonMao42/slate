@@ -72,7 +72,7 @@ pub fn silent_preview_apply(
     theme_id: &str,
     opacity: crate::opacity::OpacityPreset,
 ) -> Result<()> {
-    let registry = crate::theme::ThemeRegistry::new()?;
+    let registry = crate::theme::ThemeRegistry::with_env(env)?;
     let theme = registry.get(theme_id).ok_or_else(|| {
         crate::error::SlateError::InvalidThemeData(format!("Theme '{}' not found", theme_id))
     })?;
