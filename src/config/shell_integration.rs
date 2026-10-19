@@ -388,10 +388,33 @@ fn render_shared_exports(content: &mut String, model: &SharedShellModel) {
     model.lazygit.posix(content);
     content.push_str(&format!("export LS_COLORS={}\n", model.ls_colors));
     content.push_str(&format!("export EZA_COLORS={}\n", model.eza_colors));
+    render_posix_fzf_colors(content, model);
+}
+
+fn render_posix_fzf_colors(content: &mut String, model: &SharedShellModel) {
+    // Keep the user's fzf options. Remove only the color argument this shell
+    // previously received from Slate, including when other options followed it.
+    content.push_str(
+        r#"if [ -n "${SLATE_FZF_COLOR_OPTS:-}" ]; then
+  case "${FZF_DEFAULT_OPTS:-}" in
+    "$SLATE_FZF_COLOR_OPTS") FZF_DEFAULT_OPTS= ;;
+    "$SLATE_FZF_COLOR_OPTS "*) FZF_DEFAULT_OPTS=${FZF_DEFAULT_OPTS#"$SLATE_FZF_COLOR_OPTS "} ;;
+    *" $SLATE_FZF_COLOR_OPTS"*)
+      _slate_fzf_tail=${FZF_DEFAULT_OPTS#*" $SLATE_FZF_COLOR_OPTS"}
+      FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS%%" $SLATE_FZF_COLOR_OPTS"*}$_slate_fzf_tail"
+      unset _slate_fzf_tail
+      ;;
+  esac
+fi
+"#,
+    );
     content.push_str(&format!(
-        "export FZF_DEFAULT_OPTS={}\n",
+        "export SLATE_FZF_COLOR_OPTS={}\n",
         model.fzf_default_opts
     ));
+    content.push_str(
+        "export FZF_DEFAULT_OPTS=\"${FZF_DEFAULT_OPTS:+$FZF_DEFAULT_OPTS }$SLATE_FZF_COLOR_OPTS\"\n",
+    );
 }
 
 fn render_posix_fastfetch_wrapper(content: &mut String, model: &SharedShellModel) {
@@ -535,10 +558,7 @@ fn render_fish_shell(model: &SharedShellModel) -> String {
     model.lazygit.fish(&mut content);
     content.push_str(&format!("set -gx LS_COLORS {}\n", model.ls_colors));
     content.push_str(&format!("set -gx EZA_COLORS {}\n", model.eza_colors));
-    content.push_str(&format!(
-        "set -gx FZF_DEFAULT_OPTS {}\n",
-        model.fzf_default_opts
-    ));
+    render_fish_fzf_colors(&mut content, model);
     fastfetch::fish(&mut content, &model.fastfetch_config_path);
 
     if model.starship_enabled {
@@ -566,6 +586,32 @@ fn render_fish_shell(model: &SharedShellModel) -> String {
 
     content.push_str("end\n");
     content
+}
+
+fn render_fish_fzf_colors(content: &mut String, model: &SharedShellModel) {
+    content.push_str(
+        r#"if set -q SLATE_FZF_COLOR_OPTS; and set -q FZF_DEFAULT_OPTS
+  if test "$FZF_DEFAULT_OPTS" = "$SLATE_FZF_COLOR_OPTS"
+    set -gx FZF_DEFAULT_OPTS ''
+  else
+    set -gx FZF_DEFAULT_OPTS (string replace -- "$SLATE_FZF_COLOR_OPTS " '' "$FZF_DEFAULT_OPTS" | string collect)
+    set -gx FZF_DEFAULT_OPTS (string replace -- " $SLATE_FZF_COLOR_OPTS" '' "$FZF_DEFAULT_OPTS" | string collect)
+  end
+end
+"#,
+    );
+    content.push_str(&format!(
+        "set -gx SLATE_FZF_COLOR_OPTS {}\n",
+        model.fzf_default_opts
+    ));
+    content.push_str(
+        r#"if set -q FZF_DEFAULT_OPTS; and test -n "$FZF_DEFAULT_OPTS"
+  set -gx FZF_DEFAULT_OPTS "$FZF_DEFAULT_OPTS $SLATE_FZF_COLOR_OPTS"
+else
+  set -gx FZF_DEFAULT_OPTS "$SLATE_FZF_COLOR_OPTS"
+end
+"#,
+    );
 }
 
 fn default_powerline_fg(theme: &ThemeVariant) -> String {
@@ -731,6 +777,9 @@ pub(crate) fn should_upgrade_seeded_starship_content(content: &str) -> bool {
         || trimmed == LEGACY_PLAIN_STARSHIP_CONTENT.trim()
         || trimmed == LEGACY_STARTER_STARSHIP_CONTENT.trim()
 }
+
+#[cfg(test)]
+mod fzf_tests;
 
 #[cfg(test)]
 mod startup_tests;
