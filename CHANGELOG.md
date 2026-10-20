@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The shell installer accepts blank lines around cargo-dist checksum records while still rejecting missing or duplicate records.
+
 ## [0.6.0] - 2026-10-20
 
 ### Added
@@ -266,6 +272,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Three-tier config architecture (managed / integration / user override)
 - Homebrew tap distribution (`brew install MoonMao42/tap/slate-cli`)
 
+[Unreleased]: https://github.com/MoonMao42/slate/compare/v0.6.0...HEAD
 [0.6.0]: https://github.com/MoonMao42/slate/releases/tag/v0.6.0
 [0.5.0]: https://github.com/MoonMao42/slate/releases/tag/v0.5.0
 [0.4.0]: https://github.com/MoonMao42/slate/releases/tag/v0.4.0

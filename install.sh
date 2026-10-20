@@ -157,10 +157,12 @@ if ! curl -fsSL "${URL}.sha256" -o "$WORK_TMPDIR/$ASSET.sha256"; then
 fi
 
 if ! EXPECTED_HASH="$(awk -v asset="$ASSET" '
-  NR == 1 && (NF == 1 || (NF == 2 && ($2 == asset || $2 == "*" asset))) &&
+  NF == 0 { next }
+  { records++ }
+  records == 1 && (NF == 1 || (NF == 2 && ($2 == asset || $2 == "*" asset))) &&
     length($1) == 64 && $1 !~ /[^a-fA-F0-9]/ { print tolower($1); next }
   { exit 1 }
-  END { if (NR != 1) exit 1 }
+  END { if (records != 1) exit 1 }
 ' "$WORK_TMPDIR/$ASSET.sha256")"; then
   fail "checksum file for $ASSET must contain one SHA-256 record for this asset."
 fi

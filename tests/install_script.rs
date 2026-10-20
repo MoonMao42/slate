@@ -248,6 +248,19 @@ fn install_script_preserves_previous_binary_on_copy_and_rename_failure() {
 }
 
 #[test]
+fn install_script_accepts_cargo_dist_checksum_whitespace() {
+    for padding in ["\n", "\n \t\n"] {
+        let fixture = Fixture::new(false);
+        let record = fs::read_to_string(fixture.downloads.join(format!("{ASSET}.sha256"))).unwrap();
+        let hash = record.split_whitespace().next().unwrap();
+        fixture.checksum(&format!("{padding}{hash} *{ASSET}\n{padding}"));
+        fixture.command().assert().success();
+        assert_eq!(fs::read(fixture.destination.join("slate")).unwrap(), NEW);
+        fixture.assert_clean();
+    }
+}
+
+#[test]
 fn install_script_rejects_download_and_checksum_failures_before_replacing_binary() {
     for case in [
         "archive-download",
@@ -256,6 +269,8 @@ fn install_script_rejects_download_and_checksum_failures_before_replacing_binary
         "malformed",
         "wrong-asset",
         "extra-record",
+        "extra-record-after-blank",
+        "empty",
         "hasher-failure",
     ] {
         let fixture = Fixture::new(false);
@@ -273,6 +288,8 @@ fn install_script_rejects_download_and_checksum_failures_before_replacing_binary
             "malformed" => fixture.checksum("not a checksum\n"),
             "wrong-asset" => fixture.checksum(&format!("{hash}  another-release.tar.xz\n")),
             "extra-record" => fixture.checksum(&format!("{record}{record}")),
+            "extra-record-after-blank" => fixture.checksum(&format!("{record}\n{record}")),
+            "empty" => fixture.checksum("\n \t\n"),
             "hasher-failure" => script(
                 &fixture.bin.join("shasum"),
                 &format!("#!/bin/sh\nprintf '%s\\n' '{hash}'\nexit 1\n"),
