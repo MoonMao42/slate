@@ -181,11 +181,13 @@ fn font_cache_unsafe_or_replaced_directories_do_not_launch_the_scanner() {
     let alias = f.binary.parent().unwrap().join("home-alias");
     symlink(f.env.home(), &alias).unwrap();
     let env = SlateEnv::with_home(alias);
+    // This case checks HOME alias validation; use an existing executable rather
+    // than executing a newly written script while other tests spawn processes.
     assert_eq!(
         refresh_with(
             FontPlatformBackend::Fontconfig,
             &env,
-            || Some(f.binary.clone()),
+            || Some(PathBuf::from("/usr/bin/true")),
             REFRESH_LIMITS
         ),
         FontCacheRefresh::Refreshed

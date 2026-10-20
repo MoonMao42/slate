@@ -42,13 +42,13 @@ fn fixture() -> (tempfile::TempDir, SlateEnv) {
     let bat = env.user_local_bin().join("bat");
     write(
         &bat,
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SLATE_HOME/bat-cache-calls\"\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/bat-cache-calls\"\n",
     );
     fs::set_permissions(&bat, fs::Permissions::from_mode(0o700)).unwrap();
     let btop = env.user_local_bin().join("btop");
     write(
         &btop,
-        "#!/bin/sh\nprintf called > \"$SLATE_HOME/UNEXPECTED_PROCESS\"\nexit 91\n",
+        "#!/bin/sh\nprintf called > \"$HOME/UNEXPECTED_PROCESS\"\nexit 91\n",
     );
     fs::set_permissions(&btop, fs::Permissions::from_mode(0o700)).unwrap();
     write(
@@ -78,6 +78,26 @@ fn json(env: &SlateEnv, args: &[&str]) -> serde_json::Value {
         .get_output()
         .clone();
     serde_json::from_slice(&output.stdout).unwrap()
+}
+
+// Direct library calls must resolve the fixture's tools even when the host has
+// bat installed. Leave SLATE_HOME unset to exercise the injected HOME binding.
+fn run_in_private_process(test_name: &str) -> bool {
+    if std::env::var("SLATE_CUSTOM_THEME_TEST").as_deref() == Ok(test_name) {
+        return false;
+    }
+    let home = tempfile::tempdir().unwrap();
+    assert_cmd::Command::new(std::env::current_exe().unwrap())
+        .env_clear()
+        .env("HOME", home.path())
+        .env("PATH", "")
+        .env("NO_COLOR", "1")
+        .env("SLATE_CUSTOM_THEME_TEST", test_name)
+        .args(["--exact", test_name, "--nocapture"])
+        .timeout(Duration::from_secs(30))
+        .assert()
+        .success();
+    true
 }
 
 #[test]
@@ -180,6 +200,11 @@ fn custom_theme_survives_cli_apply_sync_pairing_and_prompt_import() {
 
 #[test]
 fn picker_preview_and_save_accept_a_custom_theme_from_the_injected_profile() {
+    if run_in_private_process(
+        "picker_preview_and_save_accept_a_custom_theme_from_the_injected_profile",
+    ) {
+        return;
+    }
     let (_home, env) = fixture();
     let state = PickerState::with_env(&env, THEME_ID, OpacityPreset::Solid).unwrap();
     assert_eq!(state.get_current_theme_id(), THEME_ID);
@@ -198,10 +223,19 @@ fn picker_preview_and_save_accept_a_custom_theme_from_the_injected_profile() {
         fs::read_to_string(env.managed_file("current")).unwrap(),
         THEME_ID
     );
+    assert!(fs::read_to_string(env.home().join("bat-cache-calls"))
+        .unwrap()
+        .contains("cache --build"));
+    assert!(!env.home().join("UNEXPECTED_PROCESS").exists());
 }
 
 #[test]
 fn custom_bat_asset_has_exact_checkpoint_recovery_for_existing_and_absent_files() {
+    if run_in_private_process(
+        "custom_bat_asset_has_exact_checkpoint_recovery_for_existing_and_absent_files",
+    ) {
+        return;
+    }
     for existing in [false, true] {
         let (_home, env) = fixture();
         let asset = BatAdapter
@@ -221,6 +255,10 @@ fn custom_bat_asset_has_exact_checkpoint_recovery_for_existing_and_absent_files(
             .apply_to_tools(&theme, &["bat".into()])
             .unwrap();
         report.ensure_no_failures().unwrap();
+        assert_eq!(
+            fs::read_to_string(env.home().join("bat-cache-calls")).unwrap(),
+            "cache --build\n"
+        );
         let point =
             get_restore_point_with_env(&env, report.restore_point_id.as_ref().unwrap()).unwrap();
         let entry = point
