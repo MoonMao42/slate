@@ -42,7 +42,7 @@ fn direct_brand_dispatch_inventory_matches_reviewed_routes() {
         // - `sound_sink.rs` is the sink implementation — its
         // `#[cfg(test)] mod tests` uses `dispatch(BrandEvent::...)`
         // to exercise the sink. Those are test-only event synthesis,
-        // not Phase-18-planted production call sites, and must not
+        // not production call sites, and must not
         // inflate the freeze count.
         if path
             .file_name()

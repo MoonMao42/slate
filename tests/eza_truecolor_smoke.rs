@@ -1,7 +1,7 @@
 //! eza truecolor empirical smoke test.
 //! Assumption A1: eza's `eza_colors(5)` manpage documents `38;5;nnn` for
-//! 256-colour but is silent on `38;2;R;G;B` truecolor. Slate's Phase-16
-//! strategy hinges on eza accepting truecolor in `EZA_COLORS` (
+//! 256-colour but is silent on `38;2;R;G;B` truecolor. Slate relies on
+//! eza accepting truecolor in `EZA_COLORS` (
 //! a 256-colour fallback).
 //! This test is the one empirical check that cannot be answered by reading
 //! source: set `EZA_COLORS="reset:*.rs=38;2;255;0;0"`, invoke `eza

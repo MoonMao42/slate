@@ -1,4 +1,4 @@
-//! LS_COLORS + EZA_COLORS adapter — projects the Phase-15 file_type classifier
+//! LS_COLORS + EZA_COLORS adapter — projects the shared file_type classifier
 //! into two environment-variable strings.
 //! The rendered strings are materialised into the managed shell integration
 //! files (`managed/shell/env.{zsh,bash,fish}`) by `SharedShellModel` in
@@ -13,11 +13,11 @@
 //! single source of truth for color bytes (round-trip locked by the
 //! `ls_colors_round_trips_through_classifier` invariant test).
 //! ## File-type kind keys (LS_COLORS)
-//! Phase-15 `file_type_colors::classify` is the single source of truth; it
+//! `file_type_colors::classify` is the single source of truth; it
 //! defines five `FileKind`s — `Regular`, `Directory`, `Symlink`, `Executable`
 //! (plus `Hidden` derived at match-time). GNU `LS_COLORS`, however, defines
 //! eight file-type kind keys that `ls` emits for filesystem entries beyond
-//! those four. We reuse the closest Phase-15 role for each missing kind so
+//! those four. We reuse the closest role for each missing kind so
 //! the output stays consistent with the project's single-palette invariant,
 //! and document the intentional reuse below:
 //! | Key | Meaning | Role reused |
@@ -30,7 +30,7 @@
 //! | `pi`| Named pipe / FIFO | `FileConfig` (reuse) |
 //! | `bd`| Block device | `FileConfig` (reuse) |
 //! | `cd`| Character device | `FileConfig` (reuse) |
-//! `or` / `so` / `pi` / `bd` / `cd` do not appear in the Phase-15 classifier
+//! `or` / `so` / `pi` / `bd` / `cd` do not appear in the classifier
 //! (`FileKind` has no Pipe / Socket / BlockDevice / CharDevice variants).
 //! Extending `FileKind` is deferred — until then, the closest semantically
 //! adjacent role is emitted .
@@ -60,7 +60,7 @@ use crate::theme::{Palette, ThemeVariant};
 use std::fmt::Write;
 use std::path::PathBuf;
 
-/// GNU `LS_COLORS` file-type kind keys → Phase-15 SemanticColor roles.
+/// GNU `LS_COLORS` file-type kind keys → SemanticColor roles.
 /// Order is deterministic (same iteration order as the wire format).
 /// See module-level docs for the intentional reuse rationale for `or`,
 /// `so`, `pi`, `bd`, `cd`.
@@ -68,7 +68,7 @@ static FILE_TYPE_KIND_KEYS: &[(&str, SemanticColor)] = &[
     ("di", SemanticColor::FileDir),
     ("ln", SemanticColor::FileSymlink),
     ("ex", SemanticColor::FileExec),
-    // Intentional reuse — no Phase-15 role exists for these kinds yet.
+    // Intentional reuse — no role exists for these kinds yet.
     ("or", SemanticColor::FileSymlink),
     ("so", SemanticColor::FileExec),
     ("pi", SemanticColor::FileConfig),
@@ -377,8 +377,8 @@ mod tests {
             );
             // Probe for an ESC-`[` byte sequence via byte-slice window
             // rather than a string-literal needle so this test source
-            // doesn't itself trip the Wave-6 line-scanner gate
-            // (replicates the Wave-3 `status_panel` byte-probe pattern).
+            // does not itself trip the line scanner, following the
+            // `status_panel` byte-probe pattern.
             let needle: [u8; 2] = [0x1b, b'['];
             assert!(
                 !out.as_bytes().windows(2).any(|w| w == needle),

@@ -15,9 +15,8 @@
 //! process so the next `slate theme set <id>` reads the wrong path.
 //! - **Dependency injection for tests**: `starship_bin: Option<&Path>`
 //! lets tests pass an explicit (non-existent) path to exercise the
-//! `NotInstalled` branch without mutating global `PATH` — per user
-//! MEMORY `feedback_no_tech_debt` (pure function testing, no global
-//! env var mutation in tests).
+//! `NotInstalled` branch without mutating global `PATH`. Tests use
+//! injected inputs and do not mutate global environment state.
 
 use crate::config::file_read::{self, Links, MAX_TOOL_CONFIG_BYTES};
 use crate::platform::process_output::{self, Completion, Limits};
@@ -150,10 +149,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    // NOTE: these tests are PURE function calls — no `std::env::set_var`,
-    // no `PathGuard`, no `PATH_LOCK`. Per user MEMORY feedback_no_tech_debt
-    // mutation in tests". The `NotInstalled` branch is exercised by
-    // injecting a non-existent binary path via the `starship_bin` parameter.
+    // These tests avoid global environment mutation and path locks.
+    // The `NotInstalled` branch is exercised by injecting a non-existent
+    // binary path via the `starship_bin` parameter.
 
     #[test]
     fn config_path_is_managed_only() {

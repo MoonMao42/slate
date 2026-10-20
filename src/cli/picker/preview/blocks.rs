@@ -463,8 +463,7 @@ mod tests {
     /// Collect every distinct RGB triplet emitted as a truecolor foreground
     /// (ESC `[` `3` `8` `;` `2` `;` R `;` G `;` B `m`) by the render output.
     /// The prefix is built from bytes so the test source does not itself
-    /// contain the raw styling escape literal that the Wave-5 grep gate
-    /// scans.
+    /// contain the raw styling escape literal scanned in this source file.
     fn collected_fg_triplets(out: &str) -> std::collections::HashSet<(u8, u8, u8)> {
         let mut triplets = std::collections::HashSet::new();
         let prefix_bytes: [u8; 7] = [0x1b, b'[', b'3', b'8', b';', b'2', b';'];
@@ -496,9 +495,8 @@ mod tests {
     fn render_to_string_emits_ansi_24bit_fg() {
         let out = render_all_blocks(&mocha_palette());
         // Byte-slice probe for the truecolor-fg SGR prefix (`ESC [ 3 8 ; 2`)
-        // avoids a literal escape in the test source so the Wave-5 grep
-        // gate stays authoritative (same shape as Wave-3's
-        // `status_panel_preserves_palette_swatch`).
+        // avoids a literal escape in the test source so the scanner stays
+        // authoritative, following `status_panel_preserves_palette_swatch`.
         let bytes = out.as_bytes();
         assert!(
             bytes
@@ -591,7 +589,7 @@ mod tests {
 
     /// The palette showcase is the whole point of the 4-block renderer, so
     /// the render output MUST carry many `38;2;` 24-bit swatch escapes.
-    /// Byte-slice probe avoids tripping the Wave-5 grep gate ourselves.
+    /// Byte-slice probe avoids tripping the source scanner.
     #[test]
     fn demo_render_preserves_many_palette_swatches() {
         let out = render_all_blocks(&mocha_palette());
@@ -607,7 +605,7 @@ mod tests {
     /// Byte-slice probe helper for the 24-bit background-SGR prefix
     /// (`ESC [ 4 8 ; 2 ;`). Counts how many background cells the swatch
     /// rendered. Avoids a literal escape in the test source so the
-    /// Wave-5 grep gate stays authoritative.
+    /// Source scanner stays authoritative.
     fn count_bg_cells(out: &str) -> usize {
         let bytes = out.as_bytes();
         let needle: [u8; 7] = [0x1b, b'[', b'4', b'8', b';', b'2', b';'];

@@ -586,8 +586,7 @@ mod tests {
     /// `38;2;` SGR prefix so the 4-glyph theme-color preview is
     /// rendered as colored bytes (swatch, not role text).
     /// Built from a byte slice rather than a source-level ANSI literal
-    /// so the Wave-3 grep gate `no_raw_ansi_in_wave_3_files` stays
-    /// authoritative — same pattern as
+    /// so the source scanner stays authoritative, following the same pattern as
     /// `theme_switch_envelope_uses_green_not_lavender` guard.
     #[test]
     fn status_panel_preserves_palette_swatch() {

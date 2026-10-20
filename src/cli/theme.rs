@@ -317,9 +317,8 @@ fn validate_theme_report(report: &ThemeApplyReport) -> Result<()> {
 mod tests {
     //! wiring tests for the `slate theme <name>` explicit branch.
     //! The full `handle_theme` body touches `ConfigManager`, `SlateEnv`, and
-    //! the dark-mode watcher lifecycle, so isolating the wiring behind
-    //! minimal branch helpers is the pragmatic path per 16-06-PLAN.md
-    //! "Test executor discretion" guidance. The helpers mirror the exact
+    //! the dark-mode watcher lifecycle, so the wiring is isolated behind
+    //! minimal branch helpers. The helpers mirror the exact
     //! decision shape used in `handle_theme` so a future refactor that drops
     //! the aggregator gate or forgets to forward `quiet` will flip these
     //! tests red.

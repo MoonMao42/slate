@@ -514,7 +514,7 @@ mod tests {
     /// Brand-anchor invariant — `brand_glyph` must carry the
     /// brand-lavender RGB triple on the ✦ glyph in truecolor mode (the
     /// `eprintln!` informational guidance message in `resolve_auto_theme_inner`
-    /// is the only Wave-6 production caller).
+    /// is the only production caller).
     #[test]
     fn brand_glyph_carries_lavender_in_truecolor() {
         let theme = mock_theme();

@@ -594,8 +594,8 @@ mod slate_cache_dir_tests {
     //! Dedicated coverage for `SlateEnv::slate_cache_dir`.
     //! These tests prove the accessor is XDG-aware (via the `from_process`
     //! / `with_home` constructors) and stable across calls — without
-    //! mutating `std::env::set_var` (per user preference `feedback_no_tech_debt`,
-    //! pure-function testing, no global env mutation).
+    //! mutating `std::env::set_var`; constructor injection keeps these tests
+    //! independent of global environment state.
     use super::*;
     use std::path::PathBuf;
     use tempfile::TempDir;

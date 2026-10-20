@@ -879,7 +879,7 @@ mod tests {
 
     /// graceful degrade — every formatter emits pure plain text
     /// when Roles is absent. Confirms no ANSI bytes leak and the
-    /// legacy glyph prefix stays identical to pre-Wave-2 output so
+    /// legacy glyph prefix stays identical to previous output so
     /// users hitting the registry-init edge case see the same words.
     #[test]
     fn font_formatters_fall_back_to_plain_when_roles_absent() {

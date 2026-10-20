@@ -58,8 +58,7 @@ fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
 /// renders the active theme's colors as raw truecolor escapes so the
 /// quote shimmers in theme accent. Per the migration scanner, the
 /// renderer fn carries a `// SWATCH-RENDERER:` marker so its `\x1b[38;2;`
-/// bytes survive the Wave-6 grep gate (function-scope allowlist; matches
-/// Wave-3 `swatch_cell` + Wave-5 `render_preview` precedent).
+/// bytes are allowed by the migration scanner's function-scope marker.
 /// The quote / author prose itself does NOT migrate to a Roles helper:
 /// the visual contract IS the theme-tinted text. Brand-anchor styling
 /// (lavender) would clash with the curated palette anchor.
@@ -225,7 +224,7 @@ mod tests {
         assert!(out.contains("test quote"));
         assert!(out.contains("test author"));
         // SWATCH-RENDERER assertion via byte-slice probe so this test
-        // source doesn't itself trip the Wave-6 grep gate.
+        // source does not itself trip the migration scanner.
         let bytes = out.as_bytes();
         let needle: [u8; 6] = [0x1b, b'[', b'3', b'8', b';', b'2'];
         assert!(

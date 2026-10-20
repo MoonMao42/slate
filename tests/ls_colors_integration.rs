@@ -7,7 +7,7 @@
 //! export syntax (POSIX `export X='…'` vs fish `set -gx X '…'`);
 //! * use 24-bit truecolor escapes (`38;2;R;G;B`) and never fall back to the
 //! 256-colour form (`38;5;…`) ;
-//! * round-trip through the Phase-15 file-type classifier — the ANSI code
+//! * round-trip through the shared file-type classifier — the ANSI code
 //! under `:*.rs=…` matches `PaletteRenderer::rgb_to_ansi_24bit(palette
 //! .resolve(classify("main.rs", FileKind::Regular)))`;
 //! * pass `zsh -n` parsing when `zsh` is available on PATH (skips gracefully
@@ -227,7 +227,7 @@ fn env_zsh_passes_shell_syntax_check() {
 
 #[test]
 fn env_zsh_round_trips_classifier() {
-    // Strongest guard on the feature: for every extension in the Phase-15
+    // Strongest guard on the feature: for every extension in the
     // classifier map, the ANSI code printed inside LS_COLORS must equal the
     // ANSI code that `classify(name, Regular) → palette.resolve → rgb_to_ansi`
     // produces. If any of those steps drifts, the visible palette breaks.

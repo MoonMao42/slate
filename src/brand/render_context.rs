@@ -143,7 +143,7 @@ fn pill_background_ansi(theme: &ThemeVariant) -> Result<String> {
 
 /// Pure helper: classify the render mode from already-extracted env
 /// signals. Keeps `std::env` out of tests — callers pass the values, we
-/// return the decision (honors user feedback_no_tech_debt rule).
+/// return the decision without mutating process environment state.
 pub(crate) fn classify_env(
     no_color: bool,
     is_tty: bool,

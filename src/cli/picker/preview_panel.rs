@@ -214,8 +214,8 @@ pub fn self_draw_prompt_from_sample_tokens(palette: &crate::theme::Palette) -> S
 /// cell intentionally carries a truecolor background SGR (ESC `[` `4` `8` `;`
 /// `2` `;` R `;` G `;` B m) because the whole point of the preview panel IS
 /// to display theme colors. The `// SWATCH-RENDERER:` marker below drops
-/// this body from the Wave-5 grep gate (same pattern as Wave-3's
-/// `src/cli/status_panel.rs::swatch_cell`).
+/// this body from the source scanner, like
+/// `src/cli/status_panel.rs::swatch_cell`.
 // SWATCH-RENDERER: intentionally raw ANSI (renders theme preview colors, not role text)
 pub fn render_preview(palette: &crate::theme::Palette) -> String {
     use crate::adapter::palette_renderer::PaletteRenderer;

@@ -642,8 +642,7 @@ mod tests {
         // End-to-end write sound=off under an injected SlateEnv, then
         // install — the sink slot must be latched without creating the sound
         // cache, and subsequent dispatches must not panic.
-        // No std::env::set_var — tests stay pure per user rule
-        // `feedback_no_tech_debt` (no global env var mutation in tests).
+        // No std::env::set_var; tests avoid mutating global environment state.
         let _g = SINK_LOCK.lock().unwrap();
         let _sink_guard = reset_sink_for_tests();
         let tmp = tempfile::TempDir::new().unwrap();

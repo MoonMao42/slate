@@ -232,8 +232,8 @@ mod tests {
         // ESC-`[`-0-m reset. Probe for the bracketed token rather than
         // the bare ⌘N (which is surrounded by braces in the raw
         // constant). Spelling the escape sequence out as ESC tokens
-        // keeps the line-scanner from flagging this comment as a
-        // styling residue (Wave-3/4 docstring-hygiene rule).
+        // keeps the line scanner from flagging this comment as styling
+        // residue.
         assert!(
             out.contains("[ ⌘N ]"),
             "macOS keycap must render as a bordered pill, got: {out:?}"

@@ -1,7 +1,6 @@
-//! · · Wave-6 integration gate — starship fork
+//! Starship fork integration tests.
 //! These tests exercise the `fork_starship_prompt` function at integration
-//! scope (separate crate → can only see `pub` items, which is why Plan
-//! 19-08 promoted the symbol to `pub` in the preview module).
+//! scope (a separate crate that can only see `pub` items).
 //! tests use the `starship_bin: Option<&Path>` dependency-injection
 //! parameter and/or explicit managed_dir paths. NO `std::env::set_var`,
 //! NO `PathGuard`, NO `PATH_LOCK`, NO `Command::new` shelling into slate.

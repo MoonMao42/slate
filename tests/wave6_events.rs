@@ -1,13 +1,13 @@
 //! event-seam integration test.
-//! The Wave-6 dispatch sites (`AutoThemeFailed` across `src/cli/auto_theme.rs`;
+//! The dispatch sites (`AutoThemeFailed` across `src/cli/auto_theme.rs`;
 //! `ConfigSet` across `src/cli/config.rs` + `src/cli/share.rs` + the
 //! auto-theme configure flow) flow through a process-global
 //! `OnceLock<Arc<dyn EventSink>>`. Running this file as its own
 //! integration-test binary means the `OnceLock` starts fresh, so the
 //! `set_sink(CountingSink)` call at the top of the first test actually
 //! seats the counter before any dispatch fires — no collision with the
-//! lib unit tests that also touch the sink (mirror of `tests/wave4_events.rs`
-//! execution-serialiser pattern).
+//! lib unit tests that also touch the sink; the separate integration-test
+//! process gives this binary a fresh sink for deterministic counting.
 //! Contracts locked here:
 //! 1. `BrandEvent::Failure(FailureKind::AutoThemeFailed)` is routable
 //! dispatching it directly from the test lands in the sink's failure
@@ -23,7 +23,7 @@
 //! tempdir context — no watcher spawn, no shell-integration refresh
 //! side-effects) drives the real handler end-to-end and asserts
 //! exactly one ConfigSet fires and zero AutoThemeFailed leaks.
-//! 4. Compile-time variant gate enumerates every Wave-6 event variant
+//! 4. Compile-time variant gate enumerates every event variant
 //! so future renames break this test instead of silently drifting.
 
 use std::sync::{
@@ -139,7 +139,7 @@ fn config_set_sound_handler_dispatches_one_config_set() {
     );
 }
 
-/// Contract 4 — type-import gate. Reference every Wave-6 variant so a
+/// Contract 4 — type-import gate. Reference every variant so a
 /// future refactor that renames one breaks this test instead of
 /// silently drifting the event surface.
 #[test]

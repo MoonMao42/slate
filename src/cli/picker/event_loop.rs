@@ -507,7 +507,7 @@ fn disabled_prompt_preview() -> String {
 
 #[cfg(test)]
 mod tests {
-    //! Wave-5 picker key → BrandEvent dispatch unit tests.
+    //! Picker key → BrandEvent dispatch unit tests.
     //! Rather than drive the whole alt-screen event loop, we call
     //! `handle_key` directly with synthetic `KeyEvent`s and assert the
     //! shared `OnceLock` sink tally. Private `handle_key` + `Flash` are
@@ -519,7 +519,7 @@ mod tests {
     //! degrade to smoke tests (the `handle_key` branches still run
     //! without panicking). integration target will exercise
     //! the fresh-process case against `SoundSink`; the routing contract
-    //! lives in `tests/wave5_picker_events.rs`.
+    //! is also covered by integration tests.
 
     use super::*;
     use crate::brand::events::{set_sink, EventSink};

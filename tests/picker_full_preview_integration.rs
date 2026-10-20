@@ -1,9 +1,9 @@
-//! · · Wave-6 integration gate — picker full-preview
+//! Picker full-preview integration tests.
 //! Tab / Enter / Esc end-to-end paths with a tempdir-backed `SlateEnv`.
 //! These tests are the integration-scope companions to the unit tests in
 //! `src/cli/picker/state.rs` and the preview-fork tests in
 //! `src/cli/picker/preview/starship_fork.rs`. They drive the real
-//! `silent_preview_apply` adapter pipeline (now env-injected per)
+//! `silent_preview_apply` adapter pipeline with an injected environment
 //! so every managed/* write lands under the tempdir — zero developer-home
 //! pollution, zero `std::env::set_var` global mutation.
 //! Test invariants:

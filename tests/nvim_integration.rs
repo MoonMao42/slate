@@ -10,8 +10,8 @@
 //! non-spawning tests. When `has-nvim` IS set but the binary is not on
 //! PATH (CI setup bug, local dev on a minimal box), each spawning test
 //! checks `which nvim` at entry and skips cleanly with an `eprintln!`
-//! marker — NEVER panics. This matches `feedback_no_tech_debt`: tests
-//! never depend on global env-var mutation, and missing prerequisites are
+//! marker — NEVER panics. Tests never depend on global environment
+//! mutation, and missing prerequisites are
 //! a skip, not a red alarm.
 
 #[test]

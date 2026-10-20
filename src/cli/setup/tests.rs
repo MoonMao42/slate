@@ -592,10 +592,8 @@ fn choose_nvim_init_target_defaults_to_init_lua_when_neither_exists() {
 /// Idempotency gate: if an
 /// init.lua already carries a slate marker, the activation state
 /// returns `AlreadyConsented` — no prompt, no file edit.
-/// This is the pure-function equivalent of the
-/// `prompt_nvim_activation_is_idempotent_on_existing_marker` test
-/// in 17-06-PLAN.md — split because we don't need to mock
-/// cliclack to prove the short-circuit.
+/// This pure-function test verifies the same short-circuit as the
+/// interactive activation flow, without mocking cliclack.
 #[test]
 fn nvim_activation_state_detects_existing_marker_in_init_lua() {
     let td = TempDir::new().unwrap();

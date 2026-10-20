@@ -130,10 +130,8 @@ mod tests {
     /// itself is also dropped so it cannot survive to re-enter the scan.
     /// Unlike `strip_swatch_renderers`, this is **single-line scope**
     /// a stray marker cannot accidentally smother a multi-line block.
-    /// NOTE for future maintainers: this helper is a line filter; keep
-    /// braces out of the documentation when editing marker-adjacent
-    /// code (same hygiene rule as `strip_swatch_renderers`; see Wave-3
-    /// docstring-hygiene bug in 18-04-SUMMARY).
+    /// Keep braces out of marker-adjacent documentation: this helper
+    /// filters individual lines, so a marker cannot safely span a block.
     fn strip_terminal_control_markers(src: &str) -> String {
         let mut out = String::with_capacity(src.len());
         let mut skip_next = false;
@@ -267,8 +265,7 @@ fn after() {
     /// allowlist regression guard — `strip_terminal_control_markers`
     /// drops the single line that immediately follows a
     /// `// TERMINAL-CONTROL:` marker while leaving surrounding code intact.
-    /// Mirrors the narrower scope of the Wave-5 marker (single line vs.
-    /// SWATCH-RENDERER's function scope).
+    /// Unlike `SWATCH-RENDERER`, this marker applies to one line only.
     #[test]
     fn strip_terminal_control_markers_drops_only_next_line() {
         let src = "\
@@ -321,13 +318,9 @@ fn render() {
         assert!(hits.is_empty(), " style-ANSI residue: {hits:?}");
     }
 
-    /// Final post-Phase-18 sweep — after lands, no file in
-    /// `src/cli/` or `src/brand/language.rs` should carry
-    /// `#![allow(deprecated)]`. Inserted those
-    /// attributes during the Wave-0 deprecation seeding; each migrating
-    /// wave was supposed to drop them as it touched the file. This
-    /// test makes the sweep CI-authoritative — a future regression
-    /// where someone adds an `#![allow(deprecated)]` to silence a
+    /// Ensure no file in `src/cli/` or `src/brand/language.rs` carries
+    /// `#![allow(deprecated)]`. This makes the check CI-authoritative: a
+    /// regression where someone adds an `#![allow(deprecated)]` to silence a
     /// `Typography::*` / `Symbols::*` / `Colors::*` lint will fail
     /// here instead of silently re-introducing legacy APIs.
     #[test]
@@ -355,18 +348,17 @@ fn render() {
         );
     }
 
-    /// Phase-level aggregate invariant — belt-and-suspenders
-    /// on top of the 6 per-wave gates. Walks ALL `*.rs` under `src/cli/`
+    /// Aggregate invariant complementing the focused ANSI checks.
+    /// Walks ALL `*.rs` under `src/cli/`
     /// recursively + `src/adapter/ls_colors.rs` + `src/brand/language.rs`
     /// in ONE scan and asserts zero raw styling-ANSI residue (respecting
     /// the shared SWATCH-RENDERER / TERMINAL-CONTROL allowlists baked into
     /// `count_style_ansi_in`).
-    /// Catches two regression classes the per-wave gates alone cannot:
-    /// * A brand-new `src/cli/*.rs` file added post-Phase-18 that isn't
-    /// listed in any wave's explicit file array (per-wave tests only
-    /// see the hardcoded set).
-    /// * A nested `src/cli/<mod>/inner.rs` that ships raw ANSI because
-    /// the parent wave never enumerated the child (e.g. a new picker
+    /// Catches two regression classes focused checks alone cannot:
+    /// * A new `src/cli/*.rs` file that is not listed in a focused
+    /// test's explicit file array.
+    /// * A nested `src/cli/<mod>/inner.rs` that contains raw ANSI because
+    /// the focused test never enumerated the child (e.g. a new picker
     /// submodule beyond `render.rs` + `preview_panel.rs`).
     #[test]
     fn no_raw_styling_ansi_anywhere_in_user_surfaces() {

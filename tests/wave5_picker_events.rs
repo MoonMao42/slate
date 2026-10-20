@@ -99,7 +99,7 @@ fn picker_enter_event_is_routable() {
 }
 
 /// Contract 3 — compile-time variant gate.
-/// Enumerates the two Wave-5 variants so renaming
+/// Enumerates the two event variants so renaming
 /// `NavKind::PickerMove` or `SelectKind::PickerEnter` would break this
 /// test first, surfacing the regression before SoundSink
 /// depends on those names.
