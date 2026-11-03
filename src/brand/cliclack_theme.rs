@@ -1,7 +1,7 @@
 //! `SlateTheme : impl cliclack::Theme` — cliclack framing integration.
 //!
-//! Overrides the 9 methods that govern visible framing:
-//! - Intro / outro framing carries the fixed brand lavender `#7287fd`;
+//! Controls visible framing and text styles:
+//! - Intro / outro framing carries the terminal theme accent;
 //!   outro emits the completion glyph `└─ ★`.
 //! - The error symbol uses theme red, never lavender.
 //!
@@ -11,27 +11,45 @@
 use cliclack::{Theme, ThemeState};
 use console::Style;
 
-/// Slate's cliclack theme — lavender bar color, intro/outro
+/// Slate's cliclack theme — theme magenta bar color, intro/outro
 /// framing, severity-correct error/warn symbols.
 pub struct SlateTheme;
 
 impl Theme for SlateTheme {
-    /// Vertical side-bar color. Active / Submit use brand lavender (256-
-    /// color approximation because `console::Style` doesn't guarantee
-    /// truecolor on every terminal cliclack renders into). Cancel / Error
+    /// Vertical side-bar color. Active / Submit use the terminal palette’s magenta. Cancel / Error
     /// cascade to red to surface severity.
     fn bar_color(&self, state: &ThemeState) -> Style {
         match state {
-            ThemeState::Active | ThemeState::Submit => Style::new().color256(183),
+            ThemeState::Active | ThemeState::Submit => Style::new().magenta(),
             ThemeState::Cancel | ThemeState::Error(_) => Style::new().red(),
         }
     }
 
-    /// State-symbol color — Submit uses theme-green-adjacent `color256(114)`;
+    fn checkbox_style(&self, state: &ThemeState, _selected: bool, _active: bool) -> Style {
+        self.input_style(state)
+    }
+
+    fn input_style(&self, state: &ThemeState) -> Style {
+        if matches!(state, ThemeState::Cancel) {
+            Style::new().strikethrough()
+        } else {
+            Style::new()
+        }
+    }
+
+    fn placeholder_style(&self, state: &ThemeState) -> Style {
+        if matches!(state, ThemeState::Cancel) {
+            Style::new().hidden()
+        } else {
+            Style::new().bright().black()
+        }
+    }
+
+    /// State-symbol color — Submit uses the terminal palette’s green;
     /// every other state inherits the bar color.
     fn state_symbol_color(&self, state: &ThemeState) -> Style {
         match state {
-            ThemeState::Submit => Style::new().color256(114),
+            ThemeState::Submit => Style::new().green(),
             _ => self.bar_color(state),
         }
     }
@@ -50,9 +68,9 @@ impl Theme for SlateTheme {
         color.apply_to(glyph).to_string()
     }
 
-    /// Info bullet — lavender `●` (brand anchor).
+    /// Info bullet follows the terminal palette's magenta.
     fn info_symbol(&self) -> String {
-        Style::new().color256(183).apply_to("●").to_string()
+        Style::new().magenta().apply_to("●").to_string()
     }
 
     /// Warning bullet — theme yellow (cliclack default, kept).
@@ -65,9 +83,9 @@ impl Theme for SlateTheme {
         Style::new().red().apply_to("■").to_string()
     }
 
-    /// Intro framing — `✦ title` on a lavender bar.
+    /// Intro framing — `✦ title` on a theme magenta bar.
     fn format_intro(&self, title: &str) -> String {
-        let color = Style::new().color256(183);
+        let color = Style::new().magenta();
         format!(
             "{start}  {title}\n{bar}\n",
             start = color.apply_to("✦"),
@@ -75,9 +93,9 @@ impl Theme for SlateTheme {
         )
     }
 
-    /// Outro framing — `└─ ★ message` on a lavender bar.
+    /// Outro framing — `└─ ★ message` on a theme magenta bar.
     fn format_outro(&self, message: &str) -> String {
-        let color = Style::new().color256(183);
+        let color = Style::new().magenta();
         format!("{end}  {message}\n", end = color.apply_to("└─ ★"))
     }
 
@@ -104,18 +122,15 @@ pub fn init() {
 mod tests {
     use super::*;
 
-    /// Intro framing carries the brand-anchor lavender ansi-256 index (183)
-    /// and the `✦` glyph.
+    /// Intro framing uses the audited terminal accent and the `✦` glyph.
     #[test]
-    fn intro_uses_lavender_bar() {
+    fn intro_uses_terminal_accent() {
         console::set_colors_enabled(true);
         let theme = SlateTheme;
         let out = theme.format_intro("Welcome");
-        // 183 is the ansi-256 "light lavender" index closest to #7287fd;
-        // its SGR byte is `38;5;183`.
         assert!(
-            out.contains("38;5;183"),
-            "intro must carry lavender color bytes, got: {out:?}"
+            out.contains("[35m"),
+            "intro must use the terminal accent, got: {out:?}"
         );
         assert!(out.contains('✦'), "intro must include the ✦ glyph: {out:?}");
         insta::assert_snapshot!("slate_theme_format_intro", out);

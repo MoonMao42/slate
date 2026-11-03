@@ -656,7 +656,9 @@ fn reload_theme_targets_with_scope(
         report.reload_warnings.push(ReloadWarning {
             informational: true,
             tool_name: "opencode".into(),
-            message: "OpenCode TUI configuration saved with theme = system. Reopen OpenCode to check terminal-derived colors; Slate did not close or restart any running session. A new shell is not required for this file change. Live appearance is not verified.".into(),
+            message:
+                "OpenCode theme saved. Reopen OpenCode to load the updated slate-sync palette."
+                    .into(),
         });
     }
     if report.results.iter().any(|result| {

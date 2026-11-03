@@ -41,7 +41,7 @@ impl ZshHighlightAdapter {
         ]
     }
 
-    fn render_highlight_styles(theme: &ThemeVariant) -> Result<String> {
+    pub(crate) fn render_highlight_styles(theme: &ThemeVariant) -> Result<String> {
         theme.palette.validate()?;
         let mut map = Self::build_semantic_map();
         for (palette_key, token) in &mut map {

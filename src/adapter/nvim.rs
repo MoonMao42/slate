@@ -125,6 +125,24 @@ fn write_lua_entry(
     let mut wrote_any = false;
     if let Some(color) = spec.fg {
         let hex = resolve_with_fallback(palette, color);
+        let hex = if color == SemanticColor::Text {
+            let mut backgrounds = palette.syntax_backgrounds();
+            if let Some(bg) = spec.bg {
+                backgrounds.push(resolve_with_fallback(palette, bg));
+            }
+            crate::wcag::readable_on(
+                &hex,
+                &backgrounds.iter().map(String::as_str).collect::<Vec<_>>(),
+            )
+        } else if let Some(bg) = spec.bg {
+            crate::wcag::readable_color(&hex, &resolve_with_fallback(palette, bg))
+        } else {
+            let backgrounds = palette.syntax_backgrounds();
+            crate::wcag::readable_on(
+                &hex,
+                &backgrounds.iter().map(String::as_str).collect::<Vec<_>>(),
+            )
+        };
         if wrote_any {
             out.push_str(", ");
         }
@@ -133,6 +151,15 @@ fn write_lua_entry(
     }
     if let Some(color) = spec.bg {
         let hex = resolve_with_fallback(palette, color);
+        let hex = if spec.fg.is_none()
+            && matches!(
+                color,
+                SemanticColor::GitAdded | SemanticColor::GitModified | SemanticColor::Error
+            ) {
+            palette.diff_background(&hex)
+        } else {
+            hex
+        };
         if wrote_any {
             out.push_str(", ");
         }

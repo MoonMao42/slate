@@ -255,11 +255,11 @@ fn clean_preview_and_execution_preserve_user_imports_comments_and_noop_files() {
 #[test]
 fn clean_opencode_projection_preserves_jsonc_bytes_and_is_restorable() {
     for (input, expected, action) in [
-        ("// PRIVATE_CONTENT\r\n{\"theme\"/*k*/:/*v*/\"system\", \"user\":{\"n\":1.2300e+02,},}\r\n",
+        ("// PRIVATE_CONTENT\r\n{\"theme\"/*k*/:/*v*/\"slate-sync\", \"user\":{\"n\":1.2300e+02,},}\r\n",
          Some("// PRIVATE_CONTENT\r\n{/*k*//*v*/ \"user\":{\"n\":1.2300e+02,},}\r\n"), "rewrite"),
-        ("// PRIVATE_CONTENT\n{\"theme\":\"system\"}", Some("// PRIVATE_CONTENT\n{}"), "rewrite"),
+        ("// PRIVATE_CONTENT\n{\"theme\":\"slate-sync\"}", Some("// PRIVATE_CONTENT\n{}"), "rewrite"),
         ("{\"theme\":\"custom\",\"x\":1.00}", Some("{\"theme\":\"custom\",\"x\":1.00}"), "unchanged"),
-        ("{\"theme\":\"system\"}", None, "remove"),
+        ("{\"theme\":\"slate-sync\"}", None, "remove"),
     ] {
         let home = tempfile::tempdir().unwrap();
         let env = SlateEnv::with_home(home.path().to_owned());
@@ -440,11 +440,11 @@ fn clean_preview_actions_match_real_cleanup_and_its_recovery_contract() {
     );
     write(
         &env.xdg_config_home().join("opencode/tui.json"),
-        "{\"theme\":\"system\"}",
+        "{\"theme\":\"slate-sync\"}",
     );
     write(
         &env.xdg_config_home().join("opencode/tui.jsonc"),
-        "{// comment\n\"theme\":\"system\",\"mouse\":false,}",
+        "{// comment\n\"theme\":\"slate-sync\",\"mouse\":false,}",
     );
     let before_tree = tree_snapshot::tree(home.path());
     let before = profile_files(&env);

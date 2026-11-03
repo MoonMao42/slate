@@ -1,12 +1,12 @@
 //! Inspect exactly the entry Slate would edit, not OpenCode's runtime merge.
-use super::Report;
+use super::{tool_files, Report};
 use crate::adapter::{opencode::config::Document, OpencodeAdapter};
 use crate::config::file_read::{self, Links, MAX_TOOL_CONFIG_BYTES};
 use crate::env::SlateEnv;
 use std::fs;
 
 pub(super) fn inspect(report: &mut Report, env: &SlateEnv) {
-    report.scope = "Read-only inspection of Slate's selected OpenCode TUI file. Project configuration, runtime overrides, terminal color support and the running application are not checked; no tool is launched or configuration changed.";
+    report.scope = "Read-only inspection of Slate's OpenCode TUI file and generated palette. Project configuration, runtime overrides, terminal color support and the running application are not checked; no tool is launched or configuration changed.";
     let selected = OpencodeAdapter::tui_config_path(env);
     report.add_code(
         "selected_config",
@@ -56,7 +56,7 @@ pub(super) fn inspect(report: &mut Report, env: &SlateEnv) {
         },
         Ok(None) => {
             report.add_code("missing_config", "warning", "The selected OpenCode TUI file is absent; no theme connection is confirmed", &selected,
-                Some("Initialize OpenCode's user configuration if needed, then set the root theme to \"system\" in this TUI file if you want terminal-following colors. Slate skips an uninitialized default config directory.".into()));
+                Some("Initialize OpenCode's user configuration if needed, then run `slate tools sync opencode` to connect Slate colors. Slate skips an uninitialized default config directory.".into()));
             return;
         }
         Err(error) => {
@@ -80,12 +80,35 @@ pub(super) fn inspect(report: &mut Report, env: &SlateEnv) {
         &selected,
         None,
     );
-    match document.has_system_theme() {
-        Some(true) => report.add_code("system_theme", "ok", "The root theme is \"system\" in this file", &selected,
+    match document.has_slate_theme() {
+        Some(true) => report.add_code("slate_theme", "ok", "The root theme is \"slate-sync\" in this file", &selected,
             Some("If the display differs, review project/runtime overrides and the terminal palette. This file alone does not prove the live theme or that Slate originally set it.".into())),
-        Some(false) => report.add_code("custom_theme", "warning", "A custom theme is selected; terminal-following colors are not configured here", &selected,
-            Some("Keep the custom theme if intentional. For terminal-following colors, set the root theme to \"system\" in this TUI file; unrelated fields and comments need not change.".into())),
+        Some(false) => report.add_code("custom_theme", "warning", "Another theme is selected; Slate colors are not configured here", &selected,
+            Some("Keep the custom theme if intentional. Run `slate tools sync opencode` to generate and connect the Slate palette.".into())),
         None => report.add_code("unset_theme", "warning", "No explicit root theme is set in this file", &selected,
-            Some("If you want terminal-following colors, set the root theme to \"system\". A missing field does not tell us which theme OpenCode currently uses.".into())),
+            Some("Run `slate tools sync opencode` to generate and connect the Slate palette. A missing field does not tell us which theme OpenCode currently uses.".into())),
+    }
+    let asset = OpencodeAdapter::theme_path(env);
+    if let Ok(content) = tool_files::read(
+        report,
+        env,
+        &asset,
+        MAX_TOOL_CONFIG_BYTES,
+        "asset_file",
+        "Slate OpenCode theme",
+    ) {
+        match content {
+            Some(content) if crate::adapter::opencode::palette::is_owned(content.as_bytes()) => {
+                if let Some(theme) = tool_files::saved_theme(report, env) {
+                    let matches = crate::adapter::opencode::palette::render(&theme).is_ok_and(|expected| expected == content);
+                    report.add_code("palette_match", if matches {"ok"} else {"warning"},
+                        if matches {"Palette matches the saved Slate theme"} else {"Palette differs from the saved Slate theme"},
+                        &asset, (!matches).then(|| "Run `slate tools sync opencode`, then reopen OpenCode.".into()));
+                }
+            }
+            Some(_) => report.add_code("asset_ownership", "warning", "The same-named theme file is not Slate-owned", &asset, None),
+            None => report.add_code("asset_ownership", "warning", "Slate's OpenCode theme file is missing", &asset,
+                Some("Run `slate tools sync opencode` to generate the palette, then reopen OpenCode.".into())),
+        }
     }
 }

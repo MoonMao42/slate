@@ -25,11 +25,11 @@ expression: xml
                 <key>lineHighlight</key>
                 <string>#1f1d2e</string>
                 <key>invisibles</key>
-                <string>#6e6a86</string>
+                <string>#b6b5c2</string>
                 <key>gutter</key>
-                <string>#14131f</string>
+                <string>#191724</string>
                 <key>gutterForeground</key>
-                <string>#6e6a86</string>
+                <string>#838097</string>
             </dict>
         </dict>
         <dict>
@@ -40,7 +40,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#6e6a86</string>
+                <string>#b6b5c2</string>
                 <key>fontStyle</key>
                 <string>italic</string>
             </dict>
@@ -53,7 +53,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#5fa4c8</string>
+                <string>#8cbdd7</string>
             </dict>
         </dict>
         <dict>
@@ -64,7 +64,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#c898dd</string>
+                <string>#d0a8e2</string>
             </dict>
         </dict>
         <dict>
@@ -86,7 +86,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#7aa2d1</string>
+                <string>#9bb9dc</string>
             </dict>
         </dict>
         <dict>
@@ -97,7 +97,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#7db8d8</string>
+                <string>#87bedb</string>
             </dict>
         </dict>
         <dict>
@@ -130,7 +130,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#c898dd</string>
+                <string>#d0a8e2</string>
             </dict>
         </dict>
         <dict>
@@ -152,7 +152,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#5fa4c8</string>
+                <string>#8cbdd7</string>
             </dict>
         </dict>
         <dict>
@@ -163,7 +163,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#eb6f92</string>
+                <string>#f29fb6</string>
             </dict>
         </dict>
         <dict>
@@ -185,7 +185,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#7aa2d1</string>
+                <string>#9bb9dc</string>
             </dict>
         </dict>
         <dict>
@@ -196,7 +196,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#c898dd</string>
+                <string>#d0a8e2</string>
                 <key>fontStyle</key>
                 <string>bold</string>
             </dict>
@@ -209,7 +209,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#c898dd</string>
+                <string>#d0a8e2</string>
                 <key>fontStyle</key>
                 <string>italic</string>
             </dict>
@@ -233,7 +233,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#7db8d8</string>
+                <string>#87bedb</string>
             </dict>
         </dict>
         <dict>
@@ -244,9 +244,9 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#191724</string>
+                <string>#f29fb6</string>
                 <key>background</key>
-                <string>#eb6f92</string>
+                <string>#2e202f</string>
             </dict>
         </dict>
         <dict>
@@ -257,7 +257,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#7aa2d1</string>
+                <string>#9bb9dc</string>
             </dict>
         </dict>
     </array>

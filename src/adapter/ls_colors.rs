@@ -170,6 +170,12 @@ pub fn render_fzf_colors(palette: &Palette) -> String {
     let header = palette.resolve(SemanticColor::Subtext);
     let border = palette.resolve(SemanticColor::Border);
 
+    let fg_plus = crate::wcag::readable_color(&fg_plus, &bg_plus);
+    let hl_plus = crate::wcag::readable_color(&hl_plus, &bg_plus);
+    let pointer = crate::wcag::readable_color(pointer, &bg_plus);
+    let marker = crate::wcag::readable_on(&marker, &[&bg, &bg_plus]);
+    let border = crate::wcag::readable_color(&border, &bg);
+
     format!(
         "--color=fg:{fg},bg:{bg},hl:{hl},fg+:{fg_plus},bg+:{bg_plus},hl+:{hl_plus},info:{info},prompt:{prompt},pointer:{pointer},marker:{marker},spinner:{spinner},header:{header},border:{border}"
     )

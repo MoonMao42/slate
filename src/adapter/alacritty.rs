@@ -41,10 +41,10 @@ impl AlacrittyAdapter {
 
     /// Render Palette into Alacritty TOML color scheme structure.
     /// Maps palette colors to Alacritty's colors.primary, colors.normal, colors.bright sections.
-    fn render_alacritty_colors(theme: &ThemeVariant) -> String {
+    pub(crate) fn render_alacritty_colors(theme: &ThemeVariant) -> String {
         let palette = &theme.palette;
 
-        format!(
+        let mut colors = format!(
             "[colors.primary]\nbackground = \"{}\"\nforeground = \"{}\"\n\n\
 [colors.normal]\nblack = \"{}\"\nred = \"{}\"\ngreen = \"{}\"\nyellow = \"{}\"\nblue = \"{}\"\nmagenta = \"{}\"\ncyan = \"{}\"\nwhite = \"{}\"\n\n\
 [colors.bright]\nblack = \"{}\"\nred = \"{}\"\ngreen = \"{}\"\nyellow = \"{}\"\nblue = \"{}\"\nmagenta = \"{}\"\ncyan = \"{}\"\nwhite = \"{}\"\n",
@@ -68,7 +68,22 @@ impl AlacrittyAdapter {
             palette.bright_magenta,
             palette.bright_cyan,
             palette.bright_white,
-        )
+        );
+        let selection_bg = palette
+            .selection_bg
+            .as_deref()
+            .unwrap_or(&palette.background);
+        let selection_fg = crate::wcag::readable_color(
+            palette
+                .selection_fg
+                .as_deref()
+                .unwrap_or(&palette.foreground),
+            selection_bg,
+        );
+        let cursor = palette.cursor.as_deref().unwrap_or(&palette.foreground);
+        let cursor_text = crate::wcag::readable_color(&palette.background, cursor);
+        colors.push_str(&format!("\n[colors.selection]\ntext = \"{selection_fg}\"\nbackground = \"{selection_bg}\"\n\n[colors.cursor]\ntext = \"{cursor_text}\"\ncursor = \"{cursor}\"\n"));
+        colors
     }
 
     #[cfg(test)]

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Readable bright ANSI colors, muted text, selections and cursor text across all 20 bundled themes.
+- Contrast-aware editor, diff, file-manager, status-bar and picker colors, including syntax under selections and diff highlights.
+- OpenCode uses a generated `slate-sync` palette with readable panels, comments and diffs while keeping its canvas transparent.
 - Bash startup no longer reports job completion for the auto-theme watcher.
 - The shell installer accepts blank lines around cargo-dist checksum records while still rejecting missing or duplicate records.
 

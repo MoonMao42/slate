@@ -83,12 +83,12 @@ fn opencode_captured_path_probe() {
     if original.is_some() {
         assert_eq!(
             applied,
-            ORIGINAL.replace("\"custom\"", "\"system\"").as_bytes()
+            ORIGINAL.replace("\"custom\"", "\"slate-sync\"").as_bytes()
         );
     } else {
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&applied).unwrap()["theme"],
-            "system"
+            "slate-sync"
         );
     }
     assert_eq!(fs::read(&unrelated).unwrap(), other_before);

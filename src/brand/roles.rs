@@ -4,7 +4,7 @@
 //! * **Pill-led role differentiation** — `command` / `code`
 //!   render as pill chips, `path` / `shortcut` / `theme_name` do not.
 //! * **Medium lavender density** — brand anchors use the
-//!   fixed lavender `#7287fd`, daily-chrome roles use the active theme's
+//!   contrast-adjusted lavender `#7287fd`, daily-chrome roles use the active theme's
 //!   `brand_accent`, severity roles use theme red / yellow / green (never
 //!   lavender).
 //! * **Tree-style header/receipt narrative** — `heading`
@@ -14,7 +14,7 @@
 //! Fallback tree per [`RenderMode`]:
 //! * `Truecolor` → blend pill + `38;2;R;G;B` accent fg (brand-anchor
 //!   or theme `brand_accent` depending on role).
-//! * `Basic` → `› text ‹` + Dim+Bold; no background ANSI.
+//! * `Basic` → `› text ‹` + Bold; no background ANSI.
 //! * `None` → plain text, zero `\x1b[` bytes.
 
 use crate::adapter::palette_renderer::PaletteRenderer;
@@ -42,19 +42,24 @@ impl<'a> Roles<'a> {
         match self.ctx.mode {
             RenderMode::Truecolor => {
                 let bg = self.ctx.cached_pill_bg.as_deref().unwrap_or("48;2;0;0;0");
-                let fg = ansi_fg_from_hex(accent);
+                let fg = ansi_fg_from_hex(&self.pill_foreground(accent));
                 format!("\x1b[{bg};{fg}m {text} \x1b[0m")
             }
-            RenderMode::Basic => format!("\x1b[1;2m› {text} ‹\x1b[0m"),
+            RenderMode::Basic => format!("\x1b[1m› {text} ‹\x1b[0m"),
             RenderMode::None => text.to_string(),
         }
     }
 
-    /// File-system / config paths — dim + italic, no container.
+    /// Secondary text uses a readable muted color, never terminal-dependent dimming.
     pub fn path(&self, text: &str) -> String {
         match self.ctx.mode {
-            RenderMode::Truecolor => format!("\x1b[2;3m{text}\x1b[0m"),
-            RenderMode::Basic => format!("\x1b[2;3m{text}\x1b[0m"),
+            RenderMode::Truecolor => {
+                let p = &self.ctx.theme.palette;
+                let fg =
+                    ansi_fg_from_hex(&crate::wcag::readable_color(&p.bright_black, &p.background));
+                format!("\x1b[{fg};3m{text}\x1b[0m")
+            }
+            RenderMode::Basic => format!("\x1b[3m{text}\x1b[0m"),
             RenderMode::None => text.to_string(),
         }
     }
@@ -74,7 +79,8 @@ impl<'a> Roles<'a> {
         match self.ctx.mode {
             RenderMode::Truecolor => {
                 let bg = self.ctx.cached_pill_bg.as_deref().unwrap_or("48;2;0;0;0");
-                let fg = ansi_fg_from_hex(&self.ctx.theme.palette.foreground);
+                let fg =
+                    ansi_fg_from_hex(&self.pill_foreground(&self.ctx.theme.palette.foreground));
                 format!("\x1b[{bg};{fg}m {text} \x1b[0m")
             }
             RenderMode::Basic => format!("\x1b[1m`{text}`\x1b[0m"),
@@ -88,7 +94,10 @@ impl<'a> Roles<'a> {
         let accent = theme_accent(self.ctx);
         match self.ctx.mode {
             RenderMode::Truecolor => {
-                let fg = ansi_fg_from_hex(accent);
+                let fg = ansi_fg_from_hex(&crate::wcag::readable_color(
+                    accent,
+                    &self.ctx.theme.palette.background,
+                ));
                 format!("\x1b[{fg}m{text}\x1b[0m")
             }
             RenderMode::Basic => format!("\x1b[1m{text}\x1b[0m"),
@@ -96,14 +105,17 @@ impl<'a> Roles<'a> {
         }
     }
 
-    // ── Brand-anchor surfaces — fixed #7287fd ───────────────────
+    // ── Brand-anchor surfaces — adaptive lavender ───────────────────
 
     /// Brand-anchor text — the `slate` wordmark, inline product name.
-    /// Locked to [`BRAND_LAVENDER_FIXED`] regardless of active theme.
+    /// Uses the brand hue, adjusted for the active background.
     pub fn brand(&self, text: &str) -> String {
         match self.ctx.mode {
             RenderMode::Truecolor => {
-                let fg = ansi_fg_from_hex(BRAND_LAVENDER_FIXED);
+                let fg = ansi_fg_from_hex(&crate::wcag::readable_color(
+                    BRAND_LAVENDER_FIXED,
+                    &self.ctx.theme.palette.background,
+                ));
                 format!("\x1b[{fg}m{text}\x1b[0m")
             }
             RenderMode::Basic => format!("\x1b[1m{text}\x1b[0m"),
@@ -140,12 +152,32 @@ impl<'a> Roles<'a> {
     fn severity_line(&self, glyph: &str, hex: &str, text: &str) -> String {
         match self.ctx.mode {
             RenderMode::Truecolor => {
-                let fg = ansi_fg_from_hex(hex);
+                let fg = ansi_fg_from_hex(&crate::wcag::readable_color(
+                    hex,
+                    &self.ctx.theme.palette.background,
+                ));
                 format!("\x1b[{fg}m{glyph} {text}\x1b[0m")
             }
             RenderMode::Basic => format!("\x1b[1m{glyph} {text}\x1b[0m"),
             RenderMode::None => format!("{glyph} {text}"),
         }
+    }
+
+    fn pill_foreground(&self, preferred: &str) -> String {
+        let channels: Vec<u8> = self
+            .ctx
+            .cached_pill_bg
+            .as_deref()
+            .unwrap_or("48;2;0;0;0")
+            .split(';')
+            .skip(2)
+            .filter_map(|v| v.parse().ok())
+            .collect();
+        let bg = match channels.as_slice() {
+            [r, g, b] => format!("#{r:02x}{g:02x}{b:02x}"),
+            _ => self.ctx.theme.palette.background.clone(),
+        };
+        crate::wcag::readable_color(preferred, &bg)
     }
 
     // ── Tree narrative primitives (used with println!) ──────────
@@ -154,7 +186,10 @@ impl<'a> Roles<'a> {
     pub fn heading(&self, title: &str) -> String {
         match self.ctx.mode {
             RenderMode::Truecolor => {
-                let fg = ansi_fg_from_hex(BRAND_LAVENDER_FIXED);
+                let fg = ansi_fg_from_hex(&crate::wcag::readable_color(
+                    BRAND_LAVENDER_FIXED,
+                    &self.ctx.theme.palette.background,
+                ));
                 format!("\x1b[{fg}m◆\x1b[0m {title}")
             }
             RenderMode::Basic => format!("◆ {title}"),
@@ -166,7 +201,10 @@ impl<'a> Roles<'a> {
     pub fn tree_branch(&self, text: &str) -> String {
         match self.ctx.mode {
             RenderMode::Truecolor => {
-                let fg = ansi_fg_from_hex(BRAND_LAVENDER_FIXED);
+                let fg = ansi_fg_from_hex(&crate::wcag::readable_color(
+                    BRAND_LAVENDER_FIXED,
+                    &self.ctx.theme.palette.background,
+                ));
                 format!("\x1b[{fg}m┃ ├─\x1b[0m {text}")
             }
             RenderMode::Basic | RenderMode::None => format!("┃ ├─ {text}"),
@@ -177,7 +215,10 @@ impl<'a> Roles<'a> {
     pub fn tree_end(&self, text: &str) -> String {
         match self.ctx.mode {
             RenderMode::Truecolor => {
-                let fg = ansi_fg_from_hex(BRAND_LAVENDER_FIXED);
+                let fg = ansi_fg_from_hex(&crate::wcag::readable_color(
+                    BRAND_LAVENDER_FIXED,
+                    &self.ctx.theme.palette.background,
+                ));
                 format!("\x1b[{fg}m└─ ★\x1b[0m {text}")
             }
             RenderMode::Basic | RenderMode::None => format!("└─ ★ {text}"),
@@ -211,6 +252,57 @@ mod tests {
     use super::*;
     use crate::brand::render_context::{mock_context, mock_context_with_mode, mock_theme};
 
+    #[test]
+    fn all_text_roles_are_readable_without_terminal_dimming() {
+        use crate::wcag::contrast_hex;
+        let sgr = regex::Regex::new(r"\x1b\[([0-9;]+)m").unwrap();
+        for theme in crate::theme::ThemeRegistry::new().unwrap().all() {
+            let ctx = mock_context(theme);
+            let roles = Roles::new(&ctx);
+            for output in [
+                roles.command("command"),
+                roles.code("code"),
+                roles.path("path"),
+                roles.theme_name("theme"),
+                roles.logo(),
+                roles.heading("heading"),
+                roles.tree_branch("branch"),
+                roles.tree_end("end"),
+                roles.status_success("success"),
+                roles.status_warn("warning"),
+                roles.status_error("error"),
+            ] {
+                let codes: Vec<u8> = sgr.captures(&output).unwrap()[1]
+                    .split(';')
+                    .map(|v| v.parse().unwrap())
+                    .collect();
+                let mut fg = theme.palette.foreground.clone();
+                let mut bg = theme.palette.background.clone();
+                let mut i = 0;
+                while i < codes.len() {
+                    if matches!(codes[i], 38 | 48) && codes.get(i + 1) == Some(&2) {
+                        let hex = format!(
+                            "#{:02x}{:02x}{:02x}",
+                            codes[i + 2],
+                            codes[i + 3],
+                            codes[i + 4]
+                        );
+                        if codes[i] == 38 {
+                            fg = hex;
+                        } else {
+                            bg = hex;
+                        }
+                        i += 5;
+                    } else {
+                        assert_ne!(codes[i], 2, "terminal dim makes contrast unpredictable");
+                        i += 1;
+                    }
+                }
+                assert!(contrast_hex(&fg, &bg) >= 4.5, "{}: {fg} on {bg}", theme.id);
+            }
+        }
+    }
+
     /// Command pill emits the blend bg + accent fg + reset.
     #[test]
     fn snapshot_command_role_truecolor() {
@@ -220,7 +312,7 @@ mod tests {
         insta::assert_snapshot!("role_command_truecolor", roles.command("slate theme set"));
     }
 
-    /// Basic mode emits `› text ‹` + Dim+Bold, no background ANSI.
+    /// Basic mode emits `› text ‹` + Bold, no background ANSI.
     #[test]
     fn snapshot_command_role_basic_fallback() {
         let theme = mock_theme();

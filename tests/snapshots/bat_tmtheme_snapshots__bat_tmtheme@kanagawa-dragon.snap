@@ -25,11 +25,11 @@ expression: xml
                 <key>lineHighlight</key>
                 <string>#1a1718</string>
                 <key>invisibles</key>
-                <string>#49443c</string>
+                <string>#8d8b85</string>
                 <key>gutter</key>
-                <string>#0d0c0c</string>
+                <string>#181616</string>
                 <key>gutterForeground</key>
-                <string>#49443c</string>
+                <string>#84817b</string>
             </dict>
         </dict>
         <dict>
@@ -40,7 +40,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#49443c</string>
+                <string>#8d8b85</string>
                 <key>fontStyle</key>
                 <string>italic</string>
             </dict>
@@ -64,7 +64,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#957fb8</string>
+                <string>#9781b9</string>
             </dict>
         </dict>
         <dict>
@@ -130,7 +130,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#957fb8</string>
+                <string>#9781b9</string>
             </dict>
         </dict>
         <dict>
@@ -196,7 +196,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#957fb8</string>
+                <string>#9781b9</string>
                 <key>fontStyle</key>
                 <string>bold</string>
             </dict>
@@ -209,7 +209,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#957fb8</string>
+                <string>#9781b9</string>
                 <key>fontStyle</key>
                 <string>italic</string>
             </dict>
@@ -244,9 +244,9 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#181616</string>
-                <key>background</key>
                 <string>#ff6666</string>
+                <key>background</key>
+                <string>#2f1e1e</string>
             </dict>
         </dict>
         <dict>

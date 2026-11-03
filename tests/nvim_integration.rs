@@ -243,9 +243,9 @@ io.stderr:write(string.format('ADDED=%s CHANGED=%s FINAL=%d', tostring(loaded), 
 io.stderr:flush()
 vim.cmd('qa!')
 "#,
-        rtp = format!("{:?}", env.nvim_config_dir().to_string_lossy()),
-        ready = format!("{:?}", ready.to_string_lossy()),
-        added = format!("{:?}", added.to_string_lossy()),
+        rtp = format_args!("{:?}", env.nvim_config_dir().to_string_lossy()),
+        ready = format_args!("{:?}", ready.to_string_lossy()),
+        added = format_args!("{:?}", added.to_string_lossy()),
     );
     let script_path = td.path().join("custom_exercise.lua");
     std::fs::write(&script_path, script).unwrap();

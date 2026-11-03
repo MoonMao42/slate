@@ -19,10 +19,10 @@ use std::sync::{Mutex, OnceLock};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderMode {
     /// Full 24-bit ANSI (`#RRGGBB` → `38;2;R;G;B`). Pills render the
-    /// blend; brand anchors use `BRAND_LAVENDER_FIXED`.
+    /// blend; brand anchors use contrast-adjusted lavender.
     Truecolor,
-    /// 256-color or lower. Pills fall back to `› text ‹` + Dim+Bold
-    /// lavender foreground, no background color.
+    /// 256-color or lower. Pills fall back to bold `› text ‹`
+    /// with no background color.
     Basic,
     /// No color — either `NO_COLOR` set, or stdout is not a TTY, or
     /// `TERM=dumb`. Plain text, zero ANSI bytes.

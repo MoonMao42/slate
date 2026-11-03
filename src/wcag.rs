@@ -1,5 +1,5 @@
-/// WCAG 2.1 contrast ratio audit for theme colors.
-/// Reference: https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html
+/// WCAG 2.2 contrast ratio audit for theme colors.
+/// Reference: https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html
 /// Implements relative_luminance and contrast_ratio calculations
 /// for verification and warning generation during theme application.
 use crate::theme::Palette;
@@ -28,29 +28,9 @@ pub struct AuditFailure {
 /// Returns list of audit results with warnings for colors below 4.5:1 contrast.
 /// Warning mode: all issues reported but non-blocking.
 pub fn audit_palette(palette: &Palette) -> Vec<ContrastAudit> {
-    let mut audits = Vec::new();
-
-    // Check foreground vs background (primary contrast)
-    let fg_rgb = hex_to_rgb(&palette.foreground);
-    let bg_rgb = hex_to_rgb(&palette.background);
-
-    if let (Ok(fg), Ok(bg)) = (fg_rgb, bg_rgb) {
-        let ratio = contrast_ratio(
-            relative_luminance(fg.0, fg.1, fg.2),
-            relative_luminance(bg.0, bg.1, bg.2),
-        );
-
-        audits.push(ContrastAudit {
-            color_name: "foreground".to_string(),
-            foreground: palette.foreground.clone(),
-            background: palette.background.clone(),
-            ratio,
-            is_accessible: ratio >= 4.5,
-        });
-    }
-
-    // Check ANSI colors against background
-    let color_pairs = vec![
+    let mut color_pairs = vec![
+        ("foreground", &palette.foreground),
+        ("brand_accent", &palette.brand_accent),
         ("black", &palette.black),
         ("red", &palette.red),
         ("green", &palette.green),
@@ -59,25 +39,65 @@ pub fn audit_palette(palette: &Palette) -> Vec<ContrastAudit> {
         ("magenta", &palette.magenta),
         ("cyan", &palette.cyan),
         ("white", &palette.white),
+        ("bright_black", &palette.bright_black),
+        ("bright_red", &palette.bright_red),
+        ("bright_green", &palette.bright_green),
+        ("bright_yellow", &palette.bright_yellow),
+        ("bright_blue", &palette.bright_blue),
+        ("bright_magenta", &palette.bright_magenta),
+        ("bright_cyan", &palette.bright_cyan),
+        ("bright_white", &palette.bright_white),
     ];
-
-    for (name, color) in color_pairs {
-        if let (Ok(fg), Ok(bg)) = (hex_to_rgb(color), hex_to_rgb(&palette.background)) {
-            let ratio = contrast_ratio(
-                relative_luminance(fg.0, fg.1, fg.2),
-                relative_luminance(bg.0, bg.1, bg.2),
-            );
-
-            audits.push(ContrastAudit {
-                color_name: name.to_string(),
-                foreground: color.clone(),
-                background: palette.background.clone(),
-                ratio,
-                is_accessible: ratio >= 4.5,
-            });
+    for (name, color) in [
+        ("cursor", &palette.cursor),
+        ("rosewater", &palette.rosewater),
+        ("flamingo", &palette.flamingo),
+        ("pink", &palette.pink),
+        ("mauve", &palette.mauve),
+        ("lavender", &palette.lavender),
+        ("text", &palette.text),
+        ("subtext1", &palette.subtext1),
+        ("subtext0", &palette.subtext0),
+        ("overlay2", &palette.overlay2),
+        ("overlay1", &palette.overlay1),
+        ("overlay0", &palette.overlay0),
+    ] {
+        if let Some(color) = color {
+            color_pairs.push((name, color));
         }
     }
-
+    let audit = |name: &str, fg: &str, bg: &str| {
+        let ratio = contrast_hex(fg, bg);
+        ContrastAudit {
+            color_name: name.to_owned(),
+            foreground: fg.to_owned(),
+            background: bg.to_owned(),
+            ratio,
+            is_accessible: ratio >= 4.5,
+        }
+    };
+    let mut audits: Vec<_> = color_pairs
+        .into_iter()
+        .map(|(name, fg)| audit(name, fg, &palette.background))
+        .collect();
+    let mut extras: Vec<_> = palette.extras.iter().collect();
+    extras.sort_by_key(|(name, _)| *name);
+    for (name, color) in extras {
+        if !name.starts_with("canonical_") {
+            audits.push(audit(&format!("extras.{name}"), color, &palette.background));
+        }
+    }
+    audits.push(audit(
+        "selection",
+        palette
+            .selection_fg
+            .as_deref()
+            .unwrap_or(&palette.foreground),
+        palette
+            .selection_bg
+            .as_deref()
+            .unwrap_or(&palette.background),
+    ));
     audits
 }
 
@@ -117,25 +137,25 @@ pub fn log_audit_warnings(theme_name: &str, audits: &[ContrastAudit]) {
     }
 }
 
-/// Calculate relative luminance per WCAG 2.1 formula.
+/// Calculate relative luminance per WCAG 2.2 formula.
 pub fn relative_luminance(r: u8, g: u8, b: u8) -> f64 {
     let r = (r as f64) / 255.0;
     let g = (g as f64) / 255.0;
     let b = (b as f64) / 255.0;
 
-    let r = if r <= 0.03928 {
+    let r = if r <= 0.04045 {
         r / 12.92
     } else {
         ((r + 0.055) / 1.055).powf(2.4)
     };
 
-    let g = if g <= 0.03928 {
+    let g = if g <= 0.04045 {
         g / 12.92
     } else {
         ((g + 0.055) / 1.055).powf(2.4)
     };
 
-    let b = if b <= 0.03928 {
+    let b = if b <= 0.04045 {
         b / 12.92
     } else {
         ((b + 0.055) / 1.055).powf(2.4)
@@ -153,7 +173,7 @@ pub fn contrast_ratio(l1: f64, l2: f64) -> f64 {
 
 /// Convert hex color #RRGGBB to (R, G, B) tuple.
 pub fn hex_to_rgb(hex: &str) -> Result<(u8, u8, u8), String> {
-    if !hex.starts_with('#') || hex.len() != 7 {
+    if !hex.starts_with('#') || hex.len() != 7 || !hex[1..].bytes().all(|c| c.is_ascii_hexdigit()) {
         return Err(format!("Invalid hex color format: {}", hex));
     }
 
@@ -167,7 +187,7 @@ pub fn hex_to_rgb(hex: &str) -> Result<(u8, u8, u8), String> {
     Ok((r, g, b))
 }
 
-/// WCAG 2.1 contrast ratio between two `#RRGGBB` hex strings.
+/// WCAG 2.2 contrast ratio between two `#RRGGBB` hex strings.
 /// Composes [`hex_to_rgb`], [`relative_luminance`], and [`contrast_ratio`].
 /// Returns `1.0` (the worst-case contrast — equal luminances) on malformed
 /// input, so a malformed candidate naturally loses every comparison in the
@@ -179,6 +199,50 @@ pub fn contrast_hex(fg_hex: &str, bg_hex: &str) -> f64 {
     contrast_ratio(
         relative_luminance(fg.0, fg.1, fg.2),
         relative_luminance(bg.0, bg.1, bg.2),
+    )
+}
+
+/// Preserve a color when readable, otherwise move it toward black or white
+/// just far enough to pass on every supplied background. Backgrounds must be
+/// on the same luminance side (e.g. an editor canvas and its raised panels).
+pub fn readable_on(fg: &str, backgrounds: &[&str]) -> String {
+    let passes = |color: &str| backgrounds.iter().all(|bg| contrast_hex(color, bg) >= 4.5);
+    if passes(fg) || hex_to_rgb(fg).is_err() {
+        return fg.to_owned();
+    }
+    let end = pick_min_max_fg(&["#000000", "#ffffff"], backgrounds);
+    if !passes(end) {
+        return end.to_owned();
+    }
+    let (mut low, mut high) = (0.0, 1.0);
+    for _ in 0..24 {
+        let mid = (low + high) / 2.0;
+        if passes(&blend_hex(fg, end, mid)) {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    blend_hex(fg, end, high)
+}
+
+pub fn readable_color(fg: &str, bg: &str) -> String {
+    readable_on(fg, &[bg])
+}
+
+/// Blend toward a tint without changing the palette's background polarity.
+pub fn blend_hex(base: &str, tint: &str, amount: f64) -> String {
+    let (Ok(a), Ok(b)) = (hex_to_rgb(base), hex_to_rgb(tint)) else {
+        return base.to_owned();
+    };
+    let mix = |x: u8, y: u8| {
+        (f64::from(x) + (f64::from(y) - f64::from(x)) * amount.clamp(0.0, 1.0)).round() as u8
+    };
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        mix(a.0, b.0),
+        mix(a.1, b.1),
+        mix(a.2, b.2)
     )
 }
 
@@ -219,7 +283,7 @@ pub fn pick_min_max_fg<'a>(candidates: &[&'a str], pill_bgs: &[&str]) -> &'a str
 
 /// Adaptive `powerline_fg` for Light themes.
 /// Picks from `[bg_darkest|black, background, foreground]` by maximising the
-/// MIN WCAG 2.1 contrast across the 6 representative starship pill bgs:
+/// MIN WCAG 2.2 contrast across the 6 representative starship pill bgs:
 /// `[cyan, mauve|extras["mauve"]|magenta, blue, yellow, red, green]`.
 /// Tie-break preference: `bg_darkest` (or `black` cascade) first — this
 /// preserves the traditional dark-text-on-light starship aesthetic when two
@@ -341,6 +405,23 @@ mod tests {
         assert_eq!(contrast_hex("not-a-hex", "#FFFFFF"), 1.0);
         assert_eq!(contrast_hex("#FFFFFF", "zzz"), 1.0);
         assert_eq!(contrast_hex("#GGG", "#FFFFFF"), 1.0);
+        assert_eq!(contrast_hex("#aé000", "#FFFFFF"), 1.0);
+    }
+
+    #[test]
+    fn readable_colors_preserve_passing_values_and_clear_real_surfaces() {
+        assert_eq!(readable_color("#ffffff", "#000000"), "#ffffff");
+        for (fg, backgrounds) in [
+            ("#565f89", vec!["#1a1b26", "#364a82"]),
+            ("#f6d5a8", vec!["#faf4ed", "#dfdad9"]),
+            ("#7287fd", vec!["#eff1f5"]),
+        ] {
+            let adjusted = readable_on(fg, &backgrounds);
+            assert!(backgrounds
+                .iter()
+                .all(|bg| contrast_hex(&adjusted, bg) >= 4.5));
+            assert_eq!(readable_on(&adjusted, &backgrounds), adjusted);
+        }
     }
 
     #[test]

@@ -140,6 +140,8 @@ fn project(env: &SlateEnv, path: &Path, bytes: &[u8]) -> Result<Edit> {
         .any(|candidate| candidate == path)
     {
         edits::opencode(bytes, path)?
+    } else if path == crate::adapter::OpencodeAdapter::theme_path(env) {
+        edits::opencode_theme(bytes)?
     } else if owned_file(env, path) {
         Edit::Remove
     } else {

@@ -6,7 +6,7 @@ fn apply(input: &str) -> String {
     let path = Path::new("tui.jsonc");
     let doc = Document::parse(input, path).unwrap();
     String::from_utf8(
-        doc.system(path)
+        doc.slate(path)
             .unwrap()
             .unwrap_or_else(|| input.as_bytes().to_vec()),
     )
@@ -17,7 +17,7 @@ fn clean(input: &str) -> Option<String> {
     let path = Path::new("tui.jsonc");
     Document::parse(input, path)
         .unwrap()
-        .without_system_theme(path)
+        .without_slate_theme(path)
         .unwrap()
         .map(|bytes| String::from_utf8(bytes).unwrap())
 }
@@ -26,20 +26,23 @@ fn clean(input: &str) -> Option<String> {
 fn opencode_edits_only_theme_and_missing_schema_bytes() {
     let input = "// 个人配置\r\n{\r\n\t\"$schema\": \"custom-schema\",\r\n\t\"th\\u0065me\" /* key */ : /* value */ \"custom\", // tail\r\n\t\"url\": \"https://example.test/a/*b*/\",\r\n\t\"data\": {\"theme\": \"nested\", \"n\": 1.2300e+02,},\r\n}\r\n";
     let after = apply(input);
-    assert_eq!(after, input.replacen("\"custom\"", "\"system\"", 1));
+    assert_eq!(after, input.replacen("\"custom\"", "\"slate-sync\"", 1));
     assert_eq!(apply(&after), after);
     let cleaned = clean(&after).unwrap();
     assert_eq!(
         cleaned,
         after
             .replace("\"th\\u0065me\"", "")
-            .replace("\"system\",", "")
+            .replace("\"slate-sync\",", "")
             .replace(" : ", "  ")
     );
     assert_eq!(clean(&cleaned).unwrap(), cleaned);
     for schema in ["42", "null", "{\"custom\":true}"] {
         let source = format!("{{\"$schema\":{schema},\"theme\":\"custom\"}}");
-        assert_eq!(apply(&source), source.replace("\"custom\"}", "\"system\"}"));
+        assert_eq!(
+            apply(&source),
+            source.replace("\"custom\"}", "\"slate-sync\"}")
+        );
     }
 }
 
@@ -58,7 +61,7 @@ fn opencode_appends_before_trailing_comments() {
     ] {
         let after = apply(input);
         let doc = Document::parse(&after, Path::new("tui.jsonc")).unwrap();
-        assert_eq!(doc.string("theme"), Some("system"));
+        assert_eq!(doc.string("theme"), Some("slate-sync"));
         assert!(doc.property("$schema").is_some());
         for note in [
             "// header",
@@ -81,10 +84,10 @@ fn opencode_appends_before_trailing_comments() {
 
 #[test]
 fn opencode_cleanup_preserves_notes_at_every_root_comma_position() {
-    assert_eq!(clean("{\"theme\":\"system\"}"), None);
+    assert_eq!(clean("{\"theme\":\"slate-sync\"}"), None);
     assert_eq!(
         clean(&format!(
-            "{{\"theme\":\"system\",\"$schema\":\"{}\"}}",
+            "{{\"theme\":\"slate-sync\",\"$schema\":\"{}\"}}",
             OpencodeAdapter::TUI_SCHEMA
         )),
         None
@@ -94,11 +97,12 @@ fn opencode_cleanup_preserves_notes_at_every_root_comma_position() {
             for trailing in [false, true] {
                 for inside_comments in [false, true] {
                     let theme = if inside_comments {
-                        "\"theme\"/*key*/:/*value*/\"system\""
+                        "\"theme\"/*key*/:/*value*/\"slate-sync\""
                     } else {
-                        "\"theme\":\"system\""
+                        "\"theme\":\"slate-sync\""
                     };
-                    let mut props = vec!["\"user\":{\"theme\":\"system\"}", "\"number\":1.00e2"];
+                    let mut props =
+                        vec!["\"user\":{\"theme\":\"slate-sync\"}", "\"number\":1.00e2"];
                     props.insert(position, theme);
                     let separator = format!(", /* separator, */{newline}\t");
                     let input = format!(
@@ -120,14 +124,14 @@ fn opencode_cleanup_preserves_notes_at_every_root_comma_position() {
                     };
                     assert_eq!(comments(&original), comments(&parsed));
                     assert!(after.contains("\"number\":1.00e2"));
-                    assert!(after.contains("\"user\":{\"theme\":\"system\"}"));
+                    assert!(after.contains("\"user\":{\"theme\":\"slate-sync\"}"));
                     assert_eq!(clean(&after).unwrap(), after);
                 }
             }
         }
     }
     assert_eq!(
-        clean("// notes\n{\"theme\":\"system\"/* end */}").unwrap(),
+        clean("// notes\n{\"theme\":\"slate-sync\"/* end */}").unwrap(),
         "// notes\n{/* end */}"
     );
     assert_eq!(
@@ -147,13 +151,13 @@ fn opencode_rejects_ambiguous_or_malformed_jsonc_without_content_in_errors() {
         "{\"theme\":true}",
         "[]",
         "// PRIVATE_CONTENT",
-        "{\"theme\":\"system\",\"th\\u0065me\":\"PRIVATE_CONTENT\"}",
-        "{\"theme\":\"system\",\"x\":1,\"x\":2}",
-        "{theme:\"system\"}",
+        "{\"theme\":\"slate-sync\",\"th\\u0065me\":\"PRIVATE_CONTENT\"}",
+        "{\"theme\":\"slate-sync\",\"x\":1,\"x\":2}",
+        "{theme:\"slate-sync\"}",
         "{'theme':'system'}",
         "{\"x\":+1}",
         "{\"x\":0xff}",
-        "{\"x\":1 \"theme\":\"system\"}",
+        "{\"x\":1 \"theme\":\"slate-sync\"}",
         "{\"x\":\"PRIVATE_CONTENT\n\"}",
     ] {
         let Err(error) = Document::parse(input, Path::new("tui.jsonc")) else {
@@ -266,9 +270,7 @@ fn prepared_opencode_pins_directory_destination_even_when_source_identity_matche
                 prepared.publish().unwrap();
                 let text = fs::read_to_string(&original).unwrap();
                 assert_eq!(
-                    Document::parse(&text, &original)
-                        .unwrap()
-                        .has_system_theme(),
+                    Document::parse(&text, &original).unwrap().has_slate_theme(),
                     Some(true)
                 );
                 if existing {

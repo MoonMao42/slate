@@ -114,12 +114,12 @@ impl<'a> Document<'a> {
 
     /// Inspect the theme without exposing user-supplied strings in diagnostics.
     /// None means unset; false means a custom theme, not a parse/type failure.
-    pub(crate) fn has_system_theme(&self) -> Option<bool> {
-        self.string("theme").map(|theme| theme == "system")
+    pub(crate) fn has_slate_theme(&self) -> Option<bool> {
+        self.string("theme").map(|theme| theme == "slate-sync")
     }
 
-    fn system(&self, path: &Path) -> Result<Option<Vec<u8>>> {
-        if self.has_system_theme() == Some(true) {
+    fn slate(&self, path: &Path) -> Result<Option<Vec<u8>>> {
+        if self.has_slate_theme() == Some(true) {
             return Ok(None);
         }
         let mut edits = Vec::new();
@@ -127,10 +127,10 @@ impl<'a> Document<'a> {
         if let Some(theme) = self.property("theme") {
             edits.push((
                 theme.value.start()..theme.value.end(),
-                "\"system\"".to_owned(),
+                "\"slate-sync\"".to_owned(),
             ));
         } else {
-            additions.push("\"theme\": \"system\"".to_owned());
+            additions.push("\"theme\": \"slate-sync\"".to_owned());
         }
         if self.property("$schema").is_none() {
             additions.push(format!("\"$schema\": \"{}\"", OpencodeAdapter::TUI_SCHEMA));
@@ -180,7 +180,7 @@ impl<'a> Document<'a> {
         let output = self.edited(edits);
         // Validate our own splice as well as the source before any writes.
         let checked = Document::parse(&output, path)?;
-        if checked.string("theme") != Some("system") {
+        if checked.string("theme") != Some("slate-sync") {
             return Err(invalid(
                 path,
                 "cannot prepare OpenCode theme edit; contents omitted",
@@ -192,8 +192,8 @@ impl<'a> Document<'a> {
 
     /// None means a theme-only, comment-free document may be removed. All
     /// comments are user data, even if they surround the removed theme field.
-    pub(crate) fn without_system_theme(&self, path: &Path) -> Result<Option<Vec<u8>>> {
-        if self.has_system_theme() != Some(true) {
+    pub(crate) fn without_slate_theme(&self, path: &Path) -> Result<Option<Vec<u8>>> {
+        if self.has_slate_theme() != Some(true) {
             return Ok(Some(self.text.as_bytes().to_vec()));
         }
         let removable = self.root.properties.iter().all(|p| {
@@ -204,7 +204,7 @@ impl<'a> Document<'a> {
         if removable && !self.tokens.iter().any(|t| comment(&t.token)) {
             return Ok(None);
         }
-        let theme = self.property("theme").expect("system theme property");
+        let theme = self.property("theme").expect("Slate theme property");
         // Remove syntax tokens only, preserving comments even between the
         // property name, colon and value. Never touch nested theme properties.
         let mut edits: Vec<_> = self
@@ -262,10 +262,34 @@ impl Prepared {
             let text = std::str::from_utf8(&original.bytes).map_err(|_| {
                 invalid(path, "OpenCode config is not UTF-8; file contents omitted")
             })?;
-            Document::parse(text, path)?.system(path)?
+            Document::parse(text, path)?.slate(path)?
         } else {
-            Document::parse("{\n}\n", path)?.system(path)?
+            Document::parse("{\n}\n", path)?.slate(path)?
         };
+        let prepared = Self {
+            path: path.to_owned(),
+            destination,
+            original,
+            replacement,
+        };
+        prepared.verify()?;
+        Ok(prepared)
+    }
+
+    pub(super) fn asset(path: &Path, bytes: Vec<u8>) -> Result<Self> {
+        let destination = file_read::directory_alias_target(path)
+            .ok_or_else(|| invalid(path, "cannot resolve OpenCode theme destination"))?;
+        let original = source(path)?;
+        if original
+            .as_ref()
+            .is_some_and(|source| !super::palette::is_owned(&source.bytes))
+        {
+            return Err(invalid(path, "slate-sync.json is not a Slate theme; choose another filename for the personal theme"));
+        }
+        let replacement = (!original
+            .as_ref()
+            .is_some_and(|source| source.bytes == bytes))
+        .then_some(bytes);
         let prepared = Self {
             path: path.to_owned(),
             destination,

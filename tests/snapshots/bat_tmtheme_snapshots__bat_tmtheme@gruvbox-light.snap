@@ -25,11 +25,11 @@ expression: xml
                 <key>lineHighlight</key>
                 <string>#fdf4c1</string>
                 <key>invisibles</key>
-                <string>#928374</string>
+                <string>#5b5148</string>
                 <key>gutter</key>
-                <string>#f9f5d9</string>
+                <string>#fbf1c7</string>
                 <key>gutterForeground</key>
-                <string>#928374</string>
+                <string>#776a5e</string>
             </dict>
         </dict>
         <dict>
@@ -40,7 +40,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#928374</string>
+                <string>#5b5148</string>
                 <key>fontStyle</key>
                 <string>italic</string>
             </dict>
@@ -53,7 +53,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#66661e</string>
+                <string>#555519</string>
             </dict>
         </dict>
         <dict>
@@ -75,7 +75,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#8b4513</string>
+                <string>#824112</string>
             </dict>
         </dict>
         <dict>
@@ -86,7 +86,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#0d5c7d</string>
+                <string>#0d5978</string>
             </dict>
         </dict>
         <dict>
@@ -97,7 +97,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#406058</string>
+                <string>#3b5851</string>
             </dict>
         </dict>
         <dict>
@@ -141,7 +141,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#8b4513</string>
+                <string>#824112</string>
             </dict>
         </dict>
         <dict>
@@ -152,7 +152,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#66661e</string>
+                <string>#555519</string>
             </dict>
         </dict>
         <dict>
@@ -174,7 +174,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#8b4513</string>
+                <string>#824112</string>
             </dict>
         </dict>
         <dict>
@@ -185,7 +185,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#0d5c7d</string>
+                <string>#0d5978</string>
             </dict>
         </dict>
         <dict>
@@ -222,7 +222,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#8b4513</string>
+                <string>#824112</string>
             </dict>
         </dict>
         <dict>
@@ -233,7 +233,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#406058</string>
+                <string>#3b5851</string>
             </dict>
         </dict>
         <dict>
@@ -244,9 +244,9 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#fbf1c7</string>
-                <key>background</key>
                 <string>#9d0006</string>
+                <key>background</key>
+                <string>#f2d9b4</string>
             </dict>
         </dict>
         <dict>
@@ -257,7 +257,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#0d5c7d</string>
+                <string>#0d5978</string>
             </dict>
         </dict>
     </array>

@@ -30,7 +30,7 @@ fn test_baseline_has_correct_metadata() {
     let baseline = begin_restore_point_baseline(home).expect("Failed to create baseline");
 
     // Baseline should snapshot the fixed target list, including absent files.
-    let expected_target_count = if cfg!(target_os = "macos") { 43 } else { 41 };
+    let expected_target_count = if cfg!(target_os = "macos") { 44 } else { 42 };
     assert_eq!(
         baseline.entries.len(),
         expected_target_count,
@@ -50,6 +50,7 @@ fn test_baseline_has_correct_metadata() {
         home.join(".config/zellij/themes/slate-sync.kdl"),
         home.join(".config/btop/btop.conf"),
         home.join(".config/btop/themes/slate-sync.theme"),
+        home.join(".config/opencode/themes/slate-sync.json"),
         home.join(".config/yazi/theme.toml"),
         home.join(".config/yazi/flavors/slate-sync.yazi/flavor.toml"),
         home.join(".config/yazi/flavors/slate-sync.yazi/tmtheme.xml"),

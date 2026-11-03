@@ -4,7 +4,7 @@ use crate::{detection, env::SlateEnv, error::Result, theme::ThemeVariant};
 use std::path::PathBuf;
 
 pub(crate) mod config;
-mod palette;
+pub(crate) mod palette;
 
 pub struct YaziAdapter;
 

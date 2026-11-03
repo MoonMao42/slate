@@ -74,6 +74,7 @@ pub(crate) fn add_theme_paths(
         "opencode" => {
             env.validate_opencode_tui_config()?;
             files.extend(OpencodeAdapter::tui_config_paths(env));
+            files.insert(OpencodeAdapter::theme_path(env));
         }
         // The notification is shared by global theme apply, but a selected-only
         // sync must also capture it without opting into other shared writes.

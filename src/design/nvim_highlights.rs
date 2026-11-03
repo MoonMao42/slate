@@ -133,11 +133,7 @@ pub static HIGHLIGHT_GROUPS: &[(&str, HighlightSpec)] = &[
     ),
     (
         "Cursor",
-        HighlightSpec::styled_fg_bg(
-            SemanticColor::Background,
-            SemanticColor::Text,
-            Style::Reverse,
-        ),
+        HighlightSpec::fg_bg(SemanticColor::Background, SemanticColor::Text),
     ),
     ("lCursor", HighlightSpec::linked("Cursor")),
     ("CursorIM", HighlightSpec::linked("Cursor")),
@@ -1276,8 +1272,10 @@ pub fn lualine_theme(palette: &Palette) -> String {
     let emit_active = |out: &mut String, mode: &str, accent_bg: SemanticColor| {
         let a_fg = palette.resolve(SemanticColor::Background);
         let a_bg = palette.resolve(accent_bg);
+        let a_fg = crate::wcag::readable_color(&a_fg, &a_bg);
         let b_fg = palette.resolve(SemanticColor::Text);
         let b_bg = palette.resolve(SemanticColor::Surface);
+        let b_fg = crate::wcag::readable_color(&b_fg, &b_bg);
         let c_fg = palette.resolve(SemanticColor::Text);
         let c_bg = palette.resolve(SemanticColor::Background);
         let _ = writeln!(
@@ -1301,8 +1299,10 @@ pub fn lualine_theme(palette: &Palette) -> String {
     // the same visual weight — just dimmer color).
     let i_fg = palette.resolve(SemanticColor::Muted);
     let i_bg = palette.resolve(SemanticColor::Surface);
+    let i_fg = crate::wcag::readable_color(&i_fg, &i_bg);
     let b_fg = palette.resolve(SemanticColor::Muted);
     let b_bg = palette.resolve(SemanticColor::Surface);
+    let b_fg = crate::wcag::readable_color(&b_fg, &b_bg);
     let c_fg = palette.resolve(SemanticColor::Muted);
     let c_bg = palette.resolve(SemanticColor::Background);
     let _ = writeln!(

@@ -12,7 +12,7 @@ use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::error::Result;
 use crate::theme::{Palette, ThemeAppearance};
 
-/// Slate's fixed brand anchor color — the lavender (`#7287fd`) used for the
+/// Slate's source lavender, adjusted for contrast by the role renderer for the
 /// `slate` wordmark, the ✦ glyph, ◆ section headings, and the completion ★.
 pub const BRAND_LAVENDER_FIXED: &str = "#7287fd";
 
@@ -54,38 +54,6 @@ fn blend_channel(accent: u8, background: u8, ratio: f32) -> u8 {
     mixed.round().clamp(0.0, 255.0) as u8
 }
 
-/// WCAG 3:1 minimum-contrast gate for small-text pill combinations.
-pub fn contrast_ratio_passes_3_to_1(fg_hex: &str, bg_hex: &str) -> bool {
-    let Ok((fr, fg_, fb)) = PaletteRenderer::hex_to_rgb(fg_hex) else {
-        return false;
-    };
-    let Ok((br, bg, bb)) = PaletteRenderer::hex_to_rgb(bg_hex) else {
-        return false;
-    };
-    let fg_lum = relative_luminance(fr, fg_, fb);
-    let bg_lum = relative_luminance(br, bg, bb);
-    let lighter = fg_lum.max(bg_lum);
-    let darker = fg_lum.min(bg_lum);
-    (lighter + 0.05) / (darker + 0.05) >= 3.0
-}
-
-/// WCAG relative-luminance formula.
-fn relative_luminance(r: u8, g: u8, b: u8) -> f32 {
-    let rn = channel_linear(r);
-    let gn = channel_linear(g);
-    let bn = channel_linear(b);
-    0.2126 * rn + 0.7152 * gn + 0.0722 * bn
-}
-
-fn channel_linear(value: u8) -> f32 {
-    let c = f32::from(value) / 255.0;
-    if c <= 0.03928 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,32 +84,10 @@ mod tests {
     }
 
     #[test]
-    fn light_pill_blend_shifts_background_and_contrast_helper_runs() {
-        let (r, g, b) =
-            pill_background_rgb("#7287fd", "#eff1f5", ThemeAppearance::Light).expect("valid hex");
-        assert_ne!(
-            (r, g, b),
-            (0xef, 0xf1, 0xf5),
-            "pill bg must shift under blend"
-        );
-        let bg_hex = PaletteRenderer::rgb_to_hex(r, g, b);
-        // Gate helper is callable on the blended hex; manual smoke
-        // will harden this into an `assert!(passes)` once the light-theme
-        // ratio is empirically verified.
-        let _passes = contrast_ratio_passes_3_to_1("#7287fd", &bg_hex);
-    }
-
-    #[test]
     fn theme_brand_accent_returns_palette_field() {
         let mut palette = sample_palette();
         palette.brand_accent = "#abcdef".to_string();
         assert_eq!(theme_brand_accent(&palette), "#abcdef");
-    }
-
-    #[test]
-    fn contrast_ratio_rejects_low_contrast_pair() {
-        // Near-identical colors must fail 3:1.
-        assert!(!contrast_ratio_passes_3_to_1("#777777", "#787878"));
     }
 
     fn sample_palette() -> Palette {

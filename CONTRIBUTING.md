@@ -36,6 +36,11 @@ On macOS, `build.rs` compiles a small Swift helper (`dark-mode-notify`) via `swi
 cargo test
 ```
 
+Palette changes must pass both `cargo test --test theme_contrast_audit` and
+`cargo test --lib adapter::contrast_tests`. The latter reads generated tool
+styles and checks inherited selection, panel and diff backgrounds, not just
+individual swatches. Update affected color snapshots after reviewing the output.
+
 Integration tests use the `SLATE_HOME` environment variable to isolate runs from your real `~/.config`. No test touches your dotfiles.
 
 ## Code quality

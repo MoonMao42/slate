@@ -189,6 +189,7 @@ pub(super) fn inspect_targets(env: &SlateEnv) -> Result<CleanTargets> {
     paths.extend(crate::adapter::AlacrittyAdapter::integration_candidate_paths_with_env(env));
     paths.extend(crate::adapter::GhosttyAdapter.integration_candidate_paths_with_env(env)?);
     paths.extend(crate::adapter::OpencodeAdapter::tui_config_paths(env));
+    paths.push(crate::adapter::OpencodeAdapter::theme_path(env));
     for path in paths {
         add_file(env, path, &mut files)?;
     }

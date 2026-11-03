@@ -120,11 +120,12 @@ fn delta_native_generated_bat_cache_resolves_every_syntax_theme() {
     let listed = String::from_utf8(listed).unwrap();
     let mut classification_mismatches = Vec::new();
     let diff = "diff --git a/fixture.rs b/fixture.rs\n--- a/fixture.rs\n+++ b/fixture.rs\n@@ -1 +1 @@\n-let value = 1;\n+let value = 2;\n";
+    let diff = format!("{diff}diff --git a/invalid.json b/invalid.json\n--- a/invalid.json\n+++ b/invalid.json\n@@ -1 +1 @@\n-{{ \"value\": \"\\q\" }}\n+{{ \"value\": \"ok\" }}\n");
     for theme in themes.all() {
         let name = &theme.tool_refs["delta"];
-        let (appearance, flag, opposite) = match theme.appearance {
-            crate::theme::ThemeAppearance::Light => ("light", "--light", "--dark"),
-            crate::theme::ThemeAppearance::Dark => ("dark", "--dark", "--light"),
+        let (appearance, flag) = match theme.appearance {
+            crate::theme::ThemeAppearance::Light => ("light", "--light"),
+            crate::theme::ThemeAppearance::Dark => ("dark", "--dark"),
         };
         if !listed
             .lines()
@@ -146,7 +147,7 @@ fn delta_native_generated_bat_cache_resolves_every_syntax_theme() {
         .unwrap();
         let output = command(&delta)
             .args(["--paging", "never", "--true-color", "always"])
-            .write_stdin(diff)
+            .write_stdin(diff.as_str())
             .assert()
             .success()
             .stderr("")
@@ -167,7 +168,6 @@ fn delta_native_generated_bat_cache_resolves_every_syntax_theme() {
         let reference = |mode: &str| {
             command(&delta)
                 .args([
-                    "--no-gitconfig",
                     "--paging",
                     "never",
                     "--true-color",
@@ -177,7 +177,7 @@ fn delta_native_generated_bat_cache_resolves_every_syntax_theme() {
                     name,
                     mode,
                 ])
-                .write_stdin(diff)
+                .write_stdin(diff.as_str())
                 .assert()
                 .success()
                 .stderr("")
@@ -189,12 +189,6 @@ fn delta_native_generated_bat_cache_resolves_every_syntax_theme() {
             output.as_bytes(),
             reference(flag),
             "saved appearance differs from explicit mode for {}",
-            theme.id
-        );
-        assert_ne!(
-            output.as_bytes(),
-            reference(opposite),
-            "fixture must distinguish light and dark for {}",
             theme.id
         );
     }

@@ -51,7 +51,7 @@ impl DeltaAdapter {
     /// Hard-coding `dark = true` made every light-theme diff render with
     /// dark-terminal-tuned defaults — context lines washed out against the
     /// cream bg.
-    fn render_delta_colors(theme: &ThemeVariant) -> Result<String> {
+    pub(crate) fn render_delta_colors(theme: &ThemeVariant) -> Result<String> {
         let syntax_theme = theme
             .tool_refs
             .get("delta")
@@ -65,12 +65,36 @@ impl DeltaAdapter {
             crate::theme::ThemeAppearance::Light => "light = true",
             crate::theme::ThemeAppearance::Dark => "dark = true",
         };
+        let p = &theme.palette;
+        let minus = p.diff_background(&p.red);
+        let plus = p.diff_background(&p.green);
+        let minus_fg = crate::wcag::readable_color(&p.red, &minus);
+        let plus_fg = crate::wcag::readable_color(&p.green, &plus);
         Ok(format!(
             "[delta]\n\
              syntax-theme = \"{}\"\n\
              {}\n\
-             line-numbers = true\n",
-            syntax_theme, appearance_flag
+             line-numbers = true\n\
+             minus-style = syntax \"{minus}\"\n\
+             plus-style = syntax \"{plus}\"\n\
+             minus-emph-style = bold syntax \"{minus}\"\n\
+             plus-emph-style = bold syntax \"{plus}\"\n\
+             zero-style = syntax normal\n\
+             line-numbers-left-style = \"{muted}\"\n\
+             line-numbers-right-style = \"{muted}\"\n\
+             line-numbers-zero-style = \"{muted}\"\n\
+             line-numbers-minus-style = \"{minus_fg}\"\n\
+             line-numbers-plus-style = \"{plus_fg}\"\n\
+             file-style = bold \"{blue}\"\n\
+             file-decoration-style = \"{blue}\" box\n\
+             hunk-header-style = line-number syntax\n\
+             hunk-header-decoration-style = \"{blue}\" box\n\
+             hunk-header-file-style = \"{blue}\"\n\
+             hunk-header-line-number-style = \"{blue}\"\n",
+            syntax_theme,
+            appearance_flag,
+            muted = p.bright_black,
+            blue = p.blue
         ))
     }
 }

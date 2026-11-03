@@ -180,8 +180,17 @@ pub(super) fn opencode(bytes: &[u8], path: &Path) -> Result<Edit> {
             "Invalid or ambiguous OpenCode JSON/JSONC; inspect its theme manually",
         )));
     };
-    match config.without_system_theme(path)? {
+    match config.without_slate_theme(path)? {
         Some(output) => Ok(Edit::replaced(bytes, output)),
         None => Ok(Edit::Remove),
     }
+}
+
+/// Only remove the reserved theme file when its functional Slate definition is present.
+pub(super) fn opencode_theme(bytes: &[u8]) -> Result<Edit> {
+    Ok(if crate::adapter::opencode::palette::is_owned(bytes) {
+        Edit::Remove
+    } else {
+        Edit::Keep(Some("OpenCode theme is not Slate-owned; kept"))
+    })
 }

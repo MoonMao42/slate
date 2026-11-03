@@ -19,17 +19,16 @@ fn write(path: &Path, bytes: impl AsRef<[u8]>) {
 #[test]
 fn opencode_application_preserves_jsonc_and_backs_up_exact_bytes_only_on_change() {
     let themes = ThemeRegistry::new().unwrap();
-    for already_system in [false, true] {
+    for already_connected in [false, true] {
         let td = tempfile::tempdir().unwrap();
         let env = SlateEnv::with_home(td.path().to_owned());
         let path = env.xdg_config_home().join("opencode/tui.jsonc");
-        let input = if already_system {
-            "// 用户备注\r\n{\"theme\":\"system\",\"mouse\":false,}\r\n"
+        let input = if already_connected {
+            "// 用户备注\r\n{\"theme\":\"slate-sync\",\"mouse\":false,}\r\n"
         } else {
             "// 用户备注\r\n{\"$schema\":\"custom\",\"theme\":\"old\",\"mouse\":false,}\r\n"
         };
         write(&path, input);
-        let before = tree_snapshot::tree(td.path());
         let original_meta = fs::metadata(&path).unwrap();
         let outcome = OpencodeAdapter
             .apply_theme_with_env(themes.get("nord").unwrap(), &env)
@@ -42,14 +41,14 @@ fn opencode_application_preserves_jsonc_and_backs_up_exact_bytes_only_on_change(
         ));
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
-            input.replace("\"old\"", "\"system\"")
+            input.replace("\"old\"", "\"slate-sync\"")
         );
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o640
         );
-        if already_system {
-            assert_eq!(tree_snapshot::tree(td.path()), before);
+        if already_connected {
+            assert!(!env.slate_cache_dir().join("backups").exists());
             assert_eq!(fs::metadata(&path).unwrap().ino(), original_meta.ino());
             assert_eq!(
                 fs::metadata(&path).unwrap().modified().unwrap(),
@@ -63,6 +62,7 @@ fn opencode_application_preserves_jsonc_and_backs_up_exact_bytes_only_on_change(
             assert_eq!(files[0].1 .0 & 0o777, 0o600);
             assert!(!env.config_dir().exists());
         }
+        assert!(OpencodeAdapter::theme_path(&env).is_file());
         let once = tree_snapshot::tree(td.path());
         let meta = fs::metadata(&path).unwrap();
         OpencodeAdapter
@@ -135,7 +135,7 @@ fn opencode_invalid_inputs_are_bounded_read_only_and_do_not_bypass_preferred_pat
         let path = env.xdg_config_home().join("opencode/tui.json");
         // Even with a valid fallback, a blocked preferred entry must fail.
         if !case.starts_with("parent-") {
-            write(&path.with_extension("jsonc"), "{\"theme\":\"system\"}");
+            write(&path.with_extension("jsonc"), "{\"theme\":\"slate-sync\"}");
         }
         let outside = td.path().join("outside.jsonc");
         write(&outside, "// PRIVATE_CONTENT\n{\"theme\":\"host\"}");
@@ -144,7 +144,7 @@ fn opencode_invalid_inputs_are_bounded_read_only_and_do_not_bypass_preferred_pat
             "theme" => write(&path, "{\"theme\":{\"PRIVATE_CONTENT\":true}}"),
             "duplicate" => write(
                 &path,
-                "{\"theme\":\"system\",\"theme\":\"PRIVATE_CONTENT\"}",
+                "{\"theme\":\"slate-sync\",\"theme\":\"PRIVATE_CONTENT\"}",
             ),
             "deep" => write(
                 &path,
@@ -167,8 +167,13 @@ fn opencode_invalid_inputs_are_bounded_read_only_and_do_not_bypass_preferred_pat
                 .unwrap()
                 .set_len(8 * 1024 * 1024 + 1)
                 .unwrap(),
-            "isolated" => write(&path, "{\"theme\":\"system\"}"),
+            "isolated" => write(&path, "{\"theme\":\"slate-sync\"}"),
             _ => unreachable!(),
+        }
+        if case == "isolated" {
+            OpencodeAdapter
+                .apply_theme_with_env(ThemeRegistry::new().unwrap().get("nord").unwrap(), &env)
+                .unwrap();
         }
         let before = tree_snapshot::tree(td.path());
         assert_cmd::Command::new(std::env::current_exe().unwrap())
@@ -184,4 +189,56 @@ fn opencode_invalid_inputs_are_bounded_read_only_and_do_not_bypass_preferred_pat
             .success();
         assert_eq!(tree_snapshot::tree(td.path()), before, "{case}");
     }
+}
+
+#[test]
+fn opencode_theme_asset_updates_without_rewriting_config_and_rejects_collisions() {
+    let themes = ThemeRegistry::new().unwrap();
+    let td = tempfile::tempdir().unwrap();
+    let env = SlateEnv::with_home(td.path().into());
+    let config = env.xdg_config_home().join("opencode/tui.json");
+    let asset = OpencodeAdapter::theme_path(&env);
+    write(&config, "{\"theme\":\"old\",\"mouse\":false}");
+    write(&asset, "{\"personal\":true}");
+    let before = tree_snapshot::tree(td.path());
+    assert!(OpencodeAdapter
+        .apply_theme_with_env(themes.get("nord").unwrap(), &env)
+        .is_err());
+    assert_eq!(tree_snapshot::tree(td.path()), before);
+    fs::remove_file(&asset).unwrap();
+    OpencodeAdapter
+        .apply_theme_with_env(themes.get("nord").unwrap(), &env)
+        .unwrap();
+    let old = fs::read(&asset).unwrap();
+    let inode = fs::metadata(&config).unwrap().ino();
+    OpencodeAdapter
+        .apply_theme_with_env(themes.get("catppuccin-latte").unwrap(), &env)
+        .unwrap();
+    assert_ne!(fs::read(&asset).unwrap(), old);
+    assert_eq!(fs::metadata(&config).unwrap().ino(), inode);
+    assert_eq!(
+        fs::read_to_string(&config).unwrap(),
+        "{\"theme\":\"slate-sync\",\"mouse\":false, \"$schema\": \"https://opencode.ai/tui.json\"}"
+    );
+    let synced_asset = fs::read(&asset).unwrap();
+    let synced_config = fs::read(&config).unwrap();
+    assert_cmd::Command::new(assert_cmd::cargo::cargo_bin!("slate"))
+        .env("SLATE_HOME", td.path())
+        .env("HOME", td.path())
+        .env("NO_COLOR", "1")
+        .args(["--quiet", "clean"])
+        .assert()
+        .success();
+    assert!(!asset.exists());
+    let cleaned: serde_json::Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+    assert!(cleaned.get("theme").is_none());
+    assert_eq!(cleaned["mouse"], false);
+    let point = slate_cli::config::list_restore_points_with_env(&env)
+        .unwrap()
+        .remove(0);
+    assert!(slate_cli::config::execute_restore_with_env(&env, &point.id)
+        .unwrap()
+        .is_fully_successful());
+    assert_eq!(fs::read(&asset).unwrap(), synced_asset);
+    assert_eq!(fs::read(&config).unwrap(), synced_config);
 }

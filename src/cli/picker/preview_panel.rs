@@ -223,7 +223,9 @@ pub fn render_preview(palette: &crate::theme::Palette) -> String {
     const RESET: &str = "\x1b[0m";
     let bg = |hex: &str| -> String {
         let (r, g, b) = PaletteRenderer::hex_to_rgb(hex).unwrap_or((200, 200, 200));
-        format!("\x1b[48;2;{};{};{}m", r, g, b)
+        let text = crate::wcag::readable_color(&palette.background, hex);
+        let (fr, fg, fb) = PaletteRenderer::hex_to_rgb(&text).unwrap_or((0, 0, 0));
+        format!("\x1b[48;2;{r};{g};{b}m\x1b[38;2;{fr};{fg};{fb}m")
     };
 
     let mut output = String::new();

@@ -80,19 +80,34 @@ impl LazygitAdapter {
     pub(crate) fn generate_yaml_config(&self, theme: &ThemeVariant) -> Result<String> {
         let p = &theme.palette;
         p.validate()?;
-        // A neutral selected row replaces the former solid error-red block.
-        // Keep ordinary foreground legible instead of assuming ANSI accents
-        // work as backgrounds in both light and dark palettes.
-        let selected = [
-            p.selection_bg.as_deref(),
-            p.surface0.as_deref(),
-            p.bg_dim.as_deref(),
-            Some(p.background.as_str()),
-        ]
-        .into_iter()
-        .flatten()
-        .find(|bg| crate::wcag::contrast_hex(&p.foreground, bg) >= 4.5)
-        .unwrap_or(&p.background);
+        // Lazygit keeps file/status foregrounds when it highlights a row.
+        // Fit the row background to all of them, not just defaultFgColor.
+        let selected = crate::wcag::readable_on(
+            p.selection_bg
+                .as_deref()
+                .or(p.surface0.as_deref())
+                .unwrap_or(&p.background),
+            &[
+                &p.foreground,
+                &p.red,
+                &p.green,
+                &p.yellow,
+                &p.blue,
+                &p.magenta,
+                &p.cyan,
+                &p.black,
+                &p.white,
+                &p.bright_black,
+                &p.bright_red,
+                &p.bright_green,
+                &p.bright_yellow,
+                &p.bright_blue,
+                &p.bright_magenta,
+                &p.bright_cyan,
+                &p.bright_white,
+            ],
+        );
+        let selected = selected.as_str();
         let cherry_fg = crate::wcag::pick_accessible_fg_for_bg(&[&p.blue, &p.foreground], selected);
         let marked_fg =
             crate::wcag::pick_accessible_fg_for_bg(&[&p.yellow, &p.foreground], selected);
@@ -106,7 +121,7 @@ impl LazygitAdapter {
             ),
             ("searchingActiveBorderColor", &p.yellow, true),
             ("optionsTextColor", &p.blue, false),
-            ("selectedLineBgColor", selected, false),
+            ("selectedLineBgColor", selected, true),
             ("inactiveViewSelectedLineBgColor", selected, false),
             ("cherryPickedCommitFgColor", cherry_fg.as_str(), false),
             ("cherryPickedCommitBgColor", selected, false),

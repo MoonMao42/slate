@@ -1,4 +1,4 @@
-//! WCAG 2.1 contrast audit test for all registered themes.
+//! WCAG 2.2 contrast audit test for all registered themes.
 //! Fails the build if any theme color falls below the 4.5:1 WCAG AA contrast ratio.
 //! Data-driven: iterates `ThemeRegistry::all()` so the audit stays correct as themes
 //! are added or renamed.

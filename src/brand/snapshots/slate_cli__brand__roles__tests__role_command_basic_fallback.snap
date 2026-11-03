@@ -2,4 +2,4 @@
 source: src/brand/roles.rs
 expression: out
 ---
-[1;2m› slate theme set ‹[0m
+[1m› slate theme set ‹[0m

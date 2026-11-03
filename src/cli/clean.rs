@@ -370,13 +370,17 @@ fn remove_delta_managed_references(home: &Path) -> Result<()> {
 }
 
 /// Best-effort strip of Slate's OpenCode TUI theme selection. Slate only sets
-/// `theme = "system"` (plus the standard schema when creating a new file), so
+/// `theme = "slate-sync"` (plus the standard schema when creating a new file), so
 /// clean removes that value and preserves unrelated user settings.
 fn remove_opencode_managed_references(env: &SlateEnv) -> Result<()> {
     for tui_path in crate::adapter::OpencodeAdapter::tui_config_paths(env) {
         strip_opencode_slate_theme(&tui_path)?;
     }
 
+    edits::apply(
+        &crate::adapter::OpencodeAdapter::theme_path(env),
+        edits::opencode_theme,
+    )?;
     Ok(())
 }
 
@@ -757,7 +761,7 @@ mod tests {
             &tui_path,
             serde_json::json!({
                 "$schema": crate::adapter::OpencodeAdapter::TUI_SCHEMA,
-                "theme": "system"
+                "theme": "slate-sync"
             })
             .to_string(),
         )
@@ -781,7 +785,7 @@ mod tests {
             &tui_path,
             serde_json::json!({
                 "$schema": crate::adapter::OpencodeAdapter::TUI_SCHEMA,
-                "theme": "system",
+                "theme": "slate-sync",
                 "mouse": false,
                 "scroll_speed": 5
             })
@@ -808,7 +812,7 @@ mod tests {
             &tui_path,
             r#"{
                 // user setting should survive
-                "theme": "system",
+                "theme": "slate-sync",
                 "mouse": false,
             }"#,
         )

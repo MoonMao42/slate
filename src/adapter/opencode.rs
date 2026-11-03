@@ -1,6 +1,4 @@
-//! OpenCode adapter with EditInPlace strategy.
-//! Detects opencode installation and configures transparent background
-//! for Ghostty terminal by setting theme to "system" in tui.json.
+//! OpenCode palette publication with lossless TUI theme selection.
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::config::ConfigManager;
@@ -12,11 +10,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(crate) mod config;
+pub(crate) mod palette;
 
 /// OpenCode adapter implementing the ToolAdapter trait.
 pub struct OpencodeAdapter;
 
 impl OpencodeAdapter {
+    pub fn theme_path(env: &SlateEnv) -> PathBuf {
+        env.xdg_config_home()
+            .join("opencode/themes/slate-sync.json")
+    }
+
     pub(crate) const TUI_SCHEMA: &'static str = "https://opencode.ai/tui.json";
 
     /// Resolve the path to opencode's tui.json config file.
@@ -102,9 +106,9 @@ impl ToolAdapter for OpencodeAdapter {
     fn managed_config_path(&self) -> PathBuf {
         let env = SlateEnv::from_process().ok();
         if let Some(env) = env.as_ref() {
-            env.config_dir().join("managed").join("opencode")
+            Self::theme_path(env)
         } else {
-            PathBuf::from(".config/slate/managed/opencode")
+            PathBuf::from(".config/opencode/themes/slate-sync.json")
         }
     }
 
@@ -117,7 +121,7 @@ impl ToolAdapter for OpencodeAdapter {
         self.apply_theme_with_env(_theme, &env)
     }
 
-    fn apply_theme_with_env(&self, _theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
+    fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
         env.validate_opencode_tui_config()?;
         let override_path = env.opencode_tui_config();
         let config_path = Self::tui_config_path_with_override(env, override_path);
@@ -131,21 +135,22 @@ impl ToolAdapter for OpencodeAdapter {
             return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
         }
 
-        // Prepare and validate before backup/cache creation. Already connected
-        // documents are byte-for-byte no-ops, including their missing schema.
+        let theme_path = Self::theme_path(env);
+        crate::config::recovery_paths::validate_file_path(env, &config_path, "OpenCode")?;
+        crate::config::recovery_paths::validate_file_path(env, &theme_path, "OpenCode theme")?;
         let prepared = config::Prepared::read(&config_path)?;
-        if !prepared.changed() {
-            return Ok(ApplyOutcome::Applied {
-                requires_new_shell: false,
-            });
-        }
+        let asset = config::Prepared::asset(&theme_path, palette::render(theme)?.into_bytes())?;
         prepared.verify()?;
-        if let Some(original) = prepared.original_bytes() {
-            ConfigManager::from_env_paths(env).backup_captured_file(&config_path, original)?;
+        asset.verify()?;
+        if prepared.changed() {
+            if let Some(original) = prepared.original_bytes() {
+                ConfigManager::from_env_paths(env).backup_captured_file(&config_path, original)?;
+            }
         }
+        asset.publish()?;
         prepared.publish()?;
 
-        // Only the TUI file changed, not shell initialization or environment.
+        // Theme files are read on the next OpenCode launch.
         // The coordinator reports app-specific reopening guidance separately.
         Ok(ApplyOutcome::applied_no_shell())
     }
@@ -242,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_theme_skips_if_already_system() {
+    fn test_apply_theme_keeps_existing_theme_reference() {
         let tempdir = tempfile::TempDir::new().unwrap();
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
 
@@ -250,9 +255,9 @@ mod tests {
         let config_dir = tempdir.path().join(".config/opencode");
         fs::create_dir_all(&config_dir).unwrap();
 
-        // Create tui.json with theme already set to system
+        // Create a connected TUI file; the palette may still need publishing.
         let tui_path = config_dir.join("tui.json");
-        fs::write(&tui_path, r#"{"theme": "system"}"#).unwrap();
+        fs::write(&tui_path, r#"{"theme": "slate-sync"}"#).unwrap();
 
         let adapter = OpencodeAdapter;
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
@@ -262,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_theme_sets_system_theme() {
+    fn test_apply_theme_sets_slate_theme() {
         let tempdir = tempfile::TempDir::new().unwrap();
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
 
@@ -283,7 +288,7 @@ mod tests {
         // Verify theme was changed
         let content = fs::read_to_string(&tui_path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed["theme"], "system");
+        assert_eq!(parsed["theme"], "slate-sync");
     }
 
     #[test]
@@ -306,7 +311,7 @@ mod tests {
         assert!(tui_path.exists());
         let content = fs::read_to_string(&tui_path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed["theme"], "system");
+        assert_eq!(parsed["theme"], "slate-sync");
     }
 
     #[test]
@@ -327,6 +332,8 @@ mod tests {
     fn test_managed_config_path() {
         let adapter = OpencodeAdapter;
         let path = adapter.managed_config_path();
-        assert!(path.to_string_lossy().contains("managed/opencode"));
+        assert!(path
+            .to_string_lossy()
+            .ends_with("opencode/themes/slate-sync.json"));
     }
 }

@@ -189,6 +189,11 @@ fn baseline_snapshot_targets(env: &SlateEnv) -> Result<Vec<SnapshotTarget>> {
             display_tool: "OpenCode",
             path: crate::adapter::OpencodeAdapter::tui_config_path(env),
         },
+        SnapshotTarget {
+            tool_key: "opencode-theme",
+            display_tool: "Slate OpenCode theme",
+            path: crate::adapter::OpencodeAdapter::theme_path(env),
+        },
         // nvim init files get a slate marker block (pcall(require, 'slate'))
         // on setup; baseline must capture the pre-install state so restore
         // can remove the block. Both .lua and .vim are included because

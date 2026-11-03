@@ -65,7 +65,7 @@ fn opencode_restart_guidance_does_not_request_a_new_shell_or_change_startup() {
         assert_eq!(outcome, ApplyOutcome::applied_no_shell());
         let config: serde_json::Value =
             serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
-        assert_eq!(config["theme"], "system");
+        assert_eq!(config["theme"], "slate-sync");
         assert_eq!(config["keybinds"]["leader"], "ctrl+a");
         assert_eq!(fs::read(env.zshrc_path()).unwrap(), b"# PRIVATE_STARTUP\n");
     }
@@ -83,8 +83,7 @@ fn opencode_restart_guidance_does_not_request_a_new_shell_or_change_startup() {
     assert_eq!(report.reload_warnings.len(), 1);
     let message = &report.reload_warnings[0].message;
     assert!(message.contains("Reopen OpenCode"));
-    assert!(message.contains("did not close or restart"));
-    assert!(message.contains("new shell is not required"));
+    assert!(message.contains("slate-sync"));
     assert!(!crate::adapter::registry::requires_new_shell(
         &report.results
     ));

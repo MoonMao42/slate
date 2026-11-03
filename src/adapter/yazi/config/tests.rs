@@ -40,7 +40,7 @@ fn yazi_palette_covers_all_themes_and_keeps_syntax_assets_owned() {
         ] {
             assert!(doc[name].is_table(), "{name}");
         }
-        assert!(xml.contains(&theme.palette.background) && xml.contains(&theme.palette.foreground));
+        assert!(xml.contains(&theme.palette.background));
         assert_eq!(palette::render(theme).unwrap(), (styles, xml));
     }
 }

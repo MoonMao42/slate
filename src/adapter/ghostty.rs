@@ -268,6 +268,7 @@ impl ToolAdapter for GhosttyAdapter {
              background = {bg}\n\
              foreground = {fg}\n\
              cursor-color = {cursor}\n\
+             cursor-text = {cursor_text}\n\
              selection-background = {sel_bg}\n\
              selection-foreground = {sel_fg}\n\
              palette = 0={black}\n\
@@ -290,8 +291,15 @@ impl ToolAdapter for GhosttyAdapter {
             fg = p.foreground,
             window_theme = window_theme,
             cursor = p.cursor.as_deref().unwrap_or(&p.foreground),
+            cursor_text = crate::wcag::readable_color(
+                &p.background,
+                p.cursor.as_deref().unwrap_or(&p.foreground)
+            ),
             sel_bg = p.selection_bg.as_deref().unwrap_or(&p.bright_black),
-            sel_fg = p.selection_fg.as_deref().unwrap_or(&p.foreground),
+            sel_fg = crate::wcag::readable_color(
+                p.selection_fg.as_deref().unwrap_or(&p.foreground),
+                p.selection_bg.as_deref().unwrap_or(&p.bright_black)
+            ),
             black = p.black,
             red = p.red,
             green = p.green,

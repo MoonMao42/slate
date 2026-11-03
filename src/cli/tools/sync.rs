@@ -363,7 +363,7 @@ fn menu_follow_up(report: &ThemeApplyReport) -> String {
         match result.tool_name.as_str() {
             "btop" => output.push_str(tr("  重新打开 btop；若退出时写回旧配色，请再同步一次。\n", "  Reopen btop; sync again if it restores old colors on exit.\n")),
             "opencode" => {
-                output.push_str(tr("  重新打开 OpenCode，检查 system 主题；本次未重启会话。\n", "  Reopen OpenCode and check its system theme; no session was restarted.\n"))
+                output.push_str(tr("  重新打开 OpenCode，加载更新后的 slate-sync 配色。\n", "  Reopen OpenCode to load the updated slate-sync palette.\n"))
             }
             "tmux" => {
                 output.push_str(tr("  请检查目标 tmux 服务；其他服务不变，重载失败可能已部分生效。\n", "  Check the target tmux server; others are unchanged. A failed reload may have partially applied.\n"))
@@ -413,7 +413,7 @@ fn follow_up(report: &ThemeApplyReport) -> String {
     for id in applied {
         let action = match id {
             "btop" => "Reopen btop to load the saved palette.",
-            "opencode" => "Reopen OpenCode to check theme = system against your terminal's colors. Slate did not close or restart any running session; this configuration change does not require a new shell.",
+            "opencode" => "Reopen OpenCode to load the updated slate-sync palette. A new shell is not required.",
             "eza" => "Run eza again from its configured shell; stale color exports may override the updated palette.",
             "lazygit" => "Reopen Lazygit from a fresh shell with updated Slate integration; custom config selection may override colors.",
             "yazi" => "Reopen Yazi; personal theme overrides may take precedence.",

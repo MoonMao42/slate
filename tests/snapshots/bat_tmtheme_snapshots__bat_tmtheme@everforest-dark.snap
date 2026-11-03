@@ -27,7 +27,7 @@ expression: xml
                 <key>invisibles</key>
                 <string>#a6b0a0</string>
                 <key>gutter</key>
-                <string>#2d3139</string>
+                <string>#1e2326</string>
                 <key>gutterForeground</key>
                 <string>#a6b0a0</string>
             </dict>
@@ -163,7 +163,7 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#e67e80</string>
+                <string>#e98e8f</string>
             </dict>
         </dict>
         <dict>
@@ -244,9 +244,9 @@ expression: xml
             <key>settings</key>
             <dict>
                 <key>foreground</key>
-                <string>#1e2326</string>
+                <string>#e98e8f</string>
                 <key>background</key>
-                <string>#e67e80</string>
+                <string>#322c2f</string>
             </dict>
         </dict>
         <dict>

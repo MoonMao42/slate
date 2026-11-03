@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 pub(crate) mod config;
 mod kdl_guard;
-mod palette;
+pub(crate) mod palette;
 pub struct ZellijAdapter;
 
 impl ZellijAdapter {

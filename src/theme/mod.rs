@@ -49,8 +49,7 @@ pub struct Palette {
 
     // designer-picked per-theme brand accent used by the
     // daily-chrome role surfaces (command pill, theme name, inline `slate`).
-    // Brand anchors (slate logo, ✦, ◆, ★) stay on the fixed lavender
-    // `BRAND_LAVENDER_FIXED` constant regardless of this value.
+    // Brand anchors start from `BRAND_LAVENDER_FIXED` and adjust for contrast.
     pub brand_accent: String,
 
     // Standard ANSI colors (black/8 colors + bright variants)
@@ -210,11 +209,10 @@ impl Palette {
                     .clone()
                     .unwrap_or_else(|| self.background.clone())
             }),
-            SemanticColor::SurfaceAlt => self.surface1.clone().unwrap_or_else(|| {
-                self.overlay0
-                    .clone()
-                    .unwrap_or_else(|| self.bright_black.clone())
-            }),
+            SemanticColor::SurfaceAlt => self
+                .surface1
+                .clone()
+                .unwrap_or_else(|| self.resolve(SemanticColor::Surface)),
             SemanticColor::Selection => self.selection_bg.clone().unwrap_or_else(|| {
                 self.surface2
                     .clone()
@@ -231,6 +229,25 @@ impl Palette {
                     .unwrap_or_else(|| self.yellow.clone())
             }),
         }
+    }
+
+    /// Backgrounds that can sit beneath syntax text without replacing its
+    /// foreground: cursor lines, selections, references, and diff overlays.
+    pub(crate) fn syntax_backgrounds(&self) -> Vec<String> {
+        use crate::cli::picker::preview_panel::SemanticColor;
+        vec![
+            self.background.clone(),
+            self.resolve(SemanticColor::Surface),
+            self.resolve(SemanticColor::SurfaceAlt),
+            self.resolve(SemanticColor::Selection),
+            self.diff_background(&self.red),
+            self.diff_background(&self.green),
+            self.diff_background(&self.yellow),
+        ]
+    }
+
+    pub(crate) fn diff_background(&self, accent: &str) -> String {
+        crate::wcag::blend_hex(&self.background, accent, 0.10)
     }
 }
 

@@ -86,11 +86,8 @@ pub fn render_tmtheme(palette: &Palette, theme_id: &str) -> String {
         .or(palette.surface0.as_deref())
         .unwrap_or(&palette.background);
     let invisibles = &palette.bright_black;
-    let gutter = palette
-        .bg_darker
-        .as_deref()
-        .or(palette.surface0.as_deref())
-        .unwrap_or(&palette.background);
+    // Bat emits gutter text without painting the tmTheme gutter background.
+    let gutter = background;
     let gutter_foreground = &palette.bright_black;
 
     // Per-scope colors — direct ANSI-slot mapping .
@@ -112,8 +109,10 @@ pub fn render_tmtheme(palette: &Palette, theme_id: &str) -> String {
     let markup_italic = &palette.magenta;
     let regexp = &palette.yellow;
     let escape = &palette.cyan;
-    let invalid_fg = &palette.background;
-    let invalid_bg = &palette.red;
+    // Delta replaces syntax backgrounds with its diff fill, so invalid text
+    // must remain readable when that background is replaced.
+    let invalid_fg = &palette.red;
+    let invalid_bg = palette.diff_background(&palette.red);
     let diff_meta = &palette.blue;
 
     // Render: 22 token replacements via str::replace. Avoids pulling a
@@ -149,11 +148,21 @@ pub fn render_tmtheme(palette: &Palette, theme_id: &str) -> String {
         ("{{regexp}}", regexp),
         ("{{escape}}", escape),
         ("{{invalid_fg}}", invalid_fg),
-        ("{{invalid_bg}}", invalid_bg),
+        ("{{invalid_bg}}", &invalid_bg),
         ("{{diff_meta}}", diff_meta),
     ];
+    let mut backgrounds = palette.syntax_backgrounds();
+    backgrounds.push(line_highlight.to_owned());
+    let backgrounds: Vec<_> = backgrounds.iter().map(String::as_str).collect();
     for (token, value) in pairs.iter() {
-        let escaped = xml_escape(value);
+        let color = match *token {
+            "{{name}}" | "{{uuid}}" | "{{background}}" | "{{selection_bg}}"
+            | "{{line_highlight}}" | "{{gutter}}" | "{{invalid_bg}}" => (*value).to_owned(),
+            "{{gutter_foreground}}" => crate::wcag::readable_color(value, gutter),
+            "{{caret}}" => crate::wcag::readable_color(value, background),
+            _ => crate::wcag::readable_on(value, &backgrounds),
+        };
+        let escaped = xml_escape(&color);
         out = out.replace(token, &escaped);
     }
     out

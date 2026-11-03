@@ -67,17 +67,19 @@ impl KittyAdapter {
     }
 
     /// Render Palette into Kitty color config format.
-    fn render_kitty_colors(theme: &ThemeVariant) -> String {
+    pub(crate) fn render_kitty_colors(theme: &ThemeVariant) -> String {
         let p = &theme.palette;
         let cursor = p.cursor.as_deref().unwrap_or(&p.foreground);
         let sel_bg = p.selection_bg.as_deref().unwrap_or(&p.bright_black);
         let sel_fg = p.selection_fg.as_deref().unwrap_or(&p.foreground);
+        let sel_fg = crate::wcag::readable_color(sel_fg, sel_bg);
+        let cursor_text = crate::wcag::readable_color(&p.background, cursor);
 
         format!(
             "foreground {fg}\n\
              background {bg}\n\
              cursor {cursor}\n\
-             cursor_text_color {bg}\n\
+             cursor_text_color {cursor_text}\n\
              selection_foreground {sel_fg}\n\
              selection_background {sel_bg}\n\
              \n\

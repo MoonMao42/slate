@@ -253,3 +253,6 @@ mod tests {
         assert_eq!(strategy, cloned);
     }
 }
+
+#[cfg(test)]
+mod contrast_tests;
