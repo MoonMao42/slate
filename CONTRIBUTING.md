@@ -43,12 +43,14 @@ individual swatches. Update affected color snapshots after reviewing the output.
 
 Also test actual application output: search then visually select in Neovim,
 fzf with a Bat preview, selected process rows, Git diffs, OpenCode 2 menus and
-diff views, and SSH inside tmux. Check active dialog text separately from its
+diff views, Yazi search/help selections, Zellij tabs, Yazi inside Zellij, and SSH
+inside tmux. Check active dialog text separately from its
 intentionally dimmed backdrop.
 Run `bash scripts/check-terminal-colors.sh` in each terminal with dark and light
 themes. It includes explicit ANSI backgrounds, dim/reverse, indexed and truecolor
 pairs that a palette-only audit cannot guarantee. Native window inspection and
-generated-style checks are separate validation steps.
+generated-style checks are separate validation steps. Use Solid for the baseline;
+check opt-in transparency against both light and dark desktop backgrounds.
 
 Integration tests use the `SLATE_HOME` environment variable to isolate runs from your real `~/.config`. No test touches your dotfiles.
 

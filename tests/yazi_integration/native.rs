@@ -22,13 +22,15 @@ impl Drop for Native {
 
 #[test]
 #[ignore = "requires SLATE_YAZI_BINARY; native program runs only in disposable PTYs"]
-fn yazi_native_loads_flavor_and_renders_dark_and_light_colors() {
+fn yazi_native_loads_flavor_and_renders_all_palettes() {
     let binary = std::env::var_os("SLATE_YAZI_BINARY").expect("explicit Yazi executable");
-    for id in ["nord", "catppuccin-latte"] {
+    let themes = ThemeRegistry::new().unwrap();
+    let foreground =
+        regex::Regex::new(r"<key>foreground</key>\s*<string>(#[0-9a-fA-F]{6})</string>").unwrap();
+    for theme in themes.all() {
+        let id = &theme.id;
         let home = tempfile::tempdir().unwrap();
         let env = SlateEnv::with_home(home.path().to_owned());
-        let themes = ThemeRegistry::new().unwrap();
-        let theme = themes.get(id).unwrap();
         YaziAdapter.apply_theme_with_env(theme, &env).unwrap();
         let config_before = YaziAdapter::paths(&env).map(|path| fs::read(path).unwrap());
         let cwd = home.path().join("demo-project");
@@ -104,9 +106,16 @@ fn yazi_native_loads_flavor_and_renders_dark_and_light_colors() {
             .map(|i| u8::from_str_radix(&theme.palette.cyan[i..i + 2], 16).unwrap())
             .collect();
         let expected = format!("38;2;{};{};{}", rgb[0], rgb[1], rgb[2]);
+        let syntax = fs::read_to_string(YaziAdapter::syntax_path(&env)).unwrap();
+        let function = syntax
+            .split_once("<string>entity.name.function, support.function</string>")
+            .unwrap()
+            .1;
+        let color = foreground.captures(function).unwrap()[1].to_owned();
+        assert!(slate_cli::wcag::contrast_hex(&color, &theme.palette.background) >= 4.5);
         let code_rgb: Vec<_> = [1, 3, 5]
             .into_iter()
-            .map(|i| u8::from_str_radix(&theme.palette.blue[i..i + 2], 16).unwrap())
+            .map(|i| u8::from_str_radix(&color[i..i + 2], 16).unwrap())
             .collect();
         let code_color = format!("38;2;{};{};{}mmain", code_rgb[0], code_rgb[1], code_rgb[2]);
         let start = Instant::now();

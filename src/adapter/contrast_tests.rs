@@ -225,6 +225,19 @@ fn rendered_tool_colors_meet_text_contrast_for_every_theme() {
         for rule in yazi["filetype"]["rules"].as_array().unwrap() {
             audit.pair(&scope("yazi", "filetype"), rule["fg"].as_str().unwrap(), bg);
         }
+        for (section, key, selected) in [
+            ("help", "chord", &yazi["help"]["hovered"]),
+            ("help", "action", &yazi["help"]["hovered"]),
+            ("mgr", "find_keyword", &yazi["indicator"]["current"]),
+            ("mgr", "find_position", &yazi["indicator"]["current"]),
+            ("mgr", "symlink_target", &yazi["indicator"]["current"]),
+        ] {
+            audit.pair(
+                &scope("yazi", &format!("{section}.{key}.selected")),
+                yazi[section][key]["fg"].as_str().unwrap(),
+                selected["bg"].as_str().unwrap(),
+            );
+        }
 
         let zellij: kdl::KdlDocument = zellij::palette::render(theme).unwrap().parse().unwrap();
         let components = zellij

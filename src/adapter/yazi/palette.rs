@@ -131,6 +131,13 @@ pub(crate) fn render(theme: &ThemeVariant) -> Result<(String, String)> {
             };
             let fg = if name.starts_with("marker_") {
                 fg.to_owned()
+            } else if (section == "help" && matches!(name, "chord" | "action"))
+                || (section == "mgr"
+                    && matches!(name, "find_keyword" | "find_position" | "symlink_target"))
+            {
+                // These spans override the selected row's foreground while
+                // inheriting its background in Yazi's native renderer.
+                crate::wcag::readable_on(fg, &[background, selected])
             } else {
                 crate::wcag::readable_color(fg, effective_bg)
             };
