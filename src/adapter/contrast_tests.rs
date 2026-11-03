@@ -20,7 +20,7 @@ impl Audit {
         }
     }
     fn finish(self) {
-        eprintln!("Audited {} rendered text/background pairs", self.checked);
+        eprintln!("Audited {} generated text/background pairs", self.checked);
         assert!(
             self.failures.is_empty(),
             "{} failing pairs:\n{}",
@@ -55,6 +55,9 @@ fn rendered_tool_colors_meet_text_contrast_for_every_theme() {
     let delta_background =
         Regex::new(r#"(?:minus|plus)-style = syntax "(#[a-fA-F0-9]{6})""#).unwrap();
     let swatch = Regex::new(r"\x1b\[48;2;(\d+);(\d+);(\d+)m\x1b\[38;2;(\d+);(\d+);(\d+)m").unwrap();
+    let special =
+        Regex::new(r"(?:su|sg|ca|tw|ow|st)=38;2;(\d+);(\d+);(\d+);48;2;(\d+);(\d+);(\d+);1")
+            .unwrap();
     for theme in ThemeRegistry::new().unwrap().all() {
         let p = &theme.palette;
         let bg = &p.background;
@@ -78,11 +81,18 @@ fn rendered_tool_colors_meet_text_contrast_for_every_theme() {
         let alacritty: toml::Value = AlacrittyAdapter::render_alacritty_colors(theme)
             .parse()
             .unwrap();
-        for group in ["normal", "bright"] {
+        for group in ["normal", "bright", "dim"] {
             for (key, value) in alacritty["colors"][group].as_table().unwrap() {
                 audit.pair(&scope("alacritty", key), value.as_str().unwrap(), bg);
             }
         }
+        audit.pair(
+            &scope("alacritty", "dim foreground"),
+            alacritty["colors"]["primary"]["dim_foreground"]
+                .as_str()
+                .unwrap(),
+            bg,
+        );
         for (group, bg_key) in [
             ("primary", "background"),
             ("selection", "background"),
@@ -104,6 +114,8 @@ fn rendered_tool_colors_meet_text_contrast_for_every_theme() {
             .lines()
             .filter_map(|l| l.split_once(' ').map(|(k, v)| (k.to_owned(), v.to_owned())))
             .collect();
+        assert_eq!(kitty["text_fg_override_threshold"], "4.5 ratio");
+        assert_eq!(kitty["dim_opacity"], "1");
         for index in 0..16 {
             audit.pair(
                 &scope("kitty", &format!("color{index}")),
@@ -139,6 +151,8 @@ fn rendered_tool_colors_meet_text_contrast_for_every_theme() {
                 }
             })
             .collect();
+        assert_eq!(ghostty["minimum-contrast"], "4.5");
+        assert_eq!(ghostty["faint-opacity"], "1");
         for index in 0..16 {
             audit.pair(
                 &scope("ghostty", &format!("palette{index}")),
@@ -313,6 +327,19 @@ fn rendered_tool_colors_meet_text_contrast_for_every_theme() {
                 );
                 audit.pair(&scope(tool, "foreground"), &fg, bg);
             }
+        }
+        let ls = ls_colors::render_ls_colors(p);
+        assert_eq!(special.captures_iter(&ls).count(), 6);
+        for c in special.captures_iter(&ls) {
+            let color = |offset: usize| {
+                format!(
+                    "#{:02x}{:02x}{:02x}",
+                    c[offset].parse::<u8>().unwrap(),
+                    c[offset + 1].parse::<u8>().unwrap(),
+                    c[offset + 2].parse::<u8>().unwrap()
+                )
+            };
+            audit.pair(&scope("ls", "special permissions"), &color(1), &color(4));
         }
 
         let opencode: serde_json::Value =

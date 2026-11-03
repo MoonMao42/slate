@@ -779,6 +779,120 @@ fn loader_lua_parses_via_luafile() {
     );
 }
 
+#[test]
+#[cfg(feature = "has-nvim")]
+fn native_search_then_visual_selection_keeps_text_readable() {
+    use slate_cli::{
+        adapter::NvimAdapter, env::SlateEnv, theme::ThemeRegistry, wcag::contrast_hex,
+    };
+    if skip_if_no_nvim("native_search_then_visual_selection_keeps_text_readable") {
+        return;
+    }
+    let nvim = which::which("nvim").unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let env = SlateEnv::with_home(root.path().to_owned());
+    let registry = ThemeRegistry::new().unwrap();
+    NvimAdapter::setup(&env, registry.all()[0]).unwrap();
+    let init = root.path().join("colors.lua");
+    let tokens = regex::Regex::new(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[()][0-2A-Z]|\x1b.|[^\x1b]+").unwrap();
+    for theme in registry.all() {
+        let code = format!(
+            "vim.opt.termguicolors = true\nvim.opt.rtp:prepend({rtp})\nvim.cmd('colorscheme slate-{id}')\nvim.api.nvim_buf_set_lines(0, 0, -1, false, {{'plain text', 'match selected text', 'another match'}})\nvim.opt.hlsearch = true\nvim.opt.title = true\nvim.opt.titlestring = 'slate-color-ready'\n",
+            rtp = serde_json::to_string(&root.path().join(".config/nvim")).unwrap(),
+            id = theme.id,
+        );
+        std::fs::write(&init, code).unwrap();
+        let output = assert_cmd::Command::new("python3")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/support/nvim_colors_pty.py"
+            ))
+            .arg(&nvim)
+            .arg(&init)
+            .env("HOME", root.path())
+            .env("XDG_CONFIG_HOME", root.path().join(".config"))
+            .env("XDG_CACHE_HOME", root.path().join(".cache"))
+            .env("TERM", "xterm-256color")
+            .env("COLORTERM", "truecolor")
+            .env_remove("NO_COLOR")
+            .timeout(std::time::Duration::from_secs(8))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}: {}",
+            theme.id,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8_lossy(&output.stdout);
+        let (mut fg, mut bg) = (
+            theme.palette.foreground.clone(),
+            theme.palette.background.clone(),
+        );
+        let mut reversed = false;
+        let mut selected_text = 0;
+        for token in tokens.find_iter(&text).map(|m| m.as_str()) {
+            if token.starts_with('\x1b') {
+                if !token.starts_with("\x1b[")
+                    || !token.ends_with('m')
+                    || token.contains(['?', '>'])
+                {
+                    continue;
+                }
+                let values: Vec<u16> = token[2..token.len() - 1]
+                    .split(';')
+                    .map(|v| v.parse().unwrap_or(0))
+                    .collect();
+                let mut i = 0;
+                while i < values.len() {
+                    match values[i] {
+                        0 => {
+                            fg = theme.palette.foreground.clone();
+                            bg = theme.palette.background.clone();
+                            reversed = false;
+                        }
+                        7 => reversed = true,
+                        27 => reversed = false,
+                        39 => fg = theme.palette.foreground.clone(),
+                        49 => bg = theme.palette.background.clone(),
+                        38 | 48 if i + 4 < values.len() && values[i + 1] == 2 => {
+                            let color = format!(
+                                "#{:02x}{:02x}{:02x}",
+                                values[i + 2],
+                                values[i + 3],
+                                values[i + 4]
+                            );
+                            if values[i] == 38 {
+                                fg = color;
+                            } else {
+                                bg = color;
+                            }
+                            i += 4;
+                        }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+            } else if token.chars().any(char::is_alphanumeric) {
+                let (fg, bg) = if reversed { (&bg, &fg) } else { (&fg, &bg) };
+                assert!(
+                    contrast_hex(fg, bg) >= 4.5,
+                    "{}: {token:?} uses {fg} on {bg}",
+                    theme.id
+                );
+                if Some(bg) == theme.palette.selection_bg.as_ref() {
+                    selected_text += 1;
+                }
+            }
+        }
+        assert!(
+            selected_text > 0,
+            "{}: no selected text was rendered",
+            theme.id
+        );
+    }
+}
+
 // clean + config editor disable (cross-reference)
 // The `clean_removes_all_nvim_files` and
 // `config_editor_disable_preserves_colors` contracts live alongside the

@@ -45,7 +45,7 @@ impl AlacrittyAdapter {
         let palette = &theme.palette;
 
         let mut colors = format!(
-            "[colors.primary]\nbackground = \"{}\"\nforeground = \"{}\"\n\n\
+            "[colors.primary]\nbackground = \"{}\"\nforeground = \"{}\"\ndim_foreground = \"{dim_fg}\"\n\n\
 [colors.normal]\nblack = \"{}\"\nred = \"{}\"\ngreen = \"{}\"\nyellow = \"{}\"\nblue = \"{}\"\nmagenta = \"{}\"\ncyan = \"{}\"\nwhite = \"{}\"\n\n\
 [colors.bright]\nblack = \"{}\"\nred = \"{}\"\ngreen = \"{}\"\nyellow = \"{}\"\nblue = \"{}\"\nmagenta = \"{}\"\ncyan = \"{}\"\nwhite = \"{}\"\n",
             palette.background,
@@ -68,6 +68,7 @@ impl AlacrittyAdapter {
             palette.bright_magenta,
             palette.bright_cyan,
             palette.bright_white,
+            dim_fg = palette.foreground,
         );
         let selection_bg = palette
             .selection_bg
@@ -83,6 +84,21 @@ impl AlacrittyAdapter {
         let cursor = palette.cursor.as_deref().unwrap_or(&palette.foreground);
         let cursor_text = crate::wcag::readable_color(&palette.background, cursor);
         colors.push_str(&format!("\n[colors.selection]\ntext = \"{selection_fg}\"\nbackground = \"{selection_bg}\"\n\n[colors.cursor]\ntext = \"{cursor_text}\"\ncursor = \"{cursor}\"\n"));
+        // Alacritty otherwise darkens normal colors for SGR 2, which can turn
+        // readable text into unreadable text on a dark terminal background.
+        colors.push_str("\n[colors.dim]\n");
+        for (name, color) in [
+            ("black", &palette.black),
+            ("red", &palette.red),
+            ("green", &palette.green),
+            ("yellow", &palette.yellow),
+            ("blue", &palette.blue),
+            ("magenta", &palette.magenta),
+            ("cyan", &palette.cyan),
+            ("white", &palette.white),
+        ] {
+            colors.push_str(&format!("{name} = \"{color}\"\n"));
+        }
         colors
     }
 

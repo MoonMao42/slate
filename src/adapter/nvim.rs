@@ -1,25 +1,7 @@
-//! Neovim colorscheme adapter — emits Lua files under the user's
-//! `~/.config/nvim/` runtimepath. See plans 01-08.
-//! Delivered in waves:
-//! W1 — src/design/nvim_highlights.rs (role→group table)
-//! W2 — render_colorscheme + render_shim (this file)
-//! W3 — render_loader + write_state_file (this file)
-//! W4 — plugin groups + lualine_theme (this file)
-//! W5 — NvimAdapter trait impl + registry wiring (this file)
-//! deliverables landed in this file:
-//! • `render_colorscheme(palette, variant_id) -> String` — emits ONE
-//! variant's highlight-group sub-table as `-- comment\n{ ... }`
-//! (splice target, not a standalone Lua module).
-//! • `render_shim(variant_id) -> String` — emits the 2-line shim that
-//! lives at `~/.config/nvim/colors/slate-<id>.lua`.
-//! Output shape reminder: `render_colorscheme`'s output is a leading Lua
-//! comment followed by a BARE table literal. It is designed to be spliced
-//! into the loader's `PALETTES` table by (i.e.
-//! `PALETTES['<variant-id>'] = <render_colorscheme output>`). It is NOT a
-//! standalone Lua module — don't wrap with `return` / `local t =` — and
-//! syntax gate validates each variant's sub-table through the
-//! loader parse path, not via a direct luafile on render_colorscheme
-//! output (bare `{ ... }` at file-statement level is a Lua parse error).
+//! Neovim colorscheme, loader and live palette state.
+//! render_colorscheme emits a bare Lua table for insertion into the loader;
+//! render_shim selects a variant through that loader. Setup installs both,
+//! while ordinary theme application updates the state consumed by the loader.
 
 #![allow(dead_code)]
 

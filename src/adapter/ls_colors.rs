@@ -1,54 +1,7 @@
-//! LS_COLORS + EZA_COLORS adapter — projects the shared file_type classifier
-//! into two environment-variable strings.
-//! The rendered strings are materialised into the managed shell integration
-//! files (`managed/shell/env.{zsh,bash,fish}`) by `SharedShellModel` in
-//! . This module owns the projection only; it does not
-//! write any files.
-//! ## Color byte source of truth
-//! Every per-entry colour is a bare `38;2;R;G;B` triple — no ESC-`[` wrapper,
-//! no trailing `m`. The shell consumer (GNU `ls` / `eza`) supplies the
-//! wrapping when it interprets the env var. This module shares the same
-//! hex→ANSI primitive (`PaletteRenderer::rgb_to_ansi_24bit`) as
-//! `src/brand/palette.rs::pill_background_rgb` and `src/brand/roles.rs`
-//! single source of truth for color bytes (round-trip locked by the
-//! `ls_colors_round_trips_through_classifier` invariant test).
-//! ## File-type kind keys (LS_COLORS)
-//! `file_type_colors::classify` is the single source of truth; it
-//! defines five `FileKind`s — `Regular`, `Directory`, `Symlink`, `Executable`
-//! (plus `Hidden` derived at match-time). GNU `LS_COLORS`, however, defines
-//! eight file-type kind keys that `ls` emits for filesystem entries beyond
-//! those four. We reuse the closest role for each missing kind so
-//! the output stays consistent with the project's single-palette invariant,
-//! and document the intentional reuse below:
-//! | Key | Meaning | Role reused |
-//! |-----|-----------------------------------|-----------------------|
-//! | `di`| Directory | `FileDir` |
-//! | `ln`| Symbolic link | `FileSymlink` |
-//! | `ex`| Executable file | `FileExec` |
-//! | `or`| Orphan symlink (broken) | `FileSymlink` (reuse) |
-//! | `so`| Unix socket | `FileExec` (reuse) |
-//! | `pi`| Named pipe / FIFO | `FileConfig` (reuse) |
-//! | `bd`| Block device | `FileConfig` (reuse) |
-//! | `cd`| Character device | `FileConfig` (reuse) |
-//! `or` / `so` / `pi` / `bd` / `cd` do not appear in the classifier
-//! (`FileKind` has no Pipe / Socket / BlockDevice / CharDevice variants).
-//! Extending `FileKind` is deferred — until then, the closest semantically
-//! adjacent role is emitted .
-//! ## `reset:` sentinel on EZA_COLORS
-//! Per `eza_colors(5)`, eza merges `EZA_COLORS` on top of its built-in
-//! extension → color map. Setting `EZA_COLORS="*.rs=…"` alone does not
-//! reset eza's defaults; colors for extensions we do not override leak
-//! through. To keep "one palette across the stack" true, `render_eza_colors`
-//! prepends `reset:` — eza wipes its built-in DB on `reset` and then honours
-//! only the palette-driven entries we emit (with `no=0` handling everything
-//! else as default foreground).
-//! Note on `allow(dead_code)`: the `pub(crate)` render functions and the
-//! `FILE_TYPE_KIND_KEYS` table are consumed by (`SharedShellModel`)
-//! in . Until that wave lands they have no non-test call sites; the
-//! module-level `allow(dead_code)` is intentional and will be dropped when
-//! wires `render_strings()` into shell-integration composition.
-
-#![allow(dead_code)]
+//! Palette-driven LS_COLORS and EZA_COLORS exports for the shell integration.
+//! File kinds and extensions share the file_type_colors classifier. GNU ls
+//! special permission backgrounds are explicit because omitted kinds retain
+//! its built-in ANSI pairs. Eza starts with `reset` to discard its built-in map.
 
 use crate::adapter::palette_renderer::PaletteRenderer;
 use crate::adapter::{ApplyOutcome, ApplyStrategy, ToolAdapter};
@@ -90,9 +43,9 @@ fn ansi_code(palette: &Palette, role: SemanticColor) -> String {
 }
 
 /// Render LS_COLORS string for a given palette.
-/// Layout: `rs=0:no=0:<file-type kinds>:<*.ext entries>:<FULL_NAME entries>`.
-/// Every per-entry colour is a truecolor `38;2;R;G;B` triple (no
-/// 256-colour fallback, no ESC-`[` wrapper, no trailing `m`).
+/// Layout: `rs=0:no=0:<file-type kinds>:<*.ext entries>:<*name suffix entries>`.
+/// Color components use truecolor SGR parameters without ESC wrappers; special
+/// permission entries also include a truecolor background and bold weight.
 pub(crate) fn render_ls_colors(palette: &Palette) -> String {
     let mut out = String::with_capacity(1024);
     out.push_str("rs=0:no=0");
@@ -102,12 +55,32 @@ pub(crate) fn render_ls_colors(palette: &Palette) -> String {
         let _ = write!(out, ":{key}={}", ansi_code(palette, *role));
     }
 
+    // GNU ls retains its built-in colored backgrounds for these kinds unless
+    // explicitly overridden. Those ANSI pairs often clash with light themes
+    // and with palettes whose black/white slots are readable foregrounds.
+    for (keys, accent) in [
+        (&["su", "ca"][..], &palette.red),
+        (&["sg", "tw", "ow", "st"][..], &palette.yellow),
+    ] {
+        let bg = crate::wcag::blend_hex(&palette.background, accent, 0.18);
+        let fg = crate::wcag::readable_color(accent, &bg);
+        if let (Ok((r, g, b)), Ok((br, bg, bb))) = (
+            PaletteRenderer::hex_to_rgb(&fg),
+            PaletteRenderer::hex_to_rgb(&bg),
+        ) {
+            for key in keys {
+                let _ = write!(out, ":{key}=38;2;{r};{g};{b};48;2;{br};{bg};{bb};1");
+            }
+        }
+    }
+
     for (ext, role) in extension_map() {
         let _ = write!(out, ":*.{ext}={}", ansi_code(palette, *role));
     }
 
+    // GNU ls recognizes suffix rules only when the key starts with `*`.
     for (name, role) in full_name_map() {
-        let _ = write!(out, ":{name}={}", ansi_code(palette, *role));
+        let _ = write!(out, ":*{name}={}", ansi_code(palette, *role));
     }
 
     out
@@ -130,7 +103,7 @@ pub(crate) fn render_eza_colors(palette: &Palette) -> String {
     }
 
     for (name, role) in full_name_map() {
-        let _ = write!(out, ":{name}={}", ansi_code(palette, *role));
+        let _ = write!(out, ":*{name}={}", ansi_code(palette, *role));
     }
 
     // eza-specific identity keys:
@@ -246,6 +219,70 @@ mod tests {
     use regex::Regex;
     use rstest::rstest;
 
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn native_ls_accepts_filename_rules_and_renders_special_permissions() {
+        use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+        let root = tempfile::tempdir().unwrap();
+        for (name, mode) in [("setuid", 0o4755), ("setgid", 0o2755)] {
+            fs::write(root.path().join(name), "").unwrap();
+            fs::set_permissions(root.path().join(name), fs::Permissions::from_mode(mode)).unwrap();
+        }
+        for (name, mode) in [
+            ("sticky", 0o1777),
+            ("writable", 0o777),
+            ("sticky-only", 0o1755),
+        ] {
+            fs::create_dir(root.path().join(name)).unwrap();
+            fs::set_permissions(root.path().join(name), fs::Permissions::from_mode(mode)).unwrap();
+        }
+        fs::write(root.path().join("Cargo.toml"), "").unwrap();
+        let style =
+            Regex::new(r"\x1b\[38;2;(\d+);(\d+);(\d+)(?:;48;2;(\d+);(\d+);(\d+);1)?m([^\x1b]+)")
+                .unwrap();
+        for theme in crate::theme::ThemeRegistry::new().unwrap().all() {
+            let output = Command::new("ls")
+                .args(["--color=always", "-1"])
+                .arg(root.path())
+                .env("LS_COLORS", render_ls_colors(&theme.palette))
+                .env("TERM", "xterm-256color")
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert!(
+                output.stderr.is_empty(),
+                "{}: {}",
+                theme.id,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let text = String::from_utf8(output.stdout).unwrap();
+            let mut checked = 0;
+            for c in style.captures_iter(&text) {
+                let color = |offset: usize| {
+                    format!(
+                        "#{:02x}{:02x}{:02x}",
+                        c[offset].parse::<u8>().unwrap(),
+                        c[offset + 1].parse::<u8>().unwrap(),
+                        c[offset + 2].parse::<u8>().unwrap()
+                    )
+                };
+                let bg = if c.get(4).is_some() {
+                    color(4)
+                } else {
+                    theme.palette.background.clone()
+                };
+                assert!(
+                    crate::wcag::contrast_hex(&color(1), &bg) >= 4.5,
+                    "{}/{}",
+                    theme.id,
+                    &c[7]
+                );
+                checked += 1;
+            }
+            assert_eq!(checked, 6, "{}: ls silently dropped styles", theme.id);
+        }
+    }
+
     fn test_palettes() -> Vec<(&'static str, Palette)> {
         vec![
             (
@@ -310,7 +347,7 @@ mod tests {
         for (label, palette) in test_palettes() {
             let out = render_ls_colors(&palette);
             for (name, _role) in full_name_map() {
-                let needle = format!(":{name}=38;2;");
+                let needle = format!(":*{name}=38;2;");
                 assert!(
                     out.contains(&needle),
                     "palette={label}: missing full-name entry `{needle}`",
@@ -330,8 +367,8 @@ mod tests {
             ("main.rs", FileKind::Regular, ":*.rs="),
             ("README.md", FileKind::Regular, ":*.md="),
             ("photo.png", FileKind::Regular, ":*.png="),
-            ("Cargo.lock", FileKind::Regular, ":Cargo.lock="),
-            ("pnpm-lock.yaml", FileKind::Regular, ":pnpm-lock.yaml="),
+            ("Cargo.lock", FileKind::Regular, ":*Cargo.lock="),
+            ("pnpm-lock.yaml", FileKind::Regular, ":*pnpm-lock.yaml="),
             ("src", FileKind::Directory, ":di="),
             ("deploy", FileKind::Executable, ":ex="),
             ("link", FileKind::Symlink, ":ln="),
@@ -368,11 +405,10 @@ mod tests {
 
     #[rstest]
     fn ls_colors_uses_only_truecolor_codes() {
-        // Every value between `=` and the next `:` (or EOS) must match
-        // either a truecolor triple or the literal reset "0". No 256-colour
-        // fallback, no wrapped escapes.
+        // Special permission styles include an explicit truecolor background.
         let truecolor_or_reset =
-            Regex::new(r"^(?:38;2;\d{1,3};\d{1,3};\d{1,3}|0)$").expect("regex");
+            Regex::new(r"^(?:38;2;\d{1,3};\d{1,3};\d{1,3}(?:;48;2;\d{1,3};\d{1,3};\d{1,3};1)?|0)$")
+                .expect("regex");
 
         for (label, palette) in test_palettes() {
             let out = render_ls_colors(&palette);
@@ -476,7 +512,7 @@ mod tests {
             }
 
             for (name, _role) in full_name_map() {
-                let ls_needle = format!(":{name}=");
+                let ls_needle = format!(":*{name}=");
                 let ls_pos = ls.find(&ls_needle).expect("ls full-name entry present");
                 let ls_end = ls[ls_pos + 1..]
                     .find(':')

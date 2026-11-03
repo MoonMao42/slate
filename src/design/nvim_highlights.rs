@@ -237,10 +237,15 @@ pub static HIGHLIGHT_GROUPS: &[(&str, HighlightSpec)] = &[
         "Title",
         HighlightSpec::styled(SemanticColor::Accent, Style::Bold),
     ),
-    ("Visual", HighlightSpec::bg_only(SemanticColor::Selection)),
+    // A background-only selection inherits Search/IncSearch foregrounds,
+    // including canvas-colored text that disappears on the selection surface.
+    (
+        "Visual",
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::Selection),
+    ),
     (
         "VisualNOS",
-        HighlightSpec::bg_only(SemanticColor::Selection),
+        HighlightSpec::fg_bg(SemanticColor::Text, SemanticColor::Selection),
     ),
     ("WildMenu", HighlightSpec::linked("Visual")),
     (

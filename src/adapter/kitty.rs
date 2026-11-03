@@ -76,7 +76,9 @@ impl KittyAdapter {
         let cursor_text = crate::wcag::readable_color(&p.background, cursor);
 
         format!(
-            "foreground {fg}\n\
+            "text_fg_override_threshold 4.5 ratio\n\
+             dim_opacity 1\n\
+             foreground {fg}\n\
              background {bg}\n\
              cursor {cursor}\n\
              cursor_text_color {cursor_text}\n\
@@ -279,7 +281,7 @@ impl ToolAdapter for KittyAdapter {
         Self::ensure_integration_includes_managed(&integration_path, &theme_path)?;
         Self::ensure_integration_includes_managed(&integration_path, &opacity_path)?;
 
-        // Kitty pushes colors to running windows via `kitten @ set-colors`
+        // Kitty reloads colors and contrast settings via `kitten @ load-config`
         // in the reload() path; no new shell required to see the change.
         Ok(ApplyOutcome::applied_no_shell())
     }
@@ -295,8 +297,9 @@ impl ToolAdapter for KittyAdapter {
                 "SSH cannot reload the client terminal".into(),
             ));
         }
-        // Kitty does NOT auto-reload included files. Use `kitten @ set-colors`
-        // to push colors to all running Kitty windows immediately.
+        // Kitty does NOT auto-reload included files. Reload the config so the
+        // contrast threshold and dim opacity also reach existing windows;
+        // set-colors only updates colors and would silently omit those settings.
         // Requires `allow_remote_control` in kitty.conf (we add it automatically).
         let env = SlateEnv::from_process()?;
         let config_mgr = ConfigManager::with_env(&env)?;
@@ -311,18 +314,12 @@ impl ToolAdapter for KittyAdapter {
             &config_mgr,
             &sockets,
             |socket_path| {
-                kitty_command_succeeded(
-                    Command::new("kitten")
-                        .args([
-                            "@",
-                            "--to",
-                            socket_path,
-                            "set-colors",
-                            "--all",
-                            "--configured",
-                        ])
-                        .arg(&theme_path),
-                )
+                kitty_command_succeeded(Command::new("kitten").args([
+                    "@",
+                    "--to",
+                    socket_path,
+                    "load-config",
+                ]))
             },
             |socket_path, opacity| {
                 kitty_command_succeeded(

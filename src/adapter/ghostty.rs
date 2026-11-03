@@ -262,9 +262,14 @@ impl ToolAdapter for GhosttyAdapter {
         // A managed titlebar-style value loads after user preferences (including
         // nested config-files), silently overriding tabs/hidden/native choices.
         // Omission also removes earlier Slate overrides when this file regenerates.
+        // Remote programs also choose explicit ANSI backgrounds, indexed colors
+        // and truecolor. Palette checks alone cannot protect those combinations.
+        // Keep faint text opaque so dimming cannot undo the contrast floor.
         let managed_content = format!(
             "theme =\n\
              window-theme = {window_theme}\n\
+             minimum-contrast = 4.5\n\
+             faint-opacity = 1\n\
              background = {bg}\n\
              foreground = {fg}\n\
              cursor-color = {cursor}\n\

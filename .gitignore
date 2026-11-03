@@ -38,6 +38,7 @@ scripts/*
 !scripts/build-dev.sh
 !scripts/install-dev.sh
 !scripts/dev-space.sh
+!scripts/check-terminal-colors.sh
 
 # Misc
 plot_25min.png

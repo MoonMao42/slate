@@ -41,6 +41,13 @@ Palette changes must pass both `cargo test --test theme_contrast_audit` and
 styles and checks inherited selection, panel and diff backgrounds, not just
 individual swatches. Update affected color snapshots after reviewing the output.
 
+Also test actual application output: search then visually select in Neovim,
+fzf with a Bat preview, selected process rows, Git diffs, and SSH inside tmux.
+Run `bash scripts/check-terminal-colors.sh` in each terminal with dark and light
+themes. It includes explicit ANSI backgrounds, dim/reverse, indexed and truecolor
+pairs that a palette-only audit cannot guarantee. Native window inspection and
+generated-style checks are separate validation steps.
+
 Integration tests use the `SLATE_HOME` environment variable to isolate runs from your real `~/.config`. No test touches your dotfiles.
 
 ## Code quality
