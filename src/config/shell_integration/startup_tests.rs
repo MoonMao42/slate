@@ -133,7 +133,7 @@ impl Fixture {
     }
 
     fn check_calls(&self, interactive: bool) {
-        // Disowned Zsh helpers are intentionally not covered by shell `wait`.
+        // Detached helpers are intentionally not covered by shell `wait`.
         // Wait for the private stub receipt, not for any host process.
         if interactive {
             let deadline = std::time::Instant::now() + Duration::from_secs(2);

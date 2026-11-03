@@ -446,14 +446,14 @@ fn render_posix_fastfetch_autorun(content: &mut String) {
 }
 
 fn render_posix_auto_theme(content: &mut String, model: &SharedShellModel, shell: PosixShell) {
-    // Zsh's disowned job syntax suppresses shell job notices; redirecting the
-    // helper's own output alone does not. Do not change the user's job options.
-    let background = match shell {
-        PosixShell::Zsh => "&!",
-        PosixShell::Bash => "&",
+    // Detach the helper from the interactive shell's jobs. Redirecting its
+    // output alone does not suppress job notices; preserve the user's options.
+    let (prefix, background) = match shell {
+        PosixShell::Zsh => ("", "&!"),
+        PosixShell::Bash => ("( ", "& )"),
     };
     content.push_str(&format!(
-        "if [ \"${{TERM_PROGRAM:-}}\" = \"ghostty\" ] || [ \"${{TERM_PROGRAM:-}}\" = \"Ghostty\" ]; then\n  if [ -x {notify} ]; then\n    {notify} >/dev/null 2>&1 {background}\n  fi\nfi\n",
+        "if [ \"${{TERM_PROGRAM:-}}\" = \"ghostty\" ] || [ \"${{TERM_PROGRAM:-}}\" = \"Ghostty\" ]; then\n  if [ -x {notify} ]; then\n    {prefix}{notify} >/dev/null 2>&1 {background}\n  fi\nfi\n",
         notify = model.notify_path,
     ));
 }

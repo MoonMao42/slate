@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bash startup no longer reports job completion for the auto-theme watcher.
 - The shell installer accepts blank lines around cargo-dist checksum records while still rejecting missing or duplicate records.
 
 ## [0.6.0] - 2026-10-20
