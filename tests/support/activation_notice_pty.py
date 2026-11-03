@@ -28,7 +28,7 @@ for case in (['inactive', 'failed'] if args.fixture else ['hub', 'redirected']):
         root = Path(directory)
         bin_dir = root / '.local/bin'
         bin_dir.mkdir(parents=True)
-        env = {'HOME': directory, 'PATH': str(bin_dir), 'TERM': 'xterm-256color', 'NO_COLOR': '1'}
+        env = {'HOME': directory, 'PATH': str(bin_dir), 'TERM': 'xterm-256color', 'NO_COLOR': '1', 'SLATE_LANGUAGE': 'zh-CN'}
         if args.fixture:
             reason = 'No such file or directory' if case == 'inactive' else 'Permission denied'
             tool = bin_dir / 'tmux'
@@ -48,7 +48,7 @@ for case in (['inactive', 'failed'] if args.fixture else ['hub', 'redirected']):
             (config / 'current').write_text('nord\n')
             (config / 'config.toml').write_text('[sound]\nenabled = false\n')
             (root / '.config/opencode').mkdir()
-            (root / '.config/opencode/tui.json').write_text('{}\n')
+            (root / '.config/opencode/cli.json').write_text('{}\n')
             command = [binary] if case == 'hub' else [binary, 'theme', 'nord']
         if case == 'redirected':
             result = subprocess.run(command, env=env, cwd=root, capture_output=True, timeout=10)
@@ -121,6 +121,6 @@ for case in (['inactive', 'failed'] if args.fixture else ['hub', 'redirected']):
         if not args.fixture:
             assert (config / 'current').read_text().strip() == 'nord'
             assert (root / '.config/btop/themes/slate-sync.theme').is_file()
-            assert 'system' in (root / '.config/opencode/tui.json').read_text()
+            assert 'slate-sync' in (root / '.config/opencode/cli.json').read_text()
             assert not (root / 'UNEXPECTED_TOOL').exists()
         print(f'PASS: activation output {case}; private profile only')

@@ -197,7 +197,7 @@ fn doctor_integration_fifo_reads_are_bounded_and_read_only() {
         ("kitty", ".config/kitty/kitty.conf"),
         ("nvim", ".config/nvim/init.lua"),
         ("zsh", ".zshrc"),
-        ("opencode", ".config/opencode/tui.json"),
+        ("opencode", ".config/opencode/cli.json"),
         ("opacity", ".config/slate/current-opacity"),
     ] {
         let home = TempDir::new().unwrap();

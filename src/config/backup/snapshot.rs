@@ -185,9 +185,9 @@ fn baseline_snapshot_targets(env: &SlateEnv) -> Result<Vec<SnapshotTarget>> {
             path: crate::adapter::YaziAdapter::syntax_path(env),
         },
         SnapshotTarget {
-            tool_key: "opencode-tui",
+            tool_key: "opencode-cli",
             display_tool: "OpenCode",
-            path: crate::adapter::OpencodeAdapter::tui_config_path(env),
+            path: crate::adapter::OpencodeAdapter::cli_config_path(env),
         },
         SnapshotTarget {
             tool_key: "opencode-theme",
@@ -334,9 +334,6 @@ fn create_snapshot_with_policy(
     allocation_error: &str,
     restore_targets: SnapshotTargets<'_>,
 ) -> Result<RestorePoint> {
-    if matches!(&restore_targets, SnapshotTargets::Standard) {
-        env.validate_opencode_tui_config()?;
-    }
     let created_at = SystemTime::now();
     let backup_dir = backup_directory_with_env(env)?;
 

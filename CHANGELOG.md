@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ghostty and Kitty protect contrast for remote scripts and application-defined ANSI, indexed and truecolor pairs; faint text no longer loses readability. Alacritty receives explicit dim colors.
 - Neovim selections remain readable over search matches, and GNU `ls` accepts filename rules and uses readable special permission backgrounds.
 - Contrast-aware editor, diff, file-manager, status-bar and picker colors, including syntax under selections and diff highlights.
-- OpenCode uses a generated `slate-sync` palette with readable panels, comments and diffs while keeping its canvas transparent.
+- OpenCode 2 uses `cli.json` and a generated `slate-sync` semantic theme, including readable selected actions, panels, comments and diffs. Theme mode and other CLI settings are preserved.
 - Bash startup no longer reports job completion for the auto-theme watcher.
 - The shell installer accepts blank lines around cargo-dist checksum records while still rejecting missing or duplicate records.
 

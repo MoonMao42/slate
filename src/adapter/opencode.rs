@@ -1,4 +1,4 @@
-//! OpenCode palette publication with lossless TUI theme selection.
+//! OpenCode palette publication with lossless CLI theme selection.
 
 use crate::adapter::{ApplyOutcome, ApplyStrategy, SkipReason, ToolAdapter};
 use crate::config::ConfigManager;
@@ -7,7 +7,7 @@ use crate::env::SlateEnv;
 use crate::error::Result;
 use crate::theme::ThemeVariant;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub(crate) mod config;
 pub(crate) mod palette;
@@ -21,62 +21,14 @@ impl OpencodeAdapter {
             .join("opencode/themes/slate-sync.json")
     }
 
-    pub(crate) const TUI_SCHEMA: &'static str = "https://opencode.ai/tui.json";
+    pub(crate) const CLI_SCHEMA: &'static str = "https://opencode.ai/v2/cli.json";
 
-    /// Resolve the path to opencode's tui.json config file.
-    pub(crate) fn tui_config_path(env: &SlateEnv) -> PathBuf {
-        Self::tui_config_path_with_override(env, env.opencode_tui_config())
+    pub(crate) fn cli_config_path(env: &SlateEnv) -> PathBuf {
+        env.xdg_config_home().join("opencode/cli.json")
     }
 
-    pub(crate) fn tui_config_path_with_override(
-        env: &SlateEnv,
-        override_path: Option<&Path>,
-    ) -> PathBuf {
-        if let Some(path) = override_path {
-            return path.to_owned();
-        }
-
-        let json_path = Self::default_tui_json_path(env);
-        let jsonc_path = Self::default_tui_jsonc_path(env);
-        // A blocked preferred path must be reported, not silently bypassed.
-        let genuinely_missing = |path: &std::path::Path| {
-            matches!(fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
-                && crate::config::file_read::confirm_missing(path).is_ok()
-        };
-        if !genuinely_missing(&json_path) || genuinely_missing(&jsonc_path) {
-            json_path
-        } else {
-            jsonc_path
-        }
-    }
-
-    pub(crate) fn tui_config_paths(env: &SlateEnv) -> Vec<PathBuf> {
-        let mut paths = Vec::new();
-        let mut destinations = std::collections::BTreeSet::new();
-        for path in env
-            .opencode_tui_config()
-            .map(Path::to_owned)
-            .into_iter()
-            .chain([
-                Self::default_tui_json_path(env),
-                Self::default_tui_jsonc_path(env),
-            ])
-        {
-            let destination = crate::config::file_read::directory_alias_target(&path)
-                .unwrap_or_else(|| path.clone());
-            if !paths.contains(&path) && destinations.insert(destination) {
-                paths.push(path);
-            }
-        }
-        paths
-    }
-
-    fn default_tui_json_path(env: &SlateEnv) -> PathBuf {
-        env.xdg_config_home().join("opencode").join("tui.json")
-    }
-
-    fn default_tui_jsonc_path(env: &SlateEnv) -> PathBuf {
-        env.xdg_config_home().join("opencode").join("tui.jsonc")
+    pub(crate) fn cli_config_paths(env: &SlateEnv) -> Vec<PathBuf> {
+        vec![Self::cli_config_path(env)]
     }
 
     /// Resolve the path to opencode's config directory.
@@ -100,7 +52,7 @@ impl ToolAdapter for OpencodeAdapter {
 
     fn integration_config_path(&self) -> Result<PathBuf> {
         let env = SlateEnv::from_process()?;
-        Ok(Self::tui_config_path(&env))
+        Ok(Self::cli_config_path(&env))
     }
 
     fn managed_config_path(&self) -> PathBuf {
@@ -122,14 +74,11 @@ impl ToolAdapter for OpencodeAdapter {
     }
 
     fn apply_theme_with_env(&self, theme: &ThemeVariant, env: &SlateEnv) -> Result<ApplyOutcome> {
-        env.validate_opencode_tui_config()?;
-        let override_path = env.opencode_tui_config();
-        let config_path = Self::tui_config_path_with_override(env, override_path);
+        let config_path = Self::cli_config_path(env);
 
         // Avoid creating a default OpenCode config for users who have the
         // binary installed but have never initialized OpenCode's config dir.
-        if override_path.is_none()
-            && matches!(fs::symlink_metadata(Self::config_dir(env)), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+        if matches!(fs::symlink_metadata(Self::config_dir(env)), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
             && crate::config::file_read::confirm_missing(&Self::config_dir(env)).is_ok()
         {
             return Ok(ApplyOutcome::Skipped(SkipReason::MissingIntegrationConfig));
@@ -166,37 +115,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opencode_candidates_deduplicate_directory_aliases_but_keep_final_links() {
-        use std::os::unix::fs::symlink;
-        for case in ["missing", "present", "final-link"] {
-            let td = tempfile::tempdir().unwrap();
-            let config = td.path().join(".config/opencode");
-            fs::create_dir_all(&config).unwrap();
-            let selected = if case == "final-link" {
-                fs::write(config.join("tui.json"), "{}").unwrap();
-                let link = td.path().join("linked.json");
-                symlink(config.join("tui.json"), &link).unwrap();
-                link
-            } else {
-                symlink(&config, td.path().join("alias")).unwrap();
-                if case == "present" {
-                    fs::write(config.join("tui.json"), "{}").unwrap();
-                }
-                td.path().join("alias/tui.json")
-            };
-            let env = SlateEnv::from_vars(|key| match key {
-                "HOME" => Some(td.path().as_os_str().to_owned()),
-                "OPENCODE_TUI_CONFIG" => Some(selected.as_os_str().to_owned()),
-                _ => None,
-            })
-            .unwrap();
-            let paths = OpencodeAdapter::tui_config_paths(&env);
-            assert_eq!(paths.len(), if case == "final-link" { 3 } else { 2 });
-            assert_eq!(paths[0], selected);
-        }
-    }
-
-    #[test]
     fn test_tool_name() {
         let adapter = OpencodeAdapter;
         assert_eq!(adapter.tool_name(), "opencode");
@@ -206,36 +124,6 @@ mod tests {
     fn test_apply_strategy() {
         let adapter = OpencodeAdapter;
         assert_eq!(adapter.apply_strategy(), ApplyStrategy::EditInPlace);
-    }
-
-    #[test]
-    fn test_tui_config_path() {
-        let tempdir = tempfile::TempDir::new().unwrap();
-        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
-        let path = OpencodeAdapter::tui_config_path_with_override(&env, None);
-        assert!(path.ends_with("opencode/tui.json"));
-    }
-
-    #[test]
-    fn test_tui_config_path_prefers_existing_jsonc_when_json_missing() {
-        let tempdir = tempfile::TempDir::new().unwrap();
-        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
-        let jsonc_path = tempdir.path().join(".config/opencode/tui.jsonc");
-        fs::create_dir_all(jsonc_path.parent().unwrap()).unwrap();
-        fs::write(&jsonc_path, "{}").unwrap();
-
-        let path = OpencodeAdapter::tui_config_path_with_override(&env, None);
-        assert!(path.ends_with("opencode/tui.jsonc"));
-    }
-
-    #[test]
-    fn test_tui_config_path_honors_override() {
-        let tempdir = tempfile::TempDir::new().unwrap();
-        let env = SlateEnv::with_home(tempdir.path().to_path_buf());
-        let override_path = tempdir.path().join("custom/tui.jsonc");
-
-        let path = OpencodeAdapter::tui_config_path_with_override(&env, Some(&override_path));
-        assert_eq!(path, override_path);
     }
 
     #[test]
@@ -255,9 +143,9 @@ mod tests {
         let config_dir = tempdir.path().join(".config/opencode");
         fs::create_dir_all(&config_dir).unwrap();
 
-        // Create a connected TUI file; the palette may still need publishing.
-        let tui_path = config_dir.join("tui.json");
-        fs::write(&tui_path, r#"{"theme": "slate-sync"}"#).unwrap();
+        // Create a connected CLI file; the palette may still need publishing.
+        let cli_path = config_dir.join("cli.json");
+        fs::write(&cli_path, r#"{"theme": {"name":"slate-sync"}}"#).unwrap();
 
         let adapter = OpencodeAdapter;
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
@@ -275,9 +163,9 @@ mod tests {
         let config_dir = tempdir.path().join(".config/opencode");
         fs::create_dir_all(&config_dir).unwrap();
 
-        // Create tui.json with different theme
-        let tui_path = config_dir.join("tui.json");
-        fs::write(&tui_path, r#"{"theme": "catppuccin-mocha"}"#).unwrap();
+        // Create cli.json with different theme
+        let cli_path = config_dir.join("cli.json");
+        fs::write(&cli_path, r#"{"theme": {"name":"catppuccin-mocha"}}"#).unwrap();
 
         let adapter = OpencodeAdapter;
         let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
@@ -286,17 +174,17 @@ mod tests {
         assert!(matches!(outcome, ApplyOutcome::Applied { .. }));
 
         // Verify theme was changed
-        let content = fs::read_to_string(&tui_path).unwrap();
+        let content = fs::read_to_string(&cli_path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed["theme"], "slate-sync");
+        assert_eq!(parsed["theme"]["name"], "slate-sync");
     }
 
     #[test]
-    fn test_apply_theme_creates_tui_json_if_missing() {
+    fn test_apply_theme_creates_cli_json_if_missing() {
         let tempdir = tempfile::TempDir::new().unwrap();
         let env = SlateEnv::with_home(tempdir.path().to_path_buf());
 
-        // Create config directory but no tui.json
+        // Create config directory but no cli.json
         let config_dir = tempdir.path().join(".config/opencode");
         fs::create_dir_all(&config_dir).unwrap();
 
@@ -306,12 +194,12 @@ mod tests {
 
         assert!(matches!(outcome, ApplyOutcome::Applied { .. }));
 
-        // Verify tui.json was created
-        let tui_path = config_dir.join("tui.json");
-        assert!(tui_path.exists());
-        let content = fs::read_to_string(&tui_path).unwrap();
+        // Verify cli.json was created
+        let cli_path = config_dir.join("cli.json");
+        assert!(cli_path.exists());
+        let content = fs::read_to_string(&cli_path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed["theme"], "slate-sync");
+        assert_eq!(parsed["theme"]["name"], "slate-sync");
     }
 
     #[test]

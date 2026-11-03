@@ -58,7 +58,6 @@ fn metadata(env: &SlateEnv, path: &Path) -> Result<Option<fs::Metadata>> {
 }
 
 pub(super) fn validate_storage_paths(env: &SlateEnv) -> Result<()> {
-    env.validate_opencode_tui_config()?;
     for path in [
         env.config_dir().to_owned(),
         env.slate_cache_dir().to_owned(),
@@ -166,7 +165,6 @@ pub(super) struct CleanTargets {
 }
 
 pub(super) fn inspect_targets(env: &SlateEnv) -> Result<CleanTargets> {
-    env.validate_opencode_tui_config()?;
     let mut files = BTreeSet::new();
     let mut directories = BTreeSet::new();
     let mut paths = vec![
@@ -188,7 +186,7 @@ pub(super) fn inspect_targets(env: &SlateEnv) -> Result<CleanTargets> {
     paths.extend(env.tmux_config_candidates());
     paths.extend(crate::adapter::AlacrittyAdapter::integration_candidate_paths_with_env(env));
     paths.extend(crate::adapter::GhosttyAdapter.integration_candidate_paths_with_env(env)?);
-    paths.extend(crate::adapter::OpencodeAdapter::tui_config_paths(env));
+    paths.extend(crate::adapter::OpencodeAdapter::cli_config_paths(env));
     paths.push(crate::adapter::OpencodeAdapter::theme_path(env));
     for path in paths {
         add_file(env, path, &mut files)?;

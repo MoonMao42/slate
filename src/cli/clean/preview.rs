@@ -135,7 +135,7 @@ fn project(env: &SlateEnv, path: &Path, bytes: &[u8]) -> Result<Edit> {
         edits::zellij(bytes)?
     } else if path == crate::adapter::ZellijAdapter::paths(env)?[1] {
         edits::zellij_theme(bytes)?
-    } else if crate::adapter::OpencodeAdapter::tui_config_paths(env)
+    } else if crate::adapter::OpencodeAdapter::cli_config_paths(env)
         .iter()
         .any(|candidate| candidate == path)
     {

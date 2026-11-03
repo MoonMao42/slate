@@ -369,11 +369,11 @@ fn remove_delta_managed_references(home: &Path) -> Result<()> {
     crate::adapter::marker_block::remove_managed_blocks_from_file(&gitconfig_path)
 }
 
-/// Best-effort strip of Slate's OpenCode TUI theme selection. Slate only sets
-/// `theme = "slate-sync"` (plus the standard schema when creating a new file), so
+/// Best-effort strip of Slate's OpenCode 2 theme selection. Slate only sets
+/// `theme.name = "slate-sync"` (plus the standard schema when creating a new file), so
 /// clean removes that value and preserves unrelated user settings.
 fn remove_opencode_managed_references(env: &SlateEnv) -> Result<()> {
-    for tui_path in crate::adapter::OpencodeAdapter::tui_config_paths(env) {
+    for tui_path in crate::adapter::OpencodeAdapter::cli_config_paths(env) {
         strip_opencode_slate_theme(&tui_path)?;
     }
 
@@ -752,16 +752,16 @@ mod tests {
     }
 
     #[test]
-    fn remove_opencode_managed_references_deletes_slate_only_tui_config() {
+    fn remove_opencode_managed_references_deletes_slate_only_cli_config() {
         let td = TempDir::new().unwrap();
         let env = SlateEnv::with_home(td.path().to_path_buf());
-        let tui_path = td.path().join(".config/opencode/tui.json");
+        let tui_path = td.path().join(".config/opencode/cli.json");
         std::fs::create_dir_all(tui_path.parent().unwrap()).unwrap();
         std::fs::write(
             &tui_path,
             serde_json::json!({
-                "$schema": crate::adapter::OpencodeAdapter::TUI_SCHEMA,
-                "theme": "slate-sync"
+                "$schema": crate::adapter::OpencodeAdapter::CLI_SCHEMA,
+                "theme": {"name":"slate-sync"}
             })
             .to_string(),
         )
@@ -771,7 +771,7 @@ mod tests {
 
         assert!(
             !tui_path.exists(),
-            "Slate-only OpenCode TUI config should be removed"
+            "Slate-only OpenCode CLI config should be removed"
         );
     }
 
@@ -779,13 +779,13 @@ mod tests {
     fn remove_opencode_managed_references_preserves_user_settings() {
         let td = TempDir::new().unwrap();
         let env = SlateEnv::with_home(td.path().to_path_buf());
-        let tui_path = td.path().join(".config/opencode/tui.json");
+        let tui_path = td.path().join(".config/opencode/cli.json");
         std::fs::create_dir_all(tui_path.parent().unwrap()).unwrap();
         std::fs::write(
             &tui_path,
             serde_json::json!({
-                "$schema": crate::adapter::OpencodeAdapter::TUI_SCHEMA,
-                "theme": "slate-sync",
+                "$schema": crate::adapter::OpencodeAdapter::CLI_SCHEMA,
+                "theme": {"name":"slate-sync"},
                 "mouse": false,
                 "scroll_speed": 5
             })
@@ -803,16 +803,16 @@ mod tests {
     }
 
     #[test]
-    fn remove_opencode_managed_references_handles_tui_jsonc() {
+    fn remove_opencode_managed_references_preserves_cli_json_comments() {
         let td = TempDir::new().unwrap();
         let env = SlateEnv::with_home(td.path().to_path_buf());
-        let tui_path = td.path().join(".config/opencode/tui.jsonc");
+        let tui_path = td.path().join(".config/opencode/cli.json");
         std::fs::create_dir_all(tui_path.parent().unwrap()).unwrap();
         std::fs::write(
             &tui_path,
             r#"{
                 // user setting should survive
-                "theme": "slate-sync",
+                "theme": {"name":"slate-sync"},
                 "mouse": false,
             }"#,
         )

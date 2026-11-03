@@ -255,15 +255,15 @@ fn clean_preview_and_execution_preserve_user_imports_comments_and_noop_files() {
 #[test]
 fn clean_opencode_projection_preserves_jsonc_bytes_and_is_restorable() {
     for (input, expected, action) in [
-        ("// PRIVATE_CONTENT\r\n{\"theme\"/*k*/:/*v*/\"slate-sync\", \"user\":{\"n\":1.2300e+02,},}\r\n",
+        ("// PRIVATE_CONTENT\r\n{\"theme\"/*k*/:/*v*/{\"name\":\"slate-sync\"}, \"user\":{\"n\":1.2300e+02,},}\r\n",
          Some("// PRIVATE_CONTENT\r\n{/*k*//*v*/ \"user\":{\"n\":1.2300e+02,},}\r\n"), "rewrite"),
-        ("// PRIVATE_CONTENT\n{\"theme\":\"slate-sync\"}", Some("// PRIVATE_CONTENT\n{}"), "rewrite"),
-        ("{\"theme\":\"custom\",\"x\":1.00}", Some("{\"theme\":\"custom\",\"x\":1.00}"), "unchanged"),
-        ("{\"theme\":\"slate-sync\"}", None, "remove"),
+        ("// PRIVATE_CONTENT\n{\"theme\":{\"name\":\"slate-sync\"}}", Some("// PRIVATE_CONTENT\n{}"), "rewrite"),
+        ("{\"theme\":{\"name\":\"custom\"},\"x\":1.00}", Some("{\"theme\":{\"name\":\"custom\"},\"x\":1.00}"), "unchanged"),
+        ("{\"theme\":{\"name\":\"slate-sync\"}}", None, "remove"),
     ] {
         let home = tempfile::tempdir().unwrap();
         let env = SlateEnv::with_home(home.path().to_owned());
-        let path = env.xdg_config_home().join("opencode/tui.jsonc");
+        let path = env.xdg_config_home().join("opencode/cli.json");
         write(&path, input);
         let before = profile_files(&env);
         let tree_before = tree_snapshot::tree(home.path());
@@ -439,18 +439,14 @@ fn clean_preview_actions_match_real_cleanup_and_its_recovery_contract() {
         "palette = 'slate'\n[palettes.slate]\nred = '#f00'\n[palettes.user]\nred = '#faa'\n",
     );
     write(
-        &env.xdg_config_home().join("opencode/tui.json"),
-        "{\"theme\":\"slate-sync\"}",
-    );
-    write(
-        &env.xdg_config_home().join("opencode/tui.jsonc"),
-        "{// comment\n\"theme\":\"slate-sync\",\"mouse\":false,}",
+        &env.xdg_config_home().join("opencode/cli.json"),
+        "{// comment\n\"theme\":{\"name\":\"slate-sync\"},\"mouse\":false,}",
     );
     let before_tree = tree_snapshot::tree(home.path());
     let before = profile_files(&env);
     let preview = json_preview(home.path(), true);
     assert_eq!(preview["summary"]["blocked"], 0);
-    assert!(preview["summary"]["remove"].as_u64().unwrap() >= 5);
+    assert!(preview["summary"]["remove"].as_u64().unwrap() >= 4);
     assert!(preview["summary"]["rewrite"].as_u64().unwrap() >= 8);
     assert_eq!(tree_snapshot::tree(home.path()), before_tree);
     command(home.path())
@@ -577,7 +573,7 @@ fn clean_preview_discloses_skipped_parsers_and_escapes_displayed_paths() {
         "PRIVATE_CONTENT [",
     );
     write(
-        &env.xdg_config_home().join("opencode/tui.json"),
+        &env.xdg_config_home().join("opencode/cli.json"),
         "PRIVATE_CONTENT invalid JSON",
     );
     write(

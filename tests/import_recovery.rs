@@ -209,7 +209,7 @@ fn whole_import_covers_adapter_outputs_and_recovers_success_or_later_failure() {
             0o640,
         );
         write(
-            &env.xdg_config_home().join("opencode/tui.json"),
+            &env.xdg_config_home().join("opencode/cli.json"),
             if fail {
                 "invalid JSON"
             } else {

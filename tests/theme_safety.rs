@@ -76,7 +76,7 @@ fn first_apply_captures_a_file_only_operation_checkpoint_including_opencode() {
     let td = TempDir::new().unwrap();
     let env = SlateEnv::with_home(td.path().to_owned());
     let alacritty = env.xdg_config_home().join("alacritty/alacritty.toml");
-    let opencode = env.xdg_config_home().join("opencode/tui.jsonc");
+    let opencode = env.xdg_config_home().join("opencode/cli.json");
     let originals = [
         (
             &alacritty,
@@ -84,7 +84,7 @@ fn first_apply_captures_a_file_only_operation_checkpoint_including_opencode() {
         ),
         (
             &opencode,
-            "// user settings\n{\"theme\": \"custom\", \"scroll_speed\": 7}\n",
+            "// user settings\n{\"theme\": {\"name\":\"custom\"}, \"scroll_speed\": 7}\n",
         ),
     ];
     for (path, content) in &originals {

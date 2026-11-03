@@ -57,7 +57,7 @@ fn json(command: &mut assert_cmd::Command) -> serde_json::Value {
     assert!(report["scope"]
         .as_str()
         .unwrap()
-        .contains("Project configuration"));
+        .contains("Inline overrides"));
     assert!(report["scope"]
         .as_str()
         .unwrap()
@@ -77,23 +77,31 @@ fn check<'a>(report: &'a serde_json::Value, code: &str) -> &'a serde_json::Value
 #[test]
 fn opencode_doctor_explains_theme_states_without_values_or_writes() {
     let home = tempfile::tempdir().unwrap();
-    let path = home.path().join(".config/opencode/tui.jsonc");
+    let path = home.path().join(".config/opencode/cli.json");
     for (input, code, status) in [
         (
-            "// PRIVATE_CONTENT\n{\"theme\":\"slate-sync\",\"n\":1.230e2,}",
+            "// PRIVATE_CONTENT\n{\"theme\":{\"name\":\"slate-sync\"},\"n\":1.230e2,}",
             "slate_theme",
             "ok",
         ),
-        ("{\"theme\":\"sla\\u0074e-sync\"}", "slate_theme", "ok"),
-        ("{\"theme\":\"PRIVATE_CONTENT\"}", "custom_theme", "warning"),
         (
-            "{/* \"theme\":\"slate-sync\" PRIVATE_CONTENT */}",
+            "{\"theme\":{\"name\":\"sla\\u0074e-sync\"}}",
+            "slate_theme",
+            "ok",
+        ),
+        (
+            "{\"theme\":{\"name\":\"PRIVATE_CONTENT\"}}",
+            "custom_theme",
+            "warning",
+        ),
+        (
+            "{/* \"theme\":{\"name\":\"slate-sync\"} PRIVATE_CONTENT */}",
             "unset_theme",
             "warning",
         ),
         ("{\"theme\":42}", "invalid_config", "error"),
         (
-            "{\"theme\":\"slate-sync\",\"theme\":\"PRIVATE_CONTENT\"}",
+            "{\"theme\":{\"name\":\"slate-sync\"},\"theme\":{\"name\":\"PRIVATE_CONTENT\"}}",
             "invalid_config",
             "error",
         ),
@@ -132,78 +140,28 @@ fn opencode_doctor_explains_theme_states_without_values_or_writes() {
 }
 
 #[test]
-fn opencode_doctor_shares_adapter_paths_but_does_not_claim_runtime_precedence() {
-    for case in [
-        "json", "jsonc", "both", "xdg", "override", "relative", "isolated",
-    ] {
+fn opencode_doctor_uses_global_cli_settings_in_default_xdg_and_isolated_profiles() {
+    for case in ["default", "xdg", "isolated"] {
         let home = tempfile::tempdir().unwrap();
+        let external = home.path().join("custom-xdg");
         let root = if case == "xdg" {
-            home.path().join("custom-xdg")
+            external.clone()
         } else {
             home.path().join(".config")
         };
-        let json_path = root.join("opencode/tui.json");
-        let jsonc_path = root.join("opencode/tui.jsonc");
-        let custom = home.path().join("custom/tui.jsonc");
+        let path = root.join("opencode/cli.json");
+        write(&path, r#"{"theme":{"name":"slate-sync","mode":"light"}}"#);
         let mut cmd = command(home.path(), case == "isolated");
-        if case == "xdg" {
-            cmd.env("XDG_CONFIG_HOME", &root);
+        if case != "default" {
+            cmd.env("XDG_CONFIG_HOME", &external);
         }
-        let expected = match case {
-            "jsonc" => {
-                write(&jsonc_path, "{\"theme\":\"slate-sync\"}");
-                &jsonc_path
-            }
-            "override" | "relative" => {
-                write(&custom, "{\"theme\":\"slate-sync\"}");
-                write(&json_path, "{\"theme\":\"PRIVATE_CONTENT\"}");
-                if case == "relative" {
-                    cmd.env("OPENCODE_TUI_CONFIG", "custom/tui.jsonc");
-                } else {
-                    cmd.env("OPENCODE_TUI_CONFIG", &custom);
-                }
-                &custom
-            }
-            _ => {
-                write(&json_path, "{\"theme\":\"slate-sync\"}");
-                if case == "both" {
-                    write(&jsonc_path, "{\"theme\":\"PRIVATE_CONTENT\"}");
-                }
-                if case == "isolated" {
-                    write(&custom, "{\"theme\":\"PRIVATE_CONTENT\"}");
-                    cmd.env("OPENCODE_TUI_CONFIG", &custom);
-                }
-                &json_path
-            }
-        };
-        // A project config is not read or merged by Slate's doctor.
-        write(
-            &home.path().join("tui.json"),
-            "{\"theme\":\"PRIVATE_CONTENT\"}",
-        );
         let before = tree_snapshot::tree(home.path());
         let report = json(&mut cmd);
-        let selected = check(&report, "selected_config")["path"].as_str().unwrap();
-        let expected_path = if case == "relative" {
-            fs::canonicalize(home.path())
-                .unwrap()
-                .join("custom/tui.jsonc")
-        } else {
-            expected.to_owned()
-        };
-        assert_eq!(home.path().join(selected), expected_path);
+        assert_eq!(
+            check(&report, "selected_config")["path"],
+            path.to_str().unwrap()
+        );
         assert_eq!(check(&report, "slate_theme")["status"], "ok");
-        if matches!(case, "both" | "override" | "relative") {
-            assert_eq!(check(&report, "alternate_config")["status"], "warning");
-        }
-        if case == "isolated" {
-            check(&report, "isolated_profile");
-            assert!(!report.to_string().contains(custom.to_str().unwrap()));
-        }
-        if case == "relative" {
-            assert!(Path::new(selected).is_absolute());
-            assert_eq!(check(&report, "relative_config")["status"], "info");
-        }
         assert_eq!(tree_snapshot::tree(home.path()), before);
     }
 }
@@ -221,10 +179,13 @@ fn opencode_doctor_reports_unsafe_inputs_without_blocking_or_reading_fallbacks()
         "missing",
     ] {
         let home = tempfile::tempdir().unwrap();
-        let path = home.path().join(".config/opencode/tui.json");
+        let path = home.path().join(".config/opencode/cli.json");
         // A valid fallback must not disguise an obstructed preferred entry.
         if case != "missing" {
-            write(&path.with_extension("jsonc"), "{\"theme\":\"slate-sync\"}");
+            write(
+                &path.with_extension("jsonc"),
+                "{\"theme\":{\"name\":\"slate-sync\"}}",
+            );
         }
         match case {
             "utf8" => write(&path, b"// PRIVATE_CONTENT\xff"),
@@ -237,7 +198,7 @@ fn opencode_doctor_reports_unsafe_inputs_without_blocking_or_reading_fallbacks()
                 if case == "link" {
                     write(
                         &target,
-                        "{\"theme\":\"slate-sync\",\"x\":\"PRIVATE_CONTENT\"}",
+                        "{\"theme\":{\"name\":\"slate-sync\"},\"x\":\"PRIVATE_CONTENT\"}",
                     );
                 }
                 symlink(target, &path).unwrap();
@@ -285,8 +246,8 @@ fn integration_doctor_paths_are_terminal_safe_and_json_discloses_lossy_names() {
         let td = tempfile::tempdir().unwrap();
         let home = td.path().join(std::ffi::OsString::from_vec(raw.to_vec()));
         fs::create_dir(&home).unwrap();
-        let path = home.join(".config/opencode/tui.json");
-        write(&path, "{\"theme\":\"slate-sync\"}");
+        let path = home.join(".config/opencode/cli.json");
+        write(&path, "{\"theme\":{\"name\":\"slate-sync\"}}");
         let before = tree_snapshot::tree(td.path());
         let report = json(&mut command(&home, true));
         assert_eq!(
@@ -325,8 +286,8 @@ fn integration_doctors_work_while_locked_or_pending_and_handle_closed_stdout() {
     );
     write(&env.managed_file("config.toml"), b"PRIVATE_CONTENT\xff");
     write(
-        &env.xdg_config_home().join("opencode/tui.json"),
-        "{\"theme\":\"slate-sync\"}",
+        &env.xdg_config_home().join("opencode/cli.json"),
+        "{\"theme\":{\"name\":\"slate-sync\"}}",
     );
     let executable = home.path().join("bin/opencode");
     write(

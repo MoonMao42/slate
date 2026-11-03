@@ -4,7 +4,6 @@ use std::path::{Component, Path, PathBuf};
 
 mod bat;
 mod lazygit;
-mod opencode;
 mod shell_startup;
 mod zellij;
 
@@ -31,7 +30,6 @@ pub struct SlateEnv {
     nvim_config_dir: PathBuf,
     bat_paths: bat::BatPaths,
     lazygit_paths: lazygit::Paths,
-    opencode_tui_config: Option<opencode::TuiConfig>,
     starship_config_override: Option<PathBuf>,
     yazi_config_home: PathBuf,
     eza_config_home: PathBuf,
@@ -128,10 +126,6 @@ impl SlateEnv {
             ));
         }
         let nvim_config_dir = xdg_config_home.join(nvim_appname);
-        let opencode_tui_config = opencode::TuiConfig::capture(
-            nonempty("OPENCODE_TUI_CONFIG"),
-            slate_home_override.is_some(),
-        );
         let bat_paths = bat::BatPaths::capture(
             &vars,
             slate_home_override.is_some(),
@@ -180,7 +174,6 @@ impl SlateEnv {
             zsh_config_home,
             nvim_config_dir,
             bat_paths,
-            opencode_tui_config,
             yazi_config_home,
             eza_config_home,
             eza_color_values: if slate_home_override.is_none() {
@@ -212,7 +205,6 @@ impl SlateEnv {
             zsh_config_home: home.clone(),
             nvim_config_dir: xdg_config_home.join("nvim"),
             bat_paths: bat::BatPaths::capture(&|_| None, true, &xdg_config_home, &xdg_cache_home),
-            opencode_tui_config: None,
             yazi_config_home: xdg_config_home.join("yazi"),
             eza_config_home: xdg_config_home.join("eza"),
             eza_color_values: [None, None],
@@ -300,34 +292,6 @@ impl SlateEnv {
     /// Validate captured bat paths before writing or launching its cache builder.
     pub fn validate_bat_paths(&self) -> Result<()> {
         self.bat_paths.validate()
-    }
-
-    /// Captured once and absent under SLATE_HOME or with_home isolation. Valid
-    /// overrides are absolute; an unresolved override retains its supplied path
-    /// for diagnostics. Writers must call validate_opencode_tui_config first.
-    pub fn opencode_tui_config(&self) -> Option<&Path> {
-        self.opencode_tui_config
-            .as_ref()
-            .map(|config| config.path.as_path())
-    }
-
-    pub(crate) fn opencode_tui_config_was_relative(&self) -> bool {
-        self.opencode_tui_config
-            .as_ref()
-            .is_some_and(|config| config.was_relative)
-    }
-
-    pub(crate) fn opencode_tui_config_error(&self) -> Option<&str> {
-        self.opencode_tui_config
-            .as_ref()
-            .and_then(|config| config.error.as_deref())
-    }
-
-    pub fn validate_opencode_tui_config(&self) -> Result<()> {
-        match self.opencode_tui_config_error() {
-            Some(error) => Err(crate::error::SlateError::InvalidConfig(error.to_owned())),
-            None => Ok(()),
-        }
     }
 
     /// tmux uses the first existing user config, with the legacy path first.

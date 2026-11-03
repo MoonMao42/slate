@@ -111,13 +111,8 @@ fn clean_isolated_profile_backs_up_all_removed_files_and_restores_modes() {
         (".cache/slate/current_theme.lua", "-- state\n", 0o600),
         (".config/fish/conf.d/slate.fish", "# loader\n", 0o640),
         (
-            ".config/opencode/tui.json",
-            "{\"theme\":\"slate-sync\"}",
-            0o600,
-        ),
-        (
-            ".config/opencode/tui.jsonc",
-            "{\"theme\":\"slate-sync\"}",
+            ".config/opencode/cli.json",
+            "{\"theme\":{\"name\":\"slate-sync\"}}",
             0o600,
         ),
     ];

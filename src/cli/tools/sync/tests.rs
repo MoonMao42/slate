@@ -53,10 +53,10 @@ fn opencode_restart_guidance_does_not_request_a_new_shell_or_change_startup() {
         ApplyOutcome, OpencodeAdapter, ToolAdapter, ToolApplyResult, ToolRegistry,
     };
     let (_home, env) = fixture();
-    let config = env.xdg_config_home().join("opencode/tui.json");
+    let config = env.xdg_config_home().join("opencode/cli.json");
     seed(
         &config,
-        "{\"theme\":\"personal\",\"keybinds\":{\"leader\":\"ctrl+a\"}}",
+        "{\"theme\":{\"name\":\"personal\"},\"keybinds\":{\"leader\":\"ctrl+a\"}}",
     );
     seed(&env.zshrc_path(), "# PRIVATE_STARTUP\n");
     let theme = crate::theme::catppuccin::catppuccin_mocha().unwrap();
@@ -65,7 +65,7 @@ fn opencode_restart_guidance_does_not_request_a_new_shell_or_change_startup() {
         assert_eq!(outcome, ApplyOutcome::applied_no_shell());
         let config: serde_json::Value =
             serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
-        assert_eq!(config["theme"], "slate-sync");
+        assert_eq!(config["theme"]["name"], "slate-sync");
         assert_eq!(config["keybinds"]["leader"], "ctrl+a");
         assert_eq!(fs::read(env.zshrc_path()).unwrap(), b"# PRIVATE_STARTUP\n");
     }

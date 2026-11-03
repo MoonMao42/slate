@@ -72,8 +72,7 @@ pub(crate) fn add_theme_paths(
             files.insert(super::ZshHighlightAdapter::theme_path(env));
         }
         "opencode" => {
-            env.validate_opencode_tui_config()?;
-            files.extend(OpencodeAdapter::tui_config_paths(env));
+            files.extend(OpencodeAdapter::cli_config_paths(env));
             files.insert(OpencodeAdapter::theme_path(env));
         }
         // The notification is shared by global theme apply, but a selected-only

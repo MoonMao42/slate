@@ -50,7 +50,6 @@ pub(super) fn create(env: &SlateEnv, request: &ImportRequest) -> Result<Checkpoi
     }
     let mut theme_tools = Vec::new();
     if request.theme.is_some() {
-        env.validate_opencode_tui_config()?;
         files.insert(env.slate_cache_dir().join("current_theme.lua"));
         for adapter in ToolRegistry::default().adapters() {
             if adapter.apply_strategy() == ApplyStrategy::DetectAndInstall

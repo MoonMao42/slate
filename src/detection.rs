@@ -741,18 +741,9 @@ pub fn detect_tool_presence_with_env(tool_id: &str, env: &SlateEnv) -> ToolPrese
 }
 
 // Configuration evidence is not executable detection or config validation.
-// Keep it injected and independent of the ambient OPENCODE_TUI_CONFIG value.
 fn opencode_config_evidence(env: &SlateEnv) -> Option<PathBuf> {
-    if env.opencode_tui_config_error().is_some() {
-        return None;
-    }
-    env.opencode_tui_config()
-        .filter(|path| path.exists())
-        .map(Path::to_owned)
-        .or_else(|| {
-            let directory = env.xdg_config_home().join("opencode");
-            directory.exists().then_some(directory)
-        })
+    let directory = env.xdg_config_home().join("opencode");
+    directory.exists().then_some(directory)
 }
 
 pub fn shell_quote(value: &str) -> String {
@@ -904,17 +895,6 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let home = td.path().join("profile");
         std::fs::create_dir(&home).unwrap();
-        for name in ["first.json", "second.json"] {
-            let config = td.path().join(name);
-            std::fs::write(&config, "{}").unwrap();
-            let env = crate::env::SlateEnv::from_vars(|key| match key {
-                "HOME" => Some(home.as_os_str().to_owned()),
-                "OPENCODE_TUI_CONFIG" => Some(config.as_os_str().to_owned()),
-                _ => None,
-            })
-            .unwrap();
-            assert_eq!(super::opencode_config_evidence(&env), Some(config));
-        }
         let isolated = crate::env::SlateEnv::with_home(home.clone());
         assert_eq!(super::opencode_config_evidence(&isolated), None);
         let directory = home.join(".config/opencode");

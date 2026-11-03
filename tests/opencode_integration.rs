@@ -22,11 +22,11 @@ fn opencode_application_preserves_jsonc_and_backs_up_exact_bytes_only_on_change(
     for already_connected in [false, true] {
         let td = tempfile::tempdir().unwrap();
         let env = SlateEnv::with_home(td.path().to_owned());
-        let path = env.xdg_config_home().join("opencode/tui.jsonc");
+        let path = env.xdg_config_home().join("opencode/cli.json");
         let input = if already_connected {
-            "// 用户备注\r\n{\"theme\":\"slate-sync\",\"mouse\":false,}\r\n"
+            "// 用户备注\r\n{\"theme\":{\"name\":\"slate-sync\"},\"mouse\":false,}\r\n"
         } else {
-            "// 用户备注\r\n{\"$schema\":\"custom\",\"theme\":\"old\",\"mouse\":false,}\r\n"
+            "// 用户备注\r\n{\"$schema\":\"custom\",\"theme\":{\"name\":\"old\"},\"mouse\":false,}\r\n"
         };
         write(&path, input);
         let original_meta = fs::metadata(&path).unwrap();
@@ -82,8 +82,8 @@ fn opencode_backup_failure_does_not_modify_configuration() {
     let td = tempfile::tempdir().unwrap();
     let env = SlateEnv::with_home(td.path().to_owned());
     write(
-        &env.xdg_config_home().join("opencode/tui.json"),
-        "{\"theme\":\"old\"}",
+        &env.xdg_config_home().join("opencode/cli.json"),
+        "{\"theme\":{\"name\":\"old\"}}",
     );
     write(
         &env.slate_cache_dir().join("backups"),
@@ -132,19 +132,28 @@ fn opencode_invalid_inputs_are_bounded_read_only_and_do_not_bypass_preferred_pat
     ] {
         let td = tempfile::tempdir().unwrap();
         let env = SlateEnv::with_home(td.path().to_owned());
-        let path = env.xdg_config_home().join("opencode/tui.json");
+        let path = env.xdg_config_home().join("opencode/cli.json");
         // Even with a valid fallback, a blocked preferred entry must fail.
         if !case.starts_with("parent-") {
-            write(&path.with_extension("jsonc"), "{\"theme\":\"slate-sync\"}");
+            write(
+                &path.with_extension("jsonc"),
+                "{\"theme\":{\"name\":\"slate-sync\"}}",
+            );
         }
         let outside = td.path().join("outside.jsonc");
-        write(&outside, "// PRIVATE_CONTENT\n{\"theme\":\"host\"}");
+        write(
+            &outside,
+            "// PRIVATE_CONTENT\n{\"theme\":{\"name\":\"host\"}}",
+        );
         match case {
             "comment" => write(&path, "{} /* PRIVATE_CONTENT"),
-            "theme" => write(&path, "{\"theme\":{\"PRIVATE_CONTENT\":true}}"),
+            "theme" => write(
+                &path,
+                "{\"theme\":{\"name\":true,\"PRIVATE_CONTENT\":true}}",
+            ),
             "duplicate" => write(
                 &path,
-                "{\"theme\":\"slate-sync\",\"theme\":\"PRIVATE_CONTENT\"}",
+                "{\"theme\":{\"name\":\"slate-sync\"},\"theme\":{\"name\":\"PRIVATE_CONTENT\"}}",
             ),
             "deep" => write(
                 &path,
@@ -167,7 +176,7 @@ fn opencode_invalid_inputs_are_bounded_read_only_and_do_not_bypass_preferred_pat
                 .unwrap()
                 .set_len(8 * 1024 * 1024 + 1)
                 .unwrap(),
-            "isolated" => write(&path, "{\"theme\":\"slate-sync\"}"),
+            "isolated" => write(&path, "{\"theme\":{\"name\":\"slate-sync\"}}"),
             _ => unreachable!(),
         }
         if case == "isolated" {
@@ -181,7 +190,6 @@ fn opencode_invalid_inputs_are_bounded_read_only_and_do_not_bypass_preferred_pat
             .env("HOME", td.path())
             .env("SLATE_HOME", td.path())
             .env("PATH", td.path().join("bin"))
-            .env("OPENCODE_TUI_CONFIG", &outside)
             .env("SLATE_OPENCODE_PROBE", case)
             .args(["--exact", "opencode_input_probe", "--nocapture"])
             .timeout(Duration::from_secs(5))
@@ -196,9 +204,9 @@ fn opencode_theme_asset_updates_without_rewriting_config_and_rejects_collisions(
     let themes = ThemeRegistry::new().unwrap();
     let td = tempfile::tempdir().unwrap();
     let env = SlateEnv::with_home(td.path().into());
-    let config = env.xdg_config_home().join("opencode/tui.json");
+    let config = env.xdg_config_home().join("opencode/cli.json");
     let asset = OpencodeAdapter::theme_path(&env);
-    write(&config, "{\"theme\":\"old\",\"mouse\":false}");
+    write(&config, "{\"theme\":{\"name\":\"old\"},\"mouse\":false}");
     write(&asset, "{\"personal\":true}");
     let before = tree_snapshot::tree(td.path());
     assert!(OpencodeAdapter
@@ -218,7 +226,7 @@ fn opencode_theme_asset_updates_without_rewriting_config_and_rejects_collisions(
     assert_eq!(fs::metadata(&config).unwrap().ino(), inode);
     assert_eq!(
         fs::read_to_string(&config).unwrap(),
-        "{\"theme\":\"slate-sync\",\"mouse\":false, \"$schema\": \"https://opencode.ai/tui.json\"}"
+        "{\"theme\":{\"name\":\"slate-sync\"},\"mouse\":false, \"$schema\": \"https://opencode.ai/v2/cli.json\"}"
     );
     let synced_asset = fs::read(&asset).unwrap();
     let synced_config = fs::read(&config).unwrap();

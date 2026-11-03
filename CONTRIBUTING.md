@@ -42,7 +42,9 @@ styles and checks inherited selection, panel and diff backgrounds, not just
 individual swatches. Update affected color snapshots after reviewing the output.
 
 Also test actual application output: search then visually select in Neovim,
-fzf with a Bat preview, selected process rows, Git diffs, and SSH inside tmux.
+fzf with a Bat preview, selected process rows, Git diffs, OpenCode 2 menus and
+diff views, and SSH inside tmux. Check active dialog text separately from its
+intentionally dimmed backdrop.
 Run `bash scripts/check-terminal-colors.sh` in each terminal with dark and light
 themes. It includes explicit ANSI backgrounds, dim/reverse, indexed and truecolor
 pairs that a palette-only audit cannot guarantee. Native window inspection and

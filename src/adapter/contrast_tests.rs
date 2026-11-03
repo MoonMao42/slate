@@ -344,28 +344,75 @@ fn rendered_tool_colors_meet_text_contrast_for_every_theme() {
 
         let opencode: serde_json::Value =
             serde_json::from_str(&opencode::palette::render(theme).unwrap()).unwrap();
-        let colors = opencode["theme"].as_object().unwrap();
-        assert_eq!(colors["background"], "none");
-        for (key, value) in colors {
-            if key.starts_with("background") || key.ends_with("Bg") {
-                continue;
-            }
-            let fg = value.as_str().unwrap();
-            if key == "selectedListItemText" {
+        let colors = &opencode["base"];
+        assert_eq!(colors["background"]["base"], "transparent");
+        let backgrounds = [
+            bg.as_str(),
+            colors["background"]["raised"]["base"].as_str().unwrap(),
+            colors["background"]["raised"]["high"].as_str().unwrap(),
+            colors["diff"]["background"]["added"].as_str().unwrap(),
+            colors["diff"]["background"]["removed"].as_str().unwrap(),
+        ];
+        for pointer in [
+            "/text/base",
+            "/text/muted",
+            "/text/faint",
+            "/border/base",
+            "/scrollbar/base",
+            "/diff/lineNumber/text",
+        ] {
+            for background in backgrounds {
                 audit.pair(
-                    &scope("opencode", key),
-                    fg,
-                    colors["primary"].as_str().unwrap(),
+                    &scope("opencode", pointer),
+                    colors.pointer(pointer).unwrap().as_str().unwrap(),
+                    background,
                 );
+            }
+        }
+        for pointer in ["/syntax", "/markdown", "/diff/text", "/diff/highlight"] {
+            for (key, value) in colors.pointer(pointer).unwrap().as_object().unwrap() {
+                for background in backgrounds {
+                    audit.pair(&scope("opencode", key), value.as_str().unwrap(), background);
+                }
+            }
+        }
+        for kind in ["action", "formfield", "feedback"] {
+            let text = &colors["text"][kind];
+            let fills = &colors["background"][kind];
+            let variants = if kind == "action" {
+                vec!["primary", "secondary", "destructive"]
+            } else if kind == "feedback" {
+                vec!["error", "warning", "success", "info"]
             } else {
-                for background in [
-                    bg.as_str(),
-                    colors["backgroundPanel"].as_str().unwrap(),
-                    colors["backgroundElement"].as_str().unwrap(),
-                    colors["diffAddedBg"].as_str().unwrap(),
-                    colors["diffRemovedBg"].as_str().unwrap(),
+                vec![""]
+            };
+            for variant in variants {
+                let (text, fills) = if variant.is_empty() {
+                    (text, fills)
+                } else {
+                    (&text[variant], &fills[variant])
+                };
+                for state in [
+                    "base",
+                    "$hovered",
+                    "$focused",
+                    "$pressed",
+                    "$selected",
+                    "$disabled",
                 ] {
-                    audit.pair(&scope("opencode", key), fg, background);
+                    let fg = text.get(state).unwrap_or(&text["base"]).as_str().unwrap();
+                    let fill = fills.get(state).unwrap_or(&fills["base"]).as_str().unwrap();
+                    for background in backgrounds {
+                        audit.pair(
+                            &scope("opencode", &format!("{kind}/{variant}/{state}")),
+                            fg,
+                            if fill == "transparent" {
+                                background
+                            } else {
+                                fill
+                            },
+                        );
+                    }
                 }
             }
         }

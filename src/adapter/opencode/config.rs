@@ -1,4 +1,4 @@
-//! Lossless root-field edits: JSONC syntax is parsed, never stripped or
+//! Lossless theme-name edits: JSONC syntax is parsed, never stripped or
 //! reserialized. Comments, whitespace and unrelated values keep their bytes.
 use super::OpencodeAdapter;
 use crate::config::file_read::{self, Links, Source, MAX_TOOL_CONFIG_BYTES};
@@ -58,7 +58,7 @@ impl<'a> Document<'a> {
         )
         .map_err(|_| invalid(path, "invalid OpenCode JSON/JSONC; file contents omitted"))?;
         let Some(jsonc_parser::ast::Value::Object(root)) = parsed.value else {
-            return Err(invalid(path, "OpenCode TUI config must be a JSON object"));
+            return Err(invalid(path, "OpenCode CLI config must be a JSON object"));
         };
         let tokens = parsed.tokens.unwrap_or_default();
         // Even with JSON5 options disabled, the scanner accepts raw newlines
@@ -76,24 +76,33 @@ impl<'a> Document<'a> {
                 "invalid OpenCode JSON literal; file contents omitted",
             ));
         }
-        let mut names = HashSet::new();
-        for property in &root.properties {
-            if !names.insert(property.name.as_str()) {
+        let unique = |object: &Object<'_>| -> Result<()> {
+            let mut names = HashSet::new();
+            if object
+                .properties
+                .iter()
+                .any(|p| !names.insert(p.name.as_str()))
+            {
                 return Err(invalid(
                     path,
-                    "duplicate OpenCode root fields; inspect the config before editing",
+                    "duplicate OpenCode config fields; inspect the config before editing",
                 ));
             }
-        }
-        if root
-            .properties
-            .iter()
-            .any(|p| p.name.as_str() == "theme" && p.value.as_string_lit().is_none())
-        {
-            return Err(invalid(
-                path,
-                "OpenCode theme must be a string; inspect the config before editing",
-            ));
+            Ok(())
+        };
+        unique(&root)?;
+        if let Some(theme) = root.properties.iter().find(|p| p.name.as_str() == "theme") {
+            let jsonc_parser::ast::Value::Object(theme) = &theme.value else {
+                return Err(invalid(path, "OpenCode 2 theme must be an object"));
+            };
+            unique(theme)?;
+            if theme
+                .properties
+                .iter()
+                .any(|p| p.name.as_str() == "name" && p.value.as_string_lit().is_none())
+            {
+                return Err(invalid(path, "OpenCode theme.name must be a string"));
+            }
         }
         Ok(Self { text, root, tokens })
     }
@@ -112,10 +121,71 @@ impl<'a> Document<'a> {
             .map(|v| v.value.as_ref())
     }
 
-    /// Inspect the theme without exposing user-supplied strings in diagnostics.
+    fn theme(&self) -> Option<&Object<'a>> {
+        match &self.property("theme")?.value {
+            jsonc_parser::ast::Value::Object(theme) => Some(theme),
+            _ => None,
+        }
+    }
+
+    fn theme_name(&self) -> Option<&ObjectProp<'a>> {
+        self.theme()?
+            .properties
+            .iter()
+            .find(|p| p.name.as_str() == "name")
+    }
+
     /// None means unset; false means a custom theme, not a parse/type failure.
     pub(crate) fn has_slate_theme(&self) -> Option<bool> {
-        self.string("theme").map(|theme| theme == "slate-sync")
+        self.theme_name()?
+            .value
+            .as_string_lit()
+            .map(|name| name.value == "slate-sync")
+    }
+
+    fn insertion(
+        &self,
+        object: &Object<'_>,
+        additions: &[String],
+    ) -> (std::ops::Range<usize>, String) {
+        let newline = if self.text.contains("\r\n") {
+            "\r\n"
+        } else {
+            "\n"
+        };
+        let multiline = self.text[object.start()..object.end()].contains('\n');
+        let indent = object
+            .properties
+            .first()
+            .and_then(|p| {
+                let prefix = self.text[..p.start()].rsplit_once('\n')?.1;
+                prefix
+                    .bytes()
+                    .all(|b| b == b' ' || b == b'\t')
+                    .then_some(prefix)
+            })
+            .unwrap_or("  ");
+        let separator = if multiline {
+            format!(",{newline}{indent}")
+        } else {
+            ", ".to_owned()
+        };
+        // Insert before any trailing comment or comma.
+        let (at, prefix, suffix) = if let Some(last) = object.properties.last() {
+            (last.value.end(), separator.clone(), String::new())
+        } else if multiline {
+            (
+                object.start() + 1,
+                format!("{newline}{indent}"),
+                newline.to_owned(),
+            )
+        } else {
+            (object.start() + 1, String::new(), String::new())
+        };
+        (
+            at..at,
+            format!("{prefix}{}{suffix}", additions.join(&separator)),
+        )
     }
 
     fn slate(&self, path: &Path) -> Result<Option<Vec<u8>>> {
@@ -124,106 +194,72 @@ impl<'a> Document<'a> {
         }
         let mut edits = Vec::new();
         let mut additions = Vec::new();
-        if let Some(theme) = self.property("theme") {
+        if let Some(name) = self.theme_name() {
             edits.push((
-                theme.value.start()..theme.value.end(),
+                name.value.start()..name.value.end(),
                 "\"slate-sync\"".to_owned(),
             ));
+        } else if let Some(theme) = self.theme() {
+            edits.push(self.insertion(theme, &["\"name\": \"slate-sync\"".to_owned()]));
         } else {
-            additions.push("\"theme\": \"slate-sync\"".to_owned());
+            additions.push("\"theme\": {\"name\": \"slate-sync\"}".to_owned());
         }
         if self.property("$schema").is_none() {
-            additions.push(format!("\"$schema\": \"{}\"", OpencodeAdapter::TUI_SCHEMA));
+            additions.push(format!("\"$schema\": \"{}\"", OpencodeAdapter::CLI_SCHEMA));
         }
         if !additions.is_empty() {
-            let newline = if self.text.contains("\r\n") {
-                "\r\n"
-            } else {
-                "\n"
-            };
-            let multiline = self.text[self.root.start()..self.root.end()].contains('\n');
-            let indent = self
-                .root
-                .properties
-                .first()
-                .and_then(|p| {
-                    let prefix = self.text[..p.start()].rsplit_once('\n')?.1;
-                    prefix
-                        .bytes()
-                        .all(|b| b == b' ' || b == b'\t')
-                        .then_some(prefix)
-                })
-                .unwrap_or("  ");
-            let separator = if multiline {
-                format!(",{newline}{indent}")
-            } else {
-                ", ".to_owned()
-            };
-            // Insert immediately after a value, BEFORE its trailing comment or
-            // comma. This cannot place a new field inside a line comment.
-            let (at, prefix, suffix) = if let Some(last) = self.root.properties.last() {
-                (last.value.end(), separator.clone(), String::new())
-            } else if multiline {
-                (
-                    self.root.start() + 1,
-                    format!("{newline}{indent}"),
-                    newline.to_owned(),
-                )
-            } else {
-                (self.root.start() + 1, String::new(), String::new())
-            };
-            edits.push((
-                at..at,
-                format!("{prefix}{}{suffix}", additions.join(&separator)),
-            ));
+            edits.push(self.insertion(&self.root, &additions));
         }
         let output = self.edited(edits);
-        // Validate our own splice as well as the source before any writes.
-        let checked = Document::parse(&output, path)?;
-        if checked.string("theme") != Some("slate-sync") {
+        if Document::parse(&output, path)?.has_slate_theme() != Some(true) {
             return Err(invalid(
                 path,
                 "cannot prepare OpenCode theme edit; contents omitted",
             ));
         }
-        drop(checked);
         Ok(Some(output.into_bytes()))
     }
 
-    /// None means a theme-only, comment-free document may be removed. All
-    /// comments are user data, even if they surround the removed theme field.
+    /// Remove only Slate's theme name; preserve mode, comments and other settings.
     pub(crate) fn without_slate_theme(&self, path: &Path) -> Result<Option<Vec<u8>>> {
         if self.has_slate_theme() != Some(true) {
             return Ok(Some(self.text.as_bytes().to_vec()));
         }
-        let removable = self.root.properties.iter().all(|p| {
-            p.name.as_str() == "theme"
-                || (p.name.as_str() == "$schema"
-                    && self.string("$schema") == Some(OpencodeAdapter::TUI_SCHEMA))
-        });
+        let only_name = self.theme().expect("theme object").properties.len() == 1;
+        let removable = only_name
+            && self.root.properties.iter().all(|p| {
+                p.name.as_str() == "theme"
+                    || (p.name.as_str() == "$schema"
+                        && self.string("$schema") == Some(OpencodeAdapter::CLI_SCHEMA))
+            });
         if removable && !self.tokens.iter().any(|t| comment(&t.token)) {
             return Ok(None);
         }
-        let theme = self.property("theme").expect("Slate theme property");
-        // Remove syntax tokens only, preserving comments even between the
-        // property name, colon and value. Never touch nested theme properties.
+        let property = if only_name {
+            self.property("theme")
+        } else {
+            self.theme_name()
+        }
+        .expect("Slate theme name");
         let mut edits: Vec<_> = self
             .tokens
             .iter()
-            .filter(|t| t.start() >= theme.start() && t.end() <= theme.end() && !comment(&t.token))
+            .filter(|t| {
+                t.start() >= property.start() && t.end() <= property.end() && !comment(&t.token)
+            })
             .map(|t| (t.start()..t.end(), String::new()))
             .collect();
         let following = self
             .tokens
             .iter()
-            .find(|t| t.start() >= theme.end() && !comment(&t.token));
+            .find(|t| t.start() >= property.end() && !comment(&t.token));
         let comma = following
             .filter(|t| matches!(t.token, Token::Comma))
             .or_else(|| {
                 self.tokens
                     .iter()
                     .rev()
-                    .find(|t| t.end() <= theme.start() && !comment(&t.token))
+                    .find(|t| t.end() <= property.start() && !comment(&t.token))
                     .filter(|t| matches!(t.token, Token::Comma))
             });
         if let Some(comma) = comma {
