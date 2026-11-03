@@ -22,10 +22,7 @@ use crossterm::{
 use super::actions::quick_save_auto;
 use super::preview::starship_fork::fork_starship_prompt;
 use super::preview_snapshot::PreviewSnapshot;
-use super::render::{
-    get_effective_opacity_for_rendering, is_ghostty, render, render_afterglow_receipt,
-    should_guard_light_theme_opacity,
-};
+use super::render::{get_effective_opacity_for_rendering, render, render_afterglow_receipt};
 use super::rollback_guard::{install_rollback_panic_hook, RollbackGuard};
 use super::state::PickerState;
 
@@ -314,7 +311,6 @@ fn handle_key(
             if !crate::detection::TerminalProfile::detect().supports_opacity() {
                 return Ok(KeyOutcome::Inert);
             }
-            let was_guarded = should_guard_light_theme_opacity(state);
             state.set_opacity_override(true);
             let at_edge = state.move_left();
             if at_edge {
@@ -322,11 +318,11 @@ fn handle_key(
                     text: tr("← 已到不透明", "← Solid (hard stop)").to_string(),
                     until: Instant::now() + Duration::from_millis(500),
                 });
-            } else if was_guarded {
+            } else if state.get_current_opacity() != OpacityPreset::Solid {
                 *flash = Some(Flash {
                     text: tr(
-                        "浅色主题半透明时可能降低文字对比度",
-                        "(!) Translucent light themes may reduce text contrast",
+                        "透明背景会受壁纸影响，实色文字更清晰",
+                        "Wallpaper can reduce text contrast; Solid keeps it stable",
                     )
                     .to_string(),
                     until: Instant::now() + Duration::from_millis(1200),
@@ -338,7 +334,6 @@ fn handle_key(
             if !crate::detection::TerminalProfile::detect().supports_opacity() {
                 return Ok(KeyOutcome::Inert);
             }
-            let was_guarded = should_guard_light_theme_opacity(state);
             state.set_opacity_override(true);
             let at_edge = state.move_right();
             if at_edge {
@@ -346,20 +341,11 @@ fn handle_key(
                     text: tr("→ 已到透明", "→ Clear (hard stop)").to_string(),
                     until: Instant::now() + Duration::from_millis(500),
                 });
-            } else if was_guarded {
+            } else if state.get_current_opacity() != OpacityPreset::Solid {
                 *flash = Some(Flash {
                     text: tr(
-                        "浅色主题半透明时可能降低文字对比度",
-                        "(!) Translucent light themes may reduce text contrast",
-                    )
-                    .to_string(),
-                    until: Instant::now() + Duration::from_millis(1200),
-                });
-            } else if state.get_current_opacity() == OpacityPreset::Frosted && !is_ghostty() {
-                *flash = Some(Flash {
-                    text: tr(
-                        "此终端近似显示磨砂 · Ghostty 支持完整模糊",
-                        "(i) Frosted is approximated here · Ghostty shows full blur",
+                        "透明背景会受壁纸影响，实色文字更清晰",
+                        "Wallpaper can reduce text contrast; Solid keeps it stable",
                     )
                     .to_string(),
                     until: Instant::now() + Duration::from_millis(1200),

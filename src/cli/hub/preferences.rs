@@ -96,14 +96,17 @@ fn choose_opacity_from_preferences(
             Some(OpacityPreset::Frosted),
             tr("磨砂", "Frosted"),
             tr(
-                "半透明磨砂背景（Ghostty 支持背景模糊）",
-                "Translucent background with blur in Ghostty",
+                "半透明背景，壁纸可能降低文字对比度",
+                "Translucent background; wallpaper can reduce text contrast",
             ),
         )
         .item(
             Some(OpacityPreset::Clear),
             tr("透明", "Clear"),
-            tr("高透背景，透出桌面壁纸", "High transparency background"),
+            tr(
+                "高透背景，文字更易受壁纸干扰",
+                "High transparency; text contrast depends on the wallpaper",
+            ),
         )
         .item(None, tr("返回终端偏好", "Back"), "")
         .interact()

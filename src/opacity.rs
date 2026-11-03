@@ -3,7 +3,6 @@
 //! configurations.
 
 use crate::error::{Result, SlateError};
-use crate::theme::{ThemeAppearance, ThemeVariant};
 use std::str::FromStr;
 
 mod managed;
@@ -20,7 +19,7 @@ pub enum OpacityPreset {
     /// Provides subtle transparency with Gaussian blur for visual depth.
     Frosted,
     /// Highly transparent (opacity = 0.75, blur = 0)
-    /// Maximizes background visibility; can impact readability with light themes.
+    /// Maximizes background visibility; can reduce text contrast against the desktop.
     Clear,
 }
 
@@ -73,78 +72,9 @@ impl std::fmt::Display for OpacityPreset {
     }
 }
 
-/// Recommended opacity preset based on theme lightness.
-/// Light themes prefer Solid; dark themes prefer Frosted.
-pub fn recommended_opacity_for_theme(theme: &ThemeVariant) -> OpacityPreset {
-    if theme.appearance == ThemeAppearance::Light {
-        OpacityPreset::Solid
-    } else {
-        OpacityPreset::Frosted
-    }
-}
-
-/// Check if a translucent opacity would degrade light theme legibility.
-/// Light themes with Frosted/Clear should warn user.
-pub fn should_warn_for_translucent_light_theme(
-    theme: &ThemeVariant,
-    preset: OpacityPreset,
-) -> bool {
-    let is_translucent = preset == OpacityPreset::Frosted || preset == OpacityPreset::Clear;
-
-    theme.appearance == ThemeAppearance::Light && is_translucent
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn opacity_advice_uses_declared_appearance_across_catalog_and_renamed_themes() {
-        let themes = crate::theme::ThemeRegistry::new().unwrap();
-        for theme in themes.all() {
-            let light = theme.appearance == ThemeAppearance::Light;
-            assert_eq!(
-                recommended_opacity_for_theme(theme),
-                if light {
-                    OpacityPreset::Solid
-                } else {
-                    OpacityPreset::Frosted
-                },
-                "{}",
-                theme.id
-            );
-            for preset in [
-                OpacityPreset::Solid,
-                OpacityPreset::Frosted,
-                OpacityPreset::Clear,
-            ] {
-                assert_eq!(
-                    should_warn_for_translucent_light_theme(theme, preset),
-                    light && preset != OpacityPreset::Solid,
-                    "{} {preset}",
-                    theme.id
-                );
-            }
-        }
-        let dawn = themes.get("rose-pine-dawn").unwrap();
-        assert_eq!(recommended_opacity_for_theme(dawn), OpacityPreset::Solid);
-        let mut renamed = dawn.clone();
-        renamed.name = "Unrelated display name".into();
-        assert_eq!(
-            recommended_opacity_for_theme(&renamed),
-            OpacityPreset::Solid
-        );
-        renamed.appearance = ThemeAppearance::Dark;
-        renamed.name = "Daylight Latte".into();
-        assert_eq!(
-            recommended_opacity_for_theme(&renamed),
-            OpacityPreset::Frosted
-        );
-        assert!(!should_warn_for_translucent_light_theme(
-            &renamed,
-            OpacityPreset::Clear
-        ));
-    }
 
     #[test]
     fn test_opacity_preset_solid_values() {
@@ -240,202 +170,5 @@ mod tests {
             let parsed: OpacityPreset = s.parse().unwrap();
             assert_eq!(&parsed, preset);
         }
-    }
-
-    #[test]
-    fn test_recommended_opacity_for_light_theme() {
-        use crate::theme::Palette;
-        use std::collections::HashMap;
-
-        let light_theme = ThemeVariant {
-            id: "test-light".to_string(),
-            name: "Clean Light".to_string(),
-            family: "Test".to_string(),
-            tool_refs: HashMap::new(),
-            palette: Palette {
-                foreground: "#000000".to_string(),
-                background: "#ffffff".to_string(),
-                cursor: None,
-                selection_bg: None,
-                selection_fg: None,
-                brand_accent: "#7287fd".to_string(),
-                black: "#000000".to_string(),
-                red: "#ff0000".to_string(),
-                green: "#00ff00".to_string(),
-                yellow: "#ffff00".to_string(),
-                blue: "#0000ff".to_string(),
-                magenta: "#ff00ff".to_string(),
-                cyan: "#00ffff".to_string(),
-                white: "#ffffff".to_string(),
-                bright_black: "#808080".to_string(),
-                bright_red: "#ff8080".to_string(),
-                bright_green: "#80ff80".to_string(),
-                bright_yellow: "#ffff80".to_string(),
-                bright_blue: "#8080ff".to_string(),
-                bright_magenta: "#ff80ff".to_string(),
-                bright_cyan: "#80ffff".to_string(),
-                bright_white: "#ffffff".to_string(),
-                bg_dim: None,
-                bg_darker: None,
-                bg_darkest: None,
-                rosewater: None,
-                flamingo: None,
-                pink: None,
-                mauve: None,
-                lavender: None,
-                text: None,
-                subtext1: None,
-                subtext0: None,
-                overlay2: None,
-                overlay1: None,
-                overlay0: None,
-                surface2: None,
-                surface1: None,
-                surface0: None,
-                extras: HashMap::new(),
-            },
-            appearance: crate::theme::ThemeAppearance::Light,
-            auto_pair: None,
-        };
-
-        assert_eq!(
-            recommended_opacity_for_theme(&light_theme),
-            OpacityPreset::Solid
-        );
-    }
-
-    #[test]
-    fn test_recommended_opacity_for_dark_theme() {
-        use crate::theme::Palette;
-        use std::collections::HashMap;
-
-        let dark_theme = ThemeVariant {
-            id: "test-dark".to_string(),
-            name: "Modern Dark".to_string(),
-            family: "Test".to_string(),
-            tool_refs: HashMap::new(),
-            palette: Palette {
-                foreground: "#ffffff".to_string(),
-                background: "#000000".to_string(),
-                cursor: None,
-                selection_bg: None,
-                selection_fg: None,
-                brand_accent: "#7287fd".to_string(),
-                black: "#000000".to_string(),
-                red: "#ff0000".to_string(),
-                green: "#00ff00".to_string(),
-                yellow: "#ffff00".to_string(),
-                blue: "#0000ff".to_string(),
-                magenta: "#ff00ff".to_string(),
-                cyan: "#00ffff".to_string(),
-                white: "#ffffff".to_string(),
-                bright_black: "#808080".to_string(),
-                bright_red: "#ff8080".to_string(),
-                bright_green: "#80ff80".to_string(),
-                bright_yellow: "#ffff80".to_string(),
-                bright_blue: "#8080ff".to_string(),
-                bright_magenta: "#ff80ff".to_string(),
-                bright_cyan: "#80ffff".to_string(),
-                bright_white: "#ffffff".to_string(),
-                bg_dim: None,
-                bg_darker: None,
-                bg_darkest: None,
-                rosewater: None,
-                flamingo: None,
-                pink: None,
-                mauve: None,
-                lavender: None,
-                text: None,
-                subtext1: None,
-                subtext0: None,
-                overlay2: None,
-                overlay1: None,
-                overlay0: None,
-                surface2: None,
-                surface1: None,
-                surface0: None,
-                extras: HashMap::new(),
-            },
-            appearance: crate::theme::ThemeAppearance::Dark,
-            auto_pair: None,
-        };
-
-        assert_eq!(
-            recommended_opacity_for_theme(&dark_theme),
-            OpacityPreset::Frosted
-        );
-    }
-
-    #[test]
-    fn test_warn_for_translucent_light_theme() {
-        use crate::theme::Palette;
-        use std::collections::HashMap;
-
-        let light_theme = ThemeVariant {
-            id: "test-light".to_string(),
-            name: "Catppuccin Latte".to_string(),
-            family: "Test".to_string(),
-            tool_refs: HashMap::new(),
-            palette: Palette {
-                foreground: "#000000".to_string(),
-                background: "#ffffff".to_string(),
-                cursor: None,
-                selection_bg: None,
-                selection_fg: None,
-                brand_accent: "#7287fd".to_string(),
-                black: "#000000".to_string(),
-                red: "#ff0000".to_string(),
-                green: "#00ff00".to_string(),
-                yellow: "#ffff00".to_string(),
-                blue: "#0000ff".to_string(),
-                magenta: "#ff00ff".to_string(),
-                cyan: "#00ffff".to_string(),
-                white: "#ffffff".to_string(),
-                bright_black: "#808080".to_string(),
-                bright_red: "#ff8080".to_string(),
-                bright_green: "#80ff80".to_string(),
-                bright_yellow: "#ffff80".to_string(),
-                bright_blue: "#8080ff".to_string(),
-                bright_magenta: "#ff80ff".to_string(),
-                bright_cyan: "#80ffff".to_string(),
-                bright_white: "#ffffff".to_string(),
-                bg_dim: None,
-                bg_darker: None,
-                bg_darkest: None,
-                rosewater: None,
-                flamingo: None,
-                pink: None,
-                mauve: None,
-                lavender: None,
-                text: None,
-                subtext1: None,
-                subtext0: None,
-                overlay2: None,
-                overlay1: None,
-                overlay0: None,
-                surface2: None,
-                surface1: None,
-                surface0: None,
-                extras: HashMap::new(),
-            },
-            appearance: crate::theme::ThemeAppearance::Light,
-            auto_pair: None,
-        };
-
-        // Light theme + Frosted should warn
-        assert!(should_warn_for_translucent_light_theme(
-            &light_theme,
-            OpacityPreset::Frosted
-        ));
-        // Light theme + Clear should warn
-        assert!(should_warn_for_translucent_light_theme(
-            &light_theme,
-            OpacityPreset::Clear
-        ));
-        // Light theme + Solid should not warn
-        assert!(!should_warn_for_translucent_light_theme(
-            &light_theme,
-            OpacityPreset::Solid
-        ));
     }
 }

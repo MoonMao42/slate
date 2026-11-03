@@ -690,7 +690,7 @@ impl Wizard {
         Ok(())
     }
 
-    /// Auto-select opacity based on theme (dark → Frosted, light → Solid).
+    /// Use an opaque canvas so desktop colors cannot reduce text contrast.
     /// Skips if a preset already locked the opacity (e.g. quick mode presets).
     fn step_auto_opacity(&mut self) -> Result<()> {
         // If a preset already set opacity, respect it
@@ -702,12 +702,12 @@ impl Wizard {
         let selected_theme_id =
             wizard_support::resolve_theme_id_for_opacity(&self.context, &self.theme_selector)?;
 
-        let theme = self.theme_selector.get_theme(&selected_theme_id).ok_or_else(|| {
+        self.theme_selector.get_theme(&selected_theme_id).ok_or_else(|| {
             crate::error::SlateError::InvalidThemeData(
                 tr("无法识别所选主题，请重新选择主题；尚未设置透明度。", "Selected theme is unknown; choose a recognized theme before inferring opacity. No opacity was selected.").into(),
             )
         })?;
-        self.context.selected_opacity = Some(crate::opacity::recommended_opacity_for_theme(theme));
+        self.context.selected_opacity = Some(crate::opacity::OpacityPreset::Solid);
 
         self.context.current_step += 1;
         Ok(())

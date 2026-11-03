@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Setup and style presets use an opaque background so wallpaper cannot reduce text contrast. Frosted and Clear remain available as explicit choices.
 - Readable bright ANSI colors, muted text, selections and cursor text across all 20 bundled themes.
 - Ghostty and Kitty protect contrast for remote scripts and application-defined ANSI, indexed and truecolor pairs; faint text no longer loses readability. Alacritty receives explicit dim colors.
 - Neovim selections remain readable over search matches, and GNU `ls` accepts filename rules and uses readable special permission backgrounds.

@@ -496,17 +496,16 @@ mod tests {
 
     #[test]
     fn test_apply_preset_selection_sets_effective_opacity_for_quick_mode() {
-        let mut context = test_context();
-        let preset = PresetCatalog::get_preset("modern-dark").unwrap();
-
-        apply_preset_selection(&mut context, &preset);
-
-        assert_eq!(context.selected_opacity, Some(OpacityPreset::Frosted));
-        let settings = context
-            .selected_terminal_settings
-            .expect("terminal settings");
-        assert_eq!(settings.background_opacity, OpacityPreset::Frosted.to_f32());
-        assert!(settings.blur_enabled);
+        for preset in PresetCatalog::all_presets() {
+            let mut context = test_context();
+            apply_preset_selection(&mut context, &preset);
+            assert_eq!(context.selected_opacity, Some(OpacityPreset::Solid));
+            let settings = context
+                .selected_terminal_settings
+                .expect("terminal settings");
+            assert_eq!(settings.background_opacity, 1.0);
+            assert!(!settings.blur_enabled);
+        }
     }
 
     /// snapshot — tool inventory block rendered through the

@@ -14,7 +14,6 @@ use crossterm::{
     style::{Attribute, Print, ResetColor, SetAttribute},
     terminal::{self, Clear, ClearType},
 };
-use std::env;
 use std::io::{self, Write};
 
 use super::preview::compose;
@@ -250,12 +249,6 @@ pub(super) fn get_effective_opacity_for_rendering(state: &PickerState) -> Opacit
     } else {
         state.get_current_opacity()
     }
-}
-
-pub(super) fn is_ghostty() -> bool {
-    env::var("TERM_PROGRAM")
-        .map(|program| program.eq_ignore_ascii_case("ghostty"))
-        .unwrap_or(false)
 }
 
 // SWATCH-RENDERER: intentionally raw ANSI. `render_afterglow_receipt`

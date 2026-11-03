@@ -121,7 +121,7 @@ Shells: `zsh`, `bash`, `fish`. `zsh` is locally verified; `bash` and `fish` are 
 | Terminal | Status | Notes |
 |----------|--------|-------|
 | Ghostty | Recommended | Full support — live reload, opacity, watcher relaunch |
-| Kitty | Full | Live palette push via `kitten @ set-colors`; opacity + Nerd Font sync |
+| Kitty | Full | Live palette push via `kitten @ load-config`; opacity + Nerd Font sync |
 | Alacritty | Full | Inline preview and reload |
 | Terminal.app | Partial | macOS only — no live preview, no opacity, font cannot be auto-applied |
 | Other | Best effort | Shell and CLI tool theming works; terminal visuals depend on the app |
@@ -142,7 +142,7 @@ slate theme --auto            # follow system dark/light
 slate tools                   # browse, install, and sync 16 tools
 slate prompt                  # choose Starship prompt layout
 slate font                    # Nerd Font picker
-slate config set opacity frosted  # solid / frosted / clear
+slate config set opacity solid  # solid / frosted / clear
 slate config set sound off    # toggle feedback sound
 slate export                  # export current config as URI
 slate import <uri>            # re-apply from URI

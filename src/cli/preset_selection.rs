@@ -51,8 +51,8 @@ impl PresetCatalog {
                 theme_id: "catppuccin-mocha",
                 font_id: "jetbrains-mono",
                 visuals: TerminalVisuals {
-                    background_opacity: 0.95,
-                    blur_radius: 10,
+                    background_opacity: 1.0,
+                    blur_radius: 0,
                     padding_x: 12,
                     padding_y: 12,
                     cursor_style: "block",
@@ -83,8 +83,8 @@ impl PresetCatalog {
                 theme_id: "gruvbox-dark",
                 font_id: "iosevka-term",
                 visuals: TerminalVisuals {
-                    background_opacity: 0.98,
-                    blur_radius: 5,
+                    background_opacity: 1.0,
+                    blur_radius: 0,
                     padding_x: 14,
                     padding_y: 14,
                     cursor_style: "bar",

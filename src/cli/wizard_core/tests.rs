@@ -37,26 +37,28 @@ fn automatic_configuration_order_is_catalog_stable_and_preserves_opt_in() {
 }
 
 #[test]
-fn wizard_opacity_uses_appearance_but_keeps_explicit_presets_without_writes() {
+fn wizard_uses_solid_canvas_but_keeps_explicit_opacity_without_writes() {
     use crate::opacity::OpacityPreset;
-    for selected in [
-        None,
-        Some(OpacityPreset::Solid),
-        Some(OpacityPreset::Frosted),
-        Some(OpacityPreset::Clear),
-    ] {
-        let home = tempfile::tempdir().unwrap();
-        let env = SlateEnv::with_home(home.path().to_owned());
-        let mut wizard = Wizard::with_env(&env).unwrap();
-        wizard.context.selected_theme = Some("rose-pine-dawn".into());
-        wizard.context.selected_opacity = selected;
-        wizard.step_auto_opacity().unwrap();
-        assert_eq!(
-            wizard.context.selected_opacity,
-            selected.or(Some(OpacityPreset::Solid))
-        );
-        assert_eq!(wizard.context.current_step, 1);
-        assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+    for id in ["everforest-dark", "rose-pine-dawn"] {
+        for selected in [
+            None,
+            Some(OpacityPreset::Solid),
+            Some(OpacityPreset::Frosted),
+            Some(OpacityPreset::Clear),
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            let env = SlateEnv::with_home(home.path().to_owned());
+            let mut wizard = Wizard::with_env(&env).unwrap();
+            wizard.context.selected_theme = Some(id.into());
+            wizard.context.selected_opacity = selected;
+            wizard.step_auto_opacity().unwrap();
+            assert_eq!(
+                wizard.context.selected_opacity,
+                selected.or(Some(OpacityPreset::Solid))
+            );
+            assert_eq!(wizard.context.current_step, 1);
+            assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+        }
     }
 }
 

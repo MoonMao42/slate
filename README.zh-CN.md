@@ -121,7 +121,7 @@ Shell：`zsh`、`bash`、`fish`。`zsh` 已在本机验证；`bash` 与 `fish` �
 | 终端 | 状态 | 说明 |
 |------|------|------|
 | Ghostty | 最推荐 | 完整支持——热重载、透明度、watcher 自动拉起 |
-| Kitty | 完整 | `kitten @ set-colors` 实时推送；透明度 + Nerd Font 同步 |
+| Kitty | 完整 | `kitten @ load-config` 实时推送；透明度 + Nerd Font 同步 |
 | Alacritty | 完整 | 行内预览与热重载 |
 | Terminal.app | 部分 | 仅 macOS；不支持 live preview、不支持透明度、字体无法自动更换 |
 | 其他 | 尽力而为 | Shell 与 CLI 工具层主题通用；终端自身视觉效果看其能力 |
@@ -142,7 +142,7 @@ slate theme --auto            # 跟随系统深浅色
 slate tools                   # 浏览、安装并同步 16 款工具配色
 slate prompt                  # 选择 Starship 提示符样式
 slate font                    # Nerd Font 选择器
-slate config set opacity frosted  # 透明度：solid / frosted / clear
+slate config set opacity solid  # 透明度：solid / frosted / clear
 slate config set sound off    # 反馈音开关
 slate export                  # 把当前配置导成 URI
 slate import <uri>            # 从 URI 恢复配置
